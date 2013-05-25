@@ -11,3 +11,8 @@ The library interface is in "c3/stmgc.h".
 
 A demo program can be found in "c3/demo1.c".
 It can be built with "make debug-demo1" or "make build-demo1".
+
+The plan is to use this C code directly with PyPy, and not write
+manually the many calls to the shadow stack and the barrier functions.
+But the manual way is possible too, say when writing a small interpreter
+directly in C.
