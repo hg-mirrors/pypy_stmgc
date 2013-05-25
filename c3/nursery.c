@@ -174,7 +174,6 @@ void stmgc_start_transaction(struct tx_descriptor *d)
     assert(!gcptrlist_size(&d->protected_with_private_copy));
     assert(!g2l_any_entry(&d->public_to_private));
     assert(!gcptrlist_size(&d->private_old_pointing_to_young));
-    assert(!gcptrlist_size(&d->stolen_objects));
     d->num_read_objects_known_old = 0;
     d->num_public_to_protected = gcptrlist_size(&d->public_to_young);
 }
@@ -252,24 +251,20 @@ static void recdump1(char *msg, gcptr obj)
 #  define recdump1(msg, obj)  /* removed */
 #endif
 
-static inline gcptr copy_outside_nursery(struct tx_descriptor *d, gcptr obj
-                                         _REASON(char *reason))
+static inline gcptr create_old_object_copy(struct tx_descriptor *d, gcptr obj
+                                           _REASON(char *reason))
 {
-    assert(is_in_nursery(d, obj));
     assert(!(obj->h_tid & GCFLAG_NURSERY_MOVED));
     assert(!(obj->h_tid & GCFLAG_VISITED));
     assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
     assert(!(obj->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
     assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
     assert(!(obj->h_tid & GCFLAG_OLD));
-    assert(obj->h_revision & 1);    /* odd value so far */
 
     size_t size = stmcb_size(obj);
     gcptr fresh_old_copy = stmgcpage_malloc(size);
     memcpy(fresh_old_copy, obj, size);
     fresh_old_copy->h_tid |= GCFLAG_OLD;
-    obj->h_tid |= GCFLAG_NURSERY_MOVED;
-    obj->h_revision = (revision_t)fresh_old_copy;
 
 #ifdef DUMP_EXTRA
     fprintf(stderr, "%s: %p is copied to %p\n", reason, obj, fresh_old_copy);
@@ -340,7 +335,9 @@ static void visit_if_young(gcptr *root  _REASON(char *reason))
             }
         }
         /* case C */
-        fresh_old_copy = copy_outside_nursery(d, obj  _REASON("visit"));
+        fresh_old_copy = create_old_object_copy(d, obj  _REASON("visit"));
+        obj->h_tid |= GCFLAG_NURSERY_MOVED;
+        obj->h_revision = (revision_t)fresh_old_copy;
 
         /* fix the original reference */
         PATCH_ROOT_WITH(fresh_old_copy);
@@ -770,11 +767,9 @@ void stmgc_write_barrier(gcptr obj)
     gcptrlist_insert(&d->private_old_pointing_to_young, obj);
 }
 
-int stmgc_nursery_hiding(int hide)
+int stmgc_nursery_hiding(struct tx_descriptor *d, int hide)
 {
 #ifdef _GC_DEBUG
-    struct tx_descriptor *d = thread_descriptor;
-
     if (hide) {
         stm_dbgmem_not_used(d->nursery, GC_NURSERY, 1);
     }
@@ -805,10 +800,59 @@ int stmgc_nursery_hiding(int hide)
 
 /************************************************************/
 
+static gcptr extract_from_foreign_nursery(struct tx_descriptor *source_d,
+                                          gcptr L)
+{
+    /* "Stealing": this function follows a chain of protected objects
+       in the foreign nursery of the thread 'source_d'.  It copies the
+       last one outside the nursery, and return it. */
+    gcptr L2, N;
+    revision_t source_local_rev, v;
+
+    source_local_rev = ACCESS_ONCE(*source_d->local_revision_ref);
+    v = ACCESS_ONCE(L->h_revision);
+
+    /* check that L is a protected object */
+    assert(!(L->h_tid & GCFLAG_OLD));
+    assert(v != source_local_rev);
+
+    /* walk to the head of the chain in the foreign nursery
+     */
+    while (!(v & 1)) {     /* "is a pointer" */
+        L2 = (gcptr)v;
+        v = ACCESS_ONCE(L2->h_revision);
+        if (v == source_local_rev) {
+            /* L->h_revision is a pointer, but the target is a private
+               object.  We ignore private objects, so we stay at L; but
+               have to fetch L's real revision off-line from the extra
+               word that follows L2 */
+            size_t size = stmcb_size(L2);
+            v = *(revision_t *)(((char*)L2) + size);
+            assert(v & 1);   /* "is not a pointer" */
+            break;
+        }
+        else if (L2->h_tid & GCFLAG_OLD) {
+            /* we find a public object again: easy case, just return it */
+            return L2;
+        }
+        else {
+            /* the chain continues with another protected object, go on */
+            L = L2;
+        }
+    }
+
+    /* L is now the protected object to move outside, with revision v. */
+    N = create_old_object_copy(source_d, L  _REASON("stolen copy"));
+    N->h_revision = v;
+    gcptrlist_insert2(&source_d->stolen_objects, L, N);
+
+    smp_wmb();
+
+    return N;
+}
+
 void stmgc_public_to_foreign_protected(gcptr R)
 {
-    abort();//XXX
-#if 0
     /* R is a public object, which contains in h_revision a pointer to a
        protected object --- but it is protectd by another thread,
        i.e. it likely lives in a foreign nursery.  We have to copy the
@@ -836,155 +880,21 @@ void stmgc_public_to_foreign_protected(gcptr R)
     spinlock_acquire(source_d->collection_lock);
 
     /* now that we have the lock, check again that R->h_revision was not
-       modified in the meantime */
-    if (ACCESS_ONCE(R->h_revision) != v) {
-        spinlock_release(source_d->collection_lock);
-        return;   /* changed already, retry */
+       modified in the meantime.  If it did change, we do nothing and will
+       retry.
+    */
+    if (R->h_revision == v) {
+        /* debugging support: "activate" the foreign nursery */
+        int was_active = stm_dbgmem_is_active(source_d->nursery, 0);
+        if (!was_active) assert(stmgc_nursery_hiding(source_d, 0));
+
+        gcptr N = extract_from_foreign_nursery(source_d, L);
+        ACCESS_ONCE(R->h_revision) = (revision_t)N;
+        fprintf(stderr, "STEALING: %p->h_revision changed from %p to %p\n",
+                R, L, N);
+
+        /* debugging support: "deactivate" the foreign nursery again */
+        if (!was_active) assert(stmgc_nursery_hiding(source_d, 1));
     }
-
-    /* debugging support: "activate" the foreign nursery */
-    int was_active = stm_dbgmem_is_active(source_d->nursery, 0);
-    if (!was_active) assert(stmgc_nursery_hiding(0));
-
-    /* walk to the head of the chain in the foreign nursery */
-    while (1) {
-        ...
-
-    if (!is_in_nursery(d, obj)) {
-        /* 'obj' is not from the nursery (or 'obj == NULL') */
-        if (obj == NULL || !g2l_contains(
-                               &d->young_objects_outside_nursery, obj)) {
-            return;   /* then it's an old object or NULL, nothing to do */
-        }
-        /* it's a young object outside the nursery */
-
-        /* is it a protected object with a more recent revision?
-           (this test fails automatically if it's a private object) */
-        if (!(obj->h_revision & 1)) {
-            goto ignore_and_try_again_with_next;
-        }
-        /* was it already marked? */
-        if (obj->h_tid & GCFLAG_VISITED) {
-            return;    /* yes, and no '*root' to fix, as it doesn't move */
-        }
-        /* otherwise, add GCFLAG_VISITED, and continue below */
-        obj->h_tid |= GCFLAG_VISITED;
-        fresh_old_copy = obj;
-    }
-    else {
-        /* it's a nursery object.  Is it:
-           A. an already-moved nursery object?
-           B. a protected object with a more recent revision?
-           C. common case: first visit to an object to copy outside
-        */
-        if (!(obj->h_revision & 1)) {
-            
-            if (obj->h_tid & GCFLAG_NURSERY_MOVED) {
-                /* case A: just fix the ref. */
-                PATCH_ROOT_WITH((gcptr)obj->h_revision);
-                return;
-            }
-            else {
-                /* case B */
-                goto ignore_and_try_again_with_next;
-            }
-        }
-        /* case C */
-        fresh_old_copy = copy_outside_nursery(d, obj  _REASON("visit"));
-
-        /* fix the original reference */
-        PATCH_ROOT_WITH(fresh_old_copy);
-    }
-
-    /* add 'fresh_old_copy' to the list of objects to trace */
-    assert(!(fresh_old_copy->h_tid & GCFLAG_WRITE_BARRIER));
-    gcptrlist_insert(&d->old_objects_to_trace, fresh_old_copy);
-    recdump1("MOVED TO", fresh_old_copy);
-    return;
-
- ignore_and_try_again_with_next:
-    if (previous_obj == NULL) {
-        previous_obj = obj;
-    }
-    else {
-        previous_obj->h_revision = obj->h_revision;    /* compress chain */
-        previous_obj = NULL;
-    }
-    obj = (gcptr)obj->h_revision;
-    assert(stmgc_classify(d, obj) != K_PRIVATE);
-    PATCH_ROOT_WITH(obj);
-    goto retry;
-
-    ...;
-#endif
+    spinlock_release(source_d->collection_lock);
 }
-
-#if 0
-void stmgc_follow_foreign(gcptr R)
-{
-    struct tx_descriptor *d = thread_descriptor;
-
-    /* repeat the checks in the caller, to avoid passing more than one
-       argument here */
-    revision_t v = ACCESS_ONCE(R->h_revision);
-    assert(!(v & 1));    /* "is a pointer" */
-    if (!(v & 2))
-        return;   /* changed already, retry */
-
-    gcptr L = (gcptr)(v & ~2);
-
-    /* We need to look up which thread it belongs to and lock this
-       thread's minor collection lock.  This also prevents several
-       threads from getting on each other's toes trying to extract
-       objects from the same nursery */
-    struct tx_descriptor *source_d = stm_find_thread_containing_pointer(L);
-
-    setup_minor_collect(source_d, 0);
-
-    /* check again that R->h_revision was not modified in the meantime */
-    if (ACCESS_ONCE(R->h_revision) != v) {
-        teardown_minor_collect(source_d);
-        return;   /* changed already, retry */
-    }
-
-    /* temporarily take the identity of the other thread to run a very
-       partial minor collection */
-    thread_descriptor = source_d;
-    assert(stmgc_is_young(source_d, L));
-
-    /* debugging support */
-    int was_active = stm_dbgmem_is_active(source_d->nursery, 0);
-    if (!was_active) assert(stmgc_nursery_hiding(0));
-
-    /* force the object L out of the nursery, and follow references */
-
-    /*XXX <<<young_objects_outside_nursery, race>>>*/
-    /*XXX <<<stmgcpage_malloc, race>>>*/
-    /*XXX <<<object's tid???, race>>>*/
-
-    gcptr L2 = L;
-    assert(L->h_revision != *source_d->local_revision_ref);
-    visit_nursery(&L2  _REASON("FORCE OUT FROM OTHER THREAD"));
-    assert(!is_in_nursery(source_d, L2));
-    if (L2 != L)
-        assert(L->h_tid & GCFLAG_NURSERY_MOVED);
-    else 
-        assert(L->h_tid & GCFLAG_VISITED);
-
-    visit_all_outside_objects(source_d);
-
-    mark_visited_young_objects_outside_nursery_as_old(source_d);
-
-    /* debugging support */
-    if (!was_active) assert(stmgc_nursery_hiding(0));
-
-    teardown_minor_collect(source_d);
-    /* the smp_wmb() done above forces all writes from above to be
-       committed; then afterward we fix the field R->h_revision, making
-       it a pointer to the now-old object */
-    R->h_revision = (revision_t)L2;
-
-    /* done taking the identity of the other thread, take mine again */
-    thread_descriptor = d;
-}
-#endif

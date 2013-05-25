@@ -45,7 +45,7 @@ void stmgc_write_barrier(gcptr);
 enum protection_class_t stmgc_classify(gcptr);
 int stmgc_is_young_in(struct tx_descriptor *, gcptr);
 void stmgc_public_to_foreign_protected(gcptr);
-int stmgc_nursery_hiding(int);
+int stmgc_nursery_hiding(struct tx_descriptor *, int);
 
 #ifdef _GC_DEBUG
 int is_young(gcptr);
