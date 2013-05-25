@@ -29,7 +29,8 @@
 
 struct tx_descriptor;  /* from et.h */
 
-enum protection_class_t { K_PRIVATE, K_PROTECTED, K_PUBLIC };
+enum protection_class_t { K_PRIVATE, K_PROTECTED, K_PUBLIC,
+                          K_OLD_PRIVATE  /* <-only for dclassify() */ };
 
 gcptr stmgc_duplicate(gcptr, revision_t);
 void stmgc_start_transaction(struct tx_descriptor *);

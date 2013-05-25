@@ -321,6 +321,7 @@ gcptr stm_WriteBarrier(gcptr P)
   case K_PRIVATE:   W = R;                       break;
   case K_PROTECTED: W = LocalizeProtected(d, R); break;
   case K_PUBLIC:    W = LocalizePublic(d, R);    break;
+  default: abort();
   }
 
   if (W->h_tid & GCFLAG_WRITE_BARRIER)

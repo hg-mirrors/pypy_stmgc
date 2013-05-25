@@ -17,6 +17,7 @@ int stmgc_is_young(struct tx_descriptor *d, gcptr obj)
 
 enum protection_class_t stmgc_classify(struct tx_descriptor *d, gcptr obj)
 {
+    /* note that this function never returns K_OLD_PRIVATE. */
     if (obj->h_revision == stm_local_revision)
         return K_PRIVATE;
     if (stmgc_is_young(d, obj))
@@ -24,8 +25,6 @@ enum protection_class_t stmgc_classify(struct tx_descriptor *d, gcptr obj)
     else
         return K_PUBLIC;
 }
-
-#define K_OLD_PRIVATE  7
 
 static enum protection_class_t dclassify(gcptr obj)
 {
@@ -753,6 +752,7 @@ void stmgc_write_barrier(gcptr obj)
 
 int stmgc_nursery_hiding(int hide)
 {
+#ifdef _GC_DEBUG
     struct tx_descriptor *d = thread_descriptor;
 
     if (hide) {
@@ -779,7 +779,7 @@ int stmgc_nursery_hiding(int hide)
         }
 
     } G2L_LOOP_END;
-
+#endif
     return 1;
 }
 

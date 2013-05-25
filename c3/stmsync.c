@@ -110,9 +110,7 @@ gcptr _stm_allocate_old(size_t size, unsigned long tid)
 
 /************************************************************/
 
-/* sync_required is either 0 or (unsigned)-1 */
-#define SYNC_REQUIRED  ((unsigned long)-1)
-static unsigned long sync_required = 0;
+static revision_t sync_required = 0;
 
 void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int))
 {   /* must save roots around this call */
@@ -267,7 +265,7 @@ void stm_start_single_thread(void)
        which prevents any other thread from running in a transaction.
        Warning, may block waiting for rwlock_in_transaction while another
        thread runs a major GC itself! */
-    ACCESS_ONCE(sync_required) = SYNC_REQUIRED;
+    ACCESS_ONCE(sync_required) = 1;
     stm_stop_sharedlock();
     start_exclusivelock();
     ACCESS_ONCE(sync_required) = 0;
