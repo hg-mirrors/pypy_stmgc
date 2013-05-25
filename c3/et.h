@@ -52,6 +52,8 @@
  * set again at the next minor collection.
  *
  * GCFLAG_NURSERY_MOVED is used temporarily during minor collections.
+ *
+ * GCFLAG_OLD is set on old objects.
  */
 #define GCFLAG_PRIVATE_COPY      (STM_FIRST_GCFLAG << 0)
 #define GCFLAG_VISITED           (STM_FIRST_GCFLAG << 1)
@@ -59,10 +61,12 @@
 #define GCFLAG_PREBUILT_ORIGINAL (STM_FIRST_GCFLAG << 3)
 #define GCFLAG_WRITE_BARRIER     (STM_FIRST_GCFLAG << 4)
 #define GCFLAG_NURSERY_MOVED     (STM_FIRST_GCFLAG << 5)
+#define GCFLAG_OLD               (STM_FIRST_GCFLAG << 6)
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
 #define GCFLAG_PREBUILT  (GCFLAG_VISITED           | \
-                          GCFLAG_PREBUILT_ORIGINAL)
+                          GCFLAG_PREBUILT_ORIGINAL | \
+                          GCFLAG_OLD)
 
 #define GC_FLAG_NAMES  { "PRIVATE_COPY",      \
                          "VISITED",           \
@@ -70,6 +74,7 @@
                          "PREBUILT_ORIGINAL", \
                          "WRITE_BARRIER",     \
                          "NURSERY_MOVED",     \
+                         "OLD",               \
                          NULL }
 
 /************************************************************/

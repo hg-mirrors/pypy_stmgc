@@ -119,7 +119,7 @@ struct tx_descriptor *stm_find_thread_containing_pointer(gcptr L)
 
     struct tx_descriptor *d;
     for (d = tx_head; d; d = d->tx_next) {
-        if (stmgc_is_young(d, L))
+        if (stmgc_is_young_in(d, L))
             goto found;
     }
     assert(0);    /* L is not a young pointer anywhere! */
@@ -396,8 +396,8 @@ static void cleanup_for_thread(struct tx_descriptor *d)
 
     G2L_LOOP_FORWARD(d->public_to_private, item) {
 
-        assert(stmgc_classify(d, item->addr) == K_PUBLIC);
-        assert(stmgc_classify(d, item->val)  == K_PRIVATE);
+        assert(stmgc_classify(item->addr) == K_PUBLIC);
+        assert(stmgc_classify(item->val)  == K_PRIVATE);
         item->addr->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
     } G2L_LOOP_END;
@@ -689,7 +689,8 @@ void recdump(gcptr obj)
         /* ^^^ write this line even if the following segfault */
         switch (stm_dbgmem_is_active(obj, 1)) {
         case 1:
-            if (thread_descriptor && stmgc_is_young(thread_descriptor, obj)) {
+            if (thread_descriptor &&
+                    stmgc_is_young_in(thread_descriptor, obj)) {
                 if (g2l_contains(
                        &thread_descriptor->young_objects_outside_nursery, obj))
                     fprintf(stderr, " (young but outside nursery)");
@@ -738,7 +739,7 @@ void recdump(gcptr obj)
                    other thread */
                 if (!(obj->h_revision & 2) ||
                         (thread_descriptor &&
-                         stmgc_is_young(thread_descriptor, p))) {
+                         stmgc_is_young_in(thread_descriptor, p))) {
                     gcptrlist_insert(&pending, p);
                 }
                 else {

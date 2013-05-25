@@ -81,7 +81,7 @@ static gcptr HeadOfRevisionChainList(struct tx_descriptor *d, gcptr G)
         {
         old_to_young:
           v &= ~2;
-          if (UNLIKELY(!stmgc_is_young(d, (gcptr)v)))
+          if (UNLIKELY(!stmgc_is_young_in(d, (gcptr)v)))
             {
               stmgc_public_to_foreign_protected(R);
               goto retry;
@@ -183,7 +183,7 @@ static gcptr _latest_gcptr(gcptr R)
       if (v & 2)
         {
           v &= ~2;
-          if (!stmgc_is_young(thread_descriptor, (gcptr)v))
+          if (!is_young((gcptr)v))
             {
               stmgc_follow_foreign(R);
               goto retry;
@@ -317,7 +317,7 @@ gcptr stm_WriteBarrier(gcptr P)
   /* XXX optimize me based on common patterns */
   R = HeadOfRevisionChainList(d, P);
 
-  switch (stmgc_classify(d, R)) {
+  switch (stmgc_classify(R)) {
   case K_PRIVATE:   W = R;                       break;
   case K_PROTECTED: W = LocalizeProtected(d, R); break;
   case K_PUBLIC:    W = LocalizePublic(d, R);    break;
@@ -358,8 +358,8 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
           abort();//XXX
           if (R->h_tid & GCFLAG_NURSERY_MOVED)
             {
-              assert(stmgc_is_young(d, R));
-              assert(!stmgc_is_young(d, (gcptr)v));
+              assert(is_young(R));
+              assert(!is_young((gcptr)v));
               R = (gcptr)v;
               goto retry;
             }
@@ -651,6 +651,15 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       L->h_tid &= ~GCFLAG_PRIVATE_COPY;
       L->h_revision = new_revision;
 
+      if (is_young(L))
+        {
+          item->val = (gcptr)(((revision_t)L) | 2);
+#ifdef DUMP_EXTRA
+          fprintf(stderr, "PUBLIC-TO-PROTECTED:\n");
+          /*mark*/
+#endif
+        }
+
     } G2L_LOOP_END;
 
   smp_wmb(); /* a memory barrier: make sure the new L->h_revisions are visible
@@ -659,31 +668,19 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
   G2L_LOOP_FORWARD(d->public_to_private, item)
     {
       gcptr R = item->addr;
-      gcptr L = item->val;
-      revision_t v = (revision_t)L;
+      revision_t v = (revision_t)item->val;
 
       assert(!(R->h_tid & GCFLAG_PRIVATE_COPY));
       assert(R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
       assert(!(R->h_tid & GCFLAG_NURSERY_MOVED));
-      assert(!stmgc_is_young(d, R));
+      assert(!is_young(R));
       assert(R->h_revision != localrev);
 
-      if (stmgc_is_young(d, L))
-        {
-          v |= 2;
 #ifdef DUMP_EXTRA
-          fprintf(stderr, "%p->h_revision = %p (UpdateChainHeads2)  "
-                  "<=== PUBLIC-TO-PROTECTED\n", R, (gcptr)v);
-          /*mark*/
+      fprintf(stderr, "%p->h_revision = %p (UpdateChainHeads2)\n",
+              R, (gcptr)v);
+      /*mark*/
 #endif
-        }
-      else
-        {
-#ifdef DUMP_EXTRA
-          fprintf(stderr, "%p->h_revision = %p (UpdateChainHeads2)\n", R, L);
-          /*mark*/
-#endif
-        }
       ACCESS_ONCE(R->h_revision) = v;
 
       if (R->h_tid & GCFLAG_PREBUILT_ORIGINAL)

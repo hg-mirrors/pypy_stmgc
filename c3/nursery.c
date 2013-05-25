@@ -9,18 +9,29 @@ static int is_in_nursery(struct tx_descriptor *d, gcptr obj)
     return (d->nursery <= (char*)obj && ((char*)obj) < d->nursery_end);
 }
 
-int stmgc_is_young(struct tx_descriptor *d, gcptr obj)
+int stmgc_is_young_in(struct tx_descriptor *d, gcptr obj)
 {
+    /* Check if 'obj' is a young object for 'd'.  (So if it's a young
+       object for another thread, returns False.) */
     return is_in_nursery(d, obj) ||
         g2l_contains(&d->young_objects_outside_nursery, obj);
 }
 
-enum protection_class_t stmgc_classify(struct tx_descriptor *d, gcptr obj)
+#ifdef _GC_DEBUG
+int is_young(gcptr obj)
+{
+    int result = (obj->h_tid & GCFLAG_OLD) == 0;
+    assert(result == stmgc_is_young_in(thread_descriptor, obj));
+    return result;
+}
+#endif
+
+enum protection_class_t stmgc_classify(gcptr obj)
 {
     /* note that this function never returns K_OLD_PRIVATE. */
     if (obj->h_revision == stm_local_revision)
         return K_PRIVATE;
-    if (stmgc_is_young(d, obj))
+    if (is_young(obj))
         return K_PROTECTED;
     else
         return K_PUBLIC;
@@ -42,16 +53,21 @@ static enum protection_class_t dclassify(gcptr obj)
         G2L_FIND(d->young_objects_outside_nursery, obj, entry,
                  goto not_found);
 
-        if (obj->h_tid & GCFLAG_VISITED)
+        if (obj->h_tid & GCFLAG_OLD)
             e = private ? K_OLD_PRIVATE : K_PUBLIC;
         else
             e = private ? K_PRIVATE : K_PROTECTED;
     }
     assert(stm_dbgmem_is_active(obj, 0));
+    if (e == K_PRIVATE || e == K_PROTECTED)
+        assert((obj->h_tid & GCFLAG_OLD) == 0);
+    else
+        assert((obj->h_tid & GCFLAG_OLD) == GCFLAG_OLD);
     return e;
 
  not_found:
     assert(stm_dbgmem_is_active(obj, 1));
+    assert(obj->h_tid & GCFLAG_OLD);
     return private ? K_OLD_PRIVATE : K_PUBLIC;
 }
 
@@ -91,6 +107,7 @@ gcptr _stm_allocate_object_of_size_old(size_t size)
     gcptr p = stmgcpage_malloc(size);
     memset(p, 0, size);
     p->h_revision = stm_local_revision;
+    p->h_tid = GCFLAG_OLD;
     return p;
 }
 
@@ -145,7 +162,8 @@ gcptr stmgc_duplicate(gcptr globalobj, revision_t extra_word)
     localobj->h_tid &= ~(GCFLAG_VISITED           |
                          GCFLAG_PUBLIC_TO_PRIVATE |
                          GCFLAG_PREBUILT_ORIGINAL |
-                         GCFLAG_WRITE_BARRIER);
+                         GCFLAG_WRITE_BARRIER     |
+                         GCFLAG_OLD);
     localobj->h_tid |= GCFLAG_PRIVATE_COPY;
     localobj->h_revision = stm_local_revision;
     return localobj;
@@ -243,11 +261,13 @@ static inline gcptr copy_outside_nursery(struct tx_descriptor *d, gcptr obj
     assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
     assert(!(obj->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
     assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
+    assert(!(obj->h_tid & GCFLAG_OLD));
     assert(obj->h_revision & 1);    /* odd value so far */
 
     size_t size = stmcb_size(obj);
     gcptr fresh_old_copy = stmgcpage_malloc(size);
     memcpy(fresh_old_copy, obj, size);
+    fresh_old_copy->h_tid |= GCFLAG_OLD;
     obj->h_tid |= GCFLAG_NURSERY_MOVED;
     obj->h_revision = (revision_t)fresh_old_copy;
 
@@ -274,6 +294,11 @@ static void visit_if_young(gcptr *root  _REASON(char *reason))
     struct tx_descriptor *d = thread_descriptor;
 
     recdump1(reason, obj);
+
+    /* Note: it's a good idea here to avoid reading any field of 'obj'
+       before we know it's a young object.  This avoids a lot of cache
+       misses and cache pollution.
+    */
  retry:
     if (!is_in_nursery(d, obj)) {
         /* 'obj' is not from the nursery (or 'obj == NULL') */
@@ -289,11 +314,11 @@ static void visit_if_young(gcptr *root  _REASON(char *reason))
             goto ignore_and_try_again_with_next;
         }
         /* was it already marked? */
-        if (obj->h_tid & GCFLAG_VISITED) {
+        if (obj->h_tid & GCFLAG_OLD) {
             return;    /* yes, and no '*root' to fix, as it doesn't move */
         }
-        /* otherwise, add GCFLAG_VISITED, and continue below */
-        obj->h_tid |= GCFLAG_VISITED;
+        /* otherwise, add GCFLAG_OLD, and continue below */
+        obj->h_tid |= GCFLAG_OLD;
         fresh_old_copy = obj;
     }
     else {
@@ -336,7 +361,7 @@ static void visit_if_young(gcptr *root  _REASON(char *reason))
         previous_obj = NULL;
     }
     obj = (gcptr)obj->h_revision;
-    assert(stmgc_classify(d, obj) != K_PRIVATE);
+    assert(stmgc_classify(obj) != K_PRIVATE);
     PATCH_ROOT_WITH(obj);
     goto retry;
 }
@@ -345,12 +370,13 @@ static void visit_if_young(gcptr *root  _REASON(char *reason))
 static gcptr young_object_becomes_old(struct tx_descriptor *d, gcptr obj
                                       _REASON(char *reason))
 {
-    assert(stmgc_is_young(d, obj));
+    assert(stmgc_is_young_in(d, obj));
     assert(!(obj->h_tid & GCFLAG_NURSERY_MOVED));
     assert(!(obj->h_tid & GCFLAG_VISITED));
     assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
     assert(!(obj->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
     assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
+    assert(!(obj->h_tid & GCFLAG_OLD));
     assert(obj->h_revision & 1);    /* odd value so far */
 
     visit_if_young(&obj  _REASON(reason));
@@ -544,8 +570,10 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
 
         if (!is_in_nursery(d, obj)) {
             if (!g2l_contains(&d->young_objects_outside_nursery, obj) ||
-                (obj->h_tid & GCFLAG_VISITED)) {
-                /* non-young or visited young objects are kept */
+                (obj->h_tid & GCFLAG_OLD)) {
+                /* non-young or visited young objects are kept (the
+                   first line of this check could be removed, but it is
+                   better this way to avoid cache pollution) */
                 continue;
             }
         }
@@ -605,7 +633,7 @@ static void create_yo_stubs(gcptr *pobj)
         return;
 
     struct tx_descriptor *d = thread_descriptor;
-    if (!stmgc_is_young(d, obj))
+    if (!stmgc_is_young_in(d, obj))
         return;
 
     /* xxx try to avoid duplicate stubs for the same object */
@@ -635,11 +663,7 @@ static void free_unvisited_young_objects_outside_nursery(
     G2L_LOOP_FORWARD(d->young_objects_outside_nursery, item) {
 
         gcptr obj = item->addr;
-        if (obj->h_tid & GCFLAG_VISITED) {
-            /* survives */
-            obj->h_tid &= ~GCFLAG_VISITED;
-        }
-        else {
+        if (!(obj->h_tid & GCFLAG_OLD)) {
             /* dies */
             stmgcpage_free(obj);
         }
@@ -670,15 +694,11 @@ static void minor_collect(struct tx_descriptor *d)
 
     /* now all surviving nursery objects have been moved out, and all
        surviving young-but-outside-the-nursery objects have been flagged
-       with GCFLAG_VISITED */
+       with GCFLAG_OLD */
+    finish_public_to_young(d);
+
     if (g2l_any_entry(&d->young_objects_outside_nursery))
         free_unvisited_young_objects_outside_nursery(d);
-
-    /* now all previously young objects won't be changed any more and are
-       considered old (this is why we have to do this after
-       free_unvisited_young_objects_outside_nursery(), which clears
-       the VISITED flags and clears 'd->young_objects_outside_nursery') */
-    finish_public_to_young(d);
 
     teardown_minor_collect(d);
 
@@ -787,18 +807,121 @@ int stmgc_nursery_hiding(int hide)
 
 void stmgc_public_to_foreign_protected(gcptr R)
 {
-    abort();  //XXX
+    abort();//XXX
+#if 0
+    /* R is a public object, which contains in h_revision a pointer to a
+       protected object --- but it is protectd by another thread,
+       i.e. it likely lives in a foreign nursery.  We have to copy the
+       object out ourselves.  This is necessary: we can't simply wait
+       for the other thread to do a minor collection, because it might
+       be blocked in a system call or whatever. */
+    struct tx_descriptor *my_d = thread_descriptor;
+
+    /* repeat the checks in the caller, to avoid passing more than one
+       argument here */
+    revision_t v = ACCESS_ONCE(R->h_revision);
+    assert(!(v & 1));    /* "is a pointer" */
+    if (!(v & 2))
+        return;   /* changed already, retry */
+
+    gcptr L = (gcptr)(v & ~2);
+
+    /* We need to look up which thread it belongs to and lock this
+       thread's minor collection lock.  This also prevents several
+       threads from getting on each other's toes trying to extract
+       objects from the same nursery */
+    struct tx_descriptor *source_d = stm_find_thread_containing_pointer(L);
+    assert(source_d != my_d);
+
+    spinlock_acquire(source_d->collection_lock);
+
+    /* now that we have the lock, check again that R->h_revision was not
+       modified in the meantime */
+    if (ACCESS_ONCE(R->h_revision) != v) {
+        spinlock_release(source_d->collection_lock);
+        return;   /* changed already, retry */
+    }
+
+    /* debugging support: "activate" the foreign nursery */
+    int was_active = stm_dbgmem_is_active(source_d->nursery, 0);
+    if (!was_active) assert(stmgc_nursery_hiding(0));
+
+    /* walk to the head of the chain in the foreign nursery */
+    while (1) {
+        ...
+
+    if (!is_in_nursery(d, obj)) {
+        /* 'obj' is not from the nursery (or 'obj == NULL') */
+        if (obj == NULL || !g2l_contains(
+                               &d->young_objects_outside_nursery, obj)) {
+            return;   /* then it's an old object or NULL, nothing to do */
+        }
+        /* it's a young object outside the nursery */
+
+        /* is it a protected object with a more recent revision?
+           (this test fails automatically if it's a private object) */
+        if (!(obj->h_revision & 1)) {
+            goto ignore_and_try_again_with_next;
+        }
+        /* was it already marked? */
+        if (obj->h_tid & GCFLAG_VISITED) {
+            return;    /* yes, and no '*root' to fix, as it doesn't move */
+        }
+        /* otherwise, add GCFLAG_VISITED, and continue below */
+        obj->h_tid |= GCFLAG_VISITED;
+        fresh_old_copy = obj;
+    }
+    else {
+        /* it's a nursery object.  Is it:
+           A. an already-moved nursery object?
+           B. a protected object with a more recent revision?
+           C. common case: first visit to an object to copy outside
+        */
+        if (!(obj->h_revision & 1)) {
+            
+            if (obj->h_tid & GCFLAG_NURSERY_MOVED) {
+                /* case A: just fix the ref. */
+                PATCH_ROOT_WITH((gcptr)obj->h_revision);
+                return;
+            }
+            else {
+                /* case B */
+                goto ignore_and_try_again_with_next;
+            }
+        }
+        /* case C */
+        fresh_old_copy = copy_outside_nursery(d, obj  _REASON("visit"));
+
+        /* fix the original reference */
+        PATCH_ROOT_WITH(fresh_old_copy);
+    }
+
+    /* add 'fresh_old_copy' to the list of objects to trace */
+    assert(!(fresh_old_copy->h_tid & GCFLAG_WRITE_BARRIER));
+    gcptrlist_insert(&d->old_objects_to_trace, fresh_old_copy);
+    recdump1("MOVED TO", fresh_old_copy);
+    return;
+
+ ignore_and_try_again_with_next:
+    if (previous_obj == NULL) {
+        previous_obj = obj;
+    }
+    else {
+        previous_obj->h_revision = obj->h_revision;    /* compress chain */
+        previous_obj = NULL;
+    }
+    obj = (gcptr)obj->h_revision;
+    assert(stmgc_classify(d, obj) != K_PRIVATE);
+    PATCH_ROOT_WITH(obj);
+    goto retry;
+
+    ...;
+#endif
 }
 
 #if 0
 void stmgc_follow_foreign(gcptr R)
 {
-    /* R is a global old object, which contains in h_revision a pointer
-       to a global *young* object --- but it is young for another
-       thread, i.e. it likely lives in a foreign nursery.  We have to
-       copy the object out ourselves.  This is necessary: we can't
-       simply wait for the other thread to do a minor collection,
-       because it might be blocked in a system call or whatever. */
     struct tx_descriptor *d = thread_descriptor;
 
     /* repeat the checks in the caller, to avoid passing more than one

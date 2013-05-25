@@ -96,6 +96,7 @@ ffi.cdef('''
     #define GCFLAG_PREBUILT_ORIGINAL ...
     #define GCFLAG_WRITE_BARRIER     ...
     #define GCFLAG_NURSERY_MOVED     ...
+    #define GCFLAG_OLD               ...
     #define ABRT_MANUAL              ...
     typedef struct { ...; } page_header_t;
 ''')
@@ -372,7 +373,7 @@ class run_parallel(object):
 def oalloc(size):
     "Allocate an 'old' object, i.e. outside any nursery"
     p = lib.stmgcpage_malloc(size)
-    p.h_tid = GCFLAG_WRITE_BARRIER
+    p.h_tid = GCFLAG_WRITE_BARRIER | GCFLAG_OLD
     p.h_revision = lib.get_local_revision()
     lib.settid(p, 42 + size)
     return p
@@ -382,7 +383,7 @@ ofree = lib.stmgcpage_free
 def oalloc_refs(nrefs):
     "Allocate an 'old' object, i.e. outside any nursery, with nrefs pointers"
     p = lib.stmgcpage_malloc(HDR + WORD * nrefs)
-    p.h_tid = GCFLAG_WRITE_BARRIER
+    p.h_tid = GCFLAG_WRITE_BARRIER | GCFLAG_OLD
     p.h_revision = lib.get_local_revision()
     lib.settid(p, 421 + nrefs)
     for i in range(nrefs):

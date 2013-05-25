@@ -42,9 +42,15 @@ void stmgc_minor_collect(void);
 void stmgc_minor_collect_no_abort(void);
 int stmgc_minor_collect_anything_to_do(struct tx_descriptor *);
 void stmgc_write_barrier(gcptr);
-enum protection_class_t stmgc_classify(struct tx_descriptor *, gcptr);
-int stmgc_is_young(struct tx_descriptor *, gcptr);
+enum protection_class_t stmgc_classify(gcptr);
+int stmgc_is_young_in(struct tx_descriptor *, gcptr);
 void stmgc_public_to_foreign_protected(gcptr);
 int stmgc_nursery_hiding(int);
+
+#ifdef _GC_DEBUG
+int is_young(gcptr);
+#else
+#  define is_young(o)  (((o)->h_tid & GCFLAG_OLD) == 0)
+#endif
 
 #endif

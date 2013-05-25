@@ -162,6 +162,7 @@ def test_keep_global_roots_alive_2():
 
 def test_local_copy_from_global_obj():
     p1 = oalloc(HDR)
+    assert p1.h_tid & GCFLAG_OLD
     assert lib.stm_write_barrier(p1) == p1
     make_global(p1)
     p2n = lib.stm_write_barrier(p1)

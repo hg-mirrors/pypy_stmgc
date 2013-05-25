@@ -104,7 +104,7 @@ gcptr _stm_allocate_old(size_t size, unsigned long tid)
 {
     gcptr result = _stm_allocate_object_of_size_old(size);
     assert(tid == (tid & STM_USER_TID_MASK));
-    result->h_tid = tid;
+    result->h_tid = tid | GCFLAG_OLD;
     return result;
 }
 
