@@ -454,16 +454,20 @@ static void mark_public_to_young(struct tx_descriptor *d)
     for (i = 0; i < intermediate_limit; i++) {
         gcptr R = items[i];
         gcptr L;
+        revision_t v = R->h_revision;
         assert(dclassify(R) == K_PUBLIC);
-        assert(!(R->h_revision & 1));   /* "is a pointer" */
-        assert(R->h_revision & 2);      /* a pointer with bit 2 set */
-        L = (gcptr)(R->h_revision & ~2);
-        assert(dclassify(L) == K_PROTECTED);
-        visit_if_young(&L  _REASON("public.h_revision -> PROTECTED"));
-        /* The new value of L is the previously-protected object moved
-           outside.  We can't store it immediately in R->h_revision!
-           We have to wait until the end of the minor collection.  See
-           finish_public_to_young(). */
+        assert(!(v & 1));   /* "is a pointer" */
+
+        if (v & 2) {        /* a pointer with bit 2 set.
+                               Normally set, except if R was stolen */
+            L = (gcptr)(v & ~2);
+            assert(dclassify(L) == K_PROTECTED);
+            visit_if_young(&L  _REASON("public.h_revision -> PROTECTED"));
+            /* The new value of L is the previously-protected object moved
+               outside.  We can't store it immediately in R->h_revision!
+               We have to wait until the end of the minor collection.  See
+               finish_public_to_young(). */
+        }
         /*mark*/
     }
 
@@ -506,19 +510,23 @@ static void finish_public_to_young(struct tx_descriptor *d)
     for (i = 0; i < intermediate_limit; i++) {
         gcptr R = items[i];
         gcptr L;
+        revision_t v = R->h_revision;
         assert(dclassify(R) == K_PUBLIC);
-        assert(!(R->h_revision & 1));   /* "is a pointer" */
-        assert(R->h_revision & 2);      /* a pointer with bit 2 set */
-        L = (gcptr)(R->h_revision & ~2);
+        assert(!(v & 1));   /* "is a pointer" */
+        if (v & 2) {        /* a pointer with bit 2 set.
+                               Normally set, except if R was stolen */
+            L = (gcptr)(v & ~2);
 
-        /* use visit_if_young() again to find the final newly-public object */
-        visit_if_young(&L  _REASON("public.h_revision -> FETCH PUBLIC"));
-        assert(dclassify(L) == K_PUBLIC);
+            /* use visit_if_young() again to find the final newly-public
+               object */
+            visit_if_young(&L  _REASON("public.h_revision -> FETCH PUBLIC"));
+            assert(dclassify(L) == K_PUBLIC);
 
-        /* Note that although R is public, its h_revision cannot be
-           modified under our feet as long as we hold the collection lock,
-           because it's pointing to one of our protected objects */
-        ACCESS_ONCE(R->h_revision) = (revision_t)L;
+            /* Note that although R is public, its h_revision cannot be
+               modified under our feet as long as we hold the collection lock,
+               because it's pointing to one of our protected objects */
+            R->h_revision = (revision_t)L;
+        }
         /*mark*/
     }
 
