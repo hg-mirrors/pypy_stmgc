@@ -1,0 +1,55 @@
+
+
+stmgc_stop_transaction has been made a no-op:
+
+- LOCAL objects are considered local only when h_revision contains
+  a specific value (e.g. a negative odd number).  GCFLAG_GLOBAL is gone.
+
+- After every transaction that commits, we change the specific odd number.
+  We don't care about transactions that abort because all their local
+  objects are not reachable any more, anyway.
+
+- If an object has a negative odd number different than the one from
+  the current transaction, it was committed before, so it is a GLOBAL
+  object.  Moreover, as a negative value, it is "infinitely old",
+  which is correct for the copy of an object that came straight from
+  a LOCAL.  It is not correct for GCFLAG_LOCAL_COPY, which we fix
+  at commit anyway by setting its h_revision to the current
+  'global_cur_time'.
+
+------------------------------------------------------------
+
+TODO:
+
+- after an abort, try to reuse a part of the memory immediately:
+  both in the nursery, and releasing the acquired gcpages
+
+- handle time overflows, by optionally compressing the timestamps
+  during major collections
+
+- handle thread number overflows, probably just with a free list
+  of 'my_lock' values
+
+- thread creation should add sizeof(struct tx_descriptor) + GC_NURSERY
+  to the memory pressure
+
+- mallocs of too big objects
+
+- use a way to avoid walking all roots again and again, in nursery.c
+
+- try to compress the chains of revisions during minor collections
+
+- try to compress the chains of revisions during major collections
+
+- FIXME: check what occurs on abort with global_to_local_copies and
+  num_local_copies_committed_already!!
+
+- redo PossiblyUpdateChain()
+
+- race conditions in stmgc_follow_foreign() with various fields of sourcetls
+
+- stm_write_barrier doesn't give a "definitely writeable forever until the
+  transaction ends" pointer, check
+
+- how to handle immutable objects?  they might only be initialized after
+  they are moved; check

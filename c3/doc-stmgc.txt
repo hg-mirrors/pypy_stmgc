@@ -1,0 +1,420 @@
+==================================================
+Details of the interactions between STM and the GC
+==================================================
+
+Below, an "object" means really one version of an object, as allocated
+in memory.  What is from the higher level the "same" object may exist in
+several versions (we say "higher level object" to mean this).  Usually
+these versions are objects in a linked list, chained together with the
+h_revision field in the objects' headers.
+
+Each object is either young or old.  All new objects are allocated
+young.  They become old at the next minor collection.  In the common
+case, objects are allocated in the nursery, and during the next minor
+collection, they are moved outside (if they survive).  The nursery
+contains only young objects, but a few objects outside might be young
+too (e.g. objects too large for the nursery).  (In fact we found out in
+PyPy that it's a good idea to create objects young even if they are
+outside the nursery; otherwise, a program that creates a lot of
+medium-sized objects will quickly exhaust the memory and trigger a lot
+of major collections.)  For the rest of this document we'll ignore young
+objects outside the nursery.
+
+Independently, each object can be private or non-private (we used to say
+local or global).  The private objects are the ones belonging to the
+transaction currently in progress.  The non-private objects belong to
+already-committed transactions.
+
+The concepts of age (old or young) and privacy are kept separated, and
+all four combinations can exist: it allows good performance both in case
+of a lot of very short transactions and in the case of one very long
+transaction.  In the first case, we leave most young objects behind in
+the nursery, as non-private objects, without moving them (they can still
+be freed later by the next minor collection).  In the other case, over
+the course of several minor collections, we have the same behavior as a
+regular two-generational GC system which copies the surviving nursery
+objects into old ones; but these objects remain private as long as the
+transaction isn't finished.
+
+We'll also divide the non-private objects in two subcategories: "public"
+for the old non-private objects, and "protected" for the young
+non-private objects.  Protected objects, although not private, are still
+protected from direct access from other thread as long as they are in
+the nursery.
+
+
+                          non-private | private
+           +------------------------------------------------------------
+           |
+       old |         public objects   |   old private objects
+  ---------|
+           |
+     young |     [ protected objects  |  private objects  (--> grows) ]
+  (nursery)|
+
+
+Because in principle no object can be modified in-place once it has been
+committed, this limits what pointers it can contain: they must directly
+reference other objects that are not more recent than the container.
+(But an object may contain a reference to some outdated version of an
+object; then we use the normal h_revision link to find the latest
+version of the latter.)  So there are no regular pointers from a
+non-private object to a private object (which are always the most recent
+ones from the point of view of their thread).  We add another
+constraint: we don't want any public object to contain a direct pointer
+to a protected object.
+
+The only way to have a link in the "less-public" direction is via the
+h_revision field.  The multiple versions of the same higher level object
+look like this:
+
+
+    [=the static object, if it was prebuilt=]
+      |
+      | h_revision
+      |
+      `------> [=public1=]
+                 |
+                 | h_revision
+                 |
+                 `------> [=public2=]
+                            |
+                            | h_revision with bit 2 set
+                            |
+                            `------> [=protected3=]
+                                       |
+                                       | h_revision
+                                       |
+                                       `------> [=protected4=]
+
+
+The h_revision is normally a regular pointer to the next version.  But
+one of these links may go from public to protected, which is marked by
+having the bit 2 set in h_revision.  And the latest object in the chain
+has h_revision set to an odd value (bit 1 set), which gives the revision
+in which that object was committed.
+
+In addition to the diagram above, a thread may also have one private
+version (originally based on the head of the chain, but it might get
+out-of-date).  This link may be recorded "on-line" [O1] or "off-line"
+[O2], see below.  When the transaction commits, no object is copied in
+memory, but any private object becomes non-private (i.e. protected or
+public).  If the object has any previous revision, then what is so far
+the head of the chain sees its h_revision replaced with a pointer to the
+new object.  If this creates a public-to-protected link, then its bit 2
+is set.
+
+Minor collections are mostly regular first-generation collections from
+the point of view of the GC: they move all surviving nursery objects
+outside.  A minor collection always turns all protected objects into
+public ones.  (In particular, if a transaction started after the most
+recent minor collection, then there are no old private objects;
+conversely, if it started before the most recent minor collection, then
+there are no protected objects.)
+
+However another process can force a public copy of a protected object:
+"stealing".  Stealing is triggered when thread A attempts to follow the
+h_revision, finds its bit 2 set, and finds that it points outside thread
+A's own nursery --- and so it is a protected object from a foreign
+thread B.  In that case, thread A will "steal" the target object's
+latest version, making it public.  (This is done instead of simply
+waiting for thread B's next minor collection, because it can occur in an
+arbitrary amount of time: for all we know thread B may be blocked in a
+`sleep(100)`.)
+
+The diagram above becomes like this, after thread A starts with a
+pointer to "public1" and attempts to find its later version:
+
+
+      [=public1=]
+        |
+        | h_revision
+        |
+        `------> [=public2=]
+                   |
+                   | h_revision
+                   |
+                   |
+                   |        [=protected3=]
+                   |          |
+                   |          | h_revision
+                   |          |
+                   |          `------> [=protected4=]
+                   |                     .
+                   |                     . h_revision
+                   |                     .
+                   `----------------------------> [=public5=]
+
+
+with a new copy "public5" of the object being created outside the
+nursery.  Afterwards, the h_revision of "public2" points directly to
+"public5", and so any future access to the object from "public1" or
+"public2" will work directly.  (The dotted h_revision link from
+"protected4" is not actually written by the stealing thread; it is only
+recorded for the original thread to do later [O5].)
+
+The nursery objects are not written at all by the stealing process.  No
+write to nursery objects ever occurs from other threads, and the only
+reads occur during stealing.  But say we have protected objects in a
+thread A, and want to steal one of them from a thread B.  This operation
+still requires care: mostly, we have to be sure that the objects won't
+be freed concurrently by thread A while we read them in thread B.  This
+is done by acquiring thread A's collection lock from thread B.  This
+lock is also acquired by thread A itself during its own minor
+collections.  So stealing cannot occur in parallel with thread A running
+a minor collection (or thread C stealing from the same thread A), but it
+can occur in parallel with thread A's normal execution.  This compromize
+should be fine: if thread A is currently doing a minor collection, then
+thread B can as well wait a bit until it is finished and then try again:
+afterwards, all of thread A's protected objects will have become public
+anyway.
+
+                                    -+-
+
+No public object may contain a reference to a protected object.  This
+adds a problem that we ignored so far.  Fresh public objects are created
+by three processes: 1. when we commit; 2. when stealing; 3. when we do
+a minor collection.  The 3rd case is ignored here because there are no
+protected objects after a minor collection.
+
+1. When we commit, all our private objects become non-private.  In particular,
+if there are old private objects, they become public.  Of course this
+problem doesn't exist if there are no old private objects, which is the
+common case if we're doing a lot of small transactions: no object can be
+old and private if the current transaction started after the most recent
+minor collection.  The case that pauses problem here is the opposite: a
+minor collection occurred during the present transaction.  In this case
+there are no protected object so far: the nursery contains only private
+objects.
+
+So committing creates newly protected and public objects; any of these
+can contain references to any other, including "newly public -> newly
+protected" --- i.e. old -> young.  Fortunately, we keep track of such
+references anyway [O3] for the purpose of the generational garbage
+collection (by having our STM-specific write barrier work in this case
+like a traditional generational write barrier).
+
+The 2nd case is stealing: it produces a new, public revision (this is
+"public5" in the example above).  If we simply copy its content from
+"protected4" then it will likely contain references to other protected
+objects.
+
+In both cases we know exactly which objects must be fixed.  There are
+two different behaviors that can be implemented (or maybe some
+combination of both is best).  The first option is that for any
+reference that still goes to a protected object, we allocate a new
+public revision of that object, and make the reference go to that.  We
+end up with repeating the same process recursively --- this makes a new
+public copy of the protected object, which may contain more references
+to protected objects, so we make public copies of these ones too, and so
+on.  The second option is to stop this recursion: instead of allocating
+a full public revision, we allocate a public stub that contains only an
+h_revision pointing to the protected version, with the bit 2 set.  This
+works because no pointer to the stub ever escapes the STM subsystem.
+
+                                    -+-
+
+The age of an object is implicit.  Each thread has enough data to know
+if an object is young for this thread or not: whether its address falls
+inside our nursery or not.  (In practice we also need to check a small
+set of extra young objects, the ones that have been allocated outside
+the nursery.)
+
+Private objects are fully read-write but only visible from one thread.
+Public objects are visible by any thread, and are theoretically
+read-only.  Protected objects are intermediate.  In more details:
+
+~~ Private objects ~~
+
+Private objects cannot be accessed from other threads.  From their own
+thread, they are distinguished by having a particular value in
+h_revision.  We use a negative odd number.  When the transaction
+commits, we change the number that we use.  All previous private
+objects' h_revision field is no longer equal to this number, so they
+automatically become non-private (without needing to enumerate them
+all).
+
+The number is negative, which is already correct at commit time for all
+objects that are new during this transaction: a negative odd number is
+"infinitely old", i.e. older than any real revision number (a positive
+odd number).  This is fine for the first revision of any object.  For
+the objects that are not first revision (i.e. that have not been created
+during this transaction but merely marked as modified during this
+transaction), we have to replace h_revision with the real revision
+number obtained during commit.
+
+~~ Public objects ~~
+
+In public objects, h_revision is initially set as described above, to
+the revision in which the object was created (an odd number).  When one
+thread is about to commit a new revision of this public object, it
+changes atomically the h_revision field of the public object to a
+thread-specific "locked" value.  After checks to ensure that the whole
+commit is consistent, h_revision is again replaced with a pointer to the
+new revision.  If this new revision is protected, then we set the bit 2
+of the pointer, as described above.
+
+The GC flags in the header of a public object are never modified, expect
+as follows: the flag GCFLAG_PUBLIC_TO_PRIVATE is added when one thread
+makes a private copy of this public object.  As it is the only change
+that can occur --- writing a value equal to the old flags combination
+plus this particular flag --- it doesn't need special protection.  It is
+used as an optimization in the read barrier: if we have an object
+without this flag, then we don't have to look in off-line dictionaries
+[O2] to find if we made a private copy.
+
+~~ Protected objects ~~
+
+In protected objects, access from other thread is more restricted.  This
+means that we can directly use h_revision to point to a private copy as
+soon as there is one.  We need to keep somewhere else (see [O1]) the
+overwritten value of h_revision, which gives the revision number at
+which the protected object was created; it needs to be written back in
+case of a transaction abort.
+
+The GC flags in the header of a protected object may only be modified by
+the thread that protects it (not by a stealing thread).  (In fact it's
+not clear so far that they ever need to be modified at all.)
+
+                                    -+-
+
+Stealing: whenever we encounter an h_revision with the bit 2 set, we
+have to check the target object *without reading it*.  This is essential
+because the target object may belong to a different thread, and anything
+can occur concurrently (e.g. the nursery where it lives may be cleared).
+This is done by checking in which nursery the address falls: first we
+check our own nursery, and then if not, each other thread's nursery.
+
+In the latter case we enter stealing mode by acquiring the collection
+lock of the target thread.  With this lock we can then read some of the
+off-line data of the target thread.  This requires the target thread to
+guarantee that it does not change this data concurrently, but only
+when it has itself acquired the collection lock.
+
+                                    -+-
+
+Details of the data structures
+------------------------------
+
+Each thread has its own `struct tx_descriptor` structure to store its
+STM- and GC-related thread-local metadata off-line.  In particular, it
+stores all data about the STM status of public objects (e.g. whether
+they currently have a private copy).
+
+The object themselves have two words each: a GC header, and the
+h_revision number/pointer.  The GC header stores the type id of the
+object, and additional GC flags.
+
+The rest is data structures in the `struct tx_descriptor`:
+
+
+- [O1] protected_with_private_copy: this is a list of all protected
+  objects with a private copy.  In addition, we eagerly replace the
+  h_revision of the protected object with a pointer to the private
+  object.  It speeds up the read barrier in the common case where the
+  chain of objects ends in a protected object.  But we need to store the
+  original value of this h_revision field somewhere else; this is needed
+  to be able to restore it in case of abort, as well as when stealing,
+  when we need to know what revision number the protected object had.
+  To store this, private copies of protected objects are allocated with
+  an extra word after them.  (As the majority of the private objects
+  are expected to be fresh, rather than the copy of some older version
+  object, we only need to allocate this extra word in the minority of
+  cases.)
+
+  (Note that the private copies are necessarily young: it's not possible
+  that protected objects exist at the same time as old private objects.)
+
+  Access pattern: [O1] is only ever accessed by the local thread.  The
+  extra word after the private copy is written once, _before_ we change
+  h_revision in the protected object; it may subsequently be read freely
+  by that thread _and_ when stealing is in progress.
+
+
+- [O2] public_to_private: a dictionary that maps public objects to their
+  private version.  Public objects that may be keys in such a dictionary
+  have GCFLAG_PUBLIC_TO_PRIVATE.  This dict [O2] has the same purpose as
+  the list [O1], but it differs in the representation: the public
+  objects are seen by all threads, and so we cannot store anything
+  globally on them.
+
+  Access pattern: [O2] is only ever accessed by the local thread.
+
+
+- [O3] private_old_pointing_to_young: a list of old private objects that
+  may contain pointers to young private objects.  Used for minor
+  collections.
+
+  Access pattern: [O3] is only ever accessed by the local thread.
+
+
+- [O4] public_to_young: a list of all public objects with a
+  corresponding young object.  This list starts with the public objects
+  whose h_revision references a protected object (with bit 2 set), and
+  continues with the public objects that have a corresponding _young_
+  private object (a subset of the keys of `public_to_private`).  This is
+  useful information when doing a minor collection.  The point of
+  storing both kinds of objects in the same list is that after each
+  commit, all objects of the 2nd kind become objects of the 1st kind ---
+  which is implemented simply by moving the boundary to the end of the
+  list.
+
+  Access pattern: [O4] is only ever accessed by the local thread.
+
+ 
+- [O5] stolen_objects: a list of protected objects that have been
+  stolen, together with the new public copy.  This list is written by
+  the stealing thread, and it's up to the local thread to notice that it
+  is not empty and to fix the situation.  It should be checked at the
+  latest at commit time, but also when building a private copy of an
+  existing object.  These two cases require acquiring the local
+  collection lock.
+
+  (Additionally, there is the risk of not noticing a stolen object in
+  that list, and continuing to run a transaction for a long time after
+  some other thread committed a new revision of the public object.  To
+  avoid this, we start the read/write barriers by checking if this list
+  is non-empty.  This can be done without acquiring the lock, as it is
+  not needed for correctness; so it is extremely cheap.)
+
+  Access pattern: only threads that have acquired the local collection
+  lock can access [O5] (apart from the check for non-emptiness described
+  in the previous paragraph).
+
+
+Major and minor collections
+---------------------------
+
+Major collections occur to free the memory used by old objects.  For now
+we assume that major collections are rare enough, and simply synchronize
+all threads.  The thread that initiates a major collection first checks
+that each thread ran a minor collection just before (and does it on its
+behalf if not, e.g. if it is blocked in a system call).  Afterwards,
+major collection only has to deal with old objects (public or
+private-to-some-thread).
+
+As a first approximation major collection is a regular, non-concurrent,
+non-parallel GC.  (It could be made parallel relatively easily, by using
+the other waiting threads to help, rather than just have them wait.
+More subtly, in a few cases we could interrupt other threads' system
+calls to let them help, too.)
+
+The unusual characteristic of our GC is that in our case we can compress
+the h_revision chains, thus freeing more objects.  This is true for both
+minor and major collections.  During major collections, we need to keep
+alive the latest public version of a surviving object, as well as the
+private versions, if any.  The older versions can be freed.  We need a
+bit of care to adjust pointers everywhere.  Additionally, this process
+might occasionally figure out that a transaction in progress is actually
+going to abort in the future (because e.g. it has got an object in its
+read set that has a more recent committed revision).  Such transactions
+can be aborted now.
+
+Similarly, during minor collections we only need to keep the most recent
+protected revision of an object, as well as the young private version,
+if any.  An important point about minor collections is that they only
+look at their own thread's nursery, and so can occur without any
+cross-thread synchronization.  (If it is useful, we could also figure
+out a case where the current transaction is going to abort in the
+future: when objects listed as keys in `public_to_private` have become
+supersceded by a more recent commit.)
