@@ -403,7 +403,10 @@ static void cleanup_for_thread(struct tx_descriptor *d)
     G2L_LOOP_FORWARD(d->public_to_private, item) {
 
         assert(stmgc_classify(item->addr) == K_PUBLIC);
-        assert(stmgc_classify(item->val)  == K_PRIVATE);
+        /*..rt(stmgc_classify(item->val)  == K_PRIVATE); but in the
+            other thread, which becomes: */
+        assert(item->val->h_revision == *d->local_revision_ref);
+
         item->addr->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
     } G2L_LOOP_END;
