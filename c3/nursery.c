@@ -258,7 +258,7 @@ void stmgc_abort_transaction(struct tx_descriptor *d)
 
 
 extern void recdump(gcptr obj);    /* in gcpage.c */
-static void recdump1(char *msg, gcptr obj)
+void recdump1(char *msg, gcptr obj)
 {
     fprintf(stderr, "\n<--------------------%s--------------------> ", msg);
     recdump(obj);

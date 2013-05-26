@@ -12,7 +12,11 @@
 #  endif
 #endif
 
-#define DUMP_EXTRA
+#ifdef _GC_DEBUG
+#  if _GC_DEBUG >= 2
+#    define DUMP_EXTRA
+#  endif
+#endif
 
 #include <stddef.h>
 #include <setjmp.h>

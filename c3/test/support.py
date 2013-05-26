@@ -251,7 +251,7 @@ lib = ffi.verify(r'''
 '''.lstrip(),    include_dirs=[parent_dir],
                  undef_macros=['NDEBUG'],
                  define_macros=[('GC_NURSERY', '(16 * sizeof(void *))'),
-                                ('_GC_DEBUG', '1'),
+                                ('_GC_DEBUG', '2'),
                                 ('GC_PAGE_SIZE', '1000'),
                                 ('GC_MIN', '200000'),
                                 ('GC_EXPAND', '90000'),
