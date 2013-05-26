@@ -315,3 +315,56 @@ def test_access_foreign_nursery_use_stubs():
         assert lib.getlong(q2, 0) == 424242
         r.set(3)
     run_parallel(f1, f2)
+
+def test_stubs_are_public_to_young_collect():
+    pg = palloc_refs(1)
+    #
+    p1 = lib.stm_write_barrier(pg)
+    assert lib.in_nursery(p1)
+    lib.stm_push_root(p1)
+    minor_collect()
+    p1 = lib.stm_pop_root()
+    assert not lib.in_nursery(p1)
+    q1 = nalloc(HDR + WORD)
+    lib.setlong(q1, 0, 424242)
+    lib.setptr(p1, 0, q1)
+    assert not lib.in_nursery(p1)
+    assert lib.in_nursery(q1)
+    #
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    #
+    assert not lib.in_nursery(p1)   # public
+    assert lib.in_nursery(q1)       # protected
+    lib.stm_push_root(p1)
+    minor_collect()
+    p1b = lib.stm_pop_root()
+    assert p1b == p1
+    q1b = lib.getptr(p1, 0)
+    assert not lib.in_nursery(q1b)
+    assert lib.getlong(q1b, 0) == 424242
+
+def test_stubs_are_public_to_young_steal():
+    pg = palloc_refs(1)
+    seen = []
+    def f1(r):
+        q1 = nalloc(HDR + WORD)
+        lib.setlong(q1, 0, 424242)
+        p1 = lib.stm_write_barrier(pg)
+        lib.setptr(p1, 0, q1)
+        assert lib.in_nursery(p1)
+        assert lib.in_nursery(q1)
+        r.set(2)
+        r.wait(3)
+        minor_collect()
+        p4 = lib.getptr(pg, 0)
+        assert not lib.in_nursery(p4)     # the stub
+        assert lib.getlong(p4, 0) == 424242
+    def f2(r):
+        r.wait(2)
+        p2 = lib.stm_read_barrier(pg)    # foreign nursery -> old
+        assert not lib.in_nursery(p2)
+        assert p2
+        # don't read getptr(p2, 0) here, so that it remains as a stub
+        r.set(3)
+    run_parallel(f1, f2)
