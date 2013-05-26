@@ -89,3 +89,19 @@ def test_young_objects_outside_nursery():
             abort_and_retry()
         else:
             major_collect()
+
+def test_abort_protected_to_private():
+    pg = palloc(HDR + WORD)
+    p1 = lib.stm_write_barrier(pg)
+    lib.setlong(p1, 0, 32128247)
+    #
+    @perform_transaction
+    def run(retry_counter):
+        assert lib.getlong(pg, 0) == 32128247
+        if retry_counter == 0:
+            lib.setlong(pg, 0, 4737372)
+            abort_and_retry()
+        else:
+            lib.setlong(pg, 0, 838311)
+    #
+    assert lib.getlong(pg, 0) == 838311

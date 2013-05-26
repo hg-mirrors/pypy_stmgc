@@ -244,7 +244,6 @@ void stmgc_abort_transaction(struct tx_descriptor *d)
         assert(dclassify(L) == K_PRIVATE);
 
         R->h_revision = fetch_extra_word(L);
-        abort();//XXX
     }
     gcptrlist_clear(&d->protected_with_private_copy);
     spinlock_release(d->collection_lock);
@@ -613,7 +612,7 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
             continue;
         }
         /* The listed object was not visited.  Either it's because it
-           because really unreachable (in which case it cannot possibly
+           is really unreachable (in which case it cannot possibly
            be modified any more, and the current transaction cannot
            abort because of it) or it's because it was already modified.
         */
