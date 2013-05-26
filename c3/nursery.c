@@ -634,6 +634,7 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
            2. it is a stolen object
 
            3. it is not visited because it has already been modified.
+              But this case cannot occur: the object is still protected
         */
         if (obj->h_revision & 1) {
             /* first case: untrack it.  Note that this case can occur
@@ -643,17 +644,29 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
             /*mark*/
         }
         else if (obj->h_tid & GCFLAG_STOLEN) {
-            /* second case: 'obj' was stolen.  Just replace it in the
-               list with its new copy, which should be identical
-               (and public, so no more processing it needed). */
-            assert(dclassify((gcptr)obj->h_revision) == K_PUBLIC);
-            items[i] = (gcptr)obj->h_revision;
+            /* second case: 'obj' was stolen.  We check to see if
+               the public version was already outdated.  If not, we
+               replace 'obj' in the list with this public version,
+               which should be identical. */
+            gcptr P = (gcptr)obj->h_revision;
+            assert(dclassify(P) == K_PUBLIC);
+
+            if (P->h_revision & 1) {   /* "is not a pointer" */
+                items[i] = P;
+                /*mark*/
+            }
+            else {
+                /* P has already been changed.  Mark as abort. */
+                AbortTransactionAfterCollect(d, ABRT_COLLECT_MINOR);
+                /*mark*/
+                gcptrlist_clear(&d->list_of_read_objects);
+                break;
+            }
         }
         else {
-            /* third case */
-            abort();//XXX
-            /* ABRT_COLLECT_MINOR ... check
-               for stolen object */
+            /* third case: impossible */
+            assert(!"third case of fix_list_of_read_objects");
+            abort();
         }
     }
     d->num_read_objects_known_old = d->list_of_read_objects.size;

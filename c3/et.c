@@ -513,7 +513,7 @@ void AbortTransactionAfterCollect(struct tx_descriptor *d, int reason)
 {
   if (d->active >= 0)
     {
-      assert(d->active == 1);
+      assert(d->active == 1);   /* not 2, which means inevitable */
       d->active = -reason;
     }
   assert(d->active < 0);
@@ -523,7 +523,11 @@ void AbortNowIfDelayed(void)
 {
   struct tx_descriptor *d = thread_descriptor;
   if (d->active < 0)
-    AbortTransaction(-d->active);
+    {
+      int reason = -d->active;
+      d->active = 1;
+      AbortTransaction(reason);
+    }
 }
 
 /************************************************************/

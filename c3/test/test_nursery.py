@@ -392,6 +392,7 @@ def test_read_from_stolen_object():
         def cb(c):
             assert c == 0
             p1 = lib.stm_read_barrier(pg)
+            assert lib.in_nursery(p1)
             r.wait_while_in_parallel()
             minor_collect()
         perform_transaction(cb)
@@ -403,3 +404,28 @@ def test_read_from_stolen_object():
         perform_transaction(cb)
         r.leave_in_parallel()
     run_parallel(f1, f2)
+
+def test_read_from_modified_stolen_object():
+    pg = palloc(HDR + WORD)
+    seen = []
+    def f1(r):
+        lib.setlong(pg, 0, 287221)
+        def cb(c):
+            if c == 0:
+                p1 = lib.stm_read_barrier(pg)
+                assert lib.in_nursery(p1)
+                r.wait_while_in_parallel()
+                seen.append("ok")
+                minor_collect()
+                raise AssertionError("we should not reach this!")
+            else:
+                assert seen == ["ok"]
+        perform_transaction(cb)
+    def f2(r):
+        def cb(c):
+            assert c == 0
+            r.enter_in_parallel()
+            lib.setlong(pg, 0, -66666)     # steal object
+        perform_transaction(cb)
+        r.leave_in_parallel()
+    run_parallel(f1, f2, max_aborts=1)
