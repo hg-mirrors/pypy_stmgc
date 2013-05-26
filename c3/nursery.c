@@ -624,7 +624,9 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
            abort because of it) or it's because it was already modified.
         */
         if (obj->h_revision & 1) {
-            /* first case: untrack it */
+            /* first case: untrack it.  Note that this case can occur
+               without aborting the transaction.  See gcpage's
+               cleanup_for_thread() for an explanation how. */
             abort();//XXX
             items[i] = items[--d->list_of_read_objects.size];
         }
@@ -719,8 +721,10 @@ static void fix_new_public_to_protected_references(struct tx_descriptor *d)
         stmcb_trace(items[i], &create_yo_stubs);
     }
     gcptrlist_clear(&d->private_old_pointing_to_young);
-    d->num_public_to_protected = done_creating_yo_stubs(
-            &d->public_to_young, d->num_public_to_protected);
+
+    i = d->num_public_to_protected;
+    i = done_creating_yo_stubs(&d->public_to_young, i);
+    d->num_public_to_protected = i;
 }
 
 static void free_unvisited_young_objects_outside_nursery(

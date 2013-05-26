@@ -377,7 +377,13 @@ static void cleanup_for_thread(struct tx_descriptor *d)
             return;
         }
 
-        /* then check if 'obj' was visited at all, and remove it if not */
+        /* on the other hand, if we see a non-visited object in the read
+           list, then we need to remove it --- it's wrong to just abort.
+           Consider the following case: the transaction is inevitable,
+           and since it started, it popped objects out of its shadow
+           stack.  Some popped objects might become free even if they
+           have been read from.  We must not abort such transactions
+           (and cannot anyway: they are inevitable!). */
         if (!(obj->h_tid & GCFLAG_VISITED)) {
             items[i] = items[--d->list_of_read_objects.size];
         }
