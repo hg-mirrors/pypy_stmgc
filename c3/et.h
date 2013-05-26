@@ -54,6 +54,9 @@
  * GCFLAG_NURSERY_MOVED is used temporarily during minor collections.
  *
  * GCFLAG_OLD is set on old objects.
+ *
+ * GCFLAG_STOLEN is set of protected objects after we notice that they
+ * have been stolen.
  */
 #define GCFLAG_PRIVATE_COPY      (STM_FIRST_GCFLAG << 0)
 #define GCFLAG_VISITED           (STM_FIRST_GCFLAG << 1)
@@ -62,6 +65,7 @@
 #define GCFLAG_WRITE_BARRIER     (STM_FIRST_GCFLAG << 4)
 #define GCFLAG_NURSERY_MOVED     (STM_FIRST_GCFLAG << 5)
 #define GCFLAG_OLD               (STM_FIRST_GCFLAG << 6)
+#define GCFLAG_STOLEN            (STM_FIRST_GCFLAG << 7)
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
 #define GCFLAG_PREBUILT  (GCFLAG_VISITED           | \
@@ -75,6 +79,7 @@
                          "WRITE_BARRIER",     \
                          "NURSERY_MOVED",     \
                          "OLD",               \
+                         "STOLEN",            \
                          NULL }
 
 /************************************************************/

@@ -236,12 +236,12 @@ void stm_start_sharedlock(void)
 {
     int err = pthread_rwlock_rdlock(&rwlock_shared);
     assert(err == 0);
-    assert(stmgc_nursery_hiding(thread_descriptor, 0));
+    assert(stmgc_nursery_hiding(0));
 }
 
 void stm_stop_sharedlock(void)
 {
-    assert(stmgc_nursery_hiding(thread_descriptor, 1));
+    assert(stmgc_nursery_hiding(1));
     int err = pthread_rwlock_unlock(&rwlock_shared);
     assert(err == 0);
 }

@@ -314,6 +314,13 @@ gcptr stm_WriteBarrier(gcptr P)
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
+  /* must normalize the situation now, otherwise we risk that
+     LocalizePublic creates a new private version of a public
+     object that has got one, attached to the equivalent stolen
+     protected object */
+  if (gcptrlist_size(&d->stolen_objects) > 0)
+    stmgc_normalize_stolen_objects();
+
   /* XXX optimize me based on common patterns */
   R = HeadOfRevisionChainList(d, P);
 
@@ -352,11 +359,9 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
       v = ACCESS_ONCE(R->h_revision);
       if (!(v & 1))               // "is a pointer", i.e.
         {                         //   "has a more recent revision"
-          /* ... unless it is only a GCFLAG_NURSERY_MOVED, which may
-             only come from my thread's nursery; then look at the
-             moved-out object instead */
+          /* ... unless it is a GCFLAG_STOLEN object */
           abort();//XXX
-          if (R->h_tid & GCFLAG_NURSERY_MOVED)
+          if (R->h_tid & GCFLAG_STOLEN)
             {
               assert(is_young(R));
               assert(!is_young((gcptr)v));
@@ -572,6 +577,7 @@ static void AcquireLocks(struct tx_descriptor *d)
       gcptr R = item->addr;
       revision_t v;
     retry:
+      assert(R->h_tid & GCFLAG_OLD);
       v = ACCESS_ONCE(R->h_revision);
       if (!(v & 1))            // "is a pointer", i.e.
         {                      //   "has a more recent revision"
@@ -642,6 +648,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       assert(!(L->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
       assert(!(L->h_tid & GCFLAG_PREBUILT_ORIGINAL));
       assert(!(L->h_tid & GCFLAG_NURSERY_MOVED));
+      assert(!(L->h_tid & GCFLAG_STOLEN));
       assert(L->h_revision != localrev);   /* modified by AcquireLocks() */
 
 #ifdef DUMP_EXTRA
@@ -673,6 +680,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       assert(!(R->h_tid & GCFLAG_PRIVATE_COPY));
       assert(R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
       assert(!(R->h_tid & GCFLAG_NURSERY_MOVED));
+      assert(!(R->h_tid & GCFLAG_STOLEN));
       assert(!is_young(R));
       assert(R->h_revision != localrev);
 
@@ -757,6 +765,7 @@ void CommitTransaction(void)
 
   UpdateChainHeads(d, cur_time, localrev);
 
+  stmgc_committed_transaction(d);
   d->num_commits++;
   d->active = 0;
   stm_stop_sharedlock();

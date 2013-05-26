@@ -63,6 +63,8 @@ static enum protection_class_t dclassify(gcptr obj)
         assert((obj->h_tid & GCFLAG_OLD) == 0);
     else
         assert((obj->h_tid & GCFLAG_OLD) == GCFLAG_OLD);
+    if (e != K_PROTECTED)
+        assert(!(obj->h_tid & GCFLAG_STOLEN));
     return e;
 
  not_found:
@@ -169,6 +171,14 @@ gcptr stmgc_duplicate(gcptr globalobj, revision_t extra_word)
     return localobj;
 }
 
+static revision_t fetch_extra_word(gcptr L)
+{
+    size_t size = stmcb_size(L);
+    revision_t extra_word = *(revision_t *)(((char*)L) + size);
+    assert(extra_word & 1);   /* "is not a pointer", should be a rev number */
+    return extra_word;
+}
+
 void stmgc_start_transaction(struct tx_descriptor *d)
 {
     assert(!gcptrlist_size(&d->protected_with_private_copy));
@@ -179,6 +189,7 @@ void stmgc_start_transaction(struct tx_descriptor *d)
 }
 
 static void fix_new_public_to_protected_references(struct tx_descriptor *d);
+static void normalize_stolen_objects(struct tx_descriptor *d);
 
 void stmgc_stop_transaction(struct tx_descriptor *d)
 {
@@ -189,11 +200,17 @@ void stmgc_stop_transaction(struct tx_descriptor *d)
         fix_new_public_to_protected_references(d);
 
     spinlock_acquire(d->collection_lock);
+    d->collection_lock = 'C';   /* Committing */
+
     if (gcptrlist_size(&d->stolen_objects) > 0)
-        abort();  //XXX XXX also is it fine if stolen_objects grows just after
-    spinlock_release(d->collection_lock);
+        normalize_stolen_objects(d);
 
     fprintf(stderr, "stop transaction\n");
+}
+
+void stmgc_committed_transaction(struct tx_descriptor *d)
+{
+    spinlock_release(d->collection_lock);
 }
 
 void stmgc_abort_transaction(struct tx_descriptor *d)
@@ -209,20 +226,22 @@ void stmgc_abort_transaction(struct tx_descriptor *d)
        other thread is busy stealing (which includes reading the extra
        word immediately after private objects).
     */
-    spinlock_acquire(d->collection_lock);
+    if (d->collection_lock != 'C')
+        spinlock_acquire(d->collection_lock);
 
     for (i = 0; i < size; i++) {
         gcptr R = items[i];
         assert(dclassify(R) == K_PROTECTED);
         assert(!(R->h_revision & 1));    /* "is a pointer" */
         gcptr L = (gcptr)R->h_revision;
+
+        if (R->h_tid & GCFLAG_STOLEN) {    /* ignore stolen objects */
+            assert(dclassify(L) == K_PUBLIC);
+            continue;
+        }
         assert(dclassify(L) == K_PRIVATE);
 
-        size_t size = stmcb_size(R);
-        revision_t extra_word = *(revision_t *)(((char*)L) + size);
-
-        assert(extra_word & 1);
-        R->h_revision = extra_word;
+        R->h_revision = fetch_extra_word(L);
         abort();//XXX
     }
     gcptrlist_clear(&d->protected_with_private_copy);
@@ -251,8 +270,7 @@ static void recdump1(char *msg, gcptr obj)
 #  define recdump1(msg, obj)  /* removed */
 #endif
 
-static inline gcptr create_old_object_copy(struct tx_descriptor *d, gcptr obj
-                                           _REASON(char *reason))
+static inline gcptr create_old_object_copy(gcptr obj  _REASON(char *reason))
 {
     assert(!(obj->h_tid & GCFLAG_NURSERY_MOVED));
     assert(!(obj->h_tid & GCFLAG_VISITED));
@@ -335,7 +353,7 @@ static void visit_if_young(gcptr *root  _REASON(char *reason))
             }
         }
         /* case C */
-        fresh_old_copy = create_old_object_copy(d, obj  _REASON("visit"));
+        fresh_old_copy = create_old_object_copy(obj  _REASON("visit"));
         obj->h_tid |= GCFLAG_NURSERY_MOVED;
         obj->h_revision = (revision_t)fresh_old_copy;
 
@@ -410,14 +428,15 @@ static void mark_protected_with_private_copy(struct tx_descriptor *d)
         assert(dclassify(R) == K_PROTECTED);
         assert(!(R->h_revision & 1));    /* "is a pointer" */
         gcptr L = (gcptr)R->h_revision;
+
+        if (R->h_tid & GCFLAG_STOLEN) {    /* ignore stolen objects */
+            assert(dclassify(L) == K_PUBLIC);
+            continue;
+        }
         assert(dclassify(L) == K_PRIVATE);
 
         /* we first detach the link, restoring the original R->h_revision */
-        size_t size = stmcb_size(R);
-        revision_t extra_word = *(revision_t *)(((char*)L) + size);
-
-        assert(extra_word & 1);
-        R->h_revision = extra_word;
+        R->h_revision = fetch_extra_word(L);
 
         /* then we turn the protected object in a public one */
         R = young_object_becomes_old(d, R
@@ -601,7 +620,7 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
         else {
             /* second case */
             abort();//XXX
-            /* ... check
+            /* ABRT_COLLECT_MINOR ... check
                for stolen object */
         }
     }
@@ -685,6 +704,9 @@ static void minor_collect(struct tx_descriptor *d)
 
     /* acquire the "collection lock" first */
     setup_minor_collect(d);
+
+    if (gcptrlist_size(&d->stolen_objects) > 0)
+        normalize_stolen_objects(d);
 
     mark_protected_with_private_copy(d);
 
@@ -775,9 +797,10 @@ void stmgc_write_barrier(gcptr obj)
     gcptrlist_insert(&d->private_old_pointing_to_young, obj);
 }
 
-int stmgc_nursery_hiding(struct tx_descriptor *d, int hide)
+int stmgc_nursery_hiding(int hide)
 {
 #ifdef _GC_DEBUG
+    struct tx_descriptor *d = thread_descriptor;
     if (hide) {
         stm_dbgmem_not_used(d->nursery, GC_NURSERY, 1);
     }
@@ -808,101 +831,165 @@ int stmgc_nursery_hiding(struct tx_descriptor *d, int hide)
 
 /************************************************************/
 
-static gcptr extract_from_foreign_nursery(struct tx_descriptor *source_d,
-                                          gcptr L)
+static gcptr extract_from_foreign_nursery(gcptr R)
 {
-    /* "Stealing": this function follows a chain of protected objects
-       in the foreign nursery of the thread 'source_d'.  It copies the
-       last one outside the nursery, and return it. */
-    gcptr L2, N;
+    /* "Stealing": this function follows a chain of protected objects in
+       the foreign nursery of the thread temporarily in
+       'thread_descriptor'.  It copies the last one outside the nursery,
+       and return it. */
+    gcptr R2, N;
     revision_t source_local_rev, v;
 
-    source_local_rev = ACCESS_ONCE(*source_d->local_revision_ref);
-    v = ACCESS_ONCE(L->h_revision);
+    source_local_rev = stm_local_revision;
+    v = ACCESS_ONCE(R->h_revision);
 
-    /* check that L is a protected object */
-    assert(!(L->h_tid & GCFLAG_OLD));
+    /* check that R is a protected object */
+    assert(!(R->h_tid & GCFLAG_OLD));
     assert(v != source_local_rev);
 
     /* walk to the head of the chain in the foreign nursery
      */
     while (!(v & 1)) {     /* "is a pointer" */
-        L2 = (gcptr)v;
-        v = ACCESS_ONCE(L2->h_revision);
+        R2 = (gcptr)v;
+        v = ACCESS_ONCE(R2->h_revision);
         if (v == source_local_rev) {
-            /* L->h_revision is a pointer, but the target is a private
-               object.  We ignore private objects, so we stay at L; but
-               have to fetch L's real revision off-line from the extra
-               word that follows L2 */
-            size_t size = stmcb_size(L2);
-            v = *(revision_t *)(((char*)L2) + size);
-            assert(v & 1);   /* "is not a pointer" */
+            /* R->h_revision is a pointer, but the target is a private
+               object.  We ignore private objects, so we stay at R; but
+               have to fetch R's real revision off-line from the extra
+               word that follows R2 */
+            v = fetch_extra_word(R2);
             break;
         }
-        else if (L2->h_tid & GCFLAG_OLD) {
+        else if (R2->h_tid & GCFLAG_OLD) {
             /* we find a public object again: easy case, just return it */
-            return L2;
+            return R2;
         }
         else {
             /* the chain continues with another protected object, go on */
-            L = L2;
+            R = R2;
         }
     }
 
-    /* L is now the protected object to move outside, with revision v. */
-    N = create_old_object_copy(source_d, L  _REASON("stolen copy"));
+    /* R is now the protected object to move outside, with revision v. */
+    N = create_old_object_copy(R  _REASON("stolen copy"));
     N->h_revision = v;
-    gcptrlist_insert2(&source_d->stolen_objects, L, N);
+    gcptrlist_insert2(&thread_descriptor->stolen_objects, R, N);
 
-    smp_wmb();
+    /* there might be references in N going to protected objects.  We
+       must fix them with stubs. */
+    stmcb_trace(N, &create_yo_stubs);
 
     return N;
 }
 
-void stmgc_public_to_foreign_protected(gcptr R)
+void stmgc_public_to_foreign_protected(gcptr P)
 {
-    /* R is a public object, which contains in h_revision a pointer to a
+    /* P is a public object, which contains in h_revision a pointer to a
        protected object --- but it is protectd by another thread,
        i.e. it likely lives in a foreign nursery.  We have to copy the
        object out ourselves.  This is necessary: we can't simply wait
        for the other thread to do a minor collection, because it might
        be blocked in a system call or whatever. */
     struct tx_descriptor *my_d = thread_descriptor;
+    revision_t my_local_rev = stm_local_revision;
 
     /* repeat the checks in the caller, to avoid passing more than one
        argument here */
-    revision_t v = ACCESS_ONCE(R->h_revision);
+    revision_t v = ACCESS_ONCE(P->h_revision);
     assert(!(v & 1));    /* "is a pointer" */
     if (!(v & 2))
         return;   /* changed already, retry */
 
-    gcptr L = (gcptr)(v & ~2);
+    gcptr R = (gcptr)(v & ~2);
 
     /* We need to look up which thread it belongs to and lock this
        thread's minor collection lock.  This also prevents several
        threads from getting on each other's toes trying to extract
        objects from the same nursery */
-    struct tx_descriptor *source_d = stm_find_thread_containing_pointer(L);
+    struct tx_descriptor *source_d = stm_find_thread_containing_pointer(R);
     assert(source_d != my_d);
 
     spinlock_acquire(source_d->collection_lock);
 
-    /* now that we have the lock, check again that R->h_revision was not
+    /* now that we have the lock, check again that P->h_revision was not
        modified in the meantime.  If it did change, we do nothing and will
        retry.
     */
-    if (R->h_revision == v) {
+    if (P->h_revision == v) {
+        /* temporarily take the identity of source_d */
+        thread_descriptor = source_d;
+        stm_local_revision = *source_d->local_revision_ref;
+
         /* debugging support: "activate" the foreign nursery */
         int was_active = stm_dbgmem_is_active(source_d->nursery, 0);
-        if (!was_active) assert(stmgc_nursery_hiding(source_d, 0));
+        if (!was_active) assert(stmgc_nursery_hiding(0));
 
-        gcptr N = extract_from_foreign_nursery(source_d, L);
-        ACCESS_ONCE(R->h_revision) = (revision_t)N;
+        /* copy the protected source object */
+        gcptr N = extract_from_foreign_nursery(R);
+
+        /* make sure the copy N is visible to other threads before we
+           change P->h_revision */
+        smp_wmb();
+
+        /* do the change to P->h_revision */
+        ACCESS_ONCE(P->h_revision) = (revision_t)N;
         fprintf(stderr, "STEALING: %p->h_revision changed from %p to %p\n",
-                R, L, N);
+                P, R, N);
 
         /* debugging support: "deactivate" the foreign nursery again */
-        if (!was_active) assert(stmgc_nursery_hiding(source_d, 1));
+        if (!was_active) assert(stmgc_nursery_hiding(1));
+
+        /* restore my own identity */
+        stm_local_revision = my_local_rev;
+        thread_descriptor = my_d;
     }
     spinlock_release(source_d->collection_lock);
+}
+
+static void normalize_stolen_objects(struct tx_descriptor *d)
+{
+    /* d->stolen_objects lists pairs (R, N) with R being a protected
+       object, and N a public object at the _same_ revision (and with
+       identical content).  The protected object R can have a private
+       copy, but it cannot have another already-committed 'h_revision'.
+    */
+    long i, size = d->stolen_objects.size;
+    gcptr *items = d->stolen_objects.items;
+
+    for (i = 0; i < size; i += 2) {
+        gcptr R = items[i];
+        gcptr N = items[i + 1];
+
+        assert(dclassify(R) == K_PROTECTED);
+        assert(dclassify(N) == K_PUBLIC);
+
+        revision_t v = R->h_revision;
+        R->h_tid |= GCFLAG_STOLEN;
+        R->h_revision = (revision_t)N;
+
+        if (!(v & 1)) {   /* "is a pointer" */
+            gcptr L = (gcptr)v;
+            assert(dclassify(L) == K_PRIVATE);
+
+            /* R has got a private copy L.  This means that R is listed
+               in protected_with_private_copy.  Where?  We don't know.
+               The other places that scan protected_with_private_copy
+               must carefully ignore GCFLAG_STOLEN entries. */
+
+            /* we re-insert L as a private copy of the public object N */
+            N->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
+            g2l_insert(&d->public_to_private, N, L);
+            gcptrlist_insert(&d->public_to_young, N);
+        }
+    }
+    gcptrlist_clear(&d->stolen_objects);
+    abort();//XXX
+}
+
+void stmgc_normalize_stolen_objects(void)
+{
+    struct tx_descriptor *d = thread_descriptor;
+    spinlock_acquire(d->collection_lock);
+    normalize_stolen_objects(d);
+    spinlock_release(d->collection_lock);
 }

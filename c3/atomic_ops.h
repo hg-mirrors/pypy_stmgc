@@ -115,7 +115,7 @@ static inline void spinloop(void)
     } while (1)
 
 #define spinlock_release(lock)                                  \
-    do { smp_wmb(); assert((lock) == 1); (lock) = 0; } while (0)
+    do { smp_wmb(); assert((lock) != 0); (lock) = 0; } while (0)
 
 
 #endif  /* _SRCSTM_ATOMIC_OPS_ */

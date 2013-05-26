@@ -557,9 +557,9 @@ void force_minor_collections(void)
              */
             thread_descriptor = d;
             stm_local_revision = *d->local_revision_ref;
-            assert(stmgc_nursery_hiding(d, 0));
+            assert(stmgc_nursery_hiding(0));
             stmgc_minor_collect_no_abort();
-            assert(stmgc_nursery_hiding(d, 1));
+            assert(stmgc_nursery_hiding(1));
         }
     }
     thread_descriptor = saved;

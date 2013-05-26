@@ -35,6 +35,7 @@ enum protection_class_t { K_PRIVATE, K_PROTECTED, K_PUBLIC,
 gcptr stmgc_duplicate(gcptr, revision_t);
 void stmgc_start_transaction(struct tx_descriptor *);
 void stmgc_stop_transaction(struct tx_descriptor *);
+void stmgc_committed_transaction(struct tx_descriptor *);
 void stmgc_abort_transaction(struct tx_descriptor *);
 void stmgc_init_tls(void);
 void stmgc_done_tls(void);
@@ -45,7 +46,8 @@ void stmgc_write_barrier(gcptr);
 enum protection_class_t stmgc_classify(gcptr);
 int stmgc_is_young_in(struct tx_descriptor *, gcptr);
 void stmgc_public_to_foreign_protected(gcptr);
-int stmgc_nursery_hiding(struct tx_descriptor *, int);
+int stmgc_nursery_hiding(int);
+void stmgc_normalize_stolen_objects(void);
 
 #ifdef _GC_DEBUG
 int is_young(gcptr);
