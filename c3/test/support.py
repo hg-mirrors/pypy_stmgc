@@ -96,6 +96,7 @@ ffi.cdef('''
     #define GCFLAG_WRITE_BARRIER     ...
     #define GCFLAG_NURSERY_MOVED     ...
     #define GCFLAG_OLD               ...
+    #define GCFLAG_STUB              ...
     #define ABRT_MANUAL              ...
     typedef struct { ...; } page_header_t;
 ''')
@@ -450,6 +451,12 @@ def major_collect():
 
 def minor_collect():
     lib.stmgc_minor_collect()
+
+STUB_TID = GCFLAG_STUB | GCFLAG_OLD | 0   # no user tid
+
+def is_stub(p):
+    assert lib.stm_dbgmem_is_active(p, 1) != 0
+    return p.h_tid == STUB_TID
 
 def check_not_free(p):
     assert lib.stm_dbgmem_is_active(p, 1) == 1

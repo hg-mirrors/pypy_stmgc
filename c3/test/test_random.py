@@ -78,7 +78,7 @@ class RandomSingleThreadTester(object):
 
     def check(self, p):
         assert isinstance(p, Pair)
-        if p != emptypair:
+        if p != emptypair and not is_stub(p.ptr):
             self.check_not_free(p.ptr)
             pid = lib.rawgetptr(p.ptr, 2)
             assert pid == p.obj.identity
@@ -387,7 +387,7 @@ class RandomSingleThreadTester(object):
             if k1 == 82 and self.interruptible_transaction:
                 self.dump('~~~~~~~~~~~~~~~~~~~~ ABORT ~~~~~~~~~~~~~~~~~~~~')
                 self.expected_abort(manual=True)
-                lib.stm_abort_and_retry()
+                abort_and_retry()
         elif k == 12:   # only do an stm_read_barrier
             p = self.read_barrier(p)
         self.dump('-')
