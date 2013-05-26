@@ -179,8 +179,10 @@ static revision_t fetch_extra_word(gcptr L)
 
 void stmgc_start_transaction(struct tx_descriptor *d)
 {
-    assert(!d->collection_lock);  /* with no protected objects so far, no
-                                     other thread can be stealing */
+    /* with no protected objects so far, no other thread can be stealing;
+       but we can't simply assert that d->collection_lock == 0, because
+       we might still view it as non-zero for a short time. */
+    assert(d->collection_lock != 'M' && d->collection_lock != 'C');
     assert(!gcptrlist_size(&d->protected_with_private_copy));
     assert(!g2l_any_entry(&d->public_to_private));
     assert(!gcptrlist_size(&d->private_old_pointing_to_young));
@@ -202,8 +204,7 @@ void stmgc_stop_transaction(struct tx_descriptor *d)
     if (gcptrlist_size(&d->private_old_pointing_to_young) > 0)
         fix_new_public_to_protected_references(d);
 
-    spinlock_acquire(d->collection_lock);
-    d->collection_lock = 'C';   /* Committing */
+    spinlock_acquire(d->collection_lock, 'C');  /* committing */
 
     if (gcptrlist_size(&d->stolen_objects) > 0)
         normalize_stolen_objects(d);
@@ -226,8 +227,10 @@ void stmgc_abort_transaction(struct tx_descriptor *d)
        other thread is busy stealing (which includes reading the extra
        word immediately after private objects).
     */
-    if (d->collection_lock != 'C')
-        spinlock_acquire(d->collection_lock);
+    assert(d->collection_lock != 'M');  /* don't abort when minor-collecting */
+    assert(d->collection_lock != 'N');  /* don't abort when normalizing */
+    if (d->collection_lock != 'C')      /* don't double-acquire the lock */
+        spinlock_acquire(d->collection_lock, 'C');
 
     /* cancel the change to the h_revision done in LocalizeProtected() */
     long i, size = d->protected_with_private_copy.size;
@@ -248,7 +251,8 @@ void stmgc_abort_transaction(struct tx_descriptor *d)
         R->h_revision = fetch_extra_word(L);
     }
     gcptrlist_clear(&d->protected_with_private_copy);
-    spinlock_release(d->collection_lock);
+
+    spinlock_release(d->collection_lock);   /* release the lock */
 
     g2l_clear(&d->public_to_private);
     gcptrlist_clear(&d->private_old_pointing_to_young);
@@ -637,7 +641,7 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
 
 static void setup_minor_collect(struct tx_descriptor *d)
 {
-    spinlock_acquire(d->collection_lock);
+    spinlock_acquire(d->collection_lock, 'M');  /* minor-collecting */
     assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
 }
 
@@ -880,6 +884,7 @@ static gcptr extract_from_foreign_nursery(struct tx_descriptor *source_d,
                have to fetch R's real revision off-line from the extra
                word that follows R2 */
             v = fetch_extra_word(R2);
+            assert(v != source_local_rev);
             break;
         }
         else if (R2->h_tid & GCFLAG_OLD) {
@@ -912,7 +917,6 @@ void stmgc_public_to_foreign_protected(gcptr P)
        object out ourselves.  This is necessary: we can't simply wait
        for the other thread to do a minor collection, because it might
        be blocked in a system call or whatever. */
-    struct tx_descriptor *my_d = thread_descriptor;
 
     /* repeat the checks in the caller, to avoid passing more than one
        argument here */
@@ -928,9 +932,9 @@ void stmgc_public_to_foreign_protected(gcptr P)
        threads from getting on each other's toes trying to extract
        objects from the same nursery */
     struct tx_descriptor *source_d = stm_find_thread_containing_pointer(R);
-    assert(source_d != my_d);
+    assert(source_d != thread_descriptor);
 
-    spinlock_acquire(source_d->collection_lock);
+    spinlock_acquire(source_d->collection_lock, 'S');  /* stealing */
 
     /* now that we have the lock, check again that P->h_revision was not
        modified in the meantime.  If it did change, we do nothing and will
@@ -1010,7 +1014,7 @@ static void normalize_stolen_objects(struct tx_descriptor *d)
 void stmgc_normalize_stolen_objects(void)
 {
     struct tx_descriptor *d = thread_descriptor;
-    spinlock_acquire(d->collection_lock);
+    spinlock_acquire(d->collection_lock, 'N');  /* normalizing */
     normalize_stolen_objects(d);
     spinlock_release(d->collection_lock);
 }

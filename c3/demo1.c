@@ -11,7 +11,7 @@
 
 
 #define UPPER_BOUND 2500
-#define NUMTHREADS  1       /* XXX temporary! should be 4 */
+#define NUMTHREADS  2
 
 
 #define GCTID_STRUCT_NODE     123

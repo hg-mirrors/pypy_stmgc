@@ -617,6 +617,7 @@ static void CancelLocks(struct tx_descriptor *d)
       revision_t v = L->h_revision;
       if (v == stm_local_revision)
         break;    /* done */
+      L->h_revision = stm_local_revision;
 
       gcptr R = item->addr;
 #ifdef DUMP_EXTRA

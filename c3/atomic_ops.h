@@ -109,8 +109,8 @@ static inline void spinloop(void)
 }
 
 
-#define spinlock_acquire(lock)                                  \
-    do { if (bool_cas(&(lock), 0, 1)) break;                    \
+#define spinlock_acquire(lock, targetvalue)                     \
+    do { if (bool_cas(&(lock), 0, (targetvalue))) break;        \
          do { spinloop(); } while (ACCESS_ONCE(lock));          \
     } while (1)
 
