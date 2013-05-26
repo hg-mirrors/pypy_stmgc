@@ -179,6 +179,8 @@ static revision_t fetch_extra_word(gcptr L)
 
 void stmgc_start_transaction(struct tx_descriptor *d)
 {
+    assert(!d->collection_lock);  /* with no protected objects so far, no
+                                     other thread can be stealing */
     assert(!gcptrlist_size(&d->protected_with_private_copy));
     assert(!g2l_any_entry(&d->public_to_private));
     assert(!gcptrlist_size(&d->private_old_pointing_to_young));
@@ -457,6 +459,7 @@ static void mark_protected_with_private_copy(struct tx_descriptor *d)
 
         /* then we record the dependency in the dictionary
            'public_to_private' */
+        assert(L->h_revision == stm_local_revision);
         g2l_insert(&d->public_to_private, R, L);
         /*mark*/
     }
@@ -657,11 +660,7 @@ static void teardown_minor_collect(struct tx_descriptor *d)
 static void create_yo_stubs(gcptr *pobj)
 {
     gcptr obj = *pobj;
-    if (obj == NULL)
-        return;
-
-    struct tx_descriptor *d = thread_descriptor;
-    if (!stmgc_is_young_in(d, obj))
+    if (obj == NULL || (obj->h_tid & GCFLAG_OLD) != 0)
         return;
 
     /* xxx try to avoid duplicate stubs for the same object */
@@ -800,10 +799,9 @@ void stmgc_write_barrier(gcptr obj)
     gcptrlist_insert(&d->private_old_pointing_to_young, obj);
 }
 
-int stmgc_nursery_hiding(int hide)
+int stmgc_nursery_hiding(struct tx_descriptor *d, int hide)
 {
 #ifdef _GC_DEBUG
-    struct tx_descriptor *d = thread_descriptor;
     wlog_t *item;
     revision_t count;
 
@@ -855,16 +853,16 @@ int stmgc_nursery_hiding(int hide)
 
 /************************************************************/
 
-static gcptr extract_from_foreign_nursery(gcptr R)
+static gcptr extract_from_foreign_nursery(struct tx_descriptor *source_d,
+                                          gcptr R)
 {
     /* "Stealing": this function follows a chain of protected objects in
-       the foreign nursery of the thread temporarily in
-       'thread_descriptor'.  It copies the last one outside the nursery,
-       and return it. */
+       the foreign nursery of the thread 'source_d'.  It copies the last
+       one outside the nursery, and return it. */
     gcptr R2, N;
     revision_t source_local_rev, v;
 
-    source_local_rev = stm_local_revision;
+    source_local_rev = *source_d->local_revision_ref;
     v = ACCESS_ONCE(R->h_revision);
 
     /* check that R is a protected object */
@@ -895,9 +893,9 @@ static gcptr extract_from_foreign_nursery(gcptr R)
     }
 
     /* R is now the protected object to move outside, with revision v. */
-    N = create_old_object_copy(R  _REASON("stolen copy"));
+    N = create_old_object_copy(R  _REASON("**stolen copy"));
     N->h_revision = v;
-    gcptrlist_insert2(&thread_descriptor->stolen_objects, R, N);
+    gcptrlist_insert2(&source_d->stolen_objects, R, N);
 
     /* there might be references in N going to protected objects.  We
        must fix them with stubs. */
@@ -915,7 +913,6 @@ void stmgc_public_to_foreign_protected(gcptr P)
        for the other thread to do a minor collection, because it might
        be blocked in a system call or whatever. */
     struct tx_descriptor *my_d = thread_descriptor;
-    revision_t my_local_rev = stm_local_revision;
 
     /* repeat the checks in the caller, to avoid passing more than one
        argument here */
@@ -940,33 +937,30 @@ void stmgc_public_to_foreign_protected(gcptr P)
        retry.
     */
     if (P->h_revision == v) {
-        /* temporarily take the identity of source_d */
-        thread_descriptor = source_d;
-        stm_local_revision = *source_d->local_revision_ref;
-
+        /* careful here: all 'thread_descriptor' accesses will continue
+           to get the current thread (needed e.g. for stmgcpage_malloc())
+           which is different from 'source_d', the source thread out of
+           which we are stealing. */
         fprintf(stderr, "STEALING: %p->h_revision points to %p\n", P, R);
 
         /* debugging support: "activate" the foreign nursery */
-        assert(stmgc_nursery_hiding(0));
+        assert(stmgc_nursery_hiding(source_d, 0));
 
         /* copy the protected source object */
-        gcptr N = extract_from_foreign_nursery(R);
+        gcptr N = extract_from_foreign_nursery(source_d, R);
 
         /* make sure the copy N is visible to other threads before we
            change P->h_revision */
         smp_wmb();
 
         /* do the change to P->h_revision */
+        assert(bool_cas(&P->h_revision, ((revision_t)R) | 2, (revision_t)N));
         ACCESS_ONCE(P->h_revision) = (revision_t)N;
         fprintf(stderr, "STEALING: %p->h_revision changed from %p to %p\n",
                 P, R, N);
 
         /* debugging support: "deactivate" the foreign nursery again */
-        assert(stmgc_nursery_hiding(1));
-
-        /* restore my own identity */
-        stm_local_revision = my_local_rev;
-        thread_descriptor = my_d;
+        assert(stmgc_nursery_hiding(source_d, 1));
     }
     spinlock_release(source_d->collection_lock);
 }
@@ -980,6 +974,7 @@ static void normalize_stolen_objects(struct tx_descriptor *d)
     */
     long i, size = d->stolen_objects.size;
     gcptr *items = d->stolen_objects.items;
+    assert(d == thread_descriptor);
 
     for (i = 0; i < size; i += 2) {
         gcptr R = items[i];
@@ -1003,6 +998,7 @@ static void normalize_stolen_objects(struct tx_descriptor *d)
 
             /* we re-insert L as a private copy of the public object N */
             N->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
+            assert(L->h_revision == stm_local_revision);
             g2l_insert(&d->public_to_private, N, L);
             gcptrlist_insert(&d->public_to_young, N);
         }

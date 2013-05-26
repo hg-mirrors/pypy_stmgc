@@ -272,9 +272,13 @@ def test_access_foreign_nursery_with_private_copy_1():
         def cb(c):
             assert c == 0
             p4 = lib.stm_write_barrier(p1)
+            assert lib.in_nursery(p4)
+            assert p4 != p1 and p4 != pg
             assert lib.rawgetlong(p4, 0) == 9387987
+            print "changing p4=%r to contain -6666" % (p4,)
             lib.rawsetlong(p4, 0, -6666)
             r.wait_while_in_parallel()
+            assert seen == ["ok"]
         perform_transaction(cb)
     def f2(r):
         def cb(c):
@@ -284,6 +288,7 @@ def test_access_foreign_nursery_with_private_copy_1():
             assert not lib.in_nursery(p2)
             assert lib.rawgetlong(p2, 0) == 9387987
         perform_transaction(cb)
+        seen.append("ok")
         r.leave_in_parallel()
     run_parallel(f1, f2)
     assert lib.getlong(pg, 0) == -6666

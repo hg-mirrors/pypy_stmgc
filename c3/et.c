@@ -301,6 +301,7 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 
  not_found:;
   gcptr L = stmgc_duplicate(R, 0);
+  assert(L->h_revision == stm_local_revision);
   g2l_insert(&d->public_to_private, R, L);
   gcptrlist_insert(&d->public_to_young, R);
   AddInReadSet(d, R);
@@ -746,11 +747,9 @@ void CommitTransaction(void)
   gcptrlist_clear(&d->list_of_read_objects);
 
   fprintf(stderr, "\n"
-          "***************************************************************\n"
-          "***************************************************************\n"
-          "*************************************   %ld\n"
-          "***************************************************************\n"
-          "***************************************************************\n",
+          "*************************************\n"
+          "**************************************  committed %ld\n"
+          "*************************************\n",
           (long)cur_time);
 
   revision_t localrev = stm_local_revision;
