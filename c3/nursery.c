@@ -186,6 +186,9 @@ void stmgc_start_transaction(struct tx_descriptor *d)
     assert(!gcptrlist_size(&d->private_old_pointing_to_young));
     d->num_read_objects_known_old = 0;
     d->num_public_to_protected = gcptrlist_size(&d->public_to_young);
+
+    if (gcptrlist_size(&d->stolen_objects) > 0)
+        stmgc_normalize_stolen_objects();
 }
 
 static void fix_new_public_to_protected_references(struct tx_descriptor *d);

@@ -620,7 +620,6 @@ static void CancelLocks(struct tx_descriptor *d)
       gcptr R = item->addr;
 #ifdef DUMP_EXTRA
       fprintf(stderr, "%p->h_revision = %p (CancelLocks)\n", R, (gcptr)v);
-      abort();//XXX
 #endif
       ACCESS_ONCE(R->h_revision) = v;
 
