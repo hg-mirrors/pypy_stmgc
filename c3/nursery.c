@@ -815,7 +815,7 @@ int stmgc_nursery_hiding(struct tx_descriptor *d, int hide)
     while (1) {
         count = ACCESS_ONCE(d->debug_nursery_access);
         if (count == (revision_t)-1) {
-            spinloop();
+            smp_spinloop();
             continue;
         }
         if (bool_cas(&d->debug_nursery_access, count, (revision_t)-1))

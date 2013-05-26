@@ -404,7 +404,7 @@ void SpinLoop(int num)
   assert(d->active >= 1);
   assert(num < SPINLOOP_REASONS);
   d->num_spinloops[num]++;
-  spinloop();
+  smp_spinloop();
 }
 
 #if 0

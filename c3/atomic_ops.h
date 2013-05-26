@@ -13,16 +13,12 @@
 #define UNLIKELY(test)  __builtin_expect(test, 0)
 
 
-/* "compiler fence" for preventing reordering of loads/stores to
-   non-volatiles.  Should not be used any more. */
-#define CFENCE          asm volatile ("":::"memory")
-
 #if defined(__amd64__) || defined(__i386__)
-#  define smp_wmb()       CFENCE
-#  define smp_spinloop()  asm volatile ("pause")
+#  define smp_wmb()       asm volatile ("":::"memory")
+#  define smp_spinloop()  asm volatile ("pause":::"memory")
 #elif defined(__powerpc__)
 #  define smp_wmb()       asm volatile ("lwsync":::"memory")
-#  define smp_spinloop()  /* fill me? */
+#  define smp_spinloop()  asm volatile ("":::"memory")   /* fill me? */
 #else
 #  error "Define smp_wmb() for your architecture"
 #endif
@@ -100,18 +96,9 @@ fetch_and_add(revision_t *ptr, revision_t value)
 #endif
 
 
-static inline void spinloop(void)
-{
-  smp_spinloop();
-  /* use "memory" here to make sure that gcc will reload the
-     relevant data from memory after the spinloop */
-  CFENCE;
-}
-
-
 #define spinlock_acquire(lock, targetvalue)                     \
     do { if (bool_cas(&(lock), 0, (targetvalue))) break;        \
-         do { spinloop(); } while (ACCESS_ONCE(lock));          \
+         do { smp_spinloop(); } while (ACCESS_ONCE(lock));      \
     } while (1)
 
 #define spinlock_release(lock)                                  \
