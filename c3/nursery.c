@@ -627,8 +627,8 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
             /* first case: untrack it.  Note that this case can occur
                without aborting the transaction.  See gcpage's
                cleanup_for_thread() for an explanation how. */
-            abort();//XXX
             items[i] = items[--d->list_of_read_objects.size];
+            /*mark*/
         }
         else {
             /* second case */

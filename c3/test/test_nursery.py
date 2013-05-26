@@ -370,3 +370,17 @@ def test_stubs_are_public_to_young_steal():
         # don't read getptr(p2, 0) here, so that it remains as a stub
         r.set(3)
     run_parallel(f1, f2)
+
+def test_remove_from_list_of_read_objects():
+    p1 = nalloc(HDR)
+    #
+    lib.stm_push_root(p1)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    p1 = lib.stm_pop_root()
+    #
+    assert lib.in_nursery(p1)
+    p2 = lib.stm_read_barrier(p1)
+    assert p2 == p1
+    # but now, p1 is no longer a root
+    minor_collect()
