@@ -667,10 +667,9 @@ static void create_yo_stubs(gcptr *pobj)
 
     /* xxx try to avoid duplicate stubs for the same object */
     gcptr stub = stmgcpage_malloc(sizeof(*stub));
-    stub->h_tid = 0;   /* no flags */
+    stub->h_tid = GCFLAG_OLD | GCFLAG_STUB;    /* with type_id == 0 */
     stub->h_revision = ((revision_t)obj) | 2;
     *pobj = stub;
-    abort();//XXX
 }
 
 static void fix_new_public_to_protected_references(struct tx_descriptor *d)

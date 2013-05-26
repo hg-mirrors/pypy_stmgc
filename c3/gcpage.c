@@ -716,10 +716,16 @@ void recdump(gcptr obj)
         pobj = (gcptr *)(obj + 1);
         _recdump_first = pobj;
         memset(_recdump_isptr, 0, sizeof _recdump_isptr);
-        stmcb_trace(obj, &_recdump_visit);
 
-        n = stmcb_size(obj) - sizeof(*obj);
-        n = (n + sizeof(WORD) - 1) / sizeof(WORD);
+        if ((obj->h_tid & GCFLAG_STUB) == 0) {
+            stmcb_trace(obj, &_recdump_visit);
+
+            n = stmcb_size(obj) - sizeof(*obj);
+            n = (n + sizeof(WORD) - 1) / sizeof(WORD);
+        }
+        else {
+            n = 0;
+        }
         for (i = 0; i < n; i++) {
             fprintf(stderr, "   [%lu]\t%16lx (%ld)\n", i,
                     (unsigned long)*pobj, (long)*pobj);

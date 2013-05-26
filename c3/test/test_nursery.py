@@ -287,3 +287,26 @@ def test_access_foreign_nursery_with_private_copy_1():
         r.leave_in_parallel()
     run_parallel(f1, f2)
     assert lib.getlong(pg, 0) == -6666
+
+def test_access_foreign_nursery_use_stubs():
+    pg = palloc_refs(1)
+    def f1(r):
+        q1 = nalloc(HDR + WORD)
+        lib.setlong(q1, 0, 424242)
+        p1 = lib.stm_write_barrier(pg)
+        lib.setptr(p1, 0, q1)
+        assert lib.in_nursery(p1)
+        assert lib.in_nursery(q1)
+        r.set(2)
+        r.wait(3)
+        p3 = lib.stm_read_barrier(pg)
+        assert not lib.in_nursery(p3)
+    def f2(r):
+        r.wait(2)
+        p2 = lib.stm_read_barrier(pg)
+        assert not lib.in_nursery(p2)
+        assert p2
+        q2 = lib.getptr(p2, 0)
+        assert lib.getlong(q2, 0) == 424242
+        r.set(3)
+    run_parallel(f1, f2)
