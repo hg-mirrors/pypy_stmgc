@@ -14,7 +14,7 @@
     gcptr **shadowstack_end_ref;                        \
     gcptr *thread_local_obj_ref;                        \
                                                         \
-    revision_t collection_lock;                         \
+    revision_t collection_lock, debug_nursery_access;   \
     struct G2L young_objects_outside_nursery;           \
     struct GcPtrList old_objects_to_trace;              \
     long num_read_objects_known_old;                    \

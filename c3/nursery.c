@@ -217,10 +217,6 @@ void stmgc_committed_transaction(struct tx_descriptor *d)
 
 void stmgc_abort_transaction(struct tx_descriptor *d)
 {
-    /* cancel the change to the h_revision done in LocalizeProtected() */
-    long i, size = d->protected_with_private_copy.size;
-    gcptr *items = d->protected_with_private_copy.items;
-
     /* Note that the thrown-away private objects are kept around.  It
        may possibly be a small optimization to reuse the part of the
        nursery that contains them.  To be on the safe "future-proof"
@@ -230,6 +226,10 @@ void stmgc_abort_transaction(struct tx_descriptor *d)
     */
     if (d->collection_lock != 'C')
         spinlock_acquire(d->collection_lock);
+
+    /* cancel the change to the h_revision done in LocalizeProtected() */
+    long i, size = d->protected_with_private_copy.size;
+    gcptr *items = d->protected_with_private_copy.items;
 
     for (i = 0; i < size; i++) {
         gcptr R = items[i];
@@ -805,30 +805,51 @@ int stmgc_nursery_hiding(int hide)
 {
 #ifdef _GC_DEBUG
     struct tx_descriptor *d = thread_descriptor;
+    wlog_t *item;
+    revision_t count;
+
+    /* 'd->debug_nursery_access' works like a refcount: when it is 0,
+       no-one should be accessing young objects of 'd'.  We ensure that
+       it is the case using mprotect. */
+    while (1) {
+        count = ACCESS_ONCE(d->debug_nursery_access);
+        if (count == (revision_t)-1) {
+            spinloop();
+            continue;
+        }
+        if (bool_cas(&d->debug_nursery_access, count, (revision_t)-1))
+            break;
+    }
+
     if (hide) {
-        stm_dbgmem_not_used(d->nursery, GC_NURSERY, 1);
+        /* decrement the "refcount" */
+        assert(count > 0);
+        count--;
+        if (count == 0) {
+            stm_dbgmem_not_used(d->nursery, GC_NURSERY, 1);
+
+            G2L_LOOP_FORWARD(d->young_objects_outside_nursery, item) {
+                gcptr obj = item->addr;
+                size_t size = stmcb_size(obj);
+                stm_dbgmem_not_used(obj, size, 0);
+            } G2L_LOOP_END;
+        }
     }
     else {
-        stm_dbgmem_used_again(d->nursery,
-                              d->nursery_current - d->nursery, 1);
+        if (count == 0) {
+            stm_dbgmem_used_again(d->nursery,
+                                  d->nursery_current - d->nursery, 1);
+            G2L_LOOP_FORWARD(d->young_objects_outside_nursery, item) {
+                gcptr obj = item->addr;
+                stm_dbgmem_used_again(obj, sizeof(*obj), 0);
+                size_t size = stmcb_size(obj);
+                stm_dbgmem_used_again(obj, size, 0);
+            } G2L_LOOP_END;
+        }
+        count++;
     }
-
-    wlog_t *item;
-
-    G2L_LOOP_FORWARD(d->young_objects_outside_nursery, item) {
-
-        gcptr obj = item->addr;
-        if (hide) {
-            size_t size = stmcb_size(obj);
-            stm_dbgmem_not_used(obj, size, 0);
-        }
-        else {
-            stm_dbgmem_used_again(obj, sizeof(gcptr *), 0);
-            size_t size = stmcb_size(obj);
-            stm_dbgmem_used_again(obj, size, 0);
-        }
-
-    } G2L_LOOP_END;
+    smp_wmb();
+    ACCESS_ONCE(d->debug_nursery_access) = count;
 #endif
     return 1;
 }
@@ -924,9 +945,10 @@ void stmgc_public_to_foreign_protected(gcptr P)
         thread_descriptor = source_d;
         stm_local_revision = *source_d->local_revision_ref;
 
+        fprintf(stderr, "STEALING: %p->h_revision points to %p\n", P, R);
+
         /* debugging support: "activate" the foreign nursery */
-        int was_active = stm_dbgmem_is_active(source_d->nursery, 0);
-        if (!was_active) assert(stmgc_nursery_hiding(0));
+        assert(stmgc_nursery_hiding(0));
 
         /* copy the protected source object */
         gcptr N = extract_from_foreign_nursery(R);
@@ -941,7 +963,7 @@ void stmgc_public_to_foreign_protected(gcptr P)
                 P, R, N);
 
         /* debugging support: "deactivate" the foreign nursery again */
-        if (!was_active) assert(stmgc_nursery_hiding(1));
+        assert(stmgc_nursery_hiding(1));
 
         /* restore my own identity */
         stm_local_revision = my_local_rev;
