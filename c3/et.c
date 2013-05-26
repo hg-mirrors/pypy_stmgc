@@ -171,7 +171,6 @@ gcptr stm_DirectReadBarrier(gcptr G)
   return R;
 }
 
-#if 0
 static gcptr _latest_gcptr(gcptr R)
 {
   /* don't use, for tests only */
@@ -183,40 +182,46 @@ static gcptr _latest_gcptr(gcptr R)
       if (v & 2)
         {
           v &= ~2;
-          if (!is_young((gcptr)v))
-            {
-              stmgc_follow_foreign(R);
-              goto retry;
-            }
+          if (!stmgc_is_young_in(thread_descriptor, (gcptr)v))
+            return NULL;   /* can't access */
         }
       R = (gcptr)v;
       goto retry;
     }
   return R;
 }
-#endif
 
 gcptr _stm_nonrecord_barrier(gcptr obj, int *result)
 {
-  abort();//XXX
-#if 0
   /* warning, this is for tests only, and it is not thread-safe! */
-  if (obj->h_revision == stm_local_revision)
+  enum protection_class_t e = stmgc_classify(obj);
+  if (e == K_PRIVATE)
     {
-      *result = 2;   /* 'obj' a local object to start with */
+      *result = 2;   /* 'obj' a private object to start with */
       return obj;
     }
   obj = _latest_gcptr(obj);
+  if (obj == NULL)
+    {
+      assert(e == K_PUBLIC);
+      *result = 3;   /* can't check anything: we'd need foreign access */
+      return NULL;
+    }
+  if (stmgc_classify(obj) == K_PRIVATE)
+    {
+      *result = 1;
+      return obj;
+    }
 
   struct tx_descriptor *d = thread_descriptor;
   wlog_t *item;
-  G2L_LOOP_FORWARD(d->global_to_local, item)
+  G2L_LOOP_FORWARD(d->public_to_private, item)
     {
       gcptr R = item->addr;
       gcptr L = item->val;
       if (_latest_gcptr(R) == obj)
         {
-          /* 'obj' has a local version.  The way we detect this lets us
+          /* 'obj' has a private version.  The way we detect this lets us
              find it even if we already have a committed version that
              will cause conflict. */
           *result = 1;
@@ -226,17 +231,16 @@ gcptr _stm_nonrecord_barrier(gcptr obj, int *result)
 
   if (obj->h_revision > d->start_time)
     {
-      /* 'obj' has no local version, and the global version was modified */
+      /* 'obj' has no private version, and the public version was modified */
       *result = -1;
       return NULL;
     }
   else
     {
-      /* 'obj' has only an up-to-date global version */
+      /* 'obj' has only an up-to-date public version */
       *result = 0;
       return obj;
     }
-#endif
 }
 
 #if 0

@@ -99,7 +99,7 @@ class RandomSingleThreadTester(object):
             self.check(p)
             try:
                 self.current_rev.write(r.obj, index, p.obj)
-                if not self.is_local(r.ptr):
+                if not self.is_private(r.ptr):
                     self.current_rev.check_not_outdated(r.obj)
             except (model.Deleted, model.Conflict):
                 # abort! try to reproduce with C code
@@ -117,7 +117,7 @@ class RandomSingleThreadTester(object):
             return emptypair
         try:
             pobj = self.current_rev.read(r.obj, index)
-            if not self.is_local(r.ptr):
+            if not self.is_private(r.ptr):
                 self.current_rev.check_not_outdated(r.obj)
         except (model.Deleted, model.Conflict):
             # abort! try to reproduce with C code
@@ -140,7 +140,7 @@ class RandomSingleThreadTester(object):
             self.check(p)
             try:
                 self.current_rev.read_barrier(p.obj)
-                if not self.is_local(p.ptr):
+                if not self.is_private(p.ptr):
                     self.current_rev.check_not_outdated(p.obj)
             except (model.Deleted, model.Conflict):
                 # abort! try to reproduce with C code
@@ -159,7 +159,7 @@ class RandomSingleThreadTester(object):
             self.check(p)
             try:
                 self.current_rev.write_barrier(p.obj)
-                if not self.is_local(p.ptr):
+                if not self.is_private(p.ptr):
                     self.current_rev.check_not_outdated(p.obj)
             except (model.Deleted, model.Conflict):
                 # abort! try to reproduce with C code
@@ -195,7 +195,7 @@ class RandomSingleThreadTester(object):
         ptr = lib._stm_nonrecord_barrier(ptr, result)
         return ptr, result[0]
 
-    def is_local(self, ptr):
+    def is_private(self, ptr):
         return ptr.h_revision == lib.get_local_revision()
 
     def check_valid(self, lst):
@@ -208,9 +208,11 @@ class RandomSingleThreadTester(object):
             self.check(p)
 
             ptr, result = self.nonrecord_barrier(p.ptr)
-            has_local_copy = p.obj in self.current_rev.content
-            assert has_local_copy == (result >= 1)
-            if has_local_copy:
+            if ptr == ffi.NULL and result == 3:
+                continue    # can't check anything: we'd need foreign access
+            has_private_copy = p.obj in self.current_rev.content
+            assert has_private_copy == (result >= 1)
+            if has_private_copy:
                 content = self.current_rev.content[p.obj]
             else:
                 try:
