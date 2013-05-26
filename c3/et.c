@@ -360,7 +360,6 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
       if (!(v & 1))               // "is a pointer", i.e.
         {                         //   "has a more recent revision"
           /* ... unless it is a GCFLAG_STOLEN object */
-          abort();//XXX
           if (R->h_tid & GCFLAG_STOLEN)
             {
               assert(is_young(R));

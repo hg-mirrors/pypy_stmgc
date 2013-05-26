@@ -298,6 +298,8 @@ class run_parallel(object):
         self.step = 0
         self.steplocks = {0: thread.allocate_lock()}
         self.settinglock = thread.allocate_lock()
+        self.parallel_locks = (thread.allocate_lock(), thread.allocate_lock())
+        self.parallel_locks[0].acquire()
         self.resulting_exception = None
         locks = []
         for fn in fns:
@@ -367,6 +369,31 @@ class run_parallel(object):
                     value.release()
                 except thread.error:
                     pass
+
+    def wait_while_in_parallel(self):
+        # parallel_locks[0] is acquired, parallel_locks[1] is released
+        res = self.parallel_locks[1].acquire(False)
+        assert res
+        # parallel_locks[0] is acquired, parallel_locks[1] is acquired
+        print 'wait_while_in_parallel enter'
+        self.parallel_locks[0].release()
+        self.parallel_locks[1].acquire()
+        print 'wait_while_in_parallel leave'
+        # parallel_locks[0] is acquired, parallel_locks[1] is acquired
+        self.parallel_locks[1].release()
+        res = self.parallel_locks[0].acquire(False)
+        assert not res
+        # parallel_locks[0] is acquired, parallel_locks[1] is released
+
+    def enter_in_parallel(self):
+        print 'enter_in_parallel: waiting...'
+        # wait for parallel_locks[0]
+        self.parallel_locks[0].acquire()
+        print 'enter_in_parallel'
+
+    def leave_in_parallel(self):
+        print 'leave_in_parallel'
+        self.parallel_locks[1].release()
 
 # ____________________________________________________________
 

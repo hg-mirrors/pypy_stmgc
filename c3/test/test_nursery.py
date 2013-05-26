@@ -252,3 +252,31 @@ def test_access_foreign_nursery():
         assert not lib.in_nursery(p2)
         r.set(3)
     run_parallel(f1, f2)
+
+def test_access_foreign_nursery_with_private_copy_1():
+    # this version should not cause conflicts
+    pg = palloc(HDR + WORD)
+    lib.rawsetlong(pg, 0, 420063)
+    seen = []
+    def f1(r):
+        p1 = lib.stm_write_barrier(pg)
+        assert lib.in_nursery(p1)
+        lib.rawsetlong(p1, 0, 9387987)
+        def cb(c):
+            assert c == 0
+            p4 = lib.stm_write_barrier(p1)
+            assert lib.rawgetlong(p4, 0) == 9387987
+            lib.rawsetlong(p4, 0, -6666)
+            r.wait_while_in_parallel()
+        perform_transaction(cb)
+    def f2(r):
+        def cb(c):
+            assert c == 0
+            r.enter_in_parallel()
+            p2 = lib.stm_read_barrier(pg)
+            assert not lib.in_nursery(p2)
+            assert lib.rawgetlong(p2, 0) == 9387987
+        perform_transaction(cb)
+        r.leave_in_parallel()
+    run_parallel(f1, f2)
+    assert lib.getlong(pg, 0) == -6666

@@ -980,7 +980,6 @@ static void normalize_stolen_objects(struct tx_descriptor *d)
             N->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
             g2l_insert(&d->public_to_private, N, L);
             gcptrlist_insert(&d->public_to_young, N);
-            abort();//XXX
         }
         recdump1("STOLEN", R);
     }
