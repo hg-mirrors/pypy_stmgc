@@ -317,7 +317,7 @@ def test_access_foreign_nursery_use_stubs():
     run_parallel(f1, f2)
 
 def test_stubs_are_public_to_young_collect():
-    pg = palloc_refs(1)
+    pg = palloc_refs(2)
     #
     p1 = lib.stm_write_barrier(pg)
     assert lib.in_nursery(p1)
@@ -328,6 +328,7 @@ def test_stubs_are_public_to_young_collect():
     q1 = nalloc(HDR + WORD)
     lib.setlong(q1, 0, 424242)
     lib.setptr(p1, 0, q1)
+    lib.setptr(p1, 1, q1)
     assert not lib.in_nursery(p1)
     assert lib.in_nursery(q1)
     #
@@ -341,6 +342,7 @@ def test_stubs_are_public_to_young_collect():
     p1b = lib.stm_pop_root()
     assert p1b == p1
     q1b = lib.getptr(p1, 0)
+    assert q1b == lib.getptr(p1, 1)
     assert not lib.in_nursery(q1b)
     assert lib.getlong(q1b, 0) == 424242
 

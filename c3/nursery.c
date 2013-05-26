@@ -681,6 +681,7 @@ static void create_yo_stubs(gcptr *pobj)
         stub = item->val;
         assert(stub->h_revision == (((revision_t)obj) | 2));
         *pobj = stub;
+        /*mark*/
         return;
     }
 
