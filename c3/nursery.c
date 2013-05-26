@@ -625,10 +625,15 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
             /*mark*/
             continue;
         }
-        /* The listed object was not visited.  Either it's because it
-           is really unreachable (in which case it cannot possibly
-           be modified any more, and the current transaction cannot
-           abort because of it) or it's because it was already modified.
+        /* The listed object was not visited.  Three cases:
+
+           1. it is really unreachable (in which case it cannot possibly
+              be modified any more, and the current transaction cannot
+              abort because of it)
+
+           2. it is a stolen object
+
+           3. it is not visited because it has already been modified.
         */
         if (obj->h_revision & 1) {
             /* first case: untrack it.  Note that this case can occur
@@ -637,8 +642,15 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
             items[i] = items[--d->list_of_read_objects.size];
             /*mark*/
         }
+        else if (obj->h_tid & GCFLAG_STOLEN) {
+            /* second case: 'obj' was stolen.  Just replace it in the
+               list with its new copy, which should be identical
+               (and public, so no more processing it needed). */
+            assert(dclassify((gcptr)obj->h_revision) == K_PUBLIC);
+            items[i] = (gcptr)obj->h_revision;
+        }
         else {
-            /* second case */
+            /* third case */
             abort();//XXX
             /* ABRT_COLLECT_MINOR ... check
                for stolen object */

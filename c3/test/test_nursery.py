@@ -384,3 +384,22 @@ def test_remove_from_list_of_read_objects():
     assert p2 == p1
     # but now, p1 is no longer a root
     minor_collect()
+
+def test_read_from_stolen_object():
+    pg = palloc(HDR + WORD)
+    def f1(r):
+        lib.setlong(pg, 0, 519833)
+        def cb(c):
+            assert c == 0
+            p1 = lib.stm_read_barrier(pg)
+            r.wait_while_in_parallel()
+            minor_collect()
+        perform_transaction(cb)
+    def f2(r):
+        def cb(c):
+            assert c == 0
+            r.enter_in_parallel()
+            assert lib.getlong(pg, 0) == 519833    # steal object
+        perform_transaction(cb)
+        r.leave_in_parallel()
+    run_parallel(f1, f2)
