@@ -212,6 +212,13 @@ void stmgc_stop_transaction(struct tx_descriptor *d)
     fprintf(stderr, "stop transaction\n");
 }
 
+void stmgc_suspend_commit_transaction(struct tx_descriptor *d)
+{
+    /* used only when commit is suspended by another thread being
+       inevitable.  Later stmgc_stop_transaction() will be called again. */
+    spinlock_release(d->collection_lock);
+}
+
 void stmgc_committed_transaction(struct tx_descriptor *d)
 {
     spinlock_release(d->collection_lock);

@@ -730,8 +730,10 @@ void CommitTransaction(void)
           if (cur_time & 1)
             {                    // there is another inevitable transaction
               CancelLocks(d);
+              stmgc_suspend_commit_transaction(d);
               inev_mutex_acquire();   // wait until released
               inev_mutex_release();
+              stmgc_stop_transaction(d);
               AcquireLocks(d);
               continue;
             }

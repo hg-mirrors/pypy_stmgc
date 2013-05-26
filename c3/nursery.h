@@ -35,6 +35,7 @@ enum protection_class_t { K_PRIVATE, K_PROTECTED, K_PUBLIC,
 gcptr stmgc_duplicate(gcptr, revision_t);
 void stmgc_start_transaction(struct tx_descriptor *);
 void stmgc_stop_transaction(struct tx_descriptor *);
+void stmgc_suspend_commit_transaction(struct tx_descriptor *d);
 void stmgc_committed_transaction(struct tx_descriptor *);
 void stmgc_abort_transaction(struct tx_descriptor *);
 void stmgc_init_tls(void);
