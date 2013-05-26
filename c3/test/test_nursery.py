@@ -429,3 +429,22 @@ def test_read_from_modified_stolen_object():
         perform_transaction(cb)
         r.leave_in_parallel()
     run_parallel(f1, f2, max_aborts=1)
+
+def test_private_copy_and_collect():
+    p1 = nalloc(HDR + WORD)
+    lib.rawsetlong(p1, 0, 999)
+    lib.stm_push_root(p1)
+    i = 1000
+    while True:
+        lib.stm_commit_transaction()
+        lib.stm_begin_inevitable_transaction()
+        p2 = lib.stm_write_barrier(p1)
+        lib.rawsetlong(p2, 0, i)
+        if not lib.in_nursery(p2):      # at some point the nursery is full
+            break
+        p1 = p2
+        i += 1
+    minor_collect()
+    p1 = lib.stm_pop_root()
+    assert lib.rawgetlong(p1, 0) == i - 1
+    assert lib.getlong(p1, 0) == i
