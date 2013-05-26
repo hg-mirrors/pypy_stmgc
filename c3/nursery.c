@@ -378,7 +378,10 @@ static void visit_if_young(gcptr *root  _REASON(char *reason))
         previous_obj = NULL;
     }
     obj = (gcptr)obj->h_revision;
-    assert(stmgc_classify(obj) != K_PRIVATE);
+    /* nb. don't use stmgc_classify() here, because some objects trigger
+       an assert at this point: young non-nursery objects which just
+       grew the flag GCFLAG_OLD */
+    assert(obj->h_revision != stm_local_revision);  /* not a private object */
     PATCH_ROOT_WITH(obj);
     goto retry;
 }

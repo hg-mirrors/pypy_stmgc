@@ -701,13 +701,13 @@ void recdump(gcptr obj)
         case -1: fprintf(stderr, " (unmanaged)"); break;
         default: fprintf(stderr, "\n   CANNOT ACCESS MEMORY!\n"); abort();
         }
-        fprintf(stderr, "\n   tid\t%16lx ", (unsigned long)obj->h_tid);
+        fprintf(stderr, "\n   tid\t%16lx", (unsigned long)obj->h_tid);
         count++;
 
         pp = gc_flag_names;
         for (i = STM_FIRST_GCFLAG; *pp != NULL; pp++, i <<= 1) {
             if (obj->h_tid & i) {
-                fprintf(stderr, " %s", *pp);
+                fprintf(stderr, "  %s", *pp);
             }
         }
         fprintf(stderr, "\n   rev\t%16lx (%ld)\n",
