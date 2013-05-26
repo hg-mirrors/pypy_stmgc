@@ -481,7 +481,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
                                Normally set, except if R was stolen */
             L = (gcptr)(v & ~2);
             assert(dclassify(L) == K_PROTECTED);
-            visit_if_young(&L  _REASON("public.h_revision -> PROTECTED"));
+            visit_if_young(&L  _REASON("public.h_rev=PROTECTED"));
             /* The new value of L is the previously-protected object moved
                outside.  We can't store it immediately in R->h_revision!
                We have to wait until the end of the minor collection.  See
@@ -538,7 +538,7 @@ static void finish_public_to_young(struct tx_descriptor *d)
 
             /* use visit_if_young() again to find the final newly-public
                object */
-            visit_if_young(&L  _REASON("public.h_revision -> FETCH PUBLIC"));
+            visit_if_young(&L  _REASON("public.h_rev=FETCH PUBLIC"));
             assert(dclassify(L) == K_PUBLIC);
 
             /* Note that although R is public, its h_revision cannot be
@@ -980,10 +980,11 @@ static void normalize_stolen_objects(struct tx_descriptor *d)
             N->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
             g2l_insert(&d->public_to_private, N, L);
             gcptrlist_insert(&d->public_to_young, N);
+            abort();//XXX
         }
+        recdump1("STOLEN", R);
     }
     gcptrlist_clear(&d->stolen_objects);
-    abort();//XXX
 }
 
 void stmgc_normalize_stolen_objects(void)
