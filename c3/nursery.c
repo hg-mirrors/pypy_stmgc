@@ -48,16 +48,18 @@ static enum protection_class_t dclassify(gcptr obj)
     if (is_in_nursery(d, obj)) {
         e = private ? K_PRIVATE : K_PROTECTED;
     }
-    else {
-        wlog_t *entry;
-        G2L_FIND(d->young_objects_outside_nursery, obj, entry,
-                 goto not_found);
-
+    else if (g2l_contains(&d->young_objects_outside_nursery, obj)) {
         if (obj->h_tid & GCFLAG_OLD)
             e = private ? K_OLD_PRIVATE : K_PUBLIC;
         else
             e = private ? K_PRIVATE : K_PROTECTED;
     }
+    else {
+        assert(stm_dbgmem_is_active(obj, 1));
+        assert(obj->h_tid & GCFLAG_OLD);
+        return private ? K_OLD_PRIVATE : K_PUBLIC;
+    }
+
     assert(stm_dbgmem_is_active(obj, 0));
     if (e == K_PRIVATE || e == K_PROTECTED)
         assert((obj->h_tid & GCFLAG_OLD) == 0);
@@ -66,12 +68,25 @@ static enum protection_class_t dclassify(gcptr obj)
     if (e != K_PROTECTED)
         assert(!(obj->h_tid & GCFLAG_STOLEN));
     return e;
-
- not_found:
-    assert(stm_dbgmem_is_active(obj, 1));
-    assert(obj->h_tid & GCFLAG_OLD);
-    return private ? K_OLD_PRIVATE : K_PUBLIC;
 }
+
+static enum protection_class_t dclassify_at_start_of_collection(gcptr obj)
+{
+    struct tx_descriptor *d = thread_descriptor;
+
+    enum protection_class_t e = dclassify(obj);
+
+    if (g2l_contains(&d->young_objects_outside_nursery, obj) &&
+            (obj->h_tid & GCFLAG_OLD)) {
+        switch (e) {
+        case K_OLD_PRIVATE: e = K_PRIVATE; break;
+        case K_PUBLIC: e = K_PROTECTED; break;
+        default: abort();
+        }
+    }
+    return e;
+}
+
 
 void stmgc_init_tls(void)
 {
@@ -498,7 +513,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
         if (v & 2) {        /* a pointer with bit 2 set.
                                Normally set, except if R was stolen */
             L = (gcptr)(v & ~2);
-            assert(dclassify(L) == K_PROTECTED);
+            assert(dclassify_at_start_of_collection(L) == K_PROTECTED);
             visit_if_young(&L  _REASON("public.h_rev=PROTECTED"));
             /* The new value of L is the previously-protected object moved
                outside.  We can't store it immediately in R->h_revision!
