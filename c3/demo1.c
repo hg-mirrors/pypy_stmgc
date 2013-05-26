@@ -10,8 +10,8 @@
 #include "stmgc.h"
 
 
-#define UPPER_BOUND 2500
-#define NUMTHREADS  2
+#define UPPER_BOUND 250
+#define NUMTHREADS  4
 
 
 #define GCTID_STRUCT_NODE     123
