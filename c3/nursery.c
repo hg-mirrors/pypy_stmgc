@@ -159,14 +159,12 @@ gcptr stmgc_duplicate(gcptr globalobj, revision_t extra_word)
 
     memcpy(localobj, globalobj, size);
 
-    assert(!(localobj->h_tid & GCFLAG_PRIVATE_COPY));
     assert(!(localobj->h_tid & GCFLAG_NURSERY_MOVED));
     localobj->h_tid &= ~(GCFLAG_VISITED           |
                          GCFLAG_PUBLIC_TO_PRIVATE |
                          GCFLAG_PREBUILT_ORIGINAL |
                          GCFLAG_WRITE_BARRIER     |
                          GCFLAG_OLD);
-    localobj->h_tid |= GCFLAG_PRIVATE_COPY;
     localobj->h_revision = stm_local_revision;
     return localobj;
 }
@@ -214,6 +212,7 @@ void stmgc_stop_transaction(struct tx_descriptor *d)
 void stmgc_committed_transaction(struct tx_descriptor *d)
 {
     spinlock_release(d->collection_lock);
+    gcptrlist_clear(&d->protected_with_private_copy);
 }
 
 void stmgc_abort_transaction(struct tx_descriptor *d)

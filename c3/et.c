@@ -641,7 +641,6 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
   G2L_LOOP_FORWARD(d->public_to_private, item)
     {
       gcptr L = item->val;
-      assert(L->h_tid & GCFLAG_PRIVATE_COPY);
       assert(!(L->h_tid & GCFLAG_VISITED));
       assert(!(L->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
       assert(!(L->h_tid & GCFLAG_PREBUILT_ORIGINAL));
@@ -653,7 +652,6 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       fprintf(stderr, "%p->h_revision = %p (UpdateChainHeads)\n",
               L, (gcptr)new_revision);
 #endif
-      L->h_tid &= ~GCFLAG_PRIVATE_COPY;
       L->h_revision = new_revision;
 
       if (is_young(L))
@@ -675,7 +673,6 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       gcptr R = item->addr;
       revision_t v = (revision_t)item->val;
 
-      assert(!(R->h_tid & GCFLAG_PRIVATE_COPY));
       assert(R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
       assert(!(R->h_tid & GCFLAG_NURSERY_MOVED));
       assert(!(R->h_tid & GCFLAG_STOLEN));

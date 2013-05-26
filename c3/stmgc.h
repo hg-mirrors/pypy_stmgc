@@ -21,7 +21,7 @@ typedef struct stm_object_s {
 #define STM_SIZE_OF_USER_TID       (sizeof(revision_t) / 2)    /* in bytes */
 #define STM_FIRST_GCFLAG           (1L << (8 * STM_SIZE_OF_USER_TID))
 #define STM_USER_TID_MASK          (STM_FIRST_GCFLAG - 1)
-#define PREBUILT_FLAGS             (STM_FIRST_GCFLAG * (2 + 8 + 64))
+#define PREBUILT_FLAGS             (STM_FIRST_GCFLAG * (1 + 2 + 8))
 #define PREBUILT_REVISION          1
 
 
