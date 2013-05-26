@@ -22,6 +22,19 @@ void g2l_delete(struct G2L *g2l)
   memset(g2l, 0, sizeof(struct G2L));
 }
 
+struct G2L *g2l_malloc(void)
+{
+  struct G2L *g2l = malloc(sizeof(struct G2L));
+  memset(g2l, 0, sizeof(struct G2L));
+  return g2l;
+}
+
+void g2l_free(struct G2L *g2l)
+{
+  free(g2l->raw_start);
+  free(g2l);
+}
+
 wlog_t *_g2l_find(char *entry, gcptr addr)
 {
   revision_t key = (revision_t)addr;
@@ -170,6 +183,16 @@ void gcptrlist_insert3(struct GcPtrList *gcptrlist, gcptr newitem1,
   items[i+1] = newitem2;
   items[i+2] = newitem3;
   gcptrlist->size = i + 3;
+}
+
+void gcptrlist_insert_at_index(struct GcPtrList *gcptrlist, long index,
+                               gcptr newitem)
+{
+    long lastitem = gcptrlist->size;
+    assert(index <= lastitem);
+    gcptrlist_insert(gcptrlist, NULL);
+    gcptrlist->items[lastitem] = gcptrlist->items[index];
+    gcptrlist->items[index] = newitem;
 }
 
 void gcptrlist_merge(struct GcPtrList *gcptrlist,

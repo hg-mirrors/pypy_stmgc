@@ -35,6 +35,8 @@ struct G2L {
 
 void g2l_clear(struct G2L *g2l);
 void g2l_delete(struct G2L *g2l);
+struct G2L *g2l_malloc(void);
+void g2l_free(struct G2L *g2l);
 
 static inline int g2l_any_entry(struct G2L *g2l) {
     return g2l->raw_current != g2l->raw_start;
@@ -133,14 +135,20 @@ void gcptrlist_insert2(struct GcPtrList *gcptrlist, gcptr newitem1,
 void gcptrlist_insert3(struct GcPtrList *gcptrlist, gcptr newitem1,
                        gcptr newitem2, gcptr newitem3);
 
-static inline void gcptrlist_insert(struct GcPtrList *gcptrlist, gcptr newitem) {
+/* items[size++] = items[index]; items[index] = newitem; */
+void gcptrlist_insert_at_index(struct GcPtrList *gcptrlist, long index,
+                               gcptr newitem);
+
+static inline void gcptrlist_insert(struct GcPtrList *gcptrlist, gcptr newitem)
+{
     if (UNLIKELY(gcptrlist->size == gcptrlist->alloc))
         _gcptrlist_grow(gcptrlist);
     gcptrlist->items[gcptrlist->size++] = newitem;
 }
 
-static inline void gcptrlist_reduce_size(struct GcPtrList *gcptrlist, long newsize) {
-    gcptrlist->size = newsize;
+static inline void gcptrlist_reduce_size(struct GcPtrList *gcptrlist, long nsz)
+{
+    gcptrlist->size = nsz;
 }
 
 static inline long gcptrlist_size(struct GcPtrList *gcptrlist)

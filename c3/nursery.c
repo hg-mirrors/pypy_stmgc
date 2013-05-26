@@ -661,17 +661,52 @@ static void teardown_minor_collect(struct tx_descriptor *d)
     spinlock_release(d->collection_lock);
 }
 
+static __thread struct G2L *yo_stubs;   /* { protected: public_stub } */
+
 static void create_yo_stubs(gcptr *pobj)
 {
-    gcptr obj = *pobj;
+    gcptr stub, obj = *pobj;
     if (obj == NULL || (obj->h_tid & GCFLAG_OLD) != 0)
         return;
 
-    /* xxx try to avoid duplicate stubs for the same object */
-    gcptr stub = stmgcpage_malloc(sizeof(*stub));
+    /* we use 'yo_stubs', a dictionary, in order to try to avoid
+       duplicate stubs for the same object */
+    if (yo_stubs == NULL) {
+        yo_stubs = g2l_malloc();
+    }
+    else {
+        wlog_t *item;
+        G2L_FIND(*yo_stubs, obj, item, goto not_found);
+        /* found already */
+        stub = item->val;
+        assert(stub->h_revision == (((revision_t)obj) | 2));
+        *pobj = stub;
+        return;
+    }
+
+ not_found:
+    stub = stmgcpage_malloc(sizeof(*stub));
     stub->h_tid = GCFLAG_OLD | GCFLAG_STUB;    /* with type_id == 0 */
     stub->h_revision = ((revision_t)obj) | 2;
+    g2l_insert(yo_stubs, obj, stub);
     *pobj = stub;
+}
+
+static long done_creating_yo_stubs(struct GcPtrList *add_to_list, long index)
+{
+    wlog_t *item;
+    struct G2L *stubs = yo_stubs;
+    if (stubs == NULL)
+        return index;
+
+    G2L_LOOP_FORWARD(*stubs, item) {
+        gcptrlist_insert_at_index(add_to_list, index, item->val);
+        index++;
+    } G2L_LOOP_END;
+
+    g2l_free(stubs);
+    yo_stubs = NULL;
+    return index;
 }
 
 static void fix_new_public_to_protected_references(struct tx_descriptor *d)
@@ -683,6 +718,8 @@ static void fix_new_public_to_protected_references(struct tx_descriptor *d)
         stmcb_trace(items[i], &create_yo_stubs);
     }
     gcptrlist_clear(&d->private_old_pointing_to_young);
+    d->num_public_to_protected = done_creating_yo_stubs(
+            &d->public_to_young, d->num_public_to_protected);
 }
 
 static void free_unvisited_young_objects_outside_nursery(
@@ -900,11 +937,19 @@ static gcptr extract_from_foreign_nursery(struct tx_descriptor *source_d,
     /* R is now the protected object to move outside, with revision v. */
     N = create_old_object_copy(R  _REASON("**stolen copy"));
     N->h_revision = v;
-    gcptrlist_insert2(&source_d->stolen_objects, R, N);
+    gcptrlist_insert3(&source_d->stolen_objects, R, N, NULL);
 
     /* there might be references in N going to protected objects.  We
        must fix them with stubs. */
     stmcb_trace(N, &create_yo_stubs);
+
+    /* Cannot insert them here into the 'public_to_young' list, because
+       it might be accessed concurrently by the thread 'source_d'.
+       Instead we put them into stolen_objects.  They are inserted
+       at position 'size - 1', which means just before the final NULL
+       that was already pushed by the above gcptrlist_insert3(). */
+    done_creating_yo_stubs(&source_d->stolen_objects,
+                           source_d->stolen_objects.size - 1);
 
     return N;
 }
@@ -980,7 +1025,7 @@ static void normalize_stolen_objects(struct tx_descriptor *d)
     gcptr *items = d->stolen_objects.items;
     assert(d == thread_descriptor);
 
-    for (i = 0; i < size; i += 2) {
+    for (i = 0; i < size; ) {
         gcptr R = items[i];
         gcptr N = items[i + 1];
 
@@ -1007,6 +1052,17 @@ static void normalize_stolen_objects(struct tx_descriptor *d)
             gcptrlist_insert(&d->public_to_young, N);
         }
         recdump1("STOLEN", R);
+
+        /* then all items from i+2 up to the first NULL are new stubs
+           that must be added to d->public_to_young, in the first part
+           (i.e. before d->num_public_to_protected) */
+        i += 2;
+        long ptp = d->num_public_to_protected;
+        while ((N = items[i++]) != NULL) {
+            gcptrlist_insert_at_index(&d->public_to_young, ptp, N);
+            ptp++;
+        }
+        d->num_public_to_protected = ptp;
     }
     gcptrlist_clear(&d->stolen_objects);
 }
