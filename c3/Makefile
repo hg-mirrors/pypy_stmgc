@@ -25,8 +25,8 @@ iteration-4: all-builds
 	+make test-demo4 test-demo5 test-demo1 test-demo2 test-demo3
 
 
-H_FILES = et.h lists.h nursery.h gcpage.h stmsync.h dbgmem.h stmgc.h atomic_ops.h stmimpl.h
-C_FILES = et.c lists.c nursery.c gcpage.c stmsync.c dbgmem.c
+H_FILES = et.h lists.h nursery.h gcpage.h stmsync.h dbgmem.h fprintcolor.h stmgc.h atomic_ops.h stmimpl.h
+C_FILES = et.c lists.c nursery.c gcpage.c stmsync.c dbgmem.c fprintcolor.c
 
 DEBUG = -g -DGC_NURSERY=0x10000 -D_GC_DEBUG=2
 
