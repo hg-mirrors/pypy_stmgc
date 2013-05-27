@@ -354,6 +354,11 @@ static void mark_all_stack_roots(void)
     }
 }
 
+static struct stm_object_s dead_object_stub = {
+    GCFLAG_PREBUILT | GCFLAG_STUB,
+    (revision_t)&dead_object_stub
+};
+
 static void cleanup_for_thread(struct tx_descriptor *d)
 {
     long i;
@@ -376,8 +381,14 @@ static void cleanup_for_thread(struct tx_descriptor *d)
             fprintf(stderr,
                     "ABRT_COLLECT_MAJOR: %p was read but modified already\n",
                     obj);
-            AbortTransactionAfterCollect(d, ABRT_COLLECT_MAJOR);
-            return;
+            if (d->max_aborts != 0) {           /* normal path */
+                AbortTransactionAfterCollect(d, ABRT_COLLECT_MAJOR);
+                return;
+            }
+            else {     /* for tests */
+                items[i] = &dead_object_stub;
+                continue;
+            }
         }
 
         /* on the other hand, if we see a non-visited object in the read

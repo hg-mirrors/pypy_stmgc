@@ -665,17 +665,19 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
                which should be identical. */
             gcptr P = (gcptr)obj->h_revision;
             assert(dclassify(P) == K_PUBLIC);
+            items[i] = P;
 
-            if (P->h_revision & 1) {   /* "is not a pointer" */
-                items[i] = P;
-                /*mark*/
-            }
-            else {
+            if (!(P->h_revision & 1)) {   /* "is a pointer" */
                 /* P has already been changed.  Mark as abort. */
-                AbortTransactionAfterCollect(d, ABRT_COLLECT_MINOR);
-                /*mark*/
-                gcptrlist_clear(&d->list_of_read_objects);
-                break;
+                fprintf(stderr,
+                    "ABRT_COLLECT_MINOR: %p was read but modified already\n",
+                    P);
+                if (d->max_aborts != 0) {           /* normal path */
+                    AbortTransactionAfterCollect(d, ABRT_COLLECT_MINOR);
+                    /*mark*/
+                    gcptrlist_clear(&d->list_of_read_objects);
+                    break;
+                }
             }
         }
         else {
