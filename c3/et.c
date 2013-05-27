@@ -621,6 +621,7 @@ static void AcquireLocks(struct tx_descriptor *d)
 
 static void CancelLocks(struct tx_descriptor *d)
 {
+  revision_t my_lock = d->my_lock;
   wlog_t *item;
 
   if (!g2l_any_entry(&d->public_to_private))
@@ -628,16 +629,20 @@ static void CancelLocks(struct tx_descriptor *d)
 
   G2L_LOOP_FORWARD(d->public_to_private, item)
     {
+      gcptr R = item->addr;
       gcptr L = item->val;
       revision_t v = L->h_revision;
       if (v == stm_local_revision)
-        break;    /* done */
+        {
+          assert(R->h_revision != my_lock);
+          break;    /* done */
+        }
       L->h_revision = stm_local_revision;
 
-      gcptr R = item->addr;
 #ifdef DUMP_EXTRA
       fprintf(stderr, "%p->h_revision = %p (CancelLocks)\n", R, (gcptr)v);
 #endif
+      assert(R->h_revision == my_lock);
       ACCESS_ONCE(R->h_revision) = v;
 
     } G2L_LOOP_END;

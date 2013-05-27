@@ -108,7 +108,12 @@ void stmgc_init_tls(void)
 void stmgc_done_tls(void)
 {
     struct tx_descriptor *d = thread_descriptor;
+
+    spinlock_acquire(d->collection_lock, 'F');  /* freeing */
+
     assert(d->nursery_current == d->nursery);  /* else, not empty! */
+    assert(!g2l_any_entry(&d->young_objects_outside_nursery));
+
     stm_free(d->nursery, GC_NURSERY);
     gcptrlist_delete(&d->protected_with_private_copy);
     g2l_delete(&d->public_to_private);
