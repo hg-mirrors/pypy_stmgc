@@ -448,3 +448,19 @@ def test_private_copy_and_collect():
     p1 = lib.stm_pop_root()
     assert lib.rawgetlong(p1, 0) == i - 1
     assert lib.getlong(p1, 0) == i
+
+def test_dont_update_revision_to_point_to_private():
+    p1 = nalloc(HDR)
+    for i in range(50):
+        pstart = p1
+        lib.stm_push_root(pstart)
+        while True:
+            lib.stm_commit_transaction()
+            lib.stm_begin_inevitable_transaction()
+            p1 = lib.stm_write_barrier(p1)
+            if not lib.in_nursery(p1):
+                break
+        for i in range(10):
+            lib.stm_read_barrier(pstart)   # compress the chain
+        minor_collect()
+        p1 = lib.stm_pop_root()

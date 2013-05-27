@@ -103,8 +103,15 @@ static gcptr HeadOfRevisionChainList(struct tx_descriptor *d, gcptr G)
           /* we update R_prev->h_revision as a shortcut */
           /* XXX check if this really gives a worse performance than only
              doing this write occasionally based on a counter in d */
-          R_prev->h_revision = v;
           R = (gcptr)v;
+          if (R->h_revision == stm_local_revision)
+            {
+              /* must not update an older h_revision to go directly to
+                 the private copy at the end of a chain of protected
+                 objects! */
+              return R;
+            }
+          R_prev->h_revision = v;
           goto retry;
         }
     }
