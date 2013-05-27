@@ -209,6 +209,10 @@ static gcptr _latest_gcptr(gcptr R)
 gcptr _stm_nonrecord_barrier(gcptr obj, int *result)
 {
   /* warning, this is for tests only, and it is not thread-safe! */
+  struct tx_descriptor *d = thread_descriptor;
+  if (gcptrlist_size(&d->stolen_objects) > 0)
+    stmgc_normalize_stolen_objects();
+
   enum protection_class_t e = stmgc_classify(obj);
   if (e == K_PRIVATE)
     {
@@ -228,7 +232,6 @@ gcptr _stm_nonrecord_barrier(gcptr obj, int *result)
       return obj;
     }
 
-  struct tx_descriptor *d = thread_descriptor;
   wlog_t *item;
   G2L_LOOP_FORWARD(d->public_to_private, item)
     {
