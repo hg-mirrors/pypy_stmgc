@@ -10,7 +10,7 @@
 #include "stmgc.h"
 
 
-#define UPPER_BOUND 250
+#define UPPER_BOUND 10
 #define NUMTHREADS  4
 
 
@@ -42,28 +42,50 @@ struct node global_chained_list = {
     NULL,
 };
 
+struct node *do_a_check(int seen[], int stress_gc)
+{
+  int i;
+  for (i=0; i<UPPER_BOUND; i++)
+    seen[i] = 0;
+
+  struct node *r_n, *prev_n;
+  r_n = (struct node *)stm_read_barrier((gcptr)&global_chained_list);
+  assert(r_n->value == -1);
+  while (r_n->next)
+    {
+      prev_n = r_n;   /* for gdb only */
+
+      if (stress_gc)
+        {
+          /* allocate a young object that is forgotten, to stress the GC */
+          stm_push_root((gcptr)r_n);
+          stm_allocate(sizeof(struct node), GCTID_STRUCT_NODE);
+          r_n = (struct node *)stm_pop_root();
+        }
+
+      r_n = (struct node *)stm_read_barrier((gcptr)r_n->next);
+      long v = r_n->value;
+      assert(0 <= v && v < UPPER_BOUND);
+      if (v == 0)
+        assert(seen[v] < NUMTHREADS);
+      else
+        assert(seen[v] < seen[v-1]);
+      seen[v]++;
+    }
+  return r_n;
+}
+
 int insert1(gcptr arg1, int retry_counter)
 {
+    int seen[UPPER_BOUND];
     long nvalue;
-    struct node *n = &global_chained_list;
-    struct node *last = NULL;
     struct node *r_arg;
 
     r_arg = (struct node *)stm_read_barrier(arg1);
     nvalue = r_arg->value;
 
-    while (n)
-      {
-        n = (struct node *)stm_read_barrier((gcptr)n);
+    struct node *last = do_a_check(seen, 1);
 
-        /* allocate a young object that is forgotten, to stress the GC */
-        stm_push_root((gcptr)n);
-        stm_allocate(sizeof(struct node), GCTID_STRUCT_NODE);
-        n = (struct node *)stm_pop_root();
-
-        last = n;
-        n = n->next;
-      }
 
     stm_push_root((gcptr)last);
     struct node *w_newnode = (struct node *)stm_allocate(sizeof(struct node),
@@ -83,7 +105,7 @@ static sem_t done;
 
 extern void stmgcpage_possibly_major_collect(int force);  /* temp */
 
-void* demo1(void *arg)
+void *demo1(void *arg)
 {
     int i, status;
     struct node *w_node;
@@ -107,29 +129,13 @@ void* demo1(void *arg)
     return NULL;
 }
 
-void check(int numthreads)
+void final_check(void)
 {
-  struct node *r_n;
   int seen[UPPER_BOUND];
-  int i;
-  for (i=0; i<UPPER_BOUND; i++)
-    seen[i] = 0;
 
   stm_initialize();
-  r_n = (struct node *)stm_read_barrier((gcptr)&global_chained_list);
-  assert(r_n->value == -1);
-  while (r_n->next)
-    {
-      r_n = (struct node *)stm_read_barrier((gcptr)r_n->next);
-      long v = r_n->value;
-      assert(0 <= v && v < UPPER_BOUND);
-      if (v == 0)
-        assert(seen[v] < numthreads);
-      else
-        assert(seen[v] < seen[v-1]);
-      seen[v]++;
-    }
-  assert(seen[UPPER_BOUND-1] == numthreads);
+  do_a_check(seen, 0);
+  assert(seen[UPPER_BOUND-1] == NUMTHREADS);
   stm_finalize();
   printf("check ok\n");
 }
@@ -146,22 +152,21 @@ void newthread(void*(*func)(void*), void *arg)
 
 int main(void)
 {
-  int numthreads = NUMTHREADS;
   int i, status;
 
   status = sem_init(&done, 0, 0);
   assert(status == 0);
 
-  for (i=0; i<numthreads; i++)
+  for (i = 0; i < NUMTHREADS; i++)
     newthread(demo1, NULL);
 
-  for (i=0; i<numthreads; i++)
+  for (i=0; i < NUMTHREADS; i++)
     {
       status = sem_wait(&done);
       assert(status == 0);
       printf("thread finished\n");
     }
 
-  check(numthreads);
+  final_check();
   return 0;
 }
