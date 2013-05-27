@@ -1030,10 +1030,12 @@ void stmgc_public_to_foreign_protected(gcptr P)
        thread's minor collection lock.  This also prevents several
        threads from getting on each other's toes trying to extract
        objects from the same nursery */
-    struct tx_descriptor *source_d = stm_find_thread_containing_pointer(R);
-    assert(source_d != thread_descriptor);
+    struct tx_descriptor *source_d;
 
-    spinlock_acquire(source_d->collection_lock, 'S');  /* stealing */
+    /* source_d->collection_lock will be acquired with 'S' (stealing)
+       by the following call: */
+    source_d = stm_find_thread_containing_pointer_and_lock(R);
+    assert(source_d != thread_descriptor);
 
     /* now that we have the lock, check again that P->h_revision was not
        modified in the meantime.  If it did change, we do nothing and will

@@ -113,7 +113,7 @@ void stmgcpage_done_tls(void)
     stmgcpage_release_global_lock();
 }
 
-struct tx_descriptor *stm_find_thread_containing_pointer(gcptr L)
+struct tx_descriptor *stm_find_thread_containing_pointer_and_lock(gcptr L)
 {
     stmgcpage_acquire_global_lock();
 
@@ -126,6 +126,10 @@ struct tx_descriptor *stm_find_thread_containing_pointer(gcptr L)
     abort();
 
  found:
+    /* must acquire the collection_lock before releasing the global lock,
+       otherwise 'd' might be freed under our feet */
+    spinlock_acquire(d->collection_lock, 'S');  /* stealing */
+
     stmgcpage_release_global_lock();
     return d;
 }

@@ -76,7 +76,7 @@ gcptr stmgcpage_malloc(size_t size);
 void stmgcpage_free(gcptr obj);
 void stmgcpage_add_prebuilt_root(gcptr obj);
 void stmgcpage_possibly_major_collect(int force);
-struct tx_descriptor *stm_find_thread_containing_pointer(gcptr);
+struct tx_descriptor *stm_find_thread_containing_pointer_and_lock(gcptr);
 
 extern struct GcPtrList stm_prebuilt_gcroots;
 
