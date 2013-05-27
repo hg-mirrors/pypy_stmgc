@@ -122,8 +122,8 @@ struct tx_descriptor *stm_find_thread_containing_pointer_and_lock(gcptr L)
         if (stmgc_is_young_in(d, L))
             goto found;
     }
-    assert(0);    /* L is not a young pointer anywhere! */
-    abort();
+    stmgcpage_release_global_lock();
+    return NULL;         /* L is not a young pointer anywhere! */
 
  found:
     /* must acquire the collection_lock before releasing the global lock,

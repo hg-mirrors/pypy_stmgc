@@ -1042,6 +1042,8 @@ void stmgc_public_to_foreign_protected(gcptr P)
        retry.
     */
     if (P->h_revision == v) {
+        assert(source_d != NULL);
+
         /* careful here: all 'thread_descriptor' accesses will continue
            to get the current thread (needed e.g. for stmgcpage_malloc())
            which is different from 'source_d', the source thread out of
@@ -1067,7 +1069,9 @@ void stmgc_public_to_foreign_protected(gcptr P)
         /* debugging support: "deactivate" the foreign nursery again */
         assert(stmgc_nursery_hiding(source_d, 1));
     }
-    spinlock_release(source_d->collection_lock);
+
+    if (source_d != NULL)
+        spinlock_release(source_d->collection_lock);
 }
 
 static void normalize_stolen_objects(struct tx_descriptor *d)
