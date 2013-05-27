@@ -220,7 +220,8 @@ class RandomSingleThreadTester(object):
                     is_too_recent = False
                 except model.Deleted:
                     is_too_recent = True
-                assert is_too_recent == (result < 0)
+                if result < 0:
+                    assert is_too_recent
                 if is_too_recent:
                     continue     # can't really check more in this case
 

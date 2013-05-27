@@ -53,3 +53,6 @@ TODO:
 
 - how to handle immutable objects?  they might only be initialized after
   they are moved; check
+
+- commit should not increase the global_cur_time if it only changed
+  protected objects

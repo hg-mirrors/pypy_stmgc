@@ -357,6 +357,8 @@ gcptr stm_WriteBarrier(gcptr P)
   if (W->h_tid & GCFLAG_WRITE_BARRIER)
     stmgc_write_barrier(W);
 
+  fprintf(stderr, "write_barrier: %p -> %p\n", P, W);
+
   return W;
 }
 
@@ -382,7 +384,10 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
       v = ACCESS_ONCE(R->h_revision);
       if (!(v & 1))               // "is a pointer", i.e.
         {                         //   "has a more recent revision"
-          /* ... unless it is a GCFLAG_STOLEN object */
+          /* ... unless it's a protected-to-private link */
+          if (((gcptr)v)->h_revision == stm_local_revision)
+            continue;
+          /* ... or unless it is a GCFLAG_STOLEN object */
           if (R->h_tid & GCFLAG_STOLEN)
             {
               assert(is_young(R));

@@ -273,7 +273,7 @@ static void visit(gcptr *pobj)
     if (obj->h_tid & GCFLAG_VISITED)
         return;    /* already seen */
 
-    if (obj->h_tid & GCFLAG_PUBLIC_TO_PRIVATE) {
+    if (obj->h_tid & (GCFLAG_PUBLIC_TO_PRIVATE | GCFLAG_STUB)) {
         if (obj->h_revision & 1) { // "is not a ptr", so no more recent version
             obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE; // see also fix_outdated()
         }

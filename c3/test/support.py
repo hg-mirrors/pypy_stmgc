@@ -136,6 +136,7 @@ lib = ffi.verify(r'''
 
     void rawsetptr(gcptr obj, long index, gcptr newvalue)
     {
+        fprintf(stderr, "%p->[%ld] = %p\n", obj, index, newvalue);
         assert(stm_dbgmem_is_active(obj, 1));
         assert(gettid(obj) > 421 + index);
         ((gcptr *)(obj + 1))[index] = newvalue;
