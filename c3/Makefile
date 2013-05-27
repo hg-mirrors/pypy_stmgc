@@ -28,7 +28,7 @@ iteration-4: all-builds
 H_FILES = et.h lists.h nursery.h gcpage.h stmsync.h dbgmem.h fprintcolor.h stmgc.h atomic_ops.h stmimpl.h
 C_FILES = et.c lists.c nursery.c gcpage.c stmsync.c dbgmem.c fprintcolor.c
 
-DEBUG = -g -DGC_NURSERY=0x10000 -D_GC_DEBUG=2
+DEBUG = -g -DGC_NURSERY=0x10000 -D_GC_DEBUG=1
 
 
 build-%: %.c ${H_FILES} ${C_FILES}

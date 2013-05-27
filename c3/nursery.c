@@ -1116,7 +1116,7 @@ static void normalize_stolen_objects(struct tx_descriptor *d)
             g2l_insert(&d->public_to_private, N, L);
             gcptrlist_insert(&d->public_to_young, N);
         }
-        recdump1("STOLEN", R);
+        recdump1("WAS STOLEN", R);
 
         /* then all items from i+2 up to the first NULL are new stubs
            that must be added to d->public_to_young, in the first part

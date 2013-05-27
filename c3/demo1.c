@@ -8,9 +8,10 @@
 
 
 #include "stmgc.h"
+#include "fprintcolor.h"
 
 
-#define UPPER_BOUND 10
+#define UPPER_BOUND 100
 #define NUMTHREADS  4
 
 
@@ -45,7 +46,7 @@ struct node global_chained_list = {
 struct node *do_a_check(int seen[], int stress_gc)
 {
   int i;
-  for (i=0; i<UPPER_BOUND; i++)
+  for (i=0; i<NUMTHREADS; i++)
     seen[i] = 0;
 
   struct node *r_n, *prev_n;
@@ -65,19 +66,18 @@ struct node *do_a_check(int seen[], int stress_gc)
 
       r_n = (struct node *)stm_read_barrier((gcptr)r_n->next);
       long v = r_n->value;
-      assert(0 <= v && v < UPPER_BOUND);
-      if (v == 0)
-        assert(seen[v] < NUMTHREADS);
-      else
-        assert(seen[v] < seen[v-1]);
-      seen[v]++;
+      fprintf(stderr, "\t\t\t\t{ %ld, %p }\n", v, r_n->next);
+      assert(0 <= v && v < UPPER_BOUND * NUMTHREADS);
+      int tn = v / UPPER_BOUND;
+      assert(seen[tn] == v % UPPER_BOUND);
+      seen[tn]++;
     }
   return r_n;
 }
 
 int insert1(gcptr arg1, int retry_counter)
 {
-    int seen[UPPER_BOUND];
+    int seen[NUMTHREADS];
     long nvalue;
     struct node *r_arg;
 
@@ -92,10 +92,13 @@ int insert1(gcptr arg1, int retry_counter)
                                                          GCTID_STRUCT_NODE);
     last = (struct node *)stm_pop_root();
 
+    assert(seen[nvalue / UPPER_BOUND] == nvalue % UPPER_BOUND);
     w_newnode->value = nvalue;
     w_newnode->next = NULL;
+    fprintf(stderr, "DEMO1: %p->value = %ld\n", w_newnode, nvalue);
 
     struct node *w_last = (struct node *)stm_write_barrier((gcptr)last);
+    fprintf(stderr, "DEMO1:   %p->next = %p\n", w_last, w_newnode);
     w_last->next = w_newnode;
 
     return 0;   /* return from stm_perform_transaction() */
@@ -105,18 +108,24 @@ static sem_t done;
 
 extern void stmgcpage_possibly_major_collect(int force);  /* temp */
 
+static int thr_mynum = 0;
+
 void *demo1(void *arg)
 {
-    int i, status;
+    int i, status, start;
     struct node *w_node;
     stm_initialize();
+
+    start = thr_mynum++;   /* protected by being inevitable here */
+    start *= UPPER_BOUND;
+    fprintf(stderr, "THREAD STARTING: start = %d\n", start);
 
     w_node = (struct node *)stm_allocate(sizeof(struct node),
                                          GCTID_STRUCT_NODE);
 
     for (i=0; i<UPPER_BOUND; i++) {
         w_node = (struct node *)stm_write_barrier((gcptr)w_node);
-        w_node->value = i;
+        w_node->value = start + i;
         stm_push_root((gcptr)w_node);
         stm_perform_transaction((gcptr)w_node, insert1);
         stmgcpage_possibly_major_collect(0); /* temp */
@@ -131,11 +140,15 @@ void *demo1(void *arg)
 
 void final_check(void)
 {
-  int seen[UPPER_BOUND];
+  int i;
+  int seen[NUMTHREADS];
 
   stm_initialize();
   do_a_check(seen, 0);
-  assert(seen[UPPER_BOUND-1] == NUMTHREADS);
+
+  for (i=0; i<NUMTHREADS; i++)
+    assert(seen[i] == UPPER_BOUND);
+
   stm_finalize();
   printf("check ok\n");
 }

@@ -93,7 +93,7 @@ static gcptr HeadOfRevisionChainList(struct tx_descriptor *d, gcptr G)
       gcptr R_prev = R;
       R = (gcptr)v;
 
-      /* retry */
+    retry_threelevels:
       v = ACCESS_ONCE(R->h_revision);
       if (!(v & 1))  // "is a pointer", i.e.
         {            //      "has a more recent revision"
@@ -103,15 +103,23 @@ static gcptr HeadOfRevisionChainList(struct tx_descriptor *d, gcptr G)
           /* we update R_prev->h_revision as a shortcut */
           /* XXX check if this really gives a worse performance than only
              doing this write occasionally based on a counter in d */
-          R = (gcptr)v;
-          if (R->h_revision == stm_local_revision)
+          gcptr R_next = (gcptr)v;
+          if (R_next->h_revision == stm_local_revision)
             {
               /* must not update an older h_revision to go directly to
                  the private copy at the end of a chain of protected
                  objects! */
-              return R;
+              return R_next;
+            }
+          if (R_prev->h_tid & GCFLAG_STOLEN)
+            {
+              /* must not update the h_revision of a stolen object! */
+              R_prev = R;
+              R = R_next;
+              goto retry_threelevels;
             }
           R_prev->h_revision = v;
+          R = R_next;
           goto retry;
         }
     }
@@ -505,7 +513,14 @@ void AbortTransaction(int num)
   gcptrlist_clear(&d->list_of_read_objects);
   stmgc_abort_transaction(d);
 
-  fprintf(stderr, "[%lx] abort %d\n", (long)d->my_lock, num);
+  fprintf(stderr,
+          "\n"
+          "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+          "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+          "!!!!!!!!!!!!!!!!!!!!!  [%lx] abort %d\n"
+          "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+          "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+          "\n", (long)d->my_lock, num);
   if (num != ABRT_MANUAL && d->max_aborts >= 0 && !d->max_aborts--)
     {
       fprintf(stderr, "unexpected abort!\n");
