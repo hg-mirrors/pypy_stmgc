@@ -774,6 +774,8 @@ void CommitTransaction(void)
   revision_t newrev = -(cur_time + 1);
   assert(newrev & 1);
   ACCESS_ONCE(stm_local_revision) = newrev;
+  fprintf(stderr, "%p: stm_local_revision = %ld\n", d, newrev);
+  assert(d->local_revision_ref = &stm_local_revision);
 
   UpdateChainHeads(d, cur_time, localrev);
 

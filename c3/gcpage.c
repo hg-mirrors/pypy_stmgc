@@ -373,6 +373,9 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         revision_t v = obj->h_revision;
         if (!(v & 1)) {  // "is a pointer"
             /* i.e. has a more recent revision.  Oups. */
+            fprintf(stderr,
+                    "ABRT_COLLECT_MAJOR: %p was read but modified already\n",
+                    obj);
             AbortTransactionAfterCollect(d, ABRT_COLLECT_MAJOR);
             return;
         }
@@ -537,23 +540,12 @@ static void free_unused_global_pages(void)
 
 /***** Major collections: forcing minor collections *****/
 
-static void check_different_local_revs(void)
-{
-#ifdef _GC_DEBUG
-    struct tx_descriptor *d, *d2;
-    for (d = tx_head; d; d = d->tx_next) {
-        for (d2 = d->tx_next; d2; d2 = d2->tx_next) {
-            assert(*d->local_revision_ref != *d2->local_revision_ref);
-        }
-    }
-#endif
-}
-
 void force_minor_collections(void)
 {
-    struct tx_descriptor *saved = thread_descriptor;
-    revision_t saved_local_rev = *saved->local_revision_ref;
     struct tx_descriptor *d;
+    struct tx_descriptor *saved = thread_descriptor;
+    revision_t saved_local_rev = stm_local_revision;
+    assert(saved_local_rev == *saved->local_revision_ref);
 
     for (d = tx_head; d; d = d->tx_next) {
         /* Force a minor collection to run in the thread 'd'.
@@ -569,11 +561,10 @@ void force_minor_collections(void)
             assert(stmgc_nursery_hiding(d, 0));
             stmgc_minor_collect_no_abort();
             assert(stmgc_nursery_hiding(d, 1));
+            thread_descriptor = saved;
+            stm_local_revision = saved_local_rev;
         }
     }
-    thread_descriptor = saved;
-    stm_local_revision = saved_local_rev;
-    check_different_local_revs();
 }
 
 
