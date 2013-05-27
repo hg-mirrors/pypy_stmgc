@@ -27,6 +27,7 @@
 
 #include "stmgc.h"
 #include "atomic_ops.h"
+#include "fprintcolor.h"
 #include "lists.h"
 #include "dbgmem.h"
 #include "nursery.h"
