@@ -745,6 +745,25 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
   g2l_clear(&d->public_to_private);
 }
 
+void UpdateProtectedChainHeads(struct tx_descriptor *d, revision_t cur_time,
+                               revision_t localrev)
+{
+  revision_t new_revision = cur_time + 1;     // make an odd number
+  assert(new_revision & 1);
+
+  long i, size = d->protected_with_private_copy.size;
+  gcptr *items = d->protected_with_private_copy.items;
+  for (i = 0; i < size; i++)
+    {
+      gcptr R = items[i];
+      if (R->h_tid & GCFLAG_STOLEN)       /* ignore stolen objects */
+        continue;
+      gcptr L = (gcptr)R->h_revision;
+      assert(L->h_revision == localrev);
+      L->h_revision = new_revision;
+    }
+}
+
 void CommitTransaction(void)
 {   /* must save roots around this call */
   revision_t cur_time;
@@ -806,6 +825,7 @@ void CommitTransaction(void)
   assert(d->local_revision_ref = &stm_local_revision);
 
   UpdateChainHeads(d, cur_time, localrev);
+  UpdateProtectedChainHeads(d, cur_time, localrev);
 
   stmgc_committed_transaction(d);
   d->num_commits++;
