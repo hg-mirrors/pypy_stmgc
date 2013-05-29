@@ -33,8 +33,16 @@ class Revision(object):
         self.globalstate = globalstate
         self.previous = globalstate.most_recent_committed_revision
         self.content = {}     # mapping StmObject: [value of fields] or Deleted
+        print 'MODEL: NEW rev %r' % self
         self.read_set = set()
         self.committed = False
+
+    def __repr__(self):
+        if hasattr(self, 'commit_time'):
+            return '<Revision 0x%x commit_time=%r>' % (id(self),
+                                                       self.commit_time)
+        else:
+            return '<Revision 0x%x>' % (id(self),)
 
     def _reverse_range(self, older_excluded_revision):
         result = []
@@ -64,11 +72,15 @@ class Revision(object):
 
     def _validate(self):
         gs = self.globalstate
-        print 'VALIDATE'
+        print 'MODEL: VALIDATE'
         self._extend_timestamp(gs.most_recent_committed_revision)
 
     def _commit(self, new_previous):
         self._extend_timestamp(new_previous)
+        if hasattr(self, 'start_time'):
+            print 'MODEL: COMMIT: start_time =', self.start_time
+            #if self.start_time == 82:
+            #    import pdb;pdb.set_trace()
         self.committed = True
         del self.read_set
         for stmobj in self.content:
@@ -78,13 +90,13 @@ class Revision(object):
                 while stmobj not in past.content:
                     past = past.previous
                 past.content[stmobj] = Deleted
-                print 'COMMIT: DELETING %r FROM %r' % (stmobj, past)
+                print 'MODEL: COMMIT: DELETING %r IN %r' % (stmobj, past)
 
     def _add_in_read_set(self, stmobj):
         if stmobj.created_in_revision is self:
             return     # don't record local objects
         if stmobj not in self.read_set:
-            print 'ADD IN READ SET:', stmobj
+            print 'MODEL: ADD IN READ SET:', stmobj
             self.read_set.add(stmobj)
 
     def _try_read(self, stmobj):
@@ -107,6 +119,7 @@ class Revision(object):
             if content is Deleted:
                 raise Deleted
             self.content[stmobj] = content[:]
+            print 'MODEL: TRY_WRITE: %r' % stmobj
         self._add_in_read_set(stmobj)
         return self.content[stmobj]
 
