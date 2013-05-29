@@ -65,14 +65,17 @@ thread has committed changes to it (hereafter called the "foreign
 thread").  Then we "steal" the object.  It is a read-only operation
 performed by peeking on the foreign thread's data.  The operation
 involves making a duplicate of the original copy if it was in the
-foreign thread's nursery, so that no thread ever reads another thread's
-nursery outside of "stealing".  The stolen copy, or the original
-protected copy if it was not young, is then marked as public.  From now
-on nobody is allocated to change the content of this copy, and it
-becomes the current public copy.
+foreign thread's nursery (so that no thread ever reads another thread's
+nursery, outside of "stealing").  The stolen copy, or the original
+protected copy if it was not in the nursery, is then marked as public.
+From now on nobody is allowed to change the content of this copy, and it
+becomes the current public copy.  These public copies accumulate: every
+time the same object is stolen by a different thread, a new public copy
+is made (so that unrelated threads don't have to worry about existing
+public copies being written to).
 
 3. A subtle but important point about making a public copy is about all
-references stored in the object: if they point to other protected
+the references stored in the object: if they point to other protected
 objects, then we cannot simply keep them as they are in the public copy.
 In that case, we have to replace these references with pointers to
 public "stubs".  A stub consists of only the header of the object.  It
@@ -80,8 +83,44 @@ is set up in the same way as in point 1 above: it plays the role of an
 "older" public copy of a protected object (although it is not actually
 older of course).  If "we", the thread that just stole the object, then
 try to follow one of the references, we will access one of these stubs,
-and go back to point 1: we will need to steal it again.
+and go back to point 1: we will need to steal the target object's
+protected copy.
 
+
+Implementation
+--------------
+
+This design is made to optimize the hopefully common case: objects we
+handle are mostly private or protected.  We can design in consequence
+the following three points:
+
+1. the extra data stored in the objects (GC flags, and one extra word
+called `h_revision`).
+
+2. the other "off-line" data stored in thread-local data.
+
+3. the read/write barriers.
+
+Point 3 is essential for performance: we want most importantly a read
+barrier that doesn't trigger for the case of reading protected and
+private objects, which is supposed to be the most common case.
+Moreover, it should also not trigger in the basic case of reading a
+never-modified public object.  There are basically three cases:
+
+1. read_barrier(P) = P   [if P is directly a non-modified copy]
+
+2. read_barrier(P) = P->h_revision   [a protected copy with a private one]
+
+3. all other more complex cases, handled by a call.
+
+It is possible to compress the first two cases into C code that GCC
+compiles into two or three assembler instructions, using a conditional
+move.  (Still, it is unclear so far if case 2 is worth inlining at every
+read barrier site, or should be left to the call.)
+
+The case of the write barrier is similar, but differs in the exact
+checks: basically case 1 is only for private objects.  This could be
+done simply by checking a different GC flags.
 
 
 
