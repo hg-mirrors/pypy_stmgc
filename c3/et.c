@@ -166,6 +166,9 @@ gcptr stm_DirectReadBarrier(gcptr G)
 
   if (R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
     {
+      if (gcptrlist_size(&d->stolen_objects) > 0)
+        stmgc_normalize_stolen_objects();
+
       wlog_t *entry;
       gcptr L;
       G2L_FIND(d->public_to_private, R, entry, goto not_found);
@@ -818,6 +821,9 @@ void CommitTransaction(void)
           (long)cur_time);
 
   revision_t localrev = stm_local_revision;
+  UpdateProtectedChainHeads(d, cur_time, localrev);
+  smp_wmb();
+
   revision_t newrev = -(cur_time + 1);
   assert(newrev & 1);
   ACCESS_ONCE(stm_local_revision) = newrev;
@@ -825,7 +831,6 @@ void CommitTransaction(void)
   assert(d->local_revision_ref = &stm_local_revision);
 
   UpdateChainHeads(d, cur_time, localrev);
-  UpdateProtectedChainHeads(d, cur_time, localrev);
 
   stmgc_committed_transaction(d);
   d->num_commits++;
