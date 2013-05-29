@@ -2,23 +2,98 @@
 Details of the interactions between STM and the GC
 ==================================================
 
-Below, an "object" means really one version of an object, as allocated
-in memory.  What is from the higher level the "same" object may exist in
-several versions (we say "higher level object" to mean this).  Usually
-these versions are objects in a linked list, chained together with the
-h_revision field in the objects' headers.
+In this document we say "high-level object" to mean an object from the
+point of the user of the library, as opposed to an "object copy", which
+occupies the space of one allocated piece of memory.  One high-level
+object can exist in several copies simultaneously.  This concept of
+"copy" should not be confused with a "revision", which stands for a
+globally consistent copy of all objects.  One revision is the result of
+one transaction.  A program usually has one revision per thread in
+progress, plus any number of older committed revisions.  The committed
+revisions are globally ordered.
 
-Each object is either young or old.  All new objects are allocated
-young.  They become old at the next minor collection.  In the common
-case, objects are allocated in the nursery, and during the next minor
-collection, they are moved outside (if they survive).  The nursery
-contains only young objects, but a few objects outside might be young
-too (e.g. objects too large for the nursery).  (In fact we found out in
-PyPy that it's a good idea to create objects young even if they are
-outside the nursery; otherwise, a program that creates a lot of
-medium-sized objects will quickly exhaust the memory and trigger a lot
-of major collections.)  For the rest of this document we'll ignore young
-objects outside the nursery.
+The object copies exist in one of three main states: they can be
+"private", "protected" or "public".  A copy is private when it belongs
+to the transaction in progress.  When that transaction commits, it
+becomes protected, and remains so as long as it is accessed only by the
+same thread.  A copy becomes public only when another thread requests
+access to it (or, more precisely, "steals" access to it).  Once public,
+a copy is immutable in memory.
+
+From the point of view of the generational GC, each copy is either young
+or old.  All new copies are allocated young.  They become old at the
+next minor collection.  In the common case, copies are allocated in the
+nursery, and during the next minor collection, if they survive, they are
+moved outside.  The nursery contains only young copies, but a few copies
+outside might be young too (e.g. copies of objects too large for the
+nursery).  (In fact we found out in PyPy that it's a good idea to create
+objects young even if they are outside the nursery; otherwise, a program
+that creates a lot of medium-sized objects will quickly exhaust the
+memory and trigger a lot of major collections.)  For the rest of this
+document we'll ignore young copies outside the nursery.
+
+An object that was never seen by a different thread has got at most two
+copies: the first, protected, is the copy at the latest committed
+revision; and the other, private, is the current copy.  If the
+transaction aborts we can forget the private copy and reuse the previous
+protected copy.  If the transaction commits we forget the previous
+protected copy instead; then at this point all private objects become
+protected.  If the object is modified again in the near future, we reuse
+the memory that was occupied by the previous copy to store the next
+private copy.  As a result, each of these two spaces in memory can be
+young or old.  When the GC runs, if any one of these two copies is
+young, only the other copy is kept.  Similarly during major collections,
+only one copy is kept.  So objects no longer modified will eventually
+consume only one space.
+
+The way to share data between threads goes via prebuilt objects, which
+are always public: it is their existence that gives the starting point
+for threads to see each other's objects.  This involves three different
+steps.
+
+1. A thread tries to write to a public object.  This is done by
+allocating a fresh private copy of the public object.  Then writes go to
+the private copy.  If the transaction commits, the private copy becomes
+protected, and the public object is made to point to it (with
+multithread care).  From now on, any access to the public object from
+the same thread will work on the protected object or its future private
+copy.  Any access from a different thread will trigger "stealing", as
+explained next.
+
+2. A thread tries to access a public object but finds that another
+thread has committed changes to it (hereafter called the "foreign
+thread").  Then we "steal" the object.  It is a read-only operation
+performed by peeking on the foreign thread's data.  The operation
+involves making a duplicate of the original copy if it was in the
+foreign thread's nursery, so that no thread ever reads another thread's
+nursery outside of "stealing".  The stolen copy, or the original
+protected copy if it was not young, is then marked as public.  From now
+on nobody is allocated to change the content of this copy, and it
+becomes the current public copy.
+
+3. A subtle but important point about making a public copy is about all
+references stored in the object: if they point to other protected
+objects, then we cannot simply keep them as they are in the public copy.
+In that case, we have to replace these references with pointers to
+public "stubs".  A stub consists of only the header of the object.  It
+is set up in the same way as in point 1 above: it plays the role of an
+"older" public copy of a protected object (although it is not actually
+older of course).  If "we", the thread that just stole the object, then
+try to follow one of the references, we will access one of these stubs,
+and go back to point 1: we will need to steal it again.
+
+
+
+
+
+
+
+------------
+
+
+
+
+
 
 Independently, each object can be private or non-private (we used to say
 local or global).  The private objects are the ones belonging to the
