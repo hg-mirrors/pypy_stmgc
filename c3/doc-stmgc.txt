@@ -87,13 +87,13 @@ An object that was never seen by a different thread has got either one
 of two copies, both protected: the "main" one, used by the thread, which
 may be private or not depending on whether the object was modified in
 the current transaction; and, if the object is private but older than
-the current transaction, then it has got a secondary copy whose purpose
-is to record the state that the object had at the start of the current
+the current transaction, then it has got a backup copy whose purpose is
+to record the state that the object had at the start of the current
 transaction.
 
 If an object is committed and then no longer modified for long enough,
 the next (minor or major) GC will free the space that was used by the
-secondary copy.
+backup copy.
 
 The way to share data between threads goes via prebuilt objects, which
 are always public: it is their existence that gives the starting point
@@ -166,10 +166,10 @@ For performance reasons, "being private" is not directly a flag in the
 object, because when a transaction commits, we don't want to have to
 walk all private objects to change this flag.  Instead, private objects
 have a precise negative odd number in their `h_revision` field, called
-the "local revision number".  When a transaction commits, we change the
-value of the local revision number, and all previously-private objects
-become automatically protected.  So the write barrier fast-path checks
-if the `h_revision` is equal from the local revision number.
+the "local revision identifier".  When a transaction commits, we change
+the value of the local revision identifier, and all previously-private
+objects become automatically protected.  So the write barrier fast-path
+checks if the `h_revision` is equal from the local revision identifier.
 
 Note that this design relies on the following property: in a given copy
 of an object which was committed at revision N, all pointers points to
@@ -218,8 +218,8 @@ The model described above is known in the literature as the "extendable
 timestamp" model.  We apply it for public object.
 
 
-Pointers and revision numbers on protected objects
---------------------------------------------------
+Commits on protected objects
+----------------------------
 
 In traditional transactional systems, we have a special case to speed up
 transactions that don't do any write; but that seems too restricted to
@@ -254,3 +254,28 @@ with other transactions already committed.  (My current guess is that we
 can in this way reduce the pressure over the word of memory that
 contains the shared "global time" variable, and make many very short
 transactions efficient.)
+
+
+Details of protected objects
+----------------------------
+
+As described above, each thread has a "local revision identifier".  It
+is a negative odd number that changes whenever it commits a transaction.
+The important point for the write barrier is that on any object copy,
+`h_revision` must be equal to the local revision identifier if and only
+if the copy is private.  A newly allocated object is always private.
+Once the transaction commits it becomes merely protected.  Its
+`h_revision` field doesn't change (but the thread's local revision
+identifier does).  If later the write barrier triggers on it, we make a
+backup copy of the object and copy the content of the primary copy to
+it.  We also set `h_revision` in the primary copy to point to the
+backup copy: as long as `h_revision` is different from the local
+revision identifier, its exact value is otherwise not used.  In this way
+we can keep using the same backup copy in each future transaction
+that needs to write to the object.
+
+The backup copy is used in two cases.  One is if the transaction aborts;
+then we copy the content back over the regular protected copy.  The
+other case is if the object is stolen.  In that case, if the object has
+an active backup copy, we must steal this one, because the regular
+protected copy is actually private at that point in time.
