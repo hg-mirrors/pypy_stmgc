@@ -2,6 +2,55 @@
 Details of the interactions between STM and the GC
 ==================================================
 
+
+--------------------------
+Introduction (hand-waving)
+--------------------------
+
+When we run multiple threads, the common case is to access objects that
+have only been seen by the current thread.  Accessing the same object
+from multiple threads is possible, and handled correctly (that's the
+whole point), but a relatively rare case.
+
+So each object is classified as "public" or "protected".  New objects
+are protected until they are read by a different thread.  The point is
+to use very different mechanisms for public and for protected objects.
+Public objects are visible by all threads, but read-only in memory; to
+change them, a copy must be made, and the changes written to the copy
+(the "redolog" approach to STM).  Protected objects, on the other hand,
+are modified in-place, with (if necessary) a copy of them being made
+only for the purpose of a possible abort of the transaction (the
+"undolog" approach).
+
+This is combined with a generational GC similar to PyPy's --- but here,
+each thread gets its own nursery and does its own "minor collections",
+independently of the others.
+
+Objects start as protected, and when another thread tries to follow a
+pointer to them, then it is that other thread's job to carefully "steal"
+the object and turn it public (possibly making a copy of it if needed,
+e.g. if it was still a young object living in the original nursery).
+
+The same object can exist temporarily in multiple versions: any number
+of public copies; at most one active protected copy; and optionally one
+private copy per thread (this is the copy as currently seen by the
+transaction in progress on that thread).  The GC cleans up the
+unnecessary copies.
+
+These ideas are basically variants and extensions of the same basic idea
+of keeping multiple copies with revision numbers to track them.
+Moreover, "read barriers" and "write barriers" are used by the C program
+calling into this library in order to be sure that it is accessing the
+right version of the object.  In the current variant we can have
+extremely cheap read barriers, which are definitely a major speed
+improvement over the previous variants (and, as far as I know, over most
+of the other existing STMs).
+
+
+----------------------
+Details (more precise)
+----------------------
+
 In this document we say "high-level object" to mean an object from the
 point of the user of the library, as opposed to an "object copy", which
 is what occupies the space of one allocated piece of memory.  One
@@ -10,40 +59,41 @@ concept of "copy" should not be confused with a "revision", which stands
 for a globally consistent copy of all objects.  One revision is the
 result of one transaction.  A program usually has one revision per
 thread in progress, plus any number of older committed revisions.  The
-committed revisions are globally ordered.
+committed revisions are globally ordered.  This is the order that the
+multithreaded program appears to have followed serially.
 
-The object copies exist in one of three main states: they can be
-"private", "protected" or "public".  A copy is private when it belongs
-to the transaction in progress.  When that transaction commits, it
-becomes protected, and remains so as long as it is accessed only by the
-same thread.  A copy becomes public only when another thread requests
-access to it (or, more precisely, "steals" access to it).  Once public,
-a copy is immutable in memory.
+The object copies exist in one of two main states: they can be
+"protected" or "public".  A copy is also called "private" when it was
+modified by the transaction in progress; this copy is always protected
+and invisible to other threads.  When that transaction commits, all
+private copies become protected, and remain so as long as it is accessed
+only by the same thread.  A copy becomes public only when another thread
+requests access to it (or, more precisely, "steals" access to it).  Once
+public, a copy is immutable in memory.
 
 From the point of view of the generational GC, each copy is either young
 or old.  All new copies are allocated young.  They become old at the
 next minor collection.  In the common case, copies are allocated in the
 nursery, and during the next minor collection, if they survive, they are
 moved outside.  The nursery contains only young copies, but a few copies
-outside might be young too (e.g. copies of objects too large for the
+outside might be young too (e.g. object copies too large for the
 nursery).  (In fact we found out in PyPy that it's a good idea to create
 objects young even if they are outside the nursery; otherwise, a program
 that creates a lot of medium-sized objects will quickly exhaust the
 memory and trigger a lot of major collections.)  For the rest of this
 document we'll ignore young copies outside the nursery.
 
-An object that was never seen by a different thread has got at most two
-copies: the first, protected, is the copy at the latest committed
-revision; and the other, private, is the current copy.  If the
-transaction aborts we can forget the private copy and reuse the previous
-protected copy.  If the transaction commits we forget the previous
-protected copy instead; then the private copy becomes protected, like
-*all* private copies at this point.  If the object is modified again in
-the near future, we reuse the memory that was occupied by the previous
-copy to store the next private copy.  As a result, each of these two
-spaces in memory can be young or old.  If an object is no longer
-modified for long enough, the next (minor or major) GC will free one of
-the two spaces it uses.
+An object that was never seen by a different thread has got either one
+of two copies, both protected: the "main" one, used by the thread, which
+may be private or not depending on whether the object was modified in
+the current transaction; and, if the object is private but older than
+the current transaction, then it has got a secondary copy whose purpose
+is to record the state that the object had at the start of the current
+transaction.
+
+If an object is committed and then no longer modified for long enough,
+the next (minor or major) GC will free the space that was used by the
+secondary copy.
 
 The way to share data between threads goes via prebuilt objects, which
 are always public: it is their existence that gives the starting point
@@ -53,15 +103,15 @@ steps.
 1. A thread tries to write to a public object.  This is done by
 allocating a fresh private copy of the public object.  Then writes go to
 the private copy.  If the transaction commits, the private copy becomes
-protected, and the public object is made to point to it (with
+simply protected, and the public object is made to point to it (with
 multithread care).  From now on, any access to the public object from
-the same thread will work on the protected object or its future private
-copy.  Any access from a different thread will trigger "stealing", as
-explained next.
+the same thread will work on the protected copy.  Any access from a
+different thread will trigger "stealing", as explained next.
 
 2. When we are running a thread, it may try to access a public object
 but find that another thread (the "foreign thread") has committed
-changes to it .  Then we "steal" the object.  It is a read-only
+changes to it; i.e. the object has a protected copy, but belonging to a
+foreign thread.  Then we "steal" the object.  It is a read-only
 operation performed by peeking on the foreign thread's data.  The
 operation involves making a duplicate of the original copy, if it was in
 the foreign thread's nursery (so that no thread ever reads another
@@ -69,11 +119,11 @@ thread's nursery, outside of "stealing").  The stolen copy, or the
 original protected copy if it was not in the nursery, is then marked as
 public.  From now on nobody is allowed to change (or free) the content
 of this copy, and it becomes the current public copy.  These public
-copies accumulate: every time the same object is stolen by a different
-thread, a new public copy is made (so that unrelated threads don't have
-to worry about existing public copies being updated).  (This chain of
-objects is freed at the next major GC, which is a stop-the-world
-operation.)
+copies accumulate in case the same object is successively stolen by
+different threads.  A new public copy is made every time, so that
+unrelated threads don't have to worry about existing public copies being
+updated.  (This chain of objects is freed at the next major GC, which is
+a stop-the-world operation.)
 
 3. A subtle but important point about making a public copy is about all
 the references stored in the object: if they point to other protected
@@ -103,23 +153,23 @@ called `h_revision`).
 3. the read/write barriers.
 
 Point 3 is essential for performance: we want most importantly a read
-barrier that doesn't trigger for the cases described above.  There are
-basically three cases:
+barrier that doesn't trigger for the cases described above.  The read
+barrier needs to check if a pointer P references a public copy that
+was outdated by a future revision.  This is an easy check, which can
+be implemented by checking a flag in the header of the copy.  In all
+the common cases, this flag is not set, and no actual call needs to
+be done.
 
-1. read_barrier(P) = P   [if P is directly a non-modified copy]
-
-2. read_barrier(P) = P->h_revision   [protected copy -> private copy]
-
-3. all other more complex cases, handled by a call.
-
-It is possible to compress the first two cases into C code that GCC
-compiles into a total of two or three assembler instructions, using a
-conditional move.  (Still, it is unclear so far if case 2 is worth
-inlining at every read barrier site, or should be left to the call.)
-
-The case of the write barrier is similar, but differs in the check for
-case 1: this case is reduced to only private objects.  This could be
-done simply by checking a different GC flags.
+The case of the write barrier is similar, but differs in the check we
+need to do.  We need to do a call if the object is not already private.
+For performance reasons, "being private" is not directly a flag in the
+object, because when a transaction commits, we don't want to have to
+walk all private objects to change this flag.  Instead, private objects
+have a precise negative odd number in their `h_revision` field, called
+the "local revision number".  When a transaction commits, we change the
+value of the local revision number, and all previously-private objects
+become automatically protected.  So the write barrier fast-path checks
+if the `h_revision` is equal from the local revision number.
 
 Note that this design relies on the following property: in a given copy
 of an object which was committed at revision N, all pointers points to
@@ -134,10 +184,12 @@ The extendable timestamp model
 
 A public object copy is either up-to-date (no more recent committed
 copy) or outdated.  The public copies need to have globally consistent
-revision numbers (produced at commit time).  If there are several copies
-of the same object, we only need to store the revision number of the
-most recent one.  The previous copies are simply outdated and need
-instead to store a pointer to a more recent copy.
+revision numbers (produced at commit time).  If there are several public
+copies of the same object, we only need to store the revision number of
+the most recent one.  The previous copies are simply outdated and need
+instead to store a pointer to a more recent copy.  We use the same field
+`h_revision` to store either the revision number or the pointer to the
+more recent copy.
 
 The important property is that committed transactions must be
 "linearized": when we look at them a posteriori, it must be as if they
@@ -150,17 +202,20 @@ revision number.  Each transaction in progress stores a temporary
 at the end of the transaction, all objects read during the transaction
 have a revision not greater than this starting time, then we have no
 "read-write" conflict (i.e. reads of an object that another thread has
-modified; there are also "write-write" conflicts).  An improvement over
-this basic model is that if, during the transaction, we are about to
-read a new object and detect a read-write conflict, we can try to
-"extend" the starting time to the value that is now stored in the global
-time variable.  If none of the objects that we have read previously have
-been modified in the interval, then the transaction would have given the
-same results if it had started at the new time.
+modified; there are also in theory "write-write" conflicts, but this
+case can be reduced to read-write conflicts if we consider that all
+writes are also reads).
+
+An improvement over this basic model is that if, during the transaction,
+we are about to read a new object and detect a read-write conflict, we
+can try to "extend" the starting time to the value that is now stored in
+the global time variable.  We need to check that none of the objects
+that we have read previously have been modified in the interval.  If
+that is the case, then the transaction would have given the same results
+if it had started at the new time.
 
 The model described above is known in the literature as the "extendable
-timestamp" model.  We apply it for public object.  It can however be
-tweaked for protected objects.
+timestamp" model.  We apply it for public object.
 
 
 Pointers and revision numbers on protected objects
@@ -169,7 +224,7 @@ Pointers and revision numbers on protected objects
 In traditional transactional systems, we have a special case to speed up
 transactions that don't do any write; but that seems too restricted to
 be useful in PyPy.  Instead, we can have a special case for transactions
-that don't write to any *public* object.  Our assumption is that
+that didn't try to write to any *public* object.  Our assumption is that
 transactions can be anywhere from very small to very large; the small
 ones are unlikely to change any object that has been seen by another
 thread.  Moreover the previous transaction in the same thread is
@@ -182,15 +237,20 @@ thread-local number (never actually made explicit in the code).  The
 global order of the committed transactions is given by the ordering of
 these 2-tuples.
 
-A commit with writes to public objects works as described above; it
+A commit which writes to public objects works as described above; it
 gives the transaction the number `(global_time, 0)`, and atomically
 increments `global_time`.
 
 A commit with no write to any public object produces the number
-`(start_time, N+1)`, provided that we didn't have any object stolen
-since `start_time`.  This condition is enough to guarantee that it is ok
-to linearize the transaction at `(start_time, N+1)` even though other
-threads might already have produced transactions linearized at some
-greater time.  Indeed, the fact that no object of ours was stolen
+`(start_time, N+1)`, provided that we didn't have any of our objects
+stolen since `start_time`.  This condition is enough to guarantee that
+it is ok to linearize the transaction at `(start_time, N+1)` even though
+other threads might already have produced transactions linearized at
+some later time.  Indeed, the fact that no object of ours was stolen
 means that no other thread's transaction depends on any object we're
-about to commit.
+about to commit.  In other words, the absence of both public writes and
+stealing is a cheap way to determine that this transaction "commutes"
+with other transactions already committed.  (My current guess is that we
+can in this way reduce the pressure over the word of memory that
+contains the shared "global time" variable, and make many very short
+transactions efficient.)
