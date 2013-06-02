@@ -171,13 +171,6 @@ the value of the local revision identifier, and all previously-private
 objects become automatically protected.  So the write barrier fast-path
 checks if the `h_revision` is equal from the local revision identifier.
 
-Note that this design relies on the following property: in a given copy
-of an object which was committed at revision N, all pointers points to
-copies of objects which were committed at or before revision N.  This
-property is true by construction, but we must be careful not to break it
-by "optimizing" the content of a copy.  In particular the GC, during
-both minor and major collections, has to preserve this property.  
-
 
 The extendable timestamp model
 ------------------------------
@@ -279,3 +272,36 @@ then we copy the content back over the regular protected copy.  The
 other case is if the object is stolen.  In that case, if the object has
 an active backup copy, we must steal this one, because the regular
 protected copy is actually private at that point in time.
+
+
+Minor and major collections
+---------------------------
+
+The GC needs to interact with objects being copied outside the nursery:
+we need to detect if, later, they are modified to contain a pointer to a
+nursery object.  This is the classical purpose of a write barrier in GC
+terms.  In our case, we need the write barrier's call to occur even on a
+private object freshly copied out of the nursery, the first time it is
+written to.  This is easily combined with the write barrier described
+above: when a minor collection copies objects out of the nursery,
+private objects' `h_revision` field is temporarily replaced with a
+different value.
+
+Major (global) collections are stop-the-world: when they need to occur,
+the threads are all stopped at the next safe point.  Then the problem
+is simplified to a regular complete garbage collection.  Additionally,
+as hinted above, we can compact chains of public object copies.
+
+Note that our design relies on the following property: in a given copy
+of an object which was committed at revision N, all pointers points to
+copies of objects which were committed at or before revision N.  This
+property is true by construction, but we must be careful not to break it
+by "optimizing" the content of a copy.  In particular, major collections
+have to preserve this property.  It means that the best (but still safe)
+thing to do during major collection is to compress chains of public
+objects down to one copy (the most recent one) and one stub.  We fix the
+references in existing objects to point to either the real copy or the
+stub.  This is probably a bit involved: we might have to get the current
+revision numbers of all threads, and theoretically compact each interval
+of number down to only one number, but still keep one active revision
+number per thread.
