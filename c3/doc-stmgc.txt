@@ -41,10 +41,10 @@ These ideas are basically variants and extensions of the same basic idea
 of keeping multiple copies with revision numbers to track them.
 Moreover, "read barriers" and "write barriers" are used by the C program
 calling into this library in order to be sure that it is accessing the
-right version of the object.  In the current variant we can have
-extremely cheap read barriers, which are definitely a major speed
-improvement over the previous variants (and, as far as I know, over most
-of the other existing STMs).
+right version of the object.  In the current variant we can have very
+cheap read barriers, which are definitely a major speed improvement over
+the previous variants (and, as far as I know, over most of the other
+existing STMs).
 
 
 ----------------------
@@ -154,22 +154,34 @@ called `h_revision`).
 
 Point 3 is essential for performance: we want most importantly a read
 barrier that doesn't trigger for the cases described above.  The read
-barrier needs to check if a pointer P references a public copy that
-was outdated by a future revision.  This is an easy check, which can
-be implemented by checking a flag in the header of the copy.  In all
-the common cases, this flag is not set, and no actual call needs to
-be done.
+barrier has two purposes: it needs to check that a given pointer P
+references an object that is not outdated already; and it needs to
+record the pointer in the "read set" of the current transaction.
 
-The case of the write barrier is similar, but differs in the check we
-need to do.  We need to do a call if the object is not already private.
-For performance reasons, "being private" is not directly a flag in the
-object, because when a transaction commits, we don't want to have to
-walk all private objects to change this flag.  Instead, private objects
-have a precise negative odd number in their `h_revision` field, called
-the "local revision identifier".  When a transaction commits, we change
-the value of the local revision identifier, and all previously-private
-objects become automatically protected.  So the write barrier fast-path
-checks if the `h_revision` is equal from the local revision identifier.
+The first check is easy, and can be implemented by checking a flag in
+the header of the copy.  In all the common cases, this flag is not set,
+and no actual call needs to be done.
+
+The recording in the read set is a bit more annoying.  We need to
+maintain a thread-local *set* of all accessed objects, but we don't care
+about the order or recording the occasional duplicate.  Moreover we
+don't need to record the private objects; but we do need all other
+protected objects, as well as public objects.  The best approach is
+probably to have a quick check "is it definitely recorded already?"
+inline, and do the call if the check fails.  It needs careful design to
+be done in only a few CPU instructions, but it should be possible.
+
+The case of the write barrier is similar to the first half of the read
+barrier, but differs in the check we need to do.  We need to do a call
+if the object is not already private.  For performance reasons, "being
+private" is not directly a flag in the object, because when a
+transaction commits, we don't want to have to walk all private objects
+to change this flag.  Instead, private objects have a precise negative
+odd number in their `h_revision` field, called the "local revision
+identifier".  When a transaction commits, we change the value of the
+local revision identifier, and all previously-private objects become
+automatically protected.  So the write barrier fast-path checks if the
+`h_revision` is equal from the local revision identifier.
 
 
 The extendable timestamp model
