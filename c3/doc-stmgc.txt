@@ -12,24 +12,26 @@ have only been seen by the current thread.  Accessing the same object
 from multiple threads is possible, and handled correctly (that's the
 whole point), but a relatively rare case.
 
-So each object is classified as "public" or "protected".  New objects
-are protected until they are read by a different thread.  The point is
-to use very different mechanisms for public and for protected objects.
-Public objects are visible by all threads, but read-only in memory; to
-change them, a copy must be made, and the changes written to the copy
-(the "redolog" approach to STM).  Protected objects, on the other hand,
-are modified in-place, with (if necessary) a copy of them being made
-only for the purpose of a possible abort of the transaction (the
-"undolog" approach).
+So each object is classified as "public", "protected", or "private".
+Objects are created private, and later become protected, and stay so as
+long as they are not read by a different thread.  The point is to use
+very different mechanisms for public and for non-public objects.  Public
+objects are visible by all threads, but read-only in memory; to change
+them, a copy must be made, and the changes written to the copy (the
+"redolog" approach to STM).  Non-public objects, on the other hand, are
+modified in-place, with (if necessary) a copy of them being made only
+for the purpose of a possible abort of the transaction (the "undolog"
+approach).
 
 This is combined with a generational GC similar to PyPy's --- but here,
 each thread gets its own nursery and does its own "minor collections",
 independently of the others.
 
-Objects start as protected, and when another thread tries to follow a
-pointer to them, then it is that other thread's job to carefully "steal"
-the object and turn it public (possibly making a copy of it if needed,
-e.g. if it was still a young object living in the original nursery).
+The idea of protected objects is that when another thread tries to
+follow a pointer to them, then it is that other thread's job to
+carefully "steal" the object and turn it public (possibly making a copy
+of it if needed, e.g. if it was still a young object living in the
+original nursery).
 
 The same object can exist temporarily in multiple versions: any number
 of public copies; at most one active protected copy; and optionally one
@@ -62,14 +64,14 @@ thread in progress, plus any number of older committed revisions.  The
 committed revisions are globally ordered.  This is the order that the
 multithreaded program appears to have followed serially.
 
-The object copies exist in one of two main states: they can be
-"protected" or "public".  A copy is also called "private" when it was
-modified by the transaction in progress; this copy is always protected
-and invisible to other threads.  When that transaction commits, all
-private copies become protected, and remain so as long as it is accessed
-only by the same thread.  A copy becomes public only when another thread
-requests access to it (or, more precisely, "steals" access to it).  Once
-public, a copy is immutable in memory.
+The object copies exist in one of three main states: they can be
+"public", "protected" or "private".  A private copy is a copy that was
+created or modified by the transaction in progress; this copy is always
+invisible to other threads.  When that transaction commits, all private
+copies become protected.  They remain protected as long as they are only
+accessed by the same thread.  A copy becomes public only when another
+thread requests access to it (or, more precisely, "steals" access to
+it).  Once public, a copy is immutable in memory.
 
 From the point of view of the generational GC, each copy is either young
 or old.  All new copies are allocated young.  They become old at the
@@ -83,17 +85,15 @@ that creates a lot of medium-sized objects will quickly exhaust the
 memory and trigger a lot of major collections.)  For the rest of this
 document we'll ignore young copies outside the nursery.
 
-An object that was never seen by a different thread has got either one
-of two copies, both protected: the "main" one, used by the thread, which
-may be private or not depending on whether the object was modified in
-the current transaction; and, if the object is private but older than
-the current transaction, then it has got a backup copy whose purpose is
-to record the state that the object had at the start of the current
-transaction.
+An object that was never seen by a different thread has got at most one
+private copy (if it was created or modified by the current transaction)
+and one protected copy (if it is older than the current transaction).
+If it has two copies, then the private one is the regular copy, and the
+other copy works as a backup copy that remembers the state that the
+object had at the start of the current transaction.
 
-If an object is committed and then no longer modified for long enough,
-the next (minor or major) GC will free the space that was used by the
-backup copy.
+If an object has got a backup copy but isn't modified any more, the next
+(minor or major) GC collection will free the backup copy.
 
 The way to share data between threads goes via prebuilt objects, which
 are always public: it is their existence that gives the starting point
@@ -103,7 +103,7 @@ steps.
 1. A thread tries to write to a public object.  This is done by
 allocating a fresh private copy of the public object.  Then writes go to
 the private copy.  If the transaction commits, the private copy becomes
-simply protected, and the public object is made to point to it (with
+protected, and the public object is made to point to it (with
 multithread care).  From now on, any access to the public object from
 the same thread will work on the protected copy.  Any access from a
 different thread will trigger "stealing", as explained next.
@@ -141,9 +141,8 @@ Read/Write Barriers
 -------------------
 
 This design is made to optimize the hopefully common case: objects we
-handle are mostly private or protected, or if they are public, they are
-mostly read-only.  We can design in consequence the following three
-points:
+handle are mostly protected, or if they are public, they are mostly
+read-only.  We can design in consequence the following three points:
 
 1. the extra data stored in the objects (GC flags, and one extra word
 called `h_revision`).
@@ -162,12 +161,12 @@ The first check is easy, and could be implemented by checking a flag in
 the header of the copy.  But the recording in the read set is a bit more
 annoying.  We need to maintain a thread-local *set* of all accessed
 objects, but we don't care about the order or recording the occasional
-duplicate.  Moreover we don't need to record the private objects; but we
-do need all other protected objects, as well as public objects.  The
-best approach is probably to have a quick check "is it definitely
-recorded already?" inline, and do the call if the check fails.  It needs
-careful design to be done in only a few CPU instructions, but it should
-be possible.
+duplicate.  Moreover we don't need to record the private copies of
+objects; but we do need all the protected and public objects.  The best
+approach is probably to have a quick check "is it definitely recorded
+already?" inline, and do the call if the check fails.  It needs careful
+design to be done in only a few CPU instructions, but it should be
+possible.
 
 (Code like this compiles to 4 instructions in the fast path:
 
@@ -179,16 +178,16 @@ be possible.
 )
 
 The case of the write barrier is similar to the first half of the read
-barrier, but differs in the check we need to do.  We need to do a call
-if the object is not already private.  For performance reasons, "being
-private" is not directly a flag in the object, because when a
-transaction commits, we don't want to have to walk all private objects
-to change this flag.  Instead, private objects have a precise negative
-odd number in their `h_revision` field, called the "local revision
-identifier".  When a transaction commits, we change the value of the
-local revision identifier, and all previously-private objects become
-automatically protected.  So the write barrier fast-path checks if the
-`h_revision` is equal from the local revision identifier.
+barrier.  We need to do a call to the slow path if the object is not
+already private.  For performance reasons, "being private" is not
+directly a flag in the object, because when a transaction commits, we
+don't want to have to walk all private copies to change this flag.
+Instead, private copies have a precise negative odd number in their
+`h_revision` field, called the "private revision identifier".  When a
+transaction commits, we change the value of the private revision
+identifier, and all previously-private objects become automatically
+protected.  So the write barrier fast-path checks if the `h_revision` is
+equal to the private revision identifier.
 
 
 The extendable timestamp model
@@ -268,29 +267,10 @@ contains the shared "global time" variable, and make many very short
 transactions efficient.)
 
 
-Details of protected objects
-----------------------------
+Object copies in detail
+-----------------------
 
-As described above, each thread has a "local revision identifier".  It
-is a negative odd number that changes whenever it commits a transaction.
-The important point for the write barrier is that on any object copy,
-`h_revision` must be equal to the local revision identifier if and only
-if the copy is private.  A newly allocated object is always private.
-Once the transaction commits it becomes merely protected.  Its
-`h_revision` field doesn't change (but the thread's local revision
-identifier does).  If later the write barrier triggers on it, we make a
-backup copy of the object and copy the content of the primary copy to
-it.  We also set `h_revision` in the primary copy to point to the
-backup copy: as long as `h_revision` is different from the local
-revision identifier, its exact value is otherwise not used.  In this way
-we can keep using the same backup copy in each future transaction
-that needs to write to the object.
-
-The backup copy is used in two cases.  One is if the transaction aborts;
-then we copy the content back over the regular protected copy.  The
-other case is if the object is stolen.  In that case, if the object has
-an active backup copy, we must steal this one, because the regular
-protected copy is actually private at that point in time.
+See doc-objects.txt.
 
 
 Minor and major collections
@@ -322,5 +302,5 @@ objects down to one copy (the most recent one) and one stub.  We fix the
 references in existing objects to point to either the real copy or the
 stub.  This is probably a bit involved: we might have to get the current
 revision numbers of all threads, and theoretically compact each interval
-of number down to only one number, but still keep one active revision
+of numbers down to only one number, but still keep one active revision
 number per thread.

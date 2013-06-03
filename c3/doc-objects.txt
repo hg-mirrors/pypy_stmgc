@@ -1,0 +1,76 @@
+
+
+
+Object copies state transitions (changes of state of the *same* copy)
+---------------------------------------------------------------------
+
+
+
+  Private freshly created
+             \                Private, with backup
+              \                  ^       \    ^
+               \                /         \   |
+         commit \       modify /    commit |  |
+                 \            /            |  | modify
+                  V          /             |  |
+           Protected, no backup            V  |
+                ^    ^              Protected, with backup
+               /     |       gc       |
+       commit /      `----------------'
+             /
+            /
+    Private copy of
+    a public obj
+
+
+
+     Protected backup copy
+                  \
+                   \
+           stealing \         commit of newer version
+                     \         ,-----------------.
+                      V        |                 V
+             Up-to-date public copy       Outdated public copy
+
+
+
+Kind of object copy                                    h_revision
+-------------------------------------------------------------------
+
+Private objects:
+- freshly created                                         PRN
+- converted from a protected obj                          PRN
+- private copy of a public obj                            PRN
+
+Protected objects:
+- converted from fresh private obj                     (old PRN)
+- converted from a private obj with backup           ptr to backup
+- backup copy of a private obj                    original h_revision
+- backup copy still attached to a protected               GT
+- original obj after GC killed the backup                 GT
+
+Public objects:
+- prebuilt object, never modified                         -1
+- other public object, never modified                     GT
+- outdated, has a protected copy               ptr to prot/priv | 2
+- outdated, target stolen                   ptr to next public copy
+
+Public stubs:
+- from stealing: like outdated public objects
+- from major GC: like outdated public objects with target stolen
+
+
+PRN = Private revision number (negative odd number)
+GT = Global time (positive odd number)
+
+
+
+Off-line data stored in the thread-local structure
+--------------------------------------------------
+
+- the PRN (private revision number): odd, negative, changes for every
+  transaction that commits
+
+- list of pairs (private converted from protected, backup copy)
+
+- dict {public obj: private copy}
