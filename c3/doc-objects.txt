@@ -8,19 +8,19 @@ Object copies state transitions (changes of state of the *same* copy)
 
   Private freshly created
              \                Private, with backup
-              \                  ^       \    ^
-               \                /         \   |
-         commit \       modify /    commit |  |
-                 \            /            |  | modify
-                  V          /             |  |
-           Protected, no backup            V  |
+              \                ^  .          |  ^
+               \              /  .    commit |  |
+         commit \     modify /  .            |  |
+                 \          /  . commit      |  | modify
+                  V        /  V              |  |
+           Protected, no backup              V  |
                 ^    ^              Protected, with backup
                /     |       gc       |
        commit /      `----------------'
              /
             /
-    Private copy of
-    a public obj
+    Private copy of               (the dotted arrow is followed if the
+    a public obj                   protected backup copy was stolen)
 
 
 
@@ -52,8 +52,8 @@ Protected objects:
 Public objects:
 - prebuilt object, never modified                         -1
 - other public object, never modified                     GT
-- outdated, has a protected copy               ptr to prot/priv | 2
-- outdated, target stolen                   ptr to next public copy
+- outdated, has a protected copy              HANDLE to prot/priv copy
+- outdated, target stolen              ptr to a more recent public copy
 
 Public stubs:
 - from stealing: like outdated public objects
@@ -62,6 +62,8 @@ Public stubs:
 
 PRN = Private revision number (negative odd number)
 GT = Global time (positive odd number)
+HANDLE = Reference to a prot/priv copy and its thread
+         (positive even number, such that: handle % 4 == 2)
 
 
 
@@ -71,6 +73,120 @@ Off-line data stored in the thread-local structure
 - the PRN (private revision number): odd, negative, changes for every
   transaction that commits
 
-- list of pairs (private converted from protected, backup copy)
+- dict active_backup_copies = {private converted from protected: backup copy}
 
-- dict {public obj: private copy}
+- dict public_to_private = {public obj: private copy}
+
+- list read_set containing the objects in the read set, with possibly
+  some duplicates (but hopefully not too many)
+
+
+
+Kind of object copy            distinguishing feature
+-------------------------------------------------------------------
+
+Any private object             h_revision == PRN
+Private with a backup          in active_backup_copies
+Backup copy                    GCFLAG_BACKUP_COPY
+Any public object              GCFLAG_PUBLIC
+Any protected object           h_revision != PRN && !GCFLAG_PUBLIC
+Stubs                          GCFLAG_STUB
+
+A public object that might \
+be key in public_to_private    has additionally GCFLAG_PUBLIC_TO_PRIVATE
+
+
+
+Read barrier
+-----------------------------------------
+
+Inline check: if P in read_barrier_cache, we don't call the slow path.
+Slow path:
+
+    if h_revision == PRN, just add P to read_barrier_cache and return
+
+    if GCFLAG_PUBLIC:
+
+        follow the chained list of h_revision's as long as they are
+        regular pointers
+
+        if it ends with an odd revision number, check that it's older
+        than start_time; extend the start timestamp if not
+
+        if it ends with a handle (L, Thread):
+
+            if Thread is the current thread: set P = L
+
+            else: do stealing and restart the read barrier
+
+        if we land on a P in read_barrier_cache: return
+
+    add P to 'read_set'
+
+    add P to 'read_barrier_cache' and return
+
+
+Handles are stored for example in a global list, and the actual handle
+encodes an index in the list.  Every entry in the list is a pointer to a
+prot/priv object --- excepted once every N positions, where it is a
+thread descriptor giving the thread to which all N-1 following pointers
+belong.  The pair (L, Thread) is thus `(list[H], list[H rounded down to
+a multiple of N])`.
+
+Stealing of an object copy L is done with the "collection lock" of
+the target Thread.  The target would also acquire its own lock in
+when doing some operations, like a minor collection, which can't
+occur in parallel with stealing.
+
+Once we have the lock, stealing is:
+
+    if the situation changed while we were waiting for the lock, return
+
+    if L has got a backup copy, turn it public;
+    else L must be protected, and we make a public copy of it
+
+    update the original P->h_revision to point directly to the new
+    public copy
+
+
+
+Write barrier
+-----------------------------------------
+
+The write barrier works for both STM purposes and for GC purposes.
+
+Inline check: if h_revision == PRN && !GCFLAG_WRITE_BARRIER, we're done.
+Slow path:
+
+    R = read_barrier(P)     # always do a full read_barrier first
+
+    if h_revision == PRN:
+
+        GC only: remove GCFLAG_WRITE_BARRIER, add R to the GC list of
+        modified old objects to trace at the next minor collection,
+        and return R
+
+    elif GCFLAG_PUBLIC:
+
+        add the flag GCFLAG_PUBLIC_TO_PRIVATE to R, if needed
+
+        make a fresh private copy L of R, with h_revision == PRN
+
+        add {R: L} in 'public_to_private'
+
+        return L
+
+    else:    # protected object
+
+        if h_revision is not a pointer:
+
+            allocate a backup copy, and attach it to h_revision
+
+        copy the object into the backup copy
+
+        change h_revision to be PRN (i.e. turn private)
+
+        if GCFLAG_WRITE_BARRIER: remove it, add R to the GC list of
+        modified old objects to trace at the next minor collection
+
+        return R
