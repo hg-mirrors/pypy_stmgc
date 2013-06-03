@@ -158,18 +158,25 @@ barrier has two purposes: it needs to check that a given pointer P
 references an object that is not outdated already; and it needs to
 record the pointer in the "read set" of the current transaction.
 
-The first check is easy, and can be implemented by checking a flag in
-the header of the copy.  In all the common cases, this flag is not set,
-and no actual call needs to be done.
+The first check is easy, and could be implemented by checking a flag in
+the header of the copy.  But the recording in the read set is a bit more
+annoying.  We need to maintain a thread-local *set* of all accessed
+objects, but we don't care about the order or recording the occasional
+duplicate.  Moreover we don't need to record the private objects; but we
+do need all other protected objects, as well as public objects.  The
+best approach is probably to have a quick check "is it definitely
+recorded already?" inline, and do the call if the check fails.  It needs
+careful design to be done in only a few CPU instructions, but it should
+be possible.
 
-The recording in the read set is a bit more annoying.  We need to
-maintain a thread-local *set* of all accessed objects, but we don't care
-about the order or recording the occasional duplicate.  Moreover we
-don't need to record the private objects; but we do need all other
-protected objects, as well as public objects.  The best approach is
-probably to have a quick check "is it definitely recorded already?"
-inline, and do the call if the check fails.  It needs careful design to
-be done in only a few CPU instructions, but it should be possible.
+(Code like this compiles to 4 instructions in the fast path:
+
+  __thread char *read_barrier_cache;  /* thread-local cache of 64KB */
+
+  if (__builtin_expect(*(gcptr *)(read_barrier_cache + (((long)x) & 65535))
+                       != x, 0))
+      x = call_read_barrier(x);
+)
 
 The case of the write barrier is similar to the first half of the read
 barrier, but differs in the check we need to do.  We need to do a call
