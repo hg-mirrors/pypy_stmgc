@@ -126,6 +126,12 @@ Slow path:
     add P to 'read_barrier_cache' and return
 
 
+It is unclear if it's better to stick all private objects into the
+read_barrier_cache, or to extend the read barrier's inline code to also
+check if h_revision == PRN (trade-off of polluting the cache with
+private objects which might be a majority, vs. making the inline check
+larger).
+
 Handles are stored for example in a global list, and the actual handle
 encodes an index in the list.  Every entry in the list is a pointer to a
 prot/priv object --- excepted once every N positions, where it is a
