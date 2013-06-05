@@ -114,3 +114,15 @@ def test_prebuilt_is_public():
                                        GCFLAG_PUBLIC |
                                        GCFLAG_PREBUILT_ORIGINAL)
     assert classify(p) == "public"
+
+def test_change_prebuilt_object():
+    p = palloc(HDR + WORD)
+    lib.rawsetlong(p, 0, 28971289)
+    flags = p.h_tid
+    assert (flags & GCFLAG_PUBLIC_TO_PRIVATE) == 0
+    assert classify(p) == "public"
+    p2 = lib.stm_write_barrier(p)
+    assert p2 != p
+    assert classify(p) == "public"
+    assert classify(p2) == "private"
+    assert p.h_tid == flags | GCFLAG_PUBLIC_TO_PRIVATE

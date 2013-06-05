@@ -317,29 +317,32 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 
 static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 {
-  abort();
-#if 0
   if (R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
     {
       wlog_t *entry;
       gcptr L;
       G2L_FIND(d->public_to_private, R, entry, goto not_found);
       L = entry->val;
-      assert(L->h_revision == stm_local_revision);
+      assert(L->h_revision == stm_private_rev_num);   /* private object */
       return L;
     }
-  else
-    R->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
+  R->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
  not_found:;
   gcptr L = stmgc_duplicate(R, 0);
-  assert(L->h_revision == stm_local_revision);
+  assert(!(L->h_tid & GCFLAG_BACKUP_COPY));
+  assert(!(L->h_tid & GCFLAG_STOLEN));
+  assert(!(L->h_tid & GCFLAG_STUB));
+  L->h_tid &= ~(GCFLAG_OLD               |
+                GCFLAG_VISITED           |
+                GCFLAG_PUBLIC            |
+                GCFLAG_PREBUILT_ORIGINAL |
+                GCFLAG_PUBLIC_TO_PRIVATE |
+                GCFLAG_WRITE_BARRIER     |
+                0);
+  L->h_revision = stm_private_rev_num;
   g2l_insert(&d->public_to_private, R, L);
-  gcptrlist_insert(&d->public_to_young, R);
-  AddInReadSet(d, R);
-  /*mark*/
   return L;
-#endif
 }
 
 gcptr stm_WriteBarrier(gcptr P)
@@ -348,7 +351,12 @@ gcptr stm_WriteBarrier(gcptr P)
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
-  W = LocalizeProtected(d, P);
+  /*P = stm_DirectReadBarrier(P);*/
+
+  if (P->h_tid & GCFLAG_PUBLIC)
+    W = LocalizePublic(d, P);
+  else
+    W = LocalizeProtected(d, P);
 
   fprintf(stderr, "write_barrier: %p -> %p\n", P, W);
 
