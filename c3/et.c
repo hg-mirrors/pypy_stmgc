@@ -18,21 +18,18 @@ static revision_t global_cur_time = 2;
    die if we start more than 0x7fff threads. */
 static revision_t next_locked_value = (LOCKED + 1) | 1;
 
-/* a negative odd number that uniquely identifies the currently running
-   transaction (but the number in aborted transactions is reused).
-   Because we don't know yet the value of 'global_cur_time' that we'll
-   be assigned when we commit, we use the (negative of) the value of
-   'global_cur_time' when we committed the previous transaction. */
-__thread revision_t stm_local_revision;
+/* a negative odd number that identifies the currently running
+   transaction within the thread. */
+__thread revision_t stm_private_rev_num;
 
 
 revision_t stm_global_cur_time(void)  /* for tests */
 {
   return global_cur_time;
 }
-revision_t stm_local_rev(void)        /* for tests */
+revision_t get_private_rev_num(void)        /* for tests */
 {
-  return stm_local_revision;
+  return stm_private_rev_num;
 }
 struct tx_descriptor *stm_thread_descriptor(void)  /* for tests */
 {
@@ -70,6 +67,8 @@ static void inev_mutex_release(void)
 
 static gcptr HeadOfRevisionChainList(struct tx_descriptor *d, gcptr G)
 {
+  abort();
+#if 0
   gcptr R = G;
   revision_t v;
 
@@ -135,10 +134,13 @@ static gcptr HeadOfRevisionChainList(struct tx_descriptor *d, gcptr G)
       goto retry;                      // restart searching from R
     }
   return R;
+#endif
 }
 
 static inline gcptr AddInReadSet(struct tx_descriptor *d, gcptr R)
 {
+  abort();
+#if 0
   fprintf(stderr, "AddInReadSet(%p)\n", R);
   d->count_reads++;
   if (!fxcache_add(&d->recent_reads_cache, R)) {
@@ -153,10 +155,13 @@ static inline gcptr AddInReadSet(struct tx_descriptor *d, gcptr R)
       //      return Localize(d, R);
       //  }
   return R;
+#endif
 }
 
 gcptr stm_DirectReadBarrier(gcptr G)
 {
+  abort();
+#if 0
   gcptr R;
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
@@ -174,19 +179,13 @@ gcptr stm_DirectReadBarrier(gcptr G)
       G2L_FIND(d->public_to_private, R, entry, goto not_found);
       L = entry->val;
       assert(L->h_revision == stm_local_revision);
-#if 0
-      if (R_Container && !(R_Container->h_tid & GCFLAG_GLOBAL))
-        {    /* R_Container is a local object */
-          gcptr *ref = (gcptr *)(((char *)R_Container) + offset);
-          *ref = L;   /* fix in-place */
-        }
-#endif
       return L;
 
     not_found:;
     }
   R = AddInReadSet(d, R);
   return R;
+#endif
 }
 
 static gcptr _latest_gcptr(gcptr R)
@@ -312,6 +311,8 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr R)
 
 static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 {
+  abort();
+#if 0
   if (R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
     {
       wlog_t *entry;
@@ -332,6 +333,7 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
   AddInReadSet(d, R);
   /*mark*/
   return L;
+#endif
 }
 
 gcptr stm_WriteBarrier(gcptr P)
@@ -376,6 +378,8 @@ static revision_t GetGlobalCurTime(struct tx_descriptor *d)
 static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
                                        _Bool during_commit)
 {
+  abort();
+#if 0
   long i, size = d->list_of_read_objects.size;
   gcptr *items = d->list_of_read_objects.items;
 
@@ -416,6 +420,7 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
         }
     }
   return 1;
+#endif
 }
 
 static void ValidateNow(struct tx_descriptor *d)
@@ -638,8 +643,8 @@ static void AcquireLocks(struct tx_descriptor *d)
         goto retry;
 
       gcptr L = item->val;
-      assert(L->h_revision == stm_local_revision);
-      assert(v != stm_local_revision);
+      assert(L->h_revision == stm_private_rev_num);
+      assert(v != stm_private_rev_num);
       L->h_revision = v;   /* store temporarily this value here */
 
     } G2L_LOOP_END;
@@ -647,6 +652,8 @@ static void AcquireLocks(struct tx_descriptor *d)
 
 static void CancelLocks(struct tx_descriptor *d)
 {
+  abort();
+#if 0
   revision_t my_lock = d->my_lock;
   wlog_t *item;
 
@@ -672,6 +679,7 @@ static void CancelLocks(struct tx_descriptor *d)
       ACCESS_ONCE(R->h_revision) = v;
 
     } G2L_LOOP_END;
+#endif
 }
 
 static pthread_mutex_t mutex_prebuilt_gcroots = PTHREAD_MUTEX_INITIALIZER;
@@ -820,15 +828,15 @@ void CommitTransaction(void)
           "*************************************\n",
           (long)cur_time);
 
-  revision_t localrev = stm_local_revision;
+  revision_t localrev = stm_private_rev_num;
   UpdateProtectedChainHeads(d, cur_time, localrev);
   smp_wmb();
 
   revision_t newrev = -(cur_time + 1);
   assert(newrev & 1);
-  ACCESS_ONCE(stm_local_revision) = newrev;
+  ACCESS_ONCE(stm_private_rev_num) = newrev;
   fprintf(stderr, "%p: stm_local_revision = %ld\n", d, (long)newrev);
-  assert(d->local_revision_ref = &stm_local_revision);
+  assert(d->private_revision_ref = &stm_private_rev_num);
 
   UpdateChainHeads(d, cur_time, localrev);
 
@@ -1027,8 +1035,8 @@ int DescriptorInit(void)
         }
       assert(d->my_lock & 1);
       assert(d->my_lock > LOCKED);
-      stm_local_revision = -d->my_lock;   /* a unique negative odd value */
-      d->local_revision_ref = &stm_local_revision;
+      stm_private_rev_num = -1;
+      d->private_revision_ref = &stm_private_rev_num;
       d->max_aborts = -1;
       thread_descriptor = d;
 

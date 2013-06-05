@@ -80,7 +80,7 @@ ffi.cdef('''
     void rawsetlong(gcptr, long, long);
 
     gcptr pseudoprebuilt(size_t size, int tid);
-    revision_t get_local_revision(void);
+    revision_t get_private_rev_num(void);
     revision_t get_start_time(void);
 
     gcptr *addr_of_thread_local(void);
@@ -112,6 +112,7 @@ lib = ffi.verify(r'''
     extern revision_t stm_global_cur_time(void);
     extern void stmgcpage_add_prebuilt_root(gcptr);
     extern void stm_clear_between_tests(void);
+    extern revision_t get_private_rev_num(void);
 
     int gettid(gcptr obj)
     {
@@ -192,11 +193,6 @@ lib = ffi.verify(r'''
         x->h_tid = PREBUILT_FLAGS | tid;
         x->h_revision = PREBUILT_REVISION;
         return x;
-    }
-
-    revision_t get_local_revision(void)
-    {
-        return stm_local_revision;
     }
 
     revision_t get_start_time(void)
@@ -421,7 +417,8 @@ def oalloc_refs(nrefs):
 def nalloc(size):
     "Allocate a fresh object from the nursery"
     p = lib.stm_allocate(size, 42 + size)
-    assert p.h_revision == lib.get_local_revision()
+    assert p.h_tid == 42 + size     # no GC flags
+    assert p.h_revision == lib.get_private_rev_num()
     return p
 
 def nalloc_refs(nrefs):
@@ -442,6 +439,7 @@ def palloc_refs(nrefs):
     p = lib.pseudoprebuilt(HDR + WORD * nrefs, 421 + nrefs)
     return p
 
+gettid = lib.gettid
 setptr = lib.setptr
 getptr = lib.getptr
 rawsetptr = lib.rawsetptr

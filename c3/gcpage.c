@@ -423,7 +423,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         assert(stmgc_classify(item->addr) == K_PUBLIC);
         /*..rt(stmgc_classify(item->val)  == K_PRIVATE); but in the
             other thread, which becomes: */
-        assert(item->val->h_revision == *d->local_revision_ref);
+        assert(item->val->h_revision == *d->private_revision_ref);
 
         item->addr->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
@@ -559,8 +559,8 @@ void force_minor_collections(void)
 {
     struct tx_descriptor *d;
     struct tx_descriptor *saved = thread_descriptor;
-    revision_t saved_local_rev = stm_local_revision;
-    assert(saved_local_rev == *saved->local_revision_ref);
+    revision_t saved_private_rev = stm_private_rev_num;
+    assert(saved_private_rev == *saved->private_revision_ref);
 
     for (d = tx_head; d; d = d->tx_next) {
         /* Force a minor collection to run in the thread 'd'.
@@ -572,12 +572,12 @@ void force_minor_collections(void)
             /* Hack: temporarily pretend that we "are" the other thread...
              */
             thread_descriptor = d;
-            stm_local_revision = *d->local_revision_ref;
+            stm_private_rev_num = *d->private_revision_ref;
             assert(stmgc_nursery_hiding(d, 0));
             stmgc_minor_collect_no_abort();
             assert(stmgc_nursery_hiding(d, 1));
             thread_descriptor = saved;
-            stm_local_revision = saved_local_rev;
+            stm_private_rev_num = saved_private_rev;
         }
     }
 }

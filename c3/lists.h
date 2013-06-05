@@ -168,16 +168,12 @@ void gcptrlist_move(struct GcPtrList *, struct GcPtrList *gcptrlist_source);
 
 /* The fxcache_xx functions implement a fixed-size set of gcptr's.
    Moreover the gcptr's in the set are mapped to small integers.  In case
-   of collisions, old items are discarded.  The cache uses 3-way caching,
-   stored in 3 consecutive entries, but the 3 entries are in "cache lines"
-   that are only aligned to a multiple of 2.  This means that among the 3
-   items, the item 0 overlaps with the item 2 of the previous cache line,
-   and the item 2 overlaps with the item 0 of the following cache line.
-   The item 1 can only be seen by the current cache line.
+   of collisions, old items are discarded.  The cache doesn't use
+   multi-way caching for now.
 
-   The cache itself uses a total of FX_ENTRIES+1 entries in the 'cache'
-   array below, starting at 'cache_start'.  The reason it is bigger than
-   necessary is that fxcache_clear() simply shifts 'cache_start', making
+   The cache itself uses a total of FX_ENTRIES entries in the 'cache'
+   array below, starting at 'shift'.  The reason it is bigger than
+   necessary is that fxcache_clear() simply increments 'shift', making
    any previous entries invalid by not being in the correct position any
    more.
 */
@@ -187,41 +183,18 @@ void gcptrlist_move(struct GcPtrList *, struct GcPtrList *gcptrlist_source);
 
 struct FXCache {
     char *cache_start;
-    revision_t nextadd;
     revision_t shift;
     revision_t cache[FX_TOTAL];
 };
 
-void fxcache_clear(struct FXCache *fxcache);
+void _fxcache_reset(struct FXCache *fxcache);
 
-static inline int fxcache_add(struct FXCache *fxcache, gcptr item) {
-    /* If 'item' is not in the cache, add it and returns 0.
-       If it is already, return 1.
-       */
-    revision_t uitem = (revision_t)item;
-    /* 'entry' points to 'cache_start[mask of uitem, even-valued]' */
-    revision_t *entry = (revision_t *)
-      (fxcache->cache_start + (uitem & ((FX_ENTRIES-2) * sizeof(revision_t))));
-    revision_t current;
-
-    current = entry[1];   /* first look here, the cache-private entry */
-    if (current == uitem)
-        return 1;
-
-    if (entry[0] == uitem) {
-        entry[0] = current;    /* move from this collidable entry to */
-        entry[1] = uitem;      /*    the cache-private entry         */
-        return 1;
-    }
-    if (entry[2] == uitem) {
-        entry[2] = current;    /* move from this collidable entry to */
-        entry[1] = uitem;      /*    the cache-private entry         */
-        return 1;
-    }
-
-    entry[fxcache->nextadd] = uitem;
-    fxcache->nextadd ^= 2;
-    return 0;
+static inline void fxcache_clear(struct FXCache *fxcache)
+{
+    fxcache->shift++;
+    if (fxcache->shift > FX_TOTAL - FX_ENTRIES)
+        _fxcache_reset(fxcache);
+    fxcache->cache_start = (char *)(fxcache->cache + fxcache->shift);
 }
 
 /************************************************************/

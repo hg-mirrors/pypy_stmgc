@@ -223,15 +223,10 @@ void gcptrlist_move(struct GcPtrList *gcptrlist,
 
 /************************************************************/
 
-void fxcache_clear(struct FXCache *fxcache)
+void _fxcache_reset(struct FXCache *fxcache)
 {
-  fxcache->shift += 4;
-  /* FX_ENTRIES+1 entries are needed */
-  if (fxcache->shift + FX_ENTRIES + 1 > FX_TOTAL) {
-    memset(fxcache->cache, 0, sizeof(fxcache->cache));
     fxcache->shift = 0;
-  }
-  fxcache->cache_start = (char *)(fxcache->cache + fxcache->shift);
+    memset(fxcache->cache, 0, sizeof(fxcache->cache));
 }
 
 /************************************************************/

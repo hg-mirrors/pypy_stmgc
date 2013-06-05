@@ -1,7 +1,7 @@
 /*** Extendable Timestamps
  *
  * Documentation:
- * https://bitbucket.org/pypy/extradoc/raw/extradoc/talk/stm2012/stmimpl.rst
+ * doc-*.txt
  *
  * This is very indirectly based on rstm_r5/stm/et.hpp.
  * See http://www.cs.rochester.edu/research/synchronization/rstm/api.shtml
@@ -20,22 +20,15 @@
  * collection: "young" objects are the ones in the nursery (plus a few big
  * ones outside) and will be collected by the following minor collection.
  *
- * Additionally, objects are either "public", "protected" or "private".  The
- * private objects have h_revision == stm_local_revision and are invisible
- * to other threads.  They become non-private when the transaction commits.
- *
- *                          non-private | private
- *           +------------------------------------------------------------
- *           |
- *       old |         public objects   |   old private objects
- *  ---------|
- *           |
- *     young |     [ protected objects  |  private objects  (--> grows) ]
- *  (nursery)|
+ * Additionally, objects are either "public", "protected" or "private".
  *
  * GCFLAG_OLD is set on old objects.
  *
  * GCFLAG_VISITED is used temporarily during major collections.
+ *
+ * GCFLAG_PUBLIC is set on public objects.
+ *
+ * GCFLAG_BACKUP_COPY means the object is a (protected) backup copy.
  *
  * GCFLAG_PUBLIC_TO_PRIVATE is added to a *public* object that has got a
  * *private* copy.  It is sticky, reset only at the next major collection.
@@ -43,12 +36,12 @@
  * GCFLAG_PREBUILT_ORIGINAL is only set on the original version of
  * prebuilt objects.
  *
- * GCFLAG_WRITE_BARRIER is set on *old* *private* objects to track old-to-
- * young pointers.  It may be left set on *public* objects but is ignored
- * there, because the write barrier will trigger anyway on any non-private
- * object.  On an old private object, it is removed once a write occurs
- * and the object is recorded in 'private_old_pointing_to_young'; it is
- * set again at the next minor collection.
+ * GCFLAG_WRITE_BARRIER is set on *old* objects to track old-to- young
+ * pointers.  It may be left set on *public* objects but is ignored
+ * there, because public objects are read-only.  The flag is removed
+ * once a write occurs and the object is recorded in the list
+ * 'old_pointing_to_young'; it is set again at the next minor
+ * collection.
  *
  * GCFLAG_NURSERY_MOVED is used temporarily during minor collections.
  *
@@ -56,26 +49,31 @@
  * have been stolen.
  *
  * GCFLAG_STUB is used for debugging: it's set on stub objects made by
- * create_yo_stubs()
+ * stealing or by major collections.
  */
 #define GCFLAG_OLD               (STM_FIRST_GCFLAG << 0)
 #define GCFLAG_VISITED           (STM_FIRST_GCFLAG << 1)
-#define GCFLAG_PUBLIC_TO_PRIVATE (STM_FIRST_GCFLAG << 2)
+#define GCFLAG_PUBLIC            (STM_FIRST_GCFLAG << 2)
 #define GCFLAG_PREBUILT_ORIGINAL (STM_FIRST_GCFLAG << 3)
-#define GCFLAG_WRITE_BARRIER     (STM_FIRST_GCFLAG << 4)
-#define GCFLAG_NURSERY_MOVED     (STM_FIRST_GCFLAG << 5)
-#define GCFLAG_STOLEN            (STM_FIRST_GCFLAG << 6)
-#define GCFLAG_STUB              (STM_FIRST_GCFLAG << 7)   /* debugging */
+#define GCFLAG_BACKUP_COPY       (STM_FIRST_GCFLAG << 4)
+#define GCFLAG_PUBLIC_TO_PRIVATE (STM_FIRST_GCFLAG << 5)
+#define GCFLAG_WRITE_BARRIER     (STM_FIRST_GCFLAG << 6)
+#define GCFLAG_NURSERY_MOVED     (STM_FIRST_GCFLAG << 7)
+#define GCFLAG_STOLEN            (STM_FIRST_GCFLAG << 8)
+#define GCFLAG_STUB              (STM_FIRST_GCFLAG << 9)   /* debugging */
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
 #define GCFLAG_PREBUILT  (GCFLAG_VISITED           | \
                           GCFLAG_PREBUILT_ORIGINAL | \
-                          GCFLAG_OLD)
+                          GCFLAG_OLD               | \
+                          GCFLAG_PUBLIC)
 
 #define GC_FLAG_NAMES  { "OLD",               \
                          "VISITED",           \
-                         "PUBLIC_TO_PRIVATE", \
+                         "PUBLIC",            \
                          "PREBUILT_ORIGINAL", \
+                         "BACKUP_COPY",       \
+                         "PUBLIC_TO_PRIVATE", \
                          "WRITE_BARRIER",     \
                          "NURSERY_MOVED",     \
                          "STOLEN",            \
@@ -121,12 +119,12 @@ struct tx_descriptor {
   char *longest_abort_info;
   long long longest_abort_info_time;
   struct FXCache recent_reads_cache;
-  revision_t *local_revision_ref;
+  revision_t *private_revision_ref;
   struct tx_descriptor *tx_next, *tx_prev;   /* a doubly linked list */
 };
 
 extern __thread struct tx_descriptor *thread_descriptor;
-extern __thread revision_t stm_local_revision;
+extern __thread revision_t stm_private_rev_num;
 
 /************************************************************/
 

@@ -78,8 +78,11 @@ void stm_finalize(void)
 gcptr stm_read_barrier(gcptr obj)
 {
     /* XXX inline in the caller */
+    abort();
+#if 0
     if (UNLIKELY(obj->h_revision != stm_local_revision))
         obj = stm_DirectReadBarrier(obj);
+#endif
     return obj;
 }
 
@@ -87,7 +90,7 @@ gcptr stm_write_barrier(gcptr obj)
 {
     /* XXX inline in the caller */
     if (UNLIKELY(((obj->h_tid & GCFLAG_WRITE_BARRIER) != 0) |
-                 (obj->h_revision != stm_local_revision)))
+                 (obj->h_revision != stm_private_rev_num)))
         obj = stm_WriteBarrier(obj);
     return obj;
 }

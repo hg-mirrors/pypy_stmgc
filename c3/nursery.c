@@ -29,7 +29,7 @@ int is_young(gcptr obj)
 enum protection_class_t stmgc_classify(gcptr obj)
 {
     /* note that this function never returns K_OLD_PRIVATE. */
-    if (obj->h_revision == stm_local_revision)
+    if (obj->h_revision == stm_private_rev_num)
         return K_PRIVATE;
     if (is_young(obj))
         return K_PROTECTED;
@@ -42,7 +42,7 @@ static enum protection_class_t dclassify(gcptr obj)
     /* for assertions only; moreover this function returns K_PRIVATE
        only for young private objects, and K_OLD_PRIVATE for old ones. */
     struct tx_descriptor *d = thread_descriptor;
-    int private = (obj->h_revision == stm_local_revision);
+    int private = (obj->h_revision == stm_private_rev_num);
     enum protection_class_t e;
 
     if (is_in_nursery(d, obj)) {
@@ -128,7 +128,7 @@ gcptr _stm_allocate_object_of_size_old(size_t size)
 {
     gcptr p = stmgcpage_malloc(size);
     memset(p, 0, size);
-    p->h_revision = stm_local_revision;
+    p->h_revision = stm_private_rev_num;
     p->h_tid = GCFLAG_OLD;
     return p;
 }
@@ -146,7 +146,7 @@ gcptr stm_allocate_object_of_size(size_t size)
     }
     stm_dbgmem_used_again(cur, size, 1);
     gcptr p = (gcptr)cur;
-    p->h_revision = stm_local_revision;
+    p->h_revision = stm_private_rev_num;
     return p;
 }
 
@@ -185,7 +185,7 @@ gcptr stmgc_duplicate(gcptr globalobj, revision_t extra_word)
                          GCFLAG_PREBUILT_ORIGINAL |
                          GCFLAG_WRITE_BARRIER     |
                          GCFLAG_OLD);
-    localobj->h_revision = stm_local_revision;
+    localobj->h_revision = stm_private_rev_num;
     return localobj;
 }
 
@@ -413,7 +413,7 @@ static void visit_if_young(gcptr *root  _REASON(char *reason))
     /* nb. don't use stmgc_classify() here, because some objects trigger
        an assert at this point: young non-nursery objects which just
        grew the flag GCFLAG_OLD */
-    assert(obj->h_revision != stm_local_revision);  /* not a private object */
+    assert(obj->h_revision != stm_private_rev_num);  /* not a private object */
     PATCH_ROOT_WITH(obj);
     goto retry;
 }
@@ -490,7 +490,7 @@ static void mark_protected_with_private_copy(struct tx_descriptor *d)
 
         /* then we record the dependency in the dictionary
            'public_to_private' */
-        assert(L->h_revision == stm_local_revision);
+        assert(L->h_revision == stm_private_rev_num);
         g2l_insert(&d->public_to_private, R, L);
         /*mark*/
     }
@@ -956,6 +956,8 @@ int stmgc_nursery_hiding(struct tx_descriptor *d, int hide)
 static gcptr extract_from_foreign_nursery(struct tx_descriptor *source_d,
                                           gcptr R)
 {
+    abort();
+#if 0
     /* "Stealing": this function follows a chain of protected objects in
        the foreign nursery of the thread 'source_d'.  It copies the last
        one outside the nursery, and return it. */
@@ -1011,6 +1013,7 @@ static gcptr extract_from_foreign_nursery(struct tx_descriptor *source_d,
                            source_d->stolen_objects.size - 1);
 
     return N;
+#endif
 }
 
 void stmgc_public_to_foreign_protected(gcptr P)
@@ -1112,7 +1115,7 @@ static void normalize_stolen_objects(struct tx_descriptor *d)
 
             /* we re-insert L as a private copy of the public object N */
             N->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
-            assert(L->h_revision == stm_local_revision);
+            assert(L->h_revision == stm_private_rev_num);
             g2l_insert(&d->public_to_private, N, L);
             gcptrlist_insert(&d->public_to_young, N);
         }
