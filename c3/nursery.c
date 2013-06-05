@@ -180,12 +180,14 @@ gcptr stmgc_duplicate(gcptr globalobj, revision_t extra_word)
     memcpy(localobj, globalobj, size);
 
     assert(!(localobj->h_tid & GCFLAG_NURSERY_MOVED));
+#if 0
     localobj->h_tid &= ~(GCFLAG_VISITED           |
                          GCFLAG_PUBLIC_TO_PRIVATE |
                          GCFLAG_PREBUILT_ORIGINAL |
                          GCFLAG_WRITE_BARRIER     |
                          GCFLAG_OLD);
     localobj->h_revision = stm_private_rev_num;
+#endif
     return localobj;
 }
 

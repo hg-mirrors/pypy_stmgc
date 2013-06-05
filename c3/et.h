@@ -116,6 +116,7 @@ struct tx_descriptor {
   unsigned int num_spinloops[SPINLOOP_REASONS];
   struct GcPtrList list_of_read_objects;
   struct GcPtrList abortinfo;
+  struct G2L private_to_backup;
   char *longest_abort_info;
   long long longest_abort_info_time;
   struct FXCache recent_reads_cache;
@@ -175,6 +176,7 @@ gcptr stm_DirectReadBarrier(gcptr);
 gcptr stm_RepeatReadBarrier(gcptr);
 gcptr stm_WriteBarrier(gcptr);
 gcptr _stm_nonrecord_barrier(gcptr, int *);
+gcptr stm_get_backup_copy(gcptr);
 
 int DescriptorInit(void);
 void DescriptorDone(void);

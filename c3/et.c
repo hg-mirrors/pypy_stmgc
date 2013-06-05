@@ -286,27 +286,33 @@ gcptr stm_RepeatReadBarrier(gcptr O)
 #endif
 }
 
-static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr R)
+static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 {
-  assert(!(R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
+  gcptr B;
 
-  /* duplicate, and save the original R->h_revision into an extra
-     word allocated just after L */
-  assert(R->h_revision & 1);
-  gcptr L = stmgc_duplicate(R, R->h_revision);
+  assert(P->h_revision != stm_private_rev_num);
+  assert(!(P->h_tid & GCFLAG_PUBLIC));
+  assert(!(P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
+  assert(!(P->h_tid & GCFLAG_BACKUP_COPY));
+  assert(!(P->h_tid & GCFLAG_STUB));
 
-  /* cross-thread memory barrier: make sure the local object is correct
-     and has h_revision == stm_local_revision, and the extra word is
-     written as well; when it is done, and only then, then we change
-     R->h_revision */
-  smp_wmb();
-
-  R->h_revision = (revision_t)L;
-
-  gcptrlist_insert(&d->protected_with_private_copy, R);
-  AddInReadSet(d, R);
-  /*mark*/
-  return L;
+  if (P->h_revision & 1)
+    {
+      /* does not have a backup yet */
+      B = stmgc_duplicate(P, 0);
+      B->h_tid |= GCFLAG_BACKUP_COPY;
+    }
+  else
+    {
+      size_t size = stmcb_size(P);
+      B = (gcptr)P->h_revision;
+      assert(B->h_tid & GCFLAG_BACKUP_COPY);
+      memcpy(B + 1, P + 1, size - sizeof(*B));
+    }
+  assert(B->h_tid & GCFLAG_BACKUP_COPY);
+  g2l_insert(&d->private_to_backup, P, B);
+  P->h_revision = stm_private_rev_num;
+  return P;
 }
 
 static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
@@ -338,33 +344,23 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 
 gcptr stm_WriteBarrier(gcptr P)
 {
-  gcptr R, W;
+  gcptr W;
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
-  /* must normalize the situation now, otherwise we risk that
-     LocalizePublic creates a new private version of a public
-     object that has got one, attached to the equivalent stolen
-     protected object */
-  if (gcptrlist_size(&d->stolen_objects) > 0)
-    stmgc_normalize_stolen_objects();
-
-  /* XXX optimize me based on common patterns */
-  R = HeadOfRevisionChainList(d, P);
-
-  switch (stmgc_classify(R)) {
-  case K_PRIVATE:   W = R;                       break;
-  case K_PROTECTED: W = LocalizeProtected(d, R); break;
-  case K_PUBLIC:    W = LocalizePublic(d, R);    break;
-  default: abort();
-  }
-
-  if (W->h_tid & GCFLAG_WRITE_BARRIER)
-    stmgc_write_barrier(W);
+  W = LocalizeProtected(d, P);
 
   fprintf(stderr, "write_barrier: %p -> %p\n", P, W);
 
   return W;
+}
+
+gcptr stm_get_backup_copy(gcptr P)
+{
+  struct tx_descriptor *d = thread_descriptor;
+  wlog_t *entry;
+  G2L_FIND(d->private_to_backup, P, entry, return NULL);
+  return entry->val;
 }
 
 /************************************************************/
@@ -527,6 +523,7 @@ void AbortTransaction(int num)
   }
 
   gcptrlist_clear(&d->list_of_read_objects);
+  g2l_clear(&d->private_to_backup);
   stmgc_abort_transaction(d);
 
   fprintf(stderr,
@@ -590,6 +587,7 @@ static void init_transaction(struct tx_descriptor *d)
     d->start_real_time.tv_nsec = -1;
   }
   assert(d->list_of_read_objects.size == 0);
+  assert(!g2l_any_entry(&d->private_to_backup));
   stmgc_start_transaction(d);
 
   d->count_reads = 1;
@@ -775,6 +773,23 @@ void UpdateProtectedChainHeads(struct tx_descriptor *d, revision_t cur_time,
     }
 }
 
+void TurnPrivateWithBackupToProtected(struct tx_descriptor *d,
+                                      revision_t cur_time)
+{
+  wlog_t *item;
+  G2L_LOOP_FORWARD(d->private_to_backup, item)
+    {
+      gcptr P = item->addr;
+      gcptr B = item->val;
+      assert(P->h_revision == stm_private_rev_num);
+      assert(B->h_tid & GCFLAG_BACKUP_COPY);
+      B->h_revision = cur_time;
+      P->h_revision = (revision_t)B;
+
+    } G2L_LOOP_END;
+  g2l_clear(&d->private_to_backup);
+}
+
 void CommitTransaction(void)
 {   /* must save roots around this call */
   revision_t cur_time;
@@ -827,6 +842,8 @@ void CommitTransaction(void)
           "**************************************  committed %ld\n"
           "*************************************\n",
           (long)cur_time);
+
+  TurnPrivateWithBackupToProtected(d, cur_time);
 
   revision_t localrev = stm_private_rev_num;
   UpdateProtectedChainHeads(d, cur_time, localrev);
@@ -1057,6 +1074,7 @@ void DescriptorDone(void)
 
     thread_descriptor = NULL;
 
+    g2l_delete(&d->private_to_backup);
     gcptrlist_delete(&d->list_of_read_objects);
     gcptrlist_delete(&d->abortinfo);
     free(d->longest_abort_info);
