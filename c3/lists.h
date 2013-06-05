@@ -208,6 +208,12 @@ static inline void fxcache_add(struct FXCache *fxcache, gcptr newobj)
     FXCACHE_AT(newobj) = newobj;
 }
 
+static inline void fxcache_remove(struct FXCache *fxcache, gcptr oldobj)
+{
+    assert(stm_read_barrier_cache == (char*)(fxcache->cache + fxcache->shift));
+    FXCACHE_AT(oldobj) = NULL;
+}
+
 /************************************************************/
 
 #endif

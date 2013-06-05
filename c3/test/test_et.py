@@ -178,3 +178,16 @@ def test_read_barrier_public_shortcut():
     assert lib.stm_read_barrier(p1) == p3
     assert list_of_read_objects() == [p3]
     assert p1.h_revision == int(ffi.cast("revision_t", p3))   # shortcutted
+
+def test_read_barrier_public_to_private():
+    p = palloc(HDR)
+    p2 = lib.stm_write_barrier(p)
+    assert p2 != p
+    assert classify(p) == "public"
+    assert classify(p2) == "private"
+    assert list_of_read_objects() == [p]
+    assert p.h_tid & GCFLAG_PUBLIC
+    assert p.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
+    p3 = lib.stm_read_barrier(p)
+    assert p3 == p2
+    assert list_of_read_objects() == [p]

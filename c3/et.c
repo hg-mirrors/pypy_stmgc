@@ -129,6 +129,18 @@ gcptr stm_DirectReadBarrier(gcptr P)
             }
         }
 
+      if (P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
+        {
+          wlog_t *item;
+          G2L_FIND(d->public_to_private, P, item, goto no_private_obj);
+
+          P = item->val;
+          assert(!(P->h_tid & GCFLAG_PUBLIC));
+          assert(P->h_revision == stm_private_rev_num);
+          return P;
+        }
+    no_private_obj:
+
       if (UNLIKELY(v > d->start_time))   // object too recent?
         {
           if (v >= LOCKED)
@@ -299,6 +311,13 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
                 0);
   L->h_revision = stm_private_rev_num;
   g2l_insert(&d->public_to_private, R, L);
+  fprintf(stderr, "write_barrier: adding %p -> %p to public_to_private\n",
+          R, L);
+
+  /* must remove R from the read_barrier_cache, because returning R is no
+     longer a valid result */
+  fxcache_remove(&d->recent_reads_cache, R);
+
   return L;
 }
 
@@ -308,7 +327,7 @@ gcptr stm_WriteBarrier(gcptr P)
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
-  /*P = stm_DirectReadBarrier(P);*/
+  P = stm_read_barrier(P);
 
   if (P->h_tid & GCFLAG_PUBLIC)
     W = LocalizePublic(d, P);
