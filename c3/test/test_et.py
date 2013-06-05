@@ -84,3 +84,24 @@ def test_protected_with_backup():
     assert classify(p) == "protected"
     assert classify(pback) == "backup"
     assert ffi.cast("revision_t *", p.h_revision) == pback
+
+def test_protected_backup_reused():
+    p = nalloc(HDR + WORD)
+    lib.setlong(p, 0, 78927812)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    lib.setlong(p, 0, 927122)
+    pback = lib.stm_get_backup_copy(p)
+    assert pback != p
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert lib.stm_get_backup_copy(p) == ffi.NULL
+    assert classify(p) == "protected"
+    assert classify(pback) == "backup"
+    assert lib.rawgetlong(p, 0) == 927122
+    assert lib.rawgetlong(pback, 0) == 78927812    # but should not be used
+    lib.setlong(p, 0, 43891)
+    assert p.h_revision == lib.get_private_rev_num()
+    assert pback == lib.stm_get_backup_copy(p)
+    assert lib.rawgetlong(p, 0) == 43891
+    assert lib.rawgetlong(pback, 0) == 927122
