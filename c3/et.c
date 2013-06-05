@@ -89,22 +89,18 @@ gcptr stm_DirectReadBarrier(gcptr G)
 {
   struct tx_descriptor *d = thread_descriptor;
   gcptr P = G;
+  revision_t v;
 
   if (P->h_tid & GCFLAG_PUBLIC)
     {
       /* follow the chained list of h_revision's as long as they are
          regular pointers */
-      revision_t v;
-
     retry:
       v = ACCESS_ONCE(P->h_revision);
       if (!(v & 1))  // "is a pointer", i.e.
         {            //      "has a more recent revision"
           if (v & 2)
-            {
-            old_to_young:
-              abort();
-            }
+            goto old_to_young;
           assert(P->h_tid & GCFLAG_PUBLIC);
 
           gcptr P_prev = P;
@@ -162,9 +158,42 @@ gcptr stm_DirectReadBarrier(gcptr G)
     {
       fprintf(stderr, "read_barrier: %p -> %p protected\n", G, P);
     }
+
+ register_in_list_of_read_objects:
   fxcache_add(&d->recent_reads_cache, P);
   gcptrlist_insert(&d->list_of_read_objects, P);
   return P;
+
+ old_to_young:;
+  revision_t target_lock;
+  target_lock = *(revision_t *)(v & ~(HANDLE_BLOCK_SIZE-1));
+  if (target_lock == d->my_lock)
+    {
+      P = (gcptr)(*(revision_t *)(v - 2));
+      assert(!(P->h_tid & GCFLAG_PUBLIC));
+      if (P->h_revision == stm_private_rev_num)
+        {
+          fprintf(stderr, "read_barrier: %p -> %p handle "
+                  "private\n", G, P);
+          return P;
+        }
+      else if (FXCACHE_AT(P) == P)
+        {
+          fprintf(stderr, "read_barrier: %p -> %p handle "
+                  "protected fxcache\n", G, P);
+          return P;
+        }
+      else
+        {
+          fprintf(stderr, "read_barrier: %p -> %p handle "
+                  "protected\n", G, P);
+          goto register_in_list_of_read_objects;
+        }
+    }
+  else
+    {
+      abort();   // stealing
+    }
 }
 
 static gcptr _latest_gcptr(gcptr R)

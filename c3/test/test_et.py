@@ -191,3 +191,35 @@ def test_read_barrier_public_to_private():
     p3 = lib.stm_read_barrier(p)
     assert p3 == p2
     assert list_of_read_objects() == [p]
+
+def test_read_barrier_handle_protected():
+    p = palloc(HDR)
+    p2 = lib.stm_write_barrier(p)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert classify(p) == "public"
+    assert classify(p2) == "protected"
+    assert list_of_read_objects() == []
+    p3 = lib.stm_read_barrier(p)
+    assert p3 == p2
+    assert list_of_read_objects() == [p2]
+    p4 = lib.stm_read_barrier(p)
+    assert p4 == p2
+    assert list_of_read_objects() == [p2]
+
+def test_read_barrier_handle_private():
+    p = palloc(HDR)
+    p2 = lib.stm_write_barrier(p)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    p2b = lib.stm_write_barrier(p)
+    assert p2b == p2
+    assert classify(p) == "public"
+    assert classify(p2) == "private"
+    assert list_of_read_objects() == [p2]
+    p3 = lib.stm_read_barrier(p)
+    assert p3 == p2
+    assert list_of_read_objects() == [p2]
+    p4 = lib.stm_read_barrier(p)
+    assert p4 == p2
+    assert list_of_read_objects() == [p2]
