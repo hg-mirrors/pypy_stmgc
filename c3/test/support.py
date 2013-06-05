@@ -84,6 +84,7 @@ ffi.cdef('''
     gcptr pseudoprebuilt(size_t size, int tid);
     revision_t get_private_rev_num(void);
     revision_t get_start_time(void);
+    revision_t get_my_lock(void);
 
     gcptr *addr_of_thread_local(void);
     int in_nursery(gcptr);
@@ -92,6 +93,8 @@ ffi.cdef('''
     /* some constants normally private that are useful in the tests */
     #define WORD                     ...
     #define GC_PAGE_SIZE             ...
+    #define LOCKED                   ...
+    #define HANDLE_BLOCK_SIZE        ...
     #define GCFLAG_OLD               ...
     #define GCFLAG_VISITED           ...
     #define GCFLAG_PUBLIC            ...
@@ -118,6 +121,7 @@ lib = ffi.verify(r'''
     extern void stmgcpage_add_prebuilt_root(gcptr);
     extern void stm_clear_between_tests(void);
     extern revision_t get_private_rev_num(void);
+    extern local_gcpages_t *stm_local_gcpages(void);
 
     int gettid(gcptr obj)
     {
@@ -203,6 +207,11 @@ lib = ffi.verify(r'''
     revision_t get_start_time(void)
     {
         return thread_descriptor->start_time;
+    }
+
+    revision_t get_my_lock(void)
+    {
+        return thread_descriptor->my_lock;
     }
 
     gcptr *addr_of_thread_local(void)
@@ -540,3 +549,11 @@ def list_of_read_objects():
         result.append(p)
         index += 1
     return result
+
+def decode_handle(r):
+    assert (r & 3) == 2
+    p = r & ~(lib.HANDLE_BLOCK_SIZE-1)
+    my_lock = ffi.cast("revision_t *", p)[0]
+    assert my_lock >= lib.LOCKED
+    ptr = ffi.cast("gcptr *", r - 2)[0]
+    return ptr, my_lock

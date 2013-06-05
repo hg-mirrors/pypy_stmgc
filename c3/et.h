@@ -13,6 +13,8 @@
 
 #define LOCKED  ((INTPTR_MAX - 0xffff) | 1)
 
+#define HANDLE_BLOCK_SIZE   (2 * WORD)
+
 /* Description of the flags
  * ------------------------
  *

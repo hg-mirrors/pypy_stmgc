@@ -296,6 +296,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 
 static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 {
+  assert(R->h_tid & GCFLAG_PUBLIC);
   if (R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
     {
       wlog_t *entry;
@@ -726,13 +727,22 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       assert(!is_young(R));
       assert(R->h_revision != localrev);
 
+      /* XXX compactify and don't leak! */
+      revision_t *handle_block = stm_malloc(3 * WORD);
+      handle_block = (revision_t *)
+        ((((intptr_t)handle_block) + HANDLE_BLOCK_SIZE-1)
+         & ~(HANDLE_BLOCK_SIZE-1));
+      handle_block[0] = d->my_lock;
+      handle_block[1] = v;
+
+      revision_t w = ((revision_t)(handle_block + 1)) + 2;
+
 #ifdef DUMP_EXTRA
-      fprintf(stderr, "%p->h_revision = %p | 2 (UpdateChainHeads2)\n",
-              R, (gcptr)v);
+      fprintf(stderr, "%p->h_revision = %p (UpdateChainHeads2)\n",
+              R, (gcptr)w);
       /*mark*/
 #endif
-      assert(!(v & 3));
-      ACCESS_ONCE(R->h_revision) = v | 2;
+      ACCESS_ONCE(R->h_revision) = w;
 
       if (R->h_tid & GCFLAG_PREBUILT_ORIGINAL)
         {
