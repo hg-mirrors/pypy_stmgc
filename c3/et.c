@@ -85,9 +85,10 @@ static inline gcptr AddInReadSet(struct tx_descriptor *d, gcptr R)
 }
 #endif
 
-gcptr stm_DirectReadBarrier(gcptr P)
+gcptr stm_DirectReadBarrier(gcptr G)
 {
   struct tx_descriptor *d = thread_descriptor;
+  gcptr P = G;
 
   if (P->h_tid & GCFLAG_PUBLIC)
     {
@@ -111,7 +112,10 @@ gcptr stm_DirectReadBarrier(gcptr P)
 
           /* if we land on a P in read_barrier_cache: just return it */
           if (FXCACHE_AT(P) == P)
-            return P;
+            {
+              fprintf(stderr, "read_barrier: %p -> %p fxcache\n", G, P);
+              return P;
+            }
 
           v = ACCESS_ONCE(P->h_revision);
           if (!(v & 1))  // "is a pointer", i.e.
@@ -137,6 +141,7 @@ gcptr stm_DirectReadBarrier(gcptr P)
           P = item->val;
           assert(!(P->h_tid & GCFLAG_PUBLIC));
           assert(P->h_revision == stm_private_rev_num);
+          fprintf(stderr, "read_barrier: %p -> %p public_to_private\n", G, P);
           return P;
         }
     no_private_obj:
@@ -151,6 +156,11 @@ gcptr stm_DirectReadBarrier(gcptr P)
           ValidateNow(d);                  // try to move start_time forward
           goto retry;                      // restart searching from P
         }
+      fprintf(stderr, "read_barrier: %p -> %p public\n", G, P);
+    }
+  else
+    {
+      fprintf(stderr, "read_barrier: %p -> %p protected\n", G, P);
     }
   fxcache_add(&d->recent_reads_cache, P);
   gcptrlist_insert(&d->list_of_read_objects, P);
