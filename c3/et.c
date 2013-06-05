@@ -716,15 +716,6 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
 #endif
       L->h_revision = new_revision;
 
-      if (is_young(L))
-        {
-          item->val = (gcptr)(((revision_t)L) | 2);
-#ifdef DUMP_EXTRA
-          fprintf(stderr, "PUBLIC-TO-PROTECTED:\n");
-          /*mark*/
-#endif
-        }
-
     } G2L_LOOP_END;
 
   smp_wmb(); /* a memory barrier: make sure the new L->h_revisions are visible
@@ -742,11 +733,12 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       assert(R->h_revision != localrev);
 
 #ifdef DUMP_EXTRA
-      fprintf(stderr, "%p->h_revision = %p (UpdateChainHeads2)\n",
+      fprintf(stderr, "%p->h_revision = %p | 2 (UpdateChainHeads2)\n",
               R, (gcptr)v);
       /*mark*/
 #endif
-      ACCESS_ONCE(R->h_revision) = v;
+      assert(!(v & 3));
+      ACCESS_ONCE(R->h_revision) = v | 2;
 
       if (R->h_tid & GCFLAG_PREBUILT_ORIGINAL)
         {

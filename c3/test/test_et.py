@@ -133,9 +133,11 @@ def test_commit_change_to_prebuilt_object():
     assert p2 != p
     assert classify(p) == "public"
     assert classify(p2) == "private"
-    lib.rawsetlong(p, 0, 1289222)
+    lib.rawsetlong(p2, 0, 1289222)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     assert classify(p) == "public"
     assert classify(p2) == "protected"
     assert p.h_revision == int(ffi.cast("revision_t", p2)) + 2
+    assert lib.rawgetlong(p, 0) == 28971289
+    assert lib.rawgetlong(p2, 0) == 1289222
