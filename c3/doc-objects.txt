@@ -50,7 +50,7 @@ Protected objects:
 - original obj after GC killed the backup                 GT
 
 Public objects:
-- prebuilt object, never modified                         -1
+- prebuilt object, never modified                          1
 - other public object, never modified                     GT
 - outdated, has a protected copy              HANDLE to prot/priv copy
 - outdated, target stolen              ptr to a more recent public copy

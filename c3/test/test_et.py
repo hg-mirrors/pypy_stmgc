@@ -105,3 +105,12 @@ def test_protected_backup_reused():
     assert pback == lib.stm_get_backup_copy(p)
     assert lib.rawgetlong(p, 0) == 43891
     assert lib.rawgetlong(pback, 0) == 927122
+
+def test_prebuilt_is_public():
+    p = palloc(HDR)
+    assert p.h_revision == 1
+    assert p.h_tid == lib.gettid(p) | (GCFLAG_OLD |
+                                       GCFLAG_VISITED |
+                                       GCFLAG_PUBLIC |
+                                       GCFLAG_PREBUILT_ORIGINAL)
+    assert classify(p) == "public"

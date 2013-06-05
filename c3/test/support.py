@@ -436,6 +436,7 @@ def nalloc_refs(nrefs):
 def palloc(size):
     "Get a ``prebuilt'' object."
     p = lib.pseudoprebuilt(size, 42 + size)
+    assert p.h_revision == 1
     return p
 
 def palloc_refs(nrefs):
