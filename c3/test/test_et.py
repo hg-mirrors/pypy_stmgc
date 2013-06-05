@@ -156,3 +156,25 @@ def test_read_barrier_protected():
     assert list_of_read_objects() == []
     assert lib.stm_read_barrier(p) == p     # record as a read object
     assert list_of_read_objects() == [p]
+
+def test_read_barrier_public():
+    p = palloc(HDR)
+    assert lib.stm_read_barrier(p) == p
+    assert list_of_read_objects() == [p]
+
+def test_read_barrier_public_outdated():
+    p1 = palloc(HDR)
+    p2 = palloc(HDR)
+    p1.h_revision = ffi.cast("revision_t", p2)
+    assert lib.stm_read_barrier(p1) == p2
+    assert list_of_read_objects() == [p2]
+
+def test_read_barrier_public_shortcut():
+    p1 = palloc(HDR)
+    p2 = palloc(HDR)
+    p3 = palloc(HDR)
+    p1.h_revision = ffi.cast("revision_t", p2)
+    p2.h_revision = ffi.cast("revision_t", p3)
+    assert lib.stm_read_barrier(p1) == p3
+    assert list_of_read_objects() == [p3]
+    assert p1.h_revision == int(ffi.cast("revision_t", p3))   # shortcutted

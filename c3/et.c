@@ -65,78 +65,6 @@ static void inev_mutex_release(void)
 
 /************************************************************/
 
-static gcptr HeadOfRevisionChainList(struct tx_descriptor *d, gcptr G)
-{
-  abort();
-#if 0
-  gcptr R = G;
-  revision_t v;
-
- retry:
-  v = ACCESS_ONCE(R->h_revision);
-  if (!(v & 1))  // "is a pointer", i.e.
-    {            //      "has a more recent revision"
-      if (v & 2)
-        {
-        old_to_young:
-          v &= ~2;
-          if (UNLIKELY(!stmgc_is_young_in(d, (gcptr)v)))
-            {
-              stmgc_public_to_foreign_protected(R);
-              goto retry;
-            }
-          R = (gcptr)v;
-          goto retry;
-        }
-
-      gcptr R_prev = R;
-      R = (gcptr)v;
-
-    retry_threelevels:
-      v = ACCESS_ONCE(R->h_revision);
-      if (!(v & 1))  // "is a pointer", i.e.
-        {            //      "has a more recent revision"
-          if (v & 2)
-            goto old_to_young;
-
-          /* we update R_prev->h_revision as a shortcut */
-          /* XXX check if this really gives a worse performance than only
-             doing this write occasionally based on a counter in d */
-          gcptr R_next = (gcptr)v;
-          if (R_next->h_revision == stm_local_revision)
-            {
-              /* must not update an older h_revision to go directly to
-                 the private copy at the end of a chain of protected
-                 objects! */
-              return R_next;
-            }
-          if (R_prev->h_tid & GCFLAG_STOLEN)
-            {
-              /* must not update the h_revision of a stolen object! */
-              R_prev = R;
-              R = R_next;
-              goto retry_threelevels;
-            }
-          R_prev->h_revision = v;
-          R = R_next;
-          goto retry;
-        }
-    }
-
-  if (UNLIKELY(v > d->start_time))   // object too recent?
-    {
-      if (v >= LOCKED)
-        {
-          SpinLoop(SPLP_LOCKED_INFLIGHT);
-          goto retry;                // spinloop until it is no longer LOCKED
-        }
-      ValidateNow(d);                  // try to move start_time forward
-      goto retry;                      // restart searching from R
-    }
-  return R;
-#endif
-}
-
 #if 0
 static inline gcptr AddInReadSet(struct tx_descriptor *d, gcptr R)
 {
@@ -163,12 +91,57 @@ gcptr stm_DirectReadBarrier(gcptr P)
 
   if (P->h_tid & GCFLAG_PUBLIC)
     {
-      abort();
-      /*...*/
-    }
+      /* follow the chained list of h_revision's as long as they are
+         regular pointers */
+      revision_t v;
 
-  gcptrlist_insert(&d->list_of_read_objects, P);
+    retry:
+      v = ACCESS_ONCE(P->h_revision);
+      if (!(v & 1))  // "is a pointer", i.e.
+        {            //      "has a more recent revision"
+          if (v & 2)
+            {
+            old_to_young:
+              abort();
+            }
+          assert(P->h_tid & GCFLAG_PUBLIC);
+
+          gcptr P_prev = P;
+          P = (gcptr)v;
+
+          /* if we land on a P in read_barrier_cache: just return it */
+          if (FXCACHE_AT(P) == P)
+            return P;
+
+          v = ACCESS_ONCE(P->h_revision);
+          if (!(v & 1))  // "is a pointer", i.e.
+            {            //      "has a more recent revision"
+              if (v & 2)
+                goto old_to_young;
+              assert(P->h_tid & GCFLAG_PUBLIC);
+
+              /* we update P_prev->h_revision as a shortcut */
+              /* XXX check if this really gives a worse performance than only
+                 doing this write occasionally based on a counter in d */
+              P_prev->h_revision = v;
+              P = (gcptr)v;
+              goto retry;
+            }
+        }
+
+      if (UNLIKELY(v > d->start_time))   // object too recent?
+        {
+          if (v >= LOCKED)
+            {
+              SpinLoop(SPLP_LOCKED_INFLIGHT);
+              goto retry;           // spinloop until it is no longer LOCKED
+            }
+          ValidateNow(d);                  // try to move start_time forward
+          goto retry;                      // restart searching from P
+        }
+    }
   fxcache_add(&d->recent_reads_cache, P);
+  gcptrlist_insert(&d->list_of_read_objects, P);
   return P;
 }
 
