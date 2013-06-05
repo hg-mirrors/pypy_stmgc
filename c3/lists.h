@@ -178,14 +178,16 @@ void gcptrlist_move(struct GcPtrList *, struct GcPtrList *gcptrlist_source);
    more.
 */
 
-#define FX_ENTRIES   8192
-#define FX_TOTAL     (FX_ENTRIES * 2)
+#define FX_MASK      65535
+#define FX_ENTRIES   ((FX_MASK + 1) / sizeof(char *))
+#define FX_TOTAL     (FX_ENTRIES * 4 / 3)
 
 struct FXCache {
-    char *cache_start;
     revision_t shift;
     revision_t cache[FX_TOTAL];
 };
+
+extern __thread char *stm_read_barrier_cache;
 
 void _fxcache_reset(struct FXCache *fxcache);
 
@@ -194,7 +196,16 @@ static inline void fxcache_clear(struct FXCache *fxcache)
     fxcache->shift++;
     if (fxcache->shift > FX_TOTAL - FX_ENTRIES)
         _fxcache_reset(fxcache);
-    fxcache->cache_start = (char *)(fxcache->cache + fxcache->shift);
+    stm_read_barrier_cache = (char *)(fxcache->cache + fxcache->shift);
+}
+
+#define FXCACHE_AT(obj)  \
+    (*(gcptr *)(stm_read_barrier_cache + ((revision_t)(obj) & FX_MASK)))
+
+static inline void fxcache_add(struct FXCache *fxcache, gcptr newobj)
+{
+    assert(stm_read_barrier_cache == (char*)(fxcache->cache + fxcache->shift));
+    FXCACHE_AT(newobj) = newobj;
 }
 
 /************************************************************/

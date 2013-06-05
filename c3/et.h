@@ -177,6 +177,7 @@ gcptr stm_RepeatReadBarrier(gcptr);
 gcptr stm_WriteBarrier(gcptr);
 gcptr _stm_nonrecord_barrier(gcptr, int *);
 gcptr stm_get_backup_copy(gcptr);
+gcptr stm_get_read_obj(long);  /* debugging */
 
 int DescriptorInit(void);
 void DescriptorDone(void);

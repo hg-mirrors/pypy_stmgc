@@ -69,6 +69,7 @@ ffi.cdef('''
     void stm_stop_sharedlock(void);
     void AbortTransaction(int);
     gcptr stm_get_backup_copy(gcptr);
+    gcptr stm_get_read_obj(long index);
 
     gcptr getptr(gcptr, long);
     void setptr(gcptr, long, gcptr);
@@ -528,3 +529,14 @@ def classify(p):
         return "backup"
     else:
         return "protected"
+
+def list_of_read_objects():
+    result = []
+    index = 0
+    while 1:
+        p = lib.stm_get_read_obj(index)
+        if p == ffi.NULL:
+            break
+        result.append(p)
+        index += 1
+    return result

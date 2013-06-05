@@ -141,3 +141,18 @@ def test_commit_change_to_prebuilt_object():
     assert p.h_revision == int(ffi.cast("revision_t", p2)) + 2
     assert lib.rawgetlong(p, 0) == 28971289
     assert lib.rawgetlong(p2, 0) == 1289222
+
+def test_read_barrier_private():
+    p = nalloc(HDR)
+    assert lib.stm_read_barrier(p) == p     # no effect
+    assert p.h_tid == gettid(p)
+    assert p.h_revision == lib.get_private_rev_num()
+    assert list_of_read_objects() == []
+
+def test_read_barrier_protected():
+    p = nalloc(HDR)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert list_of_read_objects() == []
+    assert lib.stm_read_barrier(p) == p     # record as a read object
+    assert list_of_read_objects() == [p]

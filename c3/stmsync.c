@@ -77,12 +77,10 @@ void stm_finalize(void)
 
 gcptr stm_read_barrier(gcptr obj)
 {
-    /* XXX inline in the caller */
-    abort();
-#if 0
-    if (UNLIKELY(obj->h_revision != stm_local_revision))
+    /* XXX inline in the caller, optimize to get the smallest code */
+    if (UNLIKELY((obj->h_revision != stm_private_rev_num) &&
+                 (FXCACHE_AT(obj) != obj)))
         obj = stm_DirectReadBarrier(obj);
-#endif
     return obj;
 }
 

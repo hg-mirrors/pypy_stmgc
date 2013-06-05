@@ -137,10 +137,9 @@ static gcptr HeadOfRevisionChainList(struct tx_descriptor *d, gcptr G)
 #endif
 }
 
+#if 0
 static inline gcptr AddInReadSet(struct tx_descriptor *d, gcptr R)
 {
-  abort();
-#if 0
   fprintf(stderr, "AddInReadSet(%p)\n", R);
   d->count_reads++;
   if (!fxcache_add(&d->recent_reads_cache, R)) {
@@ -155,37 +154,22 @@ static inline gcptr AddInReadSet(struct tx_descriptor *d, gcptr R)
       //      return Localize(d, R);
       //  }
   return R;
-#endif
 }
-
-gcptr stm_DirectReadBarrier(gcptr G)
-{
-  abort();
-#if 0
-  gcptr R;
-  struct tx_descriptor *d = thread_descriptor;
-  assert(d->active >= 1);
-
-  /* XXX optimize me based on common patterns */
-  R = HeadOfRevisionChainList(d, G);
-
-  if (R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
-    {
-      if (gcptrlist_size(&d->stolen_objects) > 0)
-        stmgc_normalize_stolen_objects();
-
-      wlog_t *entry;
-      gcptr L;
-      G2L_FIND(d->public_to_private, R, entry, goto not_found);
-      L = entry->val;
-      assert(L->h_revision == stm_local_revision);
-      return L;
-
-    not_found:;
-    }
-  R = AddInReadSet(d, R);
-  return R;
 #endif
+
+gcptr stm_DirectReadBarrier(gcptr P)
+{
+  struct tx_descriptor *d = thread_descriptor;
+
+  if (P->h_tid & GCFLAG_PUBLIC)
+    {
+      abort();
+      /*...*/
+    }
+
+  gcptrlist_insert(&d->list_of_read_objects, P);
+  fxcache_add(&d->recent_reads_cache, P);
+  return P;
 }
 
 static gcptr _latest_gcptr(gcptr R)
@@ -369,6 +353,14 @@ gcptr stm_get_backup_copy(gcptr P)
   wlog_t *entry;
   G2L_FIND(d->private_to_backup, P, entry, return NULL);
   return entry->val;
+}
+
+gcptr stm_get_read_obj(long index)
+{
+  struct tx_descriptor *d = thread_descriptor;
+  if (index < gcptrlist_size(&d->list_of_read_objects))
+    return d->list_of_read_objects.items[index];
+  return NULL;
 }
 
 /************************************************************/

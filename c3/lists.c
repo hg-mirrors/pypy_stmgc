@@ -223,6 +223,8 @@ void gcptrlist_move(struct GcPtrList *gcptrlist,
 
 /************************************************************/
 
+__thread char *stm_read_barrier_cache;
+
 void _fxcache_reset(struct FXCache *fxcache)
 {
     fxcache->shift = 0;
