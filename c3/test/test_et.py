@@ -115,9 +115,8 @@ def test_prebuilt_is_public():
                                        GCFLAG_PREBUILT_ORIGINAL)
     assert classify(p) == "public"
 
-def test_change_prebuilt_object():
-    p = palloc(HDR + WORD)
-    lib.rawsetlong(p, 0, 28971289)
+def test_prebuilt_object_to_private():
+    p = palloc(HDR)
     flags = p.h_tid
     assert (flags & GCFLAG_PUBLIC_TO_PRIVATE) == 0
     assert classify(p) == "public"
@@ -126,3 +125,17 @@ def test_change_prebuilt_object():
     assert classify(p) == "public"
     assert classify(p2) == "private"
     assert p.h_tid == flags | GCFLAG_PUBLIC_TO_PRIVATE
+
+def test_commit_change_to_prebuilt_object():
+    p = palloc(HDR + WORD)
+    lib.rawsetlong(p, 0, 28971289)
+    p2 = lib.stm_write_barrier(p)
+    assert p2 != p
+    assert classify(p) == "public"
+    assert classify(p2) == "private"
+    lib.rawsetlong(p, 0, 1289222)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert classify(p) == "public"
+    assert classify(p2) == "protected"
+    assert p.h_revision == int(ffi.cast("revision_t", p2)) + 2
