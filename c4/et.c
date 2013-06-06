@@ -192,10 +192,13 @@ gcptr stm_DirectReadBarrier(gcptr G)
     }
   else
     {
-      abort();   // stealing
+      /* stealing */
+      fprintf(stderr, "read_barrier: %p -> stealing %p...", G, (gcptr)v);
+      abort();
     }
 }
 
+#if 0
 static gcptr _latest_gcptr(gcptr R)
 {
   /* don't use, for tests only */
@@ -270,6 +273,7 @@ gcptr _stm_nonrecord_barrier(gcptr obj, int *result)
       return obj;
     }
 }
+#endif
 
 #if 0
 void *stm_DirectReadBarrierFromR(void *G1, void *R_Container1, size_t offset)
@@ -294,6 +298,14 @@ gcptr stm_RepeatReadBarrier(gcptr O)
 #endif
 }
 
+gcptr stmgc_duplicate(gcptr P)
+{
+  size_t size = stmcb_size(P);
+  gcptr L = stm_malloc(size);
+  memcpy(L, P, size);
+  return L;
+}
+
 static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 {
   gcptr B;
@@ -307,7 +319,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
   if (P->h_revision & 1)
     {
       /* does not have a backup yet */
-      B = stmgc_duplicate(P, 0);
+      B = stmgc_duplicate(P);
       B->h_tid |= GCFLAG_BACKUP_COPY;
     }
   else
@@ -338,7 +350,7 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
   R->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
  not_found:;
-  gcptr L = stmgc_duplicate(R, 0);
+  gcptr L = stmgc_duplicate(R);
   assert(!(L->h_tid & GCFLAG_BACKUP_COPY));
   assert(!(L->h_tid & GCFLAG_STOLEN));
   assert(!(L->h_tid & GCFLAG_STUB));
@@ -556,7 +568,7 @@ void AbortTransaction(int num)
 
   gcptrlist_clear(&d->list_of_read_objects);
   g2l_clear(&d->private_to_backup);
-  stmgc_abort_transaction(d);
+  abort();//stmgc_abort_transaction(d);
 
   fprintf(stderr,
           "\n"
@@ -620,7 +632,7 @@ static void init_transaction(struct tx_descriptor *d)
   }
   assert(d->list_of_read_objects.size == 0);
   assert(!g2l_any_entry(&d->private_to_backup));
-  stmgc_start_transaction(d);
+  assert(!g2l_any_entry(&d->public_to_private));
 
   d->count_reads = 1;
   fxcache_clear(&d->recent_reads_cache);
@@ -750,10 +762,10 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       gcptr R = item->addr;
       revision_t v = (revision_t)item->val;
 
+      assert(R->h_tid & GCFLAG_PUBLIC);
       assert(R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
       assert(!(R->h_tid & GCFLAG_NURSERY_MOVED));
       assert(!(R->h_tid & GCFLAG_STOLEN));
-      assert(!is_young(R));
       assert(R->h_revision != localrev);
 
       /* XXX compactify and don't leak! */
@@ -773,6 +785,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
 #endif
       ACCESS_ONCE(R->h_revision) = w;
 
+#if 0
       if (R->h_tid & GCFLAG_PREBUILT_ORIGINAL)
         {
           /* cannot possibly get here more than once for a given value of R */
@@ -781,12 +794,14 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
           pthread_mutex_unlock(&mutex_prebuilt_gcroots);
           /*mark*/
         }
+#endif
 
     } G2L_LOOP_END;
 
   g2l_clear(&d->public_to_private);
 }
 
+#if 0
 void UpdateProtectedChainHeads(struct tx_descriptor *d, revision_t cur_time,
                                revision_t localrev)
 {
@@ -805,6 +820,7 @@ void UpdateProtectedChainHeads(struct tx_descriptor *d, revision_t cur_time,
       L->h_revision = new_revision;
     }
 }
+#endif
 
 void TurnPrivateWithBackupToProtected(struct tx_descriptor *d,
                                       revision_t cur_time)
@@ -829,7 +845,7 @@ void CommitTransaction(void)
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
-  stmgc_stop_transaction(d);
+  spinlock_acquire(d->collection_lock, 'C');  /* committing */
   AcquireLocks(d);
 
   if (is_inevitable(d))
@@ -851,10 +867,10 @@ void CommitTransaction(void)
           if (cur_time & 1)
             {                    // there is another inevitable transaction
               CancelLocks(d);
-              stmgc_suspend_commit_transaction(d);
+              spinlock_release(d->collection_lock);
               inev_mutex_acquire();   // wait until released
               inev_mutex_release();
-              stmgc_stop_transaction(d);
+              spinlock_acquire(d->collection_lock, 'C');
               AcquireLocks(d);
               continue;
             }
@@ -879,8 +895,8 @@ void CommitTransaction(void)
   TurnPrivateWithBackupToProtected(d, cur_time);
 
   revision_t localrev = stm_private_rev_num;
-  UpdateProtectedChainHeads(d, cur_time, localrev);
-  smp_wmb();
+  //UpdateProtectedChainHeads(d, cur_time, localrev);
+  //smp_wmb();
 
   revision_t newrev = -(cur_time + 1);
   assert(newrev & 1);
@@ -890,7 +906,7 @@ void CommitTransaction(void)
 
   UpdateChainHeads(d, cur_time, localrev);
 
-  stmgc_committed_transaction(d);
+  spinlock_release(d->collection_lock);
   d->num_commits++;
   d->active = 0;
   stm_stop_sharedlock();
@@ -1107,6 +1123,7 @@ void DescriptorDone(void)
 
     thread_descriptor = NULL;
 
+    g2l_delete(&d->public_to_private);
     g2l_delete(&d->private_to_backup);
     gcptrlist_delete(&d->list_of_read_objects);
     gcptrlist_delete(&d->abortinfo);

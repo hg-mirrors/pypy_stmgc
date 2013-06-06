@@ -5,11 +5,11 @@ import os, cffi, thread, sys
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 header_files = [os.path.join(parent_dir, _n) for _n in
-                "et.h lists.h nursery.h gcpage.h "
+                "et.h lists.h "
                 "stmsync.h dbgmem.h fprintcolor.h "
                 "stmgc.h stmimpl.h atomic_ops.h".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
-                "et.c lists.c nursery.c gcpage.c "
+                "et.c lists.c "
                 "stmsync.c dbgmem.c fprintcolor.c".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
@@ -40,7 +40,7 @@ ffi.cdef('''
     #define PREBUILT_FLAGS         ...
     #define PREBUILT_REVISION      ...
 
-    gcptr stm_allocate_object_of_size(size_t size);
+    //gcptr stm_allocate_object_of_size(size_t size);
     gcptr stm_allocate(size_t size, unsigned long tid);
     void stm_push_root(gcptr);
     gcptr stm_pop_root(void);
@@ -55,15 +55,15 @@ ffi.cdef('''
     void stm_set_transaction_length(long length_max);
 
     /* extra non-public code */
-    gcptr stmgcpage_malloc(size_t size);
-    void stmgcpage_free(gcptr obj);
-    long stmgcpage_count(int quantity);
-    void stmgcpage_possibly_major_collect(int);
+    //gcptr stmgcpage_malloc(size_t size);
+    //void stmgcpage_free(gcptr obj);
+    //long stmgcpage_count(int quantity);
+    //void stmgcpage_possibly_major_collect(int);
     revision_t stm_global_cur_time(void);
-    void stmgcpage_add_prebuilt_root(gcptr);
+    //void stmgcpage_add_prebuilt_root(gcptr);
     void stm_clear_between_tests(void);
-    void stmgc_minor_collect(void);
-    gcptr _stm_nonrecord_barrier(gcptr, int *);
+    //void stmgc_minor_collect(void);
+    //gcptr _stm_nonrecord_barrier(gcptr, int *);
     int stm_dbgmem_is_active(void *p, int allow_outside);
     void stm_start_sharedlock(void);
     void stm_stop_sharedlock(void);
@@ -86,8 +86,8 @@ ffi.cdef('''
     revision_t get_start_time(void);
     revision_t get_my_lock(void);
 
-    gcptr *addr_of_thread_local(void);
-    int in_nursery(gcptr);
+    //gcptr *addr_of_thread_local(void);
+    //int in_nursery(gcptr);
     void stm_initialize_tests(int max_aborts);
 
     /* some constants normally private that are useful in the tests */
@@ -106,22 +106,20 @@ ffi.cdef('''
     #define GCFLAG_STOLEN            ...
     #define GCFLAG_STUB              ...
     #define ABRT_MANUAL              ...
-    typedef struct { ...; } page_header_t;
+    //typedef struct { ...; } page_header_t;
 ''')
 
 lib = ffi.verify(r'''
     #include "stmgc.h"
     #include "stmimpl.h"
 
-    extern gcptr stmgcpage_malloc(size_t size);
-    extern void stmgcpage_free(gcptr obj);
-    extern long stmgcpage_count(int quantity);
-    extern void stmgcpage_possibly_major_collect(int);
+    //extern gcptr stmgcpage_malloc(size_t size);
+    //extern void stmgcpage_free(gcptr obj);
+    //extern long stmgcpage_count(int quantity);
+    //extern void stmgcpage_possibly_major_collect(int);
     extern revision_t stm_global_cur_time(void);
-    extern void stmgcpage_add_prebuilt_root(gcptr);
-    extern void stm_clear_between_tests(void);
+    //extern void stmgcpage_add_prebuilt_root(gcptr);
     extern revision_t get_private_rev_num(void);
-    extern local_gcpages_t *stm_local_gcpages(void);
 
     int gettid(gcptr obj)
     {
@@ -214,17 +212,17 @@ lib = ffi.verify(r'''
         return thread_descriptor->my_lock;
     }
 
-    gcptr *addr_of_thread_local(void)
+    /*gcptr *addr_of_thread_local(void)
     {
         return &stm_thread_local_obj;
-    }
+    }*/
 
-    int in_nursery(gcptr obj)
+    /*int in_nursery(gcptr obj)
     {
         assert(stm_dbgmem_is_active(obj, 1));
         struct tx_descriptor *d = thread_descriptor;
         return (d->nursery <= (char*)obj && ((char*)obj) < d->nursery_end);
-    }
+    }*/
 
     void stm_initialize_tests(int max_aborts)
     {
@@ -275,7 +273,7 @@ lib = ffi.verify(r'''
 
 HDR = ffi.sizeof("struct stm_object_s")
 WORD = lib.WORD
-PAGE_ROOM = lib.GC_PAGE_SIZE - ffi.sizeof("page_header_t")
+#PAGE_ROOM = lib.GC_PAGE_SIZE - ffi.sizeof("page_header_t")
 for name in lib.__dict__:
     if name.startswith('GCFLAG_') or name.startswith('PREBUILT_'):
         globals()[name] = getattr(lib, name)
@@ -416,7 +414,7 @@ def oalloc(size):
     lib.settid(p, 42 + size)
     return p
 
-ofree = lib.stmgcpage_free
+#ofree = lib.stmgcpage_free
 
 def oalloc_refs(nrefs):
     "Allocate an 'old' object, i.e. outside any nursery, with nrefs pointers"

@@ -223,3 +223,15 @@ def test_read_barrier_handle_private():
     p4 = lib.stm_read_barrier(p)
     assert p4 == p2
     assert list_of_read_objects() == [p2]
+
+def test_stealing_protected_without_backup():
+    p = palloc(HDR + WORD)
+    def f1(r):
+        lib.setlong(p, 0, 2782172)
+        lib.stm_commit_transaction()
+        lib.stm_begin_inevitable_transaction()
+        r.set(2)
+    def f2(r):
+        r.wait(2)
+        assert lib.getlong(p, 0) == 2782172
+    run_parallel(f1, f2)

@@ -59,19 +59,19 @@ void stm_initialize(void)
 {
     int r = DescriptorInit();
     assert(r == 1);
-    stmgc_init_tls();
+    //stmgc_init_tls();
     init_shadowstack();
-    stmgcpage_init_tls();
+    //stmgcpage_init_tls();
     BeginInevitableTransaction();
 }
 
 void stm_finalize(void)
 {
-    stmgc_minor_collect();   /* force everything out of the nursery */
+    //stmgc_minor_collect();   /* force everything out of the nursery */
     CommitTransaction();
-    stmgcpage_done_tls();
+    //stmgcpage_done_tls();
     done_shadowstack();
-    stmgc_done_tls();
+    //stmgc_done_tls();
     DescriptorDone();
 }
 
@@ -95,18 +95,16 @@ gcptr stm_write_barrier(gcptr obj)
 
 gcptr stm_allocate(size_t size, unsigned long tid)
 {
-    gcptr result = stm_allocate_object_of_size(size);
+    gcptr result = stm_malloc(size);
     assert(tid == (tid & STM_USER_TID_MASK));
     result->h_tid = tid;
+    result->h_revision = stm_private_rev_num;
     return result;
 }
 
 gcptr _stm_allocate_old(size_t size, unsigned long tid)
 {
-    gcptr result = _stm_allocate_object_of_size_old(size);
-    assert(tid == (tid & STM_USER_TID_MASK));
-    result->h_tid = tid | GCFLAG_OLD;
-    return result;
+    abort();
 }
 
 /************************************************************/
@@ -237,12 +235,12 @@ void stm_start_sharedlock(void)
 {
     int err = pthread_rwlock_rdlock(&rwlock_shared);
     assert(err == 0);
-    assert(stmgc_nursery_hiding(thread_descriptor, 0));
+    //assert(stmgc_nursery_hiding(thread_descriptor, 0));
 }
 
 void stm_stop_sharedlock(void)
 {
-    assert(stmgc_nursery_hiding(thread_descriptor, 1));
+    //assert(stmgc_nursery_hiding(thread_descriptor, 1));
     int err = pthread_rwlock_unlock(&rwlock_shared);
     assert(err == 0);
 }
@@ -302,4 +300,16 @@ void stm_possible_safe_point(void)
     /* another thread should be waiting in start_exclusivelock(),
        which takes priority here */
     stm_start_sharedlock();
+}
+
+/************************************************************/
+
+void stm_clear_between_tests(void)
+{
+    fprintf(stderr, "\n"
+            "===============================================================\n"
+            "========================[  START  ]============================\n"
+            "===============================================================\n"
+            "\n");
+    //gcptrlist_clear(&stm_prebuilt_gcroots);
 }

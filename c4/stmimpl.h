@@ -30,8 +30,6 @@
 #include "fprintcolor.h"
 #include "lists.h"
 #include "dbgmem.h"
-#include "nursery.h"
-#include "gcpage.h"
 #include "et.h"
 #include "stmsync.h"
 

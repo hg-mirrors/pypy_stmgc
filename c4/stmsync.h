@@ -11,4 +11,6 @@ void stm_stop_single_thread(void);
 
 void stm_possible_safe_point(void);
 
+void stm_clear_between_tests(void);
+
 #endif

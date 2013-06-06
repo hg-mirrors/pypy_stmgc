@@ -13,6 +13,7 @@
 
 #define LOCKED  ((INTPTR_MAX - 0xffff) | 1)
 
+#define WORD                sizeof(gcptr)
 #define HANDLE_BLOCK_SIZE   (2 * WORD)
 
 /* Description of the flags
@@ -100,11 +101,13 @@
 #define SPINLOOP_REASONS      4
 
 struct tx_descriptor {
-  NURSERY_FIELDS_DECL
-  local_gcpages_t *local_gcpages;
   jmp_buf *setjmp_buf;
   revision_t start_time;
   revision_t my_lock;
+  revision_t collection_lock;
+  gcptr *shadowstack;
+  gcptr **shadowstack_end_ref;
+
   long atomic;   /* 0 = not atomic, > 0 atomic */
   unsigned long count_reads;
   unsigned long reads_size_limit;        /* see should_break_tr. */
@@ -119,6 +122,7 @@ struct tx_descriptor {
   struct GcPtrList list_of_read_objects;
   struct GcPtrList abortinfo;
   struct G2L private_to_backup;
+  struct G2L public_to_private;
   char *longest_abort_info;
   long long longest_abort_info_time;
   struct FXCache recent_reads_cache;
