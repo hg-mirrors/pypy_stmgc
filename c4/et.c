@@ -82,6 +82,13 @@ static inline gcptr AddInReadSet(struct tx_descriptor *d, gcptr R)
 
 static void steal(gcptr P)
 {
+  struct tx_public_descriptor *foreign_pd;
+  revision_t target_descriptor_index;
+  revision_t v = ACCESS_ONCE(P->h_revision);
+  if ((v & 3) != 2)
+    return;
+  target_descriptor_index = *(revision_t *)(v & ~(HANDLE_BLOCK_SIZE-1));
+  //foreign_pd = ACCESS_ONCE(stm_descriptor_array[target_descriptor_index]);
   abort();
 }
 
@@ -167,7 +174,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
  old_to_young:;
   revision_t target_descriptor_index;
   target_descriptor_index = *(revision_t *)(v & ~(HANDLE_BLOCK_SIZE-1));
-  if (target_descriptor_index == d->descriptor_index)
+  if (target_descriptor_index == d->public_descriptor_index)
     {
       P = (gcptr)(*(revision_t *)(v - 2));
       assert(!(P->h_tid & GCFLAG_PUBLIC));
@@ -195,7 +202,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
       /* stealing */
       fprintf(stderr, "read_barrier: %p -> stealing %p...", G, (gcptr)v);
       steal(P);
-      abort();
+      goto retry;
     }
 }
 
@@ -331,7 +338,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
       memcpy(B + 1, P + 1, size - sizeof(*B));
     }
   assert(B->h_tid & GCFLAG_BACKUP_COPY);
-  g2l_insert(&d->private_to_backup, P, B);
+  gcptrlist_insert2(&d->public_descriptor->active_backup_copies, P, B);
   P->h_revision = stm_private_rev_num;
   return P;
 }
@@ -394,10 +401,13 @@ gcptr stm_WriteBarrier(gcptr P)
 
 gcptr stm_get_backup_copy(gcptr P)
 {
-  struct tx_descriptor *d = thread_descriptor;
-  wlog_t *entry;
-  G2L_FIND(d->private_to_backup, P, entry, return NULL);
-  return entry->val;
+  struct tx_public_descriptor *pd = thread_descriptor->public_descriptor;
+  long i, size = pd->active_backup_copies.size;
+  gcptr *items = pd->active_backup_copies.items;
+  for (i = 0; i < size; i += 2)
+    if (items[i] == P)
+      return items[i + 1];
+  return NULL;
 }
 
 gcptr stm_get_read_obj(long index)
@@ -568,7 +578,7 @@ void AbortTransaction(int num)
   }
 
   gcptrlist_clear(&d->list_of_read_objects);
-  g2l_clear(&d->private_to_backup);
+  gcptrlist_clear(&d->public_descriptor->active_backup_copies);
   abort();//stmgc_abort_transaction(d);
 
   fprintf(stderr,
@@ -578,7 +588,7 @@ void AbortTransaction(int num)
           "!!!!!!!!!!!!!!!!!!!!!  [%lx] abort %d\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
-          "\n", (long)d->descriptor_index, num);
+          "\n", (long)d->public_descriptor_index, num);
   if (num != ABRT_MANUAL && d->max_aborts >= 0 && !d->max_aborts--)
     {
       fprintf(stderr, "unexpected abort!\n");
@@ -632,7 +642,7 @@ static void init_transaction(struct tx_descriptor *d)
     d->start_real_time.tv_nsec = -1;
   }
   assert(d->list_of_read_objects.size == 0);
-  assert(!g2l_any_entry(&d->private_to_backup));
+  assert(d->public_descriptor->active_backup_copies.size == 0);
   assert(!g2l_any_entry(&d->public_to_private));
 
   d->count_reads = 1;
@@ -774,7 +784,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       handle_block = (revision_t *)
         ((((intptr_t)handle_block) + HANDLE_BLOCK_SIZE-1)
          & ~(HANDLE_BLOCK_SIZE-1));
-      handle_block[0] = d->descriptor_index;
+      handle_block[0] = d->public_descriptor_index;
       handle_block[1] = v;
 
       revision_t w = ((revision_t)(handle_block + 1)) + 2;
@@ -826,18 +836,19 @@ void UpdateProtectedChainHeads(struct tx_descriptor *d, revision_t cur_time,
 void TurnPrivateWithBackupToProtected(struct tx_descriptor *d,
                                       revision_t cur_time)
 {
-  wlog_t *item;
-  G2L_LOOP_FORWARD(d->private_to_backup, item)
+  long i, size = d->public_descriptor->active_backup_copies.size;
+  gcptr *items = d->public_descriptor->active_backup_copies.items;
+
+  for (i = 0; i < size; i += 2)
     {
-      gcptr P = item->addr;
-      gcptr B = item->val;
+      gcptr P = items[i];
+      gcptr B = items[i + 1];
       assert(P->h_revision == stm_private_rev_num);
       assert(B->h_tid & GCFLAG_BACKUP_COPY);
       B->h_revision = cur_time;
       P->h_revision = (revision_t)B;
-
-    } G2L_LOOP_END;
-  g2l_clear(&d->private_to_backup);
+    };
+  gcptrlist_clear(&d->public_descriptor->active_backup_copies);
 }
 
 void CommitTransaction(void)
@@ -846,7 +857,7 @@ void CommitTransaction(void)
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
-  spinlock_acquire(d->collection_lock, 'C');  /* committing */
+  spinlock_acquire(d->public_descriptor->collection_lock, 'C');  /*committing*/
   AcquireLocks(d);
 
   if (is_inevitable(d))
@@ -868,10 +879,10 @@ void CommitTransaction(void)
           if (cur_time & 1)
             {                    // there is another inevitable transaction
               CancelLocks(d);
-              spinlock_release(d->collection_lock);
+              spinlock_release(d->public_descriptor->collection_lock);
               inev_mutex_acquire();   // wait until released
               inev_mutex_release();
-              spinlock_acquire(d->collection_lock, 'C');
+              spinlock_acquire(d->public_descriptor->collection_lock, 'C');
               AcquireLocks(d);
               continue;
             }
@@ -907,7 +918,7 @@ void CommitTransaction(void)
 
   UpdateChainHeads(d, cur_time, localrev);
 
-  spinlock_release(d->collection_lock);
+  spinlock_release(d->public_descriptor->collection_lock);
   d->num_commits++;
   d->active = 0;
   stm_stop_sharedlock();
@@ -948,7 +959,8 @@ void BecomeInevitable(const char *why)
                 (XXX statically we should know when we're outside
                 a transaction) */
 
-  fprintf(stderr, "[%lx] inevitable: %s\n", (long)d->descriptor_index, why);
+  fprintf(stderr, "[%lx] inevitable: %s\n",
+          (long)d->public_descriptor_index, why);
 
   cur_time = acquire_inev_mutex_and_mark_global_cur_time();
   if (d->start_time != cur_time)
@@ -1072,8 +1084,8 @@ void stm_ThreadLocalRef_LLSet(void **addr, void *newvalue)
 
 /************************************************************/
 
-struct tx_descriptor *stm_descriptor_array[MAX_THREADS] = {0};
-static revision_t descriptor_array_next = 0;
+struct tx_public_descriptor *stm_descriptor_array[MAX_THREADS] = {0};
+static revision_t descriptor_array_free_list = 0;
 static revision_t descriptor_array_lock = 0;
 
 int DescriptorInit(void)
@@ -1092,22 +1104,30 @@ int DescriptorInit(void)
       memset(d, 0, sizeof(struct tx_descriptor));
       spinlock_acquire(descriptor_array_lock, 1);
 
-      i = descriptor_array_next;
-      while (stm_descriptor_array[i] != NULL)
-        {
-          i++;
-          if (i == MAX_THREADS)
-            i = 0;
-          if (i == descriptor_array_next)
-            {
+      struct tx_public_descriptor *pd;
+      i = descriptor_array_free_list;
+      pd = stm_descriptor_array[i];
+      if (pd != NULL) {
+          /* we are reusing 'pd' */
+          descriptor_array_free_list = pd->free_list_next;
+          assert(descriptor_array_free_list >= 0);
+      }
+      else {
+          /* no item in the free list */
+          descriptor_array_free_list = i + 1;
+          if (descriptor_array_free_list == MAX_THREADS) {
               fprintf(stderr, "error: too many threads at the same time "
                               "in this process");
               abort();
-            }
-        }
-      descriptor_array_next = i;
-      stm_descriptor_array[i] = d;
-      d->descriptor_index = i;
+          }
+          pd = stm_malloc(sizeof(struct tx_public_descriptor));
+          memset(pd, 0, sizeof(struct tx_public_descriptor));
+          stm_descriptor_array[i] = pd;
+      }
+      pd->free_list_next = -1;
+
+      d->public_descriptor = pd;
+      d->public_descriptor_index = i;
       d->my_lock = LOCKED + 2 * i;
       assert(d->my_lock & 1);
       assert(d->my_lock >= LOCKED);
@@ -1117,7 +1137,7 @@ int DescriptorInit(void)
       thread_descriptor = d;
 
       fprintf(stderr, "[%lx] pthread %lx starting\n",
-              (long)d->descriptor_index, (long)pthread_self());
+              (long)d->public_descriptor_index, (long)pthread_self());
 
       spinlock_release(descriptor_array_lock);
       return 1;
@@ -1128,15 +1148,25 @@ int DescriptorInit(void)
 
 void DescriptorDone(void)
 {
+    revision_t i;
     struct tx_descriptor *d = thread_descriptor;
     assert(d != NULL);
     assert(d->active == 0);
 
-    stm_descriptor_array[d->descriptor_index] = NULL;
+    d->public_descriptor->collection_lock = 0;    /* unlock */
+
+    spinlock_acquire(descriptor_array_lock, 1);
+    i = d->public_descriptor_index;
+    assert(stm_descriptor_array[i] == d->public_descriptor);
+    d->public_descriptor->free_list_next = descriptor_array_free_list;
+    descriptor_array_free_list = i;
+    spinlock_release(descriptor_array_lock);
+
     thread_descriptor = NULL;
 
     g2l_delete(&d->public_to_private);
-    g2l_delete(&d->private_to_backup);
+    assert(d->public_descriptor->active_backup_copies.size == 0);
+    gcptrlist_delete(&d->public_descriptor->active_backup_copies);
     gcptrlist_delete(&d->list_of_read_objects);
     gcptrlist_delete(&d->abortinfo);
     free(d->longest_abort_info);
@@ -1145,7 +1175,6 @@ void DescriptorDone(void)
 #endif
 
     int num_aborts = 0, num_spinloops = 0;
-    int i;
     char line[256], *p = line;
 
     for (i=0; i<ABORT_REASONS; i++)
@@ -1154,7 +1183,7 @@ void DescriptorDone(void)
         num_spinloops += d->num_spinloops[i];
 
     p += sprintf(p, "[%lx] finishing: %d commits, %d aborts ",
-                 (long)d->descriptor_index,
+                 (long)d->public_descriptor_index,
                  d->num_commits,
                  num_aborts);
 

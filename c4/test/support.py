@@ -208,7 +208,7 @@ lib = ffi.verify(r'''
 
     revision_t get_descriptor_index(void)
     {
-        return thread_descriptor->descriptor_index;
+        return thread_descriptor->public_descriptor_index;
     }
 
     /*gcptr *addr_of_thread_local(void)

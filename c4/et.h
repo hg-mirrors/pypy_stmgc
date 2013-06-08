@@ -101,12 +101,25 @@
 #define SPLP_LOCKED_COMMIT        3
 #define SPINLOOP_REASONS      4
 
+/* this struct contains thread-local data that may be occasionally
+ * accessed by a foreign thread and that must stay around after the
+ * thread shuts down.  It is reused the next time a thread starts. */
+struct tx_public_descriptor {
+  revision_t collection_lock;
+  struct GcPtrList stolen_objects;
+  struct GcPtrList active_backup_copies;
+  revision_t free_list_next;
+  /* xxx gcpage data here */
+};
+
+/* this struct contains all thread-local data that is never accessed
+ * by a foreign thread */
 struct tx_descriptor {
+  struct tx_public_descriptor *public_descriptor;
+  revision_t public_descriptor_index;
   jmp_buf *setjmp_buf;
   revision_t start_time;
-  revision_t descriptor_index;
   revision_t my_lock;
-  revision_t collection_lock;
   gcptr *shadowstack;
   gcptr **shadowstack_end_ref;
 
@@ -123,7 +136,6 @@ struct tx_descriptor {
   unsigned int num_spinloops[SPINLOOP_REASONS];
   struct GcPtrList list_of_read_objects;
   struct GcPtrList abortinfo;
-  struct G2L private_to_backup;
   struct G2L public_to_private;
   char *longest_abort_info;
   long long longest_abort_info_time;
@@ -133,42 +145,9 @@ struct tx_descriptor {
 
 extern __thread struct tx_descriptor *thread_descriptor;
 extern __thread revision_t stm_private_rev_num;
-extern struct tx_descriptor *stm_descriptor_array[];
+extern struct tx_public_descriptor *stm_descriptor_array[];
 
 /************************************************************/
-
-//#define STM_BARRIER_P2R(P)
-//    (__builtin_expect((((gcptr)(P))->h_tid & GCFLAG_GLOBAL) == 0, 1) ?
-//     (P) : (typeof(P))stm_DirectReadBarrier(P))
-
-//#define STM_BARRIER_G2R(G)
-//    (assert(((gcptr)(G))->h_tid & GCFLAG_GLOBAL),
-//     (typeof(G))stm_DirectReadBarrier(G))
-
-//#define STM_BARRIER_O2R(O)
-//    (__builtin_expect((((gcptr)(O))->h_tid & GCFLAG_POSSIBLY_OUTDATED) == 0,
-//                      1) ?
-//     (O) : (typeof(O))stm_RepeatReadBarrier(O))
-
-//#define STM_READ_BARRIER_P_FROM_R(P, R_container, offset)
-//    (__builtin_expect((((gcptr)(P))->h_tid & GCFLAG_GLOBAL) == 0, 1) ?
-//     (P) : (typeof(P))stm_DirectReadBarrierFromR((P),
-//                                              (R_container),
-//                                              offset))
-
-//#define STM_BARRIER_P2W(P)
-//    (__builtin_expect((((gcptr)(P))->h_tid & GCFLAG_NOT_WRITTEN) == 0, 1) ?
-//     (P) : (typeof(P))stm_WriteBarrier(P))
-
-//#define STM_BARRIER_G2W(G)
-//    (assert(((gcptr)(G))->h_tid & GCFLAG_GLOBAL),
-//     (typeof(G))stm_WriteBarrier(G))
-
-//#define STM_BARRIER_R2W(R)
-//    (__builtin_expect((((gcptr)(R))->h_tid & GCFLAG_NOT_WRITTEN) == 0, 1) ?
-//     (R) : (typeof(R))stm_WriteBarrierFromReady(R))
-
-//#define STM_BARRIER_O2W(R)  STM_BARRIER_R2W(R)   /* same logic works here */
 
 
 void BeginTransaction(jmp_buf *);

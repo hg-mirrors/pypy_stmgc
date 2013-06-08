@@ -83,8 +83,7 @@ Off-line data stored in the thread-local structure
 - the PRN (private revision number): odd, negative, changes for every
   transaction that commits
 
-- list active_backup_copies =
-  [(private converted from protected, backup copy)]
+- list active_backup_copies = [(private, backup copy)]
 
 - dict public_to_private = {public obj: private copy}
 
