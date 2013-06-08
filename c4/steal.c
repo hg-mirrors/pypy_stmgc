@@ -56,10 +56,10 @@ void stm_steal_stub(gcptr P)
     gcptr L = (gcptr)P->h_revision;
     gcptr Q = stmgc_duplicate(L);
     Q->h_tid |= GCFLAG_PUBLIC;
+    P->h_revision = (revision_t)Q;
 
     smp_wmb();
 
-    P->h_revision = (revision_t)Q;
     P->h_tid &= ~GCFLAG_STUB;
 
  done:
