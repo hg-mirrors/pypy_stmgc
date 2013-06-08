@@ -45,13 +45,23 @@ gcptr stm_stub_malloc(struct tx_public_descriptor *pd)
 
 void stm_steal_stub(gcptr P)
 {
-    abort();
-  struct tx_public_descriptor *foreign_pd;
-  revision_t target_descriptor_index;
-  revision_t v = ACCESS_ONCE(P->h_revision);
-  if ((v & 3) != 2)
-    return;
-  target_descriptor_index = *(revision_t *)(v & ~(STUB_BLOCK_SIZE-1));
-  foreign_pd = stm_descriptor_array[target_descriptor_index];
-  abort();
+    struct tx_public_descriptor *foreign_pd = STUB_THREAD(P);
+
+    spinlock_acquire(foreign_pd->collection_lock, 'S');   /*stealing*/
+
+    if (!(P->h_tid & GCFLAG_STUB))
+        goto done;     /* un-stubbed while we waited for the lock */
+
+    /* XXX check for now that P is a regular protected object */
+    gcptr L = (gcptr)P->h_revision;
+    gcptr Q = stmgc_duplicate(L);
+    Q->h_tid |= GCFLAG_PUBLIC;
+
+    smp_wmb();
+
+    P->h_revision = (revision_t)Q;
+    P->h_tid &= ~GCFLAG_STUB;
+
+ done:
+    spinlock_release(foreign_pd->collection_lock);
 }

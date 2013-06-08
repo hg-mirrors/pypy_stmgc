@@ -251,6 +251,7 @@ def test_stealing():
         r.wait(2)
         p2 = lib.stm_read_barrier(p)    # steals
         assert lib.rawgetlong(p2, 0) == 2782172
+        assert p2 == lib.stm_read_barrier(p)    # short-circuit h_revision
         assert p.h_revision == int(ffi.cast("revision_t", p2))
         assert p2 == lib.stm_read_barrier(p)
         assert p2 not in plist
