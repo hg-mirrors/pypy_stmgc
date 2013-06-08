@@ -138,7 +138,7 @@ def test_commit_change_to_prebuilt_object():
     lib.stm_begin_inevitable_transaction()
     assert classify(p) == "public"
     assert classify(p2) == "protected"
-    assert decode_handle(p.h_revision) == (p2, lib.get_my_lock())
+    assert decode_handle(p.h_revision) == (p2, lib.get_descriptor_index())
     assert lib.rawgetlong(p, 0) == 28971289
     assert lib.rawgetlong(p2, 0) == 1289222
 
@@ -224,14 +224,36 @@ def test_read_barrier_handle_private():
     assert p4 == p2
     assert list_of_read_objects() == [p2]
 
-def test_stealing_protected_without_backup():
+def test_stealing():
     p = palloc(HDR + WORD)
+    plist = [p]
     def f1(r):
-        lib.setlong(p, 0, 2782172)
+        assert (p.h_tid & GCFLAG_PUBLIC_TO_PRIVATE) == 0
+        p1 = lib.stm_write_barrier(p)   # private copy
+        assert p1 != p
+        assert classify(p) == "public"
+        assert classify(p1) == "private"
+        assert p.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
+        lib.rawsetlong(p1, 0, 2782172)
         lib.stm_commit_transaction()
         lib.stm_begin_inevitable_transaction()
+        assert classify(p) == "public"
+        assert classify(p1) == "protected"
+        plist.append(p1)
+        # now p's most recent revision is protected
+        assert p.h_revision % 4 == 2    # a handle
         r.set(2)
+        r.wait(3)
+        assert lib.list_stolen_objects() == plist[-2:]
+        p2 = lib.stm_read_barrier(p1)
+        assert p2 == plist[-1]
     def f2(r):
         r.wait(2)
-        assert lib.getlong(p, 0) == 2782172
+        p2 = lib.stm_read_barrier(p)    # steals
+        assert lib.rawgetlong(p2, 0) == 2782172
+        assert p.h_revision == int(ffi.cast("revision_t", p2))
+        assert p2 == lib.stm_read_barrier(p)
+        assert p2 not in plist
+        plist.append(p2)
+        r.set(3)
     run_parallel(f1, f2)

@@ -11,7 +11,8 @@
 #define _SRCSTM_ET_H
 
 
-#define LOCKED  ((INTPTR_MAX - 0xffff) | 1)
+#define MAX_THREADS         1024
+#define LOCKED              (INTPTR_MAX - 2*(MAX_THREADS-1))
 
 #define WORD                sizeof(gcptr)
 #define HANDLE_BLOCK_SIZE   (2 * WORD)
@@ -103,6 +104,7 @@
 struct tx_descriptor {
   jmp_buf *setjmp_buf;
   revision_t start_time;
+  revision_t descriptor_index;
   revision_t my_lock;
   revision_t collection_lock;
   gcptr *shadowstack;
@@ -127,11 +129,11 @@ struct tx_descriptor {
   long long longest_abort_info_time;
   struct FXCache recent_reads_cache;
   revision_t *private_revision_ref;
-  struct tx_descriptor *tx_next, *tx_prev;   /* a doubly linked list */
 };
 
 extern __thread struct tx_descriptor *thread_descriptor;
 extern __thread revision_t stm_private_rev_num;
+extern struct tx_descriptor *stm_descriptor_array[];
 
 /************************************************************/
 

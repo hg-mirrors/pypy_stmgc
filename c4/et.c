@@ -13,11 +13,6 @@ __thread struct tx_descriptor *thread_descriptor = NULL;
    a transaction inevitable: we then add 1 to it. */
 static revision_t global_cur_time = 2;
 
-/* 'next_locked_value' is incremented by two for every thread that starts.
-   XXX it should be fixed at some point because right now the process will
-   die if we start more than 0x7fff threads. */
-static revision_t next_locked_value = (LOCKED + 1) | 1;
-
 /* a negative odd number that identifies the currently running
    transaction within the thread. */
 __thread revision_t stm_private_rev_num;
@@ -84,6 +79,11 @@ static inline gcptr AddInReadSet(struct tx_descriptor *d, gcptr R)
   return R;
 }
 #endif
+
+static void steal(gcptr P)
+{
+  abort();
+}
 
 gcptr stm_DirectReadBarrier(gcptr G)
 {
@@ -165,9 +165,9 @@ gcptr stm_DirectReadBarrier(gcptr G)
   return P;
 
  old_to_young:;
-  revision_t target_lock;
-  target_lock = *(revision_t *)(v & ~(HANDLE_BLOCK_SIZE-1));
-  if (target_lock == d->my_lock)
+  revision_t target_descriptor_index;
+  target_descriptor_index = *(revision_t *)(v & ~(HANDLE_BLOCK_SIZE-1));
+  if (target_descriptor_index == d->descriptor_index)
     {
       P = (gcptr)(*(revision_t *)(v - 2));
       assert(!(P->h_tid & GCFLAG_PUBLIC));
@@ -194,6 +194,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
     {
       /* stealing */
       fprintf(stderr, "read_barrier: %p -> stealing %p...", G, (gcptr)v);
+      steal(P);
       abort();
     }
 }
@@ -577,7 +578,7 @@ void AbortTransaction(int num)
           "!!!!!!!!!!!!!!!!!!!!!  [%lx] abort %d\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
-          "\n", (long)d->my_lock, num);
+          "\n", (long)d->descriptor_index, num);
   if (num != ABRT_MANUAL && d->max_aborts >= 0 && !d->max_aborts--)
     {
       fprintf(stderr, "unexpected abort!\n");
@@ -773,7 +774,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       handle_block = (revision_t *)
         ((((intptr_t)handle_block) + HANDLE_BLOCK_SIZE-1)
          & ~(HANDLE_BLOCK_SIZE-1));
-      handle_block[0] = d->my_lock;
+      handle_block[0] = d->descriptor_index;
       handle_block[1] = v;
 
       revision_t w = ((revision_t)(handle_block + 1)) + 2;
@@ -947,7 +948,7 @@ void BecomeInevitable(const char *why)
                 (XXX statically we should know when we're outside
                 a transaction) */
 
-  fprintf(stderr, "[%lx] inevitable: %s\n", (long)d->my_lock, why);
+  fprintf(stderr, "[%lx] inevitable: %s\n", (long)d->descriptor_index, why);
 
   cur_time = acquire_inev_mutex_and_mark_global_cur_time();
   if (d->start_time != cur_time)
@@ -1071,6 +1072,10 @@ void stm_ThreadLocalRef_LLSet(void **addr, void *newvalue)
 
 /************************************************************/
 
+struct tx_descriptor *stm_descriptor_array[MAX_THREADS] = {0};
+static revision_t descriptor_array_next = 0;
+static revision_t descriptor_array_lock = 0;
+
 int DescriptorInit(void)
 {
   if (GCFLAG_PREBUILT != PREBUILT_FLAGS)
@@ -1082,33 +1087,39 @@ int DescriptorInit(void)
 
   if (thread_descriptor == NULL)
     {
+      revision_t i;
       struct tx_descriptor *d = stm_malloc(sizeof(struct tx_descriptor));
       memset(d, 0, sizeof(struct tx_descriptor));
+      spinlock_acquire(descriptor_array_lock, 1);
 
-      /* initialize 'my_lock' to be a unique odd number > LOCKED */
-      while (1)
+      i = descriptor_array_next;
+      while (stm_descriptor_array[i] != NULL)
         {
-          d->my_lock = ACCESS_ONCE(next_locked_value);
-          if (d->my_lock > INTPTR_MAX - 2)
+          i++;
+          if (i == MAX_THREADS)
+            i = 0;
+          if (i == descriptor_array_next)
             {
-              /* XXX fix this limitation */
-              fprintf(stderr, "XXX error: too many threads ever created "
+              fprintf(stderr, "error: too many threads at the same time "
                               "in this process");
               abort();
             }
-          if (bool_cas(&next_locked_value, d->my_lock, d->my_lock + 2))
-            break;
         }
+      descriptor_array_next = i;
+      stm_descriptor_array[i] = d;
+      d->descriptor_index = i;
+      d->my_lock = LOCKED + 2 * i;
       assert(d->my_lock & 1);
-      assert(d->my_lock > LOCKED);
+      assert(d->my_lock >= LOCKED);
       stm_private_rev_num = -1;
       d->private_revision_ref = &stm_private_rev_num;
       d->max_aborts = -1;
       thread_descriptor = d;
 
       fprintf(stderr, "[%lx] pthread %lx starting\n",
-              (long)d->my_lock, (long)pthread_self());
+              (long)d->descriptor_index, (long)pthread_self());
 
+      spinlock_release(descriptor_array_lock);
       return 1;
     }
   else
@@ -1121,6 +1132,7 @@ void DescriptorDone(void)
     assert(d != NULL);
     assert(d->active == 0);
 
+    stm_descriptor_array[d->descriptor_index] = NULL;
     thread_descriptor = NULL;
 
     g2l_delete(&d->public_to_private);
@@ -1142,7 +1154,7 @@ void DescriptorDone(void)
         num_spinloops += d->num_spinloops[i];
 
     p += sprintf(p, "[%lx] finishing: %d commits, %d aborts ",
-                 (long)d->my_lock,
+                 (long)d->descriptor_index,
                  d->num_commits,
                  num_aborts);
 

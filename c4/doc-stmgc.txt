@@ -304,3 +304,16 @@ stub.  This is probably a bit involved: we might have to get the current
 revision numbers of all threads, and theoretically compact each interval
 of numbers down to only one number, but still keep one active revision
 number per thread.
+
+
+Stealing
+--------
+
+This is done by the *stealing thread* in order to gain access to an
+object that is protected by the *foreign thread*.  Stealing is triggered
+when we, the stealing thread, follow a "handle" created by a foreign
+thread.  The handle has a reference to the normal protected/private
+object.  The process depends on the exact state of the protected/private
+copy.  As a general rule, we may carefully read, but not write, to the
+foreign copies during stealing.
+

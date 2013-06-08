@@ -1,4 +1,23 @@
 
+Design goal
+-----------
+
+stm_read_barrier(P) -> P: the read barrier (containing a call in the
+slow path) can be applied on a pointer to an object, and returns a
+possibly different pointer.  Afterwards, any reads from the object can
+be done normally (using the returned pointer).
+
+stm_write_barrier(P) -> P: the same for writes (actually read/write mode).
+
+The returned pointers are valid until a potential transaction break ---
+with the exception that the result of stm_read_barrier() will be
+invalidated by a stm_write_barrier() done on the same object.
+
+This means we must not modify an object in-place from thread A when
+thread B might be reading from it!  It is the basis for the design
+outlined in the sequel, in which "protected" objects are seen by only
+one thread, whereas "public" objects are seen by all threads.
+
 
 
 Object copies state transitions (changes of state of the *same* copy)
@@ -8,29 +27,19 @@ Object copies state transitions (changes of state of the *same* copy)
 
   Private freshly created
              \                Private, with backup
-              \                ^  .          |  ^
-               \              /  .    commit |  |
-         commit \     modify /  .            |  |
-                 \          /  . commit      |  | modify
-                  V        /  V              |  |
-           Protected, no backup              V  |
+              \                ^           |  ^
+               \              /     commit |  |
+         commit \     modify /             |  |
+                 \          /              |  | modify
+                  V        /               |  |
+           Protected, no backup            V  |
                 ^    ^              Protected, with backup
                /     |       gc       |
        commit /      `----------------'
              /
             /
-    Private copy of               (the dotted arrow is followed if the
-    a public obj                   protected backup copy was stolen)
-
-
-
-     Protected backup copy
-                  \
-                   \
-           stealing \         commit of newer version
-                     \         ,-----------------.
-                      V        |                 V
-             Up-to-date public copy       Outdated public copy
+    Private copy of
+    a public obj
 
 
 
@@ -45,6 +54,7 @@ Private objects:
 Protected objects:
 - converted from fresh private obj                     (old PRN)
 - converted from a private obj with backup           ptr to backup
+- converted from a private obj from public                GT
 - backup copy of a private obj                    original h_revision
 - backup copy still attached to a protected               GT
 - original obj after GC killed the backup                 GT
@@ -73,13 +83,15 @@ Off-line data stored in the thread-local structure
 - the PRN (private revision number): odd, negative, changes for every
   transaction that commits
 
-- dict active_backup_copies = {private converted from protected: backup copy}
+- list active_backup_copies =
+  [(private converted from protected, backup copy)]
 
 - dict public_to_private = {public obj: private copy}
 
 - list read_set containing the objects in the read set, with possibly
   some duplicates (but hopefully not too many)
 
+- list stolen_objects = [(priv/prot object, public copy)]
 
 
 Kind of object copy            distinguishing feature
@@ -153,6 +165,8 @@ Once we have the lock, stealing is:
 
     update the original P->h_revision to point directly to the new
     public copy
+
+    add (P, new public copy) to stolen_objects
 
 
 
