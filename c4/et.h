@@ -13,9 +13,7 @@
 
 #define MAX_THREADS         1024
 #define LOCKED              (INTPTR_MAX - 2*(MAX_THREADS-1))
-
 #define WORD                sizeof(gcptr)
-#define HANDLE_BLOCK_SIZE   (2 * WORD)
 
 /* Description of the flags
  * ------------------------
@@ -52,8 +50,9 @@
  * GCFLAG_STOLEN is set of protected objects after we notice that they
  * have been stolen.
  *
- * GCFLAG_STUB is used for debugging: it's set on stub objects made by
- * stealing or by major collections.
+ * GCFLAG_STUB is set on stub objects made by stealing or by major
+ * collections.  It's removed once the stub's protected h_revision
+ * target is stolen and replaced by a regular public object.
  */
 #define GCFLAG_OLD               (STM_FIRST_GCFLAG << 0)
 #define GCFLAG_VISITED           (STM_FIRST_GCFLAG << 1)
@@ -64,7 +63,7 @@
 #define GCFLAG_WRITE_BARRIER     (STM_FIRST_GCFLAG << 6)
 #define GCFLAG_NURSERY_MOVED     (STM_FIRST_GCFLAG << 7)
 #define GCFLAG_STOLEN            (STM_FIRST_GCFLAG << 8)
-#define GCFLAG_STUB              (STM_FIRST_GCFLAG << 9)   /* debugging */
+#define GCFLAG_STUB              (STM_FIRST_GCFLAG << 9)
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
 #define GCFLAG_PREBUILT  (GCFLAG_VISITED           | \
@@ -106,6 +105,8 @@
  * thread shuts down.  It is reused the next time a thread starts. */
 struct tx_public_descriptor {
   revision_t collection_lock;
+  struct stub_block_s *stub_blocks;
+  gcptr stub_free_list;
   struct GcPtrList stolen_objects;
   struct GcPtrList active_backup_copies;
   revision_t free_list_next;

@@ -5,11 +5,11 @@ import os, cffi, thread, sys
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 header_files = [os.path.join(parent_dir, _n) for _n in
-                "et.h lists.h "
+                "et.h lists.h steal.h "
                 "stmsync.h dbgmem.h fprintcolor.h "
                 "stmgc.h stmimpl.h atomic_ops.h".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
-                "et.c lists.c "
+                "et.c lists.c steal.c "
                 "stmsync.c dbgmem.c fprintcolor.c".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
@@ -70,6 +70,7 @@ ffi.cdef('''
     void AbortTransaction(int);
     gcptr stm_get_backup_copy(gcptr);
     gcptr stm_get_read_obj(long index);
+    void *STUB_THREAD(gcptr);
 
     gcptr getptr(gcptr, long);
     void setptr(gcptr, long, gcptr);
@@ -84,7 +85,7 @@ ffi.cdef('''
     gcptr pseudoprebuilt(size_t size, int tid);
     revision_t get_private_rev_num(void);
     revision_t get_start_time(void);
-    revision_t get_descriptor_index(void);
+    void *my_stub_thread(void);
 
     //gcptr *addr_of_thread_local(void);
     //int in_nursery(gcptr);
@@ -93,7 +94,7 @@ ffi.cdef('''
     /* some constants normally private that are useful in the tests */
     #define WORD                     ...
     #define GC_PAGE_SIZE             ...
-    #define HANDLE_BLOCK_SIZE        ...
+    #define STUB_BLOCK_SIZE          ...
     #define GCFLAG_OLD               ...
     #define GCFLAG_VISITED           ...
     #define GCFLAG_PUBLIC            ...
@@ -206,9 +207,9 @@ lib = ffi.verify(r'''
         return thread_descriptor->start_time;
     }
 
-    revision_t get_descriptor_index(void)
+    void *my_stub_thread(void)
     {
-        return thread_descriptor->public_descriptor_index;
+        return (void *)thread_descriptor->public_descriptor;
     }
 
     /*gcptr *addr_of_thread_local(void)
@@ -526,10 +527,14 @@ def classify(p):
     private = p.h_revision == lib.get_private_rev_num()
     public  = (p.h_tid & GCFLAG_PUBLIC) != 0
     backup  = (p.h_tid & GCFLAG_BACKUP_COPY) != 0
+    stub    = (p.h_tid & GCFLAG_STUB) != 0
     assert private + public + backup <= 1
+    assert stub <= public
     if private:
         return "private"
     if public:
+        if stub:
+            return "stub"
         return "public"
     if backup:
         return "backup"
@@ -547,10 +552,4 @@ def list_of_read_objects():
         index += 1
     return result
 
-def decode_handle(r):
-    assert (r & 3) == 2
-    p = r & ~(lib.HANDLE_BLOCK_SIZE-1)
-    dindex = ffi.cast("revision_t *", p)[0]
-    assert 0 <= dindex < 20
-    ptr = ffi.cast("gcptr *", r - 2)[0]
-    return ptr, dindex
+stub_thread = lib.STUB_THREAD

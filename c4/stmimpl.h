@@ -31,6 +31,7 @@
 #include "lists.h"
 #include "dbgmem.h"
 #include "et.h"
+#include "steal.h"
 #include "stmsync.h"
 
 #endif

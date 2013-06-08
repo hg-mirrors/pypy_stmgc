@@ -60,38 +60,6 @@ static void inev_mutex_release(void)
 
 /************************************************************/
 
-#if 0
-static inline gcptr AddInReadSet(struct tx_descriptor *d, gcptr R)
-{
-  fprintf(stderr, "AddInReadSet(%p)\n", R);
-  d->count_reads++;
-  if (!fxcache_add(&d->recent_reads_cache, R)) {
-      /* not in the cache: it may be the first time we see it,
-       * so insert it into the list */
-      gcptrlist_insert(&d->list_of_read_objects, R);
-  }
-      //      break;
-
-      //  case 2:
-      /* already in the cache, and FX_THRESHOLD reached */
-      //      return Localize(d, R);
-      //  }
-  return R;
-}
-#endif
-
-static void steal(gcptr P)
-{
-  struct tx_public_descriptor *foreign_pd;
-  revision_t target_descriptor_index;
-  revision_t v = ACCESS_ONCE(P->h_revision);
-  if ((v & 3) != 2)
-    return;
-  target_descriptor_index = *(revision_t *)(v & ~(HANDLE_BLOCK_SIZE-1));
-  //foreign_pd = ACCESS_ONCE(stm_descriptor_array[target_descriptor_index]);
-  abort();
-}
-
 gcptr stm_DirectReadBarrier(gcptr G)
 {
   struct tx_descriptor *d = thread_descriptor;
@@ -106,26 +74,26 @@ gcptr stm_DirectReadBarrier(gcptr G)
       v = ACCESS_ONCE(P->h_revision);
       if (!(v & 1))  // "is a pointer", i.e.
         {            //      "has a more recent revision"
-          if (v & 2)
-            goto old_to_young;
-          assert(P->h_tid & GCFLAG_PUBLIC);
+          /* if we land on a P in read_barrier_cache: just return it */
+          gcptr P_next = (gcptr)v;
+          if (FXCACHE_AT(P_next) == P_next)
+            {
+              fprintf(stderr, "read_barrier: %p -> %p fxcache\n", G, P_next);
+              return P_next;
+            }
+
+          if (P->h_tid & GCFLAG_STUB)
+            goto follow_stub;
 
           gcptr P_prev = P;
-          P = (gcptr)v;
-
-          /* if we land on a P in read_barrier_cache: just return it */
-          if (FXCACHE_AT(P) == P)
-            {
-              fprintf(stderr, "read_barrier: %p -> %p fxcache\n", G, P);
-              return P;
-            }
+          P = P_next;
+          assert(P->h_tid & GCFLAG_PUBLIC);
 
           v = ACCESS_ONCE(P->h_revision);
           if (!(v & 1))  // "is a pointer", i.e.
             {            //      "has a more recent revision"
-              if (v & 2)
-                goto old_to_young;
-              assert(P->h_tid & GCFLAG_PUBLIC);
+              if (P->h_tid & GCFLAG_STUB)
+                goto follow_stub;
 
               /* we update P_prev->h_revision as a shortcut */
               /* XXX check if this really gives a worse performance than only
@@ -171,12 +139,12 @@ gcptr stm_DirectReadBarrier(gcptr G)
   gcptrlist_insert(&d->list_of_read_objects, P);
   return P;
 
- old_to_young:;
-  revision_t target_descriptor_index;
-  target_descriptor_index = *(revision_t *)(v & ~(HANDLE_BLOCK_SIZE-1));
-  if (target_descriptor_index == d->public_descriptor_index)
+ follow_stub:;
+  struct tx_public_descriptor *foreign_pd = STUB_THREAD(P);
+  if (foreign_pd == d->public_descriptor)
     {
-      P = (gcptr)(*(revision_t *)(v - 2));
+      /* same thread */
+      P = (gcptr)P->h_revision;
       assert(!(P->h_tid & GCFLAG_PUBLIC));
       if (P->h_revision == stm_private_rev_num)
         {
@@ -200,8 +168,8 @@ gcptr stm_DirectReadBarrier(gcptr G)
   else
     {
       /* stealing */
-      fprintf(stderr, "read_barrier: %p -> stealing %p...", G, (gcptr)v);
-      steal(P);
+      fprintf(stderr, "read_barrier: %p -> stealing %p...", G, P);
+      stm_steal_stub(P);
       goto retry;
     }
 }
@@ -401,6 +369,8 @@ gcptr stm_WriteBarrier(gcptr P)
 
 gcptr stm_get_backup_copy(gcptr P)
 {
+  assert(P->h_revision == stm_private_rev_num);
+
   struct tx_public_descriptor *pd = thread_descriptor->public_descriptor;
   long i, size = pd->active_backup_copies.size;
   gcptr *items = pd->active_backup_copies.items;
@@ -735,7 +705,7 @@ static void CancelLocks(struct tx_descriptor *d)
 #endif
 }
 
-static pthread_mutex_t mutex_prebuilt_gcroots = PTHREAD_MUTEX_INITIALIZER;
+//static pthread_mutex_t mutex_prebuilt_gcroots = PTHREAD_MUTEX_INITIALIZER;
 
 static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
                              revision_t localrev)
@@ -763,6 +733,11 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
 #endif
       L->h_revision = new_revision;
 
+      gcptr stub = stm_stub_malloc(d->public_descriptor);
+      stub->h_tid = GCFLAG_PUBLIC | GCFLAG_STUB;
+      stub->h_revision = (revision_t)L;
+      item->val = stub;
+
     } G2L_LOOP_END;
 
   smp_wmb(); /* a memory barrier: make sure the new L->h_revisions are visible
@@ -779,22 +754,12 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       assert(!(R->h_tid & GCFLAG_STOLEN));
       assert(R->h_revision != localrev);
 
-      /* XXX compactify and don't leak! */
-      revision_t *handle_block = stm_malloc(3 * WORD);
-      handle_block = (revision_t *)
-        ((((intptr_t)handle_block) + HANDLE_BLOCK_SIZE-1)
-         & ~(HANDLE_BLOCK_SIZE-1));
-      handle_block[0] = d->public_descriptor_index;
-      handle_block[1] = v;
-
-      revision_t w = ((revision_t)(handle_block + 1)) + 2;
-
 #ifdef DUMP_EXTRA
-      fprintf(stderr, "%p->h_revision = %p (UpdateChainHeads2)\n",
-              R, (gcptr)w);
+      fprintf(stderr, "%p->h_revision = %p (stub to %p)\n",
+              R, (gcptr)v, (gcptr)item->val->h_revision);
       /*mark*/
 #endif
-      ACCESS_ONCE(R->h_revision) = w;
+      ACCESS_ONCE(R->h_revision) = v;
 
 #if 0
       if (R->h_tid & GCFLAG_PREBUILT_ORIGINAL)

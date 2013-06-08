@@ -80,10 +80,9 @@ def test_protected_with_backup():
     assert p.h_revision == lib.get_private_rev_num()
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
-    assert lib.stm_get_backup_copy(p) == ffi.NULL
     assert classify(p) == "protected"
     assert classify(pback) == "backup"
-    assert ffi.cast("revision_t *", p.h_revision) == pback
+    assert ffi.cast("gcptr", p.h_revision) == pback
 
 def test_protected_backup_reused():
     p = nalloc(HDR + WORD)
@@ -95,7 +94,6 @@ def test_protected_backup_reused():
     assert pback != p
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
-    assert lib.stm_get_backup_copy(p) == ffi.NULL
     assert classify(p) == "protected"
     assert classify(pback) == "backup"
     assert lib.rawgetlong(p, 0) == 927122
@@ -138,7 +136,9 @@ def test_commit_change_to_prebuilt_object():
     lib.stm_begin_inevitable_transaction()
     assert classify(p) == "public"
     assert classify(p2) == "protected"
-    assert decode_handle(p.h_revision) == (p2, lib.get_descriptor_index())
+    pstub = ffi.cast("gcptr", p.h_revision)
+    assert classify(pstub) == "stub"
+    assert stub_thread(pstub) == lib.my_stub_thread()
     assert lib.rawgetlong(p, 0) == 28971289
     assert lib.rawgetlong(p2, 0) == 1289222
 
@@ -241,7 +241,7 @@ def test_stealing():
         assert classify(p1) == "protected"
         plist.append(p1)
         # now p's most recent revision is protected
-        assert p.h_revision % 4 == 2    # a handle
+        assert classify(ffi.cast("gcptr", p.h_revision)) == "stub"
         r.set(2)
         r.wait(3)
         assert lib.list_stolen_objects() == plist[-2:]
