@@ -171,6 +171,23 @@ void gcptrlist_insert2(struct GcPtrList *gcptrlist, gcptr newitem1,
   gcptrlist->size = i + 2;
 }
 
+void gcptrlist_locked_insert2(struct GcPtrList *gcptrlist, gcptr newitem1,
+                              gcptr newitem2, revision_t *lock)
+{
+  gcptr *items;
+  long i = gcptrlist->size;
+  if (UNLIKELY((gcptrlist->alloc - i) < 2)) 
+    {
+      spinlock_acquire(*lock, 'I');
+      _gcptrlist_grow(gcptrlist);
+      spinlock_release(*lock);
+    }
+  items = gcptrlist->items;
+  items[i+0] = newitem1;
+  items[i+1] = newitem2;
+  gcptrlist->size = i + 2;
+}
+
 void gcptrlist_insert3(struct GcPtrList *gcptrlist, gcptr newitem1,
                        gcptr newitem2, gcptr newitem3)
 {

@@ -164,6 +164,9 @@ static inline gcptr gcptrlist_pop(struct GcPtrList *gcptrlist)
 void gcptrlist_merge(struct GcPtrList *, struct GcPtrList *gcptrlist_source);
 void gcptrlist_move(struct GcPtrList *, struct GcPtrList *gcptrlist_source);
 
+void gcptrlist_locked_insert2(struct GcPtrList *gcptrlist, gcptr newitem1,
+                              gcptr newitem2, revision_t *lock);
+
 /************************************************************/
 
 /* The fxcache_xx functions implement a fixed-size set of gcptr's.

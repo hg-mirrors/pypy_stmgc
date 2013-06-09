@@ -68,7 +68,8 @@ ffi.cdef('''
     void stm_start_sharedlock(void);
     void stm_stop_sharedlock(void);
     void AbortTransaction(int);
-    gcptr stm_get_backup_copy(gcptr);
+    gcptr stm_get_backup_copy(long index);
+    gcptr stm_get_stolen_obj(long index);
     gcptr stm_get_read_obj(long index);
     void *STUB_THREAD(gcptr);
 
@@ -103,7 +104,6 @@ ffi.cdef('''
     #define GCFLAG_PUBLIC_TO_PRIVATE ...
     #define GCFLAG_WRITE_BARRIER     ...
     #define GCFLAG_NURSERY_MOVED     ...
-    #define GCFLAG_STOLEN            ...
     #define GCFLAG_STUB              ...
     #define ABRT_MANUAL              ...
     //typedef struct { ...; } page_header_t;
@@ -551,5 +551,24 @@ def list_of_read_objects():
         result.append(p)
         index += 1
     return result
+
+def _list2dict(getter):
+    result = {}
+    index = 0
+    while 1:
+        p = getter(index)
+        if p == ffi.NULL:
+            break
+        q = getter(index + 1)
+        assert q != ffi.NULL
+        result[p] = q
+        index += 2
+    return result
+
+def backup_copies():
+    return _list2dict(lib.stm_get_backup_copy)
+
+def stolen_objs():
+    return _list2dict(lib.stm_get_stolen_obj)
 
 stub_thread = lib.STUB_THREAD

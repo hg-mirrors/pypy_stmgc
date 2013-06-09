@@ -31,6 +31,7 @@
  * GCFLAG_PUBLIC is set on public objects.
  *
  * GCFLAG_BACKUP_COPY means the object is a (protected) backup copy.
+ * For debugging.
  *
  * GCFLAG_PUBLIC_TO_PRIVATE is added to a *public* object that has got a
  * *private* copy.  It is sticky, reset only at the next major collection.
@@ -47,9 +48,6 @@
  *
  * GCFLAG_NURSERY_MOVED is used temporarily during minor collections.
  *
- * GCFLAG_STOLEN is set of protected objects after we notice that they
- * have been stolen.
- *
  * GCFLAG_STUB is set for debugging on stub objects made by stealing or
  * by major collections.  'p_stub->h_revision' might be a value
  * that is == 2 (mod 4): in this case they point to a protected/private
@@ -59,12 +57,11 @@
 #define GCFLAG_VISITED           (STM_FIRST_GCFLAG << 1)
 #define GCFLAG_PUBLIC            (STM_FIRST_GCFLAG << 2)
 #define GCFLAG_PREBUILT_ORIGINAL (STM_FIRST_GCFLAG << 3)
-#define GCFLAG_BACKUP_COPY       (STM_FIRST_GCFLAG << 4)
-#define GCFLAG_PUBLIC_TO_PRIVATE (STM_FIRST_GCFLAG << 5)
-#define GCFLAG_WRITE_BARRIER     (STM_FIRST_GCFLAG << 6)
-#define GCFLAG_NURSERY_MOVED     (STM_FIRST_GCFLAG << 7)
-#define GCFLAG_STOLEN            (STM_FIRST_GCFLAG << 8)
-#define GCFLAG_STUB              (STM_FIRST_GCFLAG << 9)   /* debugging */
+#define GCFLAG_PUBLIC_TO_PRIVATE (STM_FIRST_GCFLAG << 4)
+#define GCFLAG_WRITE_BARRIER     (STM_FIRST_GCFLAG << 5)
+#define GCFLAG_NURSERY_MOVED     (STM_FIRST_GCFLAG << 6)
+#define GCFLAG_BACKUP_COPY       (STM_FIRST_GCFLAG << 7)   /* debugging */
+#define GCFLAG_STUB              (STM_FIRST_GCFLAG << 8)   /* debugging */
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
 #define GCFLAG_PREBUILT  (GCFLAG_VISITED           | \
@@ -108,8 +105,9 @@ struct tx_public_descriptor {
   revision_t collection_lock;
   struct stub_block_s *stub_blocks;
   gcptr stub_free_list;
-  struct GcPtrList stolen_objects;
-  struct GcPtrList active_backup_copies;
+  struct GcPtrList active_backup_copies;  /* (P,B) where P=private, B=backup */
+  struct GcPtrList stolen_objects;      /* (P,Q) where P=priv/prot, Q=public */
+  revision_t *private_revision_ref;
   revision_t free_list_next;
   /* xxx gcpage data here */
 };
@@ -142,7 +140,6 @@ struct tx_descriptor {
   char *longest_abort_info;
   long long longest_abort_info_time;
   struct FXCache recent_reads_cache;
-  revision_t *private_revision_ref;
 };
 
 extern __thread struct tx_descriptor *thread_descriptor;
@@ -165,7 +162,8 @@ gcptr stm_DirectReadBarrier(gcptr);
 gcptr stm_RepeatReadBarrier(gcptr);
 gcptr stm_WriteBarrier(gcptr);
 gcptr _stm_nonrecord_barrier(gcptr, int *);
-gcptr stm_get_backup_copy(gcptr);
+gcptr stm_get_backup_copy(long);  /* debugging */
+gcptr stm_get_stolen_obj(long);  /* debugging */
 gcptr stm_get_read_obj(long);  /* debugging */
 gcptr stmgc_duplicate(gcptr);
 

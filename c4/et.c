@@ -66,6 +66,13 @@ gcptr stm_DirectReadBarrier(gcptr G)
   gcptr P = G;
   revision_t v;
 
+  if (UNLIKELY(d->public_descriptor->stolen_objects.size > 0))
+    {
+      spinlock_acquire(d->public_descriptor->collection_lock, 'N');
+      stm_normalize_stolen_objects(d->public_descriptor);
+      spinlock_release(d->public_descriptor->collection_lock);
+    }
+
   if (P->h_tid & GCFLAG_PUBLIC)
     {
       /* follow the chained list of h_revision's as long as they are
@@ -144,7 +151,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
   if (foreign_pd == d->public_descriptor)
     {
       /* same thread */
-      P = (gcptr)v;
+      P = (gcptr)(v - 2);
       assert(!(P->h_tid & GCFLAG_PUBLIC));
       if (P->h_revision == stm_private_rev_num)
         {
@@ -306,7 +313,14 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
       memcpy(B + 1, P + 1, size - sizeof(*B));
     }
   assert(B->h_tid & GCFLAG_BACKUP_COPY);
-  gcptrlist_insert2(&d->public_descriptor->active_backup_copies, P, B);
+
+  gcptrlist_locked_insert2(&d->public_descriptor->active_backup_copies, P, B,
+                           &d->public_descriptor->collection_lock);
+
+  smp_wmb();   /* guarantees that stm_steal_stub() will see the list
+                  up to the (P, B) pair in case it goes the path
+                  h_revision == *foreign_pd->private_revision_ref */
+
   P->h_revision = stm_private_rev_num;
   return P;
 }
@@ -328,7 +342,6 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
  not_found:;
   gcptr L = stmgc_duplicate(R);
   assert(!(L->h_tid & GCFLAG_BACKUP_COPY));
-  assert(!(L->h_tid & GCFLAG_STOLEN));
   assert(!(L->h_tid & GCFLAG_STUB));
   L->h_tid &= ~(GCFLAG_OLD               |
                 GCFLAG_VISITED           |
@@ -367,16 +380,19 @@ gcptr stm_WriteBarrier(gcptr P)
   return W;
 }
 
-gcptr stm_get_backup_copy(gcptr P)
+gcptr stm_get_backup_copy(long index)
 {
-  assert(P->h_revision == stm_private_rev_num);
-
   struct tx_public_descriptor *pd = thread_descriptor->public_descriptor;
-  long i, size = pd->active_backup_copies.size;
-  gcptr *items = pd->active_backup_copies.items;
-  for (i = 0; i < size; i += 2)
-    if (items[i] == P)
-      return items[i + 1];
+  if (index < gcptrlist_size(&pd->active_backup_copies))
+    return pd->active_backup_copies.items[index];
+  return NULL;
+}
+
+gcptr stm_get_stolen_obj(long index)
+{
+  struct tx_public_descriptor *pd = thread_descriptor->public_descriptor;
+  if (index < gcptrlist_size(&pd->stolen_objects))
+    return pd->stolen_objects.items[index];
   return NULL;
 }
 
@@ -549,7 +565,9 @@ void AbortTransaction(int num)
 
   gcptrlist_clear(&d->list_of_read_objects);
   gcptrlist_clear(&d->public_descriptor->active_backup_copies);
-  abort();//stmgc_abort_transaction(d);
+  abort();
+  d->public_descriptor->stolen_objects;//XXX clean up
+  //stmgc_abort_transaction(d);
 
   fprintf(stderr,
           "\n"
@@ -612,7 +630,6 @@ static void init_transaction(struct tx_descriptor *d)
     d->start_real_time.tv_nsec = -1;
   }
   assert(d->list_of_read_objects.size == 0);
-  assert(d->public_descriptor->active_backup_copies.size == 0);
   assert(!g2l_any_entry(&d->public_to_private));
 
   d->count_reads = 1;
@@ -724,7 +741,6 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       assert(!(L->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
       assert(!(L->h_tid & GCFLAG_PREBUILT_ORIGINAL));
       assert(!(L->h_tid & GCFLAG_NURSERY_MOVED));
-      assert(!(L->h_tid & GCFLAG_STOLEN));
       assert(L->h_revision != localrev);   /* modified by AcquireLocks() */
 
 #ifdef DUMP_EXTRA
@@ -751,7 +767,6 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       assert(R->h_tid & GCFLAG_PUBLIC);
       assert(R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
       assert(!(R->h_tid & GCFLAG_NURSERY_MOVED));
-      assert(!(R->h_tid & GCFLAG_STOLEN));
       assert(R->h_revision != localrev);
 
 #ifdef DUMP_EXTRA
@@ -801,19 +816,21 @@ void UpdateProtectedChainHeads(struct tx_descriptor *d, revision_t cur_time,
 void TurnPrivateWithBackupToProtected(struct tx_descriptor *d,
                                       revision_t cur_time)
 {
-  long i, size = d->public_descriptor->active_backup_copies.size;
-  gcptr *items = d->public_descriptor->active_backup_copies.items;
+  struct tx_public_descriptor *pd = d->public_descriptor;
+  long i, size = pd->active_backup_copies.size;
+  gcptr *items = pd->active_backup_copies.items;
 
   for (i = 0; i < size; i += 2)
     {
       gcptr P = items[i];
       gcptr B = items[i + 1];
-      assert(P->h_revision == stm_private_rev_num);
       assert(B->h_tid & GCFLAG_BACKUP_COPY);
+      assert(!(B->h_tid & GCFLAG_PUBLIC));
+      assert(P->h_revision == stm_private_rev_num);
       B->h_revision = cur_time;
       P->h_revision = (revision_t)B;
     };
-  gcptrlist_clear(&d->public_descriptor->active_backup_copies);
+  gcptrlist_clear(&pd->active_backup_copies);
 }
 
 void CommitTransaction(void)
@@ -823,6 +840,9 @@ void CommitTransaction(void)
   assert(d->active >= 1);
 
   spinlock_acquire(d->public_descriptor->collection_lock, 'C');  /*committing*/
+  if (d->public_descriptor->stolen_objects.size)
+    stm_normalize_stolen_objects(d->public_descriptor);
+
   AcquireLocks(d);
 
   if (is_inevitable(d))
@@ -879,7 +899,7 @@ void CommitTransaction(void)
   assert(newrev & 1);
   ACCESS_ONCE(stm_private_rev_num) = newrev;
   fprintf(stderr, "%p: stm_local_revision = %ld\n", d, (long)newrev);
-  assert(d->private_revision_ref = &stm_private_rev_num);
+  assert(d->public_descriptor->private_revision_ref = &stm_private_rev_num);
 
   UpdateChainHeads(d, cur_time, localrev);
 
@@ -1097,7 +1117,7 @@ int DescriptorInit(void)
       assert(d->my_lock & 1);
       assert(d->my_lock >= LOCKED);
       stm_private_rev_num = -1;
-      d->private_revision_ref = &stm_private_rev_num;
+      pd->private_revision_ref = &stm_private_rev_num;
       d->max_aborts = -1;
       thread_descriptor = d;
 
@@ -1113,12 +1133,15 @@ int DescriptorInit(void)
 
 void DescriptorDone(void)
 {
+    static revision_t no_private_revision = 8;
     revision_t i;
     struct tx_descriptor *d = thread_descriptor;
     assert(d != NULL);
     assert(d->active == 0);
 
-    d->public_descriptor->collection_lock = 0;    /* unlock */
+    spinlock_acquire(d->public_descriptor->collection_lock, 'D');  /*done*/
+    d->public_descriptor->private_revision_ref = &no_private_revision;
+    spinlock_release(d->public_descriptor->collection_lock);
 
     spinlock_acquire(descriptor_array_lock, 1);
     i = d->public_descriptor_index;

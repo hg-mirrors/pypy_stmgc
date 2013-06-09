@@ -60,7 +60,7 @@ def test_get_backup_copy():
     org_r = p.h_revision
     lib.setlong(p, 0, 927122)
     assert p.h_revision == lib.get_private_rev_num()
-    pback = lib.stm_get_backup_copy(p)
+    pback = backup_copies()[p]
     assert pback and pback != p
     assert pback.h_revision == org_r
     assert pback.h_tid == p.h_tid | GCFLAG_BACKUP_COPY
@@ -75,7 +75,7 @@ def test_protected_with_backup():
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     lib.setlong(p, 0, 927122)
-    pback = lib.stm_get_backup_copy(p)
+    pback = backup_copies()[p]
     assert pback != p
     assert p.h_revision == lib.get_private_rev_num()
     lib.stm_commit_transaction()
@@ -90,7 +90,7 @@ def test_protected_backup_reused():
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     lib.setlong(p, 0, 927122)
-    pback = lib.stm_get_backup_copy(p)
+    pback = backup_copies()[p]
     assert pback != p
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
@@ -100,7 +100,7 @@ def test_protected_backup_reused():
     assert lib.rawgetlong(pback, 0) == 78927812    # but should not be used
     lib.setlong(p, 0, 43891)
     assert p.h_revision == lib.get_private_rev_num()
-    assert pback == lib.stm_get_backup_copy(p)
+    assert pback == backup_copies()[p]
     assert lib.rawgetlong(p, 0) == 43891
     assert lib.rawgetlong(pback, 0) == 927122
 
@@ -239,14 +239,16 @@ def test_stealing():
         lib.stm_begin_inevitable_transaction()
         assert classify(p) == "public"
         assert classify(p1) == "protected"
-        plist.append(p1)
-        # now p's most recent revision is protected
+        plist.append(p1)     # now p's most recent revision is protected
         assert classify(ffi.cast("gcptr", p.h_revision)) == "stub"
         r.set(2)
         r.wait(3)
-        assert lib.list_stolen_objects() == plist[-2:]
-        p2 = lib.stm_read_barrier(p1)
-        assert p2 == plist[-1]
+        d = stolen_objs()
+        assert len(d) == 1
+        assert d.keys() == [p1]
+        [p2] = d.values()
+        assert lib.stm_read_barrier(p) == p2
+        assert lib.stm_read_barrier(p1) == p2
     def f2(r):
         r.wait(2)
         p2 = lib.stm_read_barrier(p)    # steals
@@ -255,6 +257,7 @@ def test_stealing():
         assert p.h_revision == int(ffi.cast("revision_t", p2))
         assert p2 == lib.stm_read_barrier(p)
         assert p2 not in plist
+        assert classify(p2) == "public"
         plist.append(p2)
         r.set(3)
     run_parallel(f1, f2)

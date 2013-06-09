@@ -53,9 +53,29 @@ void stm_steal_stub(gcptr P)
     if ((v & 3) != 2)
         goto done;     /* un-stubbed while we waited for the lock */
 
-    gcptr L = (gcptr)(v - 2);
-    gcptr Q = stmgc_duplicate(L);
+    gcptr Q, L = (gcptr)(v - 2);
+    revision_t w = ACCESS_ONCE(L->h_revision);
+
+    if (w == *foreign_pd->private_revision_ref) {
+        /* The stub points to a private object L.  Because it cannot point
+           to "really private" objects, it must mean that L used to be
+           a protected object, and it has an attached backed copy.
+           XXX find a way to optimize this search, maybe */
+        long i;
+        gcptr *items = foreign_pd->active_backup_copies.items;
+        /* we must find L as the first item of a pair in the list.  We
+           cannot rely on how big the list is here, but we know that
+           it will not be resized while we hold collection_lock. */
+        for (i = 0; items[i] != L; i += 2)
+            ;
+        L = items[i + 1];
+        assert(L->h_tid & GCFLAG_BACKUP_COPY);
+    }
+    /* duplicate L */
+    Q = stmgc_duplicate(L);  XXX RACE
+    Q->h_tid &= ~GCFLAG_BACKUP_COPY;
     Q->h_tid |= GCFLAG_PUBLIC;
+    gcptrlist_insert2(&foreign_pd->stolen_objects, L, Q);
 
     smp_wmb();
 
@@ -63,4 +83,17 @@ void stm_steal_stub(gcptr P)
 
  done:
     spinlock_release(foreign_pd->collection_lock);
+}
+
+void stm_normalize_stolen_objects(struct tx_public_descriptor *pd)
+{
+    long i, size = pd->stolen_objects.size;
+    gcptr *items = pd->stolen_objects.items;
+    for (i = 0; i < size; i += 2) {
+        gcptr L = items[i];
+        gcptr Q = items[i + 1];
+        if (L->h_revision == stm_private_rev_num) {
+            
+        }
+    }
 }
