@@ -219,19 +219,14 @@ Commit-time change of flags
 
 (This occurs during commit, when we have got the collection_lock.)
 
-public_to_private:
-
-    write GT into the private object
-
-    make a stub with h_revision = private object | 2
-
-    after a CPU write barrier, make the public h_revision to point to the stub
 
 private_from_protected:
 
     get the backup B from P->h_revision
 
     set P->h_revision to GT
+
+    remove GCFLAG_PRIVATE_FROM_PROTECTED from P
 
     if B has GCFLAG_PUBLIC: it has been stolen
 
@@ -242,3 +237,11 @@ private_from_protected:
     else:
         possibly free B now, it's not used any more
 
+
+public_to_private:
+
+    write GT into the private object
+
+    make a stub with h_revision = private object | 2
+
+    after a CPU write barrier, make the public h_revision to point to the stub

@@ -49,8 +49,10 @@ def test_private_with_backup():
     assert classify(p) == "protected"
     p2 = lib.stm_write_barrier(p)
     assert p2 == p       # does not move
-    assert p.h_revision == r2
     assert classify(p) == "private"
+    pback = follow_revision(p)
+    assert classify(pback) == "backup"
+    assert list_of_private_from_protected() == [p]
 
 def test_get_backup_copy():
     p = nalloc(HDR + WORD)
@@ -58,51 +60,18 @@ def test_get_backup_copy():
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     org_r = p.h_revision
+    assert classify(p) == "protected"
     lib.setlong(p, 0, 927122)
-    assert p.h_revision == lib.get_private_rev_num()
-    pback = backup_copies()[p]
+    assert classify(p) == "private"
+    pback = follow_revision(p)
     assert pback and pback != p
     assert pback.h_revision == org_r
-    assert pback.h_tid == p.h_tid | GCFLAG_BACKUP_COPY
+    assert pback.h_tid == ((p.h_tid & ~GCFLAG_PRIVATE_FROM_PROTECTED) |
+                           GCFLAG_BACKUP_COPY)
     assert lib.rawgetlong(pback, 0) == 78927812
     assert lib.rawgetlong(p, 0) == 927122
     assert classify(p) == "private"
     assert classify(pback) == "backup"
-
-def test_protected_with_backup():
-    p = nalloc(HDR + WORD)
-    lib.setlong(p, 0, 78927812)
-    lib.stm_commit_transaction()
-    lib.stm_begin_inevitable_transaction()
-    lib.setlong(p, 0, 927122)
-    pback = backup_copies()[p]
-    assert pback != p
-    assert p.h_revision == lib.get_private_rev_num()
-    lib.stm_commit_transaction()
-    lib.stm_begin_inevitable_transaction()
-    assert classify(p) == "protected"
-    assert classify(pback) == "backup"
-    assert ffi.cast("gcptr", p.h_revision) == pback
-
-def test_protected_backup_reused():
-    p = nalloc(HDR + WORD)
-    lib.setlong(p, 0, 78927812)
-    lib.stm_commit_transaction()
-    lib.stm_begin_inevitable_transaction()
-    lib.setlong(p, 0, 927122)
-    pback = backup_copies()[p]
-    assert pback != p
-    lib.stm_commit_transaction()
-    lib.stm_begin_inevitable_transaction()
-    assert classify(p) == "protected"
-    assert classify(pback) == "backup"
-    assert lib.rawgetlong(p, 0) == 927122
-    assert lib.rawgetlong(pback, 0) == 78927812    # but should not be used
-    lib.setlong(p, 0, 43891)
-    assert p.h_revision == lib.get_private_rev_num()
-    assert pback == backup_copies()[p]
-    assert lib.rawgetlong(p, 0) == 43891
-    assert lib.rawgetlong(pback, 0) == 927122
 
 def test_prebuilt_is_public():
     p = palloc(HDR)
@@ -240,15 +209,13 @@ def test_stealing():
         assert classify(p) == "public"
         assert classify(p1) == "protected"
         plist.append(p1)     # now p's most recent revision is protected
-        assert classify(ffi.cast("gcptr", p.h_revision)) == "stub"
+        assert classify(follow_revision(p)) == "stub"
+        assert p1.h_revision & 1
         r.set(2)
         r.wait(3)
-        d = stolen_objs()
-        assert len(d) == 1
-        assert d.keys() == [p1]
-        [p2] = d.values()
-        assert lib.stm_read_barrier(p) == p2
-        assert lib.stm_read_barrier(p1) == p2
+        assert classify(p1) == "public"
+        assert lib.stm_read_barrier(p) == p1
+        assert lib.stm_read_barrier(p1) == p1
     def f2(r):
         r.wait(2)
         p2 = lib.stm_read_barrier(p)    # steals
@@ -256,8 +223,61 @@ def test_stealing():
         assert p2 == lib.stm_read_barrier(p)    # short-circuit h_revision
         assert p.h_revision == int(ffi.cast("revision_t", p2))
         assert p2 == lib.stm_read_barrier(p)
-        assert p2 not in plist
+        assert p2 == plist[-1]
         assert classify(p2) == "public"
-        plist.append(p2)
         r.set(3)
+    run_parallel(f1, f2)
+
+def test_stealing_while_modifying():
+    py.test.skip("in-progress")
+    p = palloc(HDR + WORD)
+
+    def f1(r):
+        p1 = lib.stm_write_barrier(p)   # private copy
+        assert classify(p) == "public"
+        assert classify(p1) == "private"
+        lib.rawsetlong(p1, 0, 2782172)
+
+        def cb(c):
+            assert c == 0
+            assert classify(p) == "public"
+            assert classify(p1) == "protected"
+            assert classify(follow_revision(p)) == "stub"
+            p2 = lib.stm_write_barrier(p)
+            assert p2 == p1
+            lib.rawsetlong(p2, 0, -451112)
+            pback = follow_revision(p1)
+            assert classify(p1) == "private"
+            assert classify(pback) == "backup"
+            assert lib.stm_read_barrier(p) == p1
+            assert lib.stm_read_barrier(p1) == p1
+            assert pback.h_revision & 1
+            r.wait_while_in_parallel()
+            assert classify(p1) == "private"
+            assert classify(pback) == "public"
+            assert pback.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
+            assert lib.stm_read_barrier(p) == p1
+            assert lib.stm_read_barrier(p1) == p1
+            assert pback.h_revision & 1
+        perform_transaction(cb)
+
+        lib.stm_commit_transaction()
+        lib.stm_begin_inevitable_transaction()
+        assert classify(p1) == "protected"
+        assert classify(pback) == "public"
+        assert classify(follow_revision(pback)) == "stub"
+        assert follow_revision(pback).h_revision == (
+            ffi.cast("revision_t", p1) | 2)
+
+    def f2(r):
+        def cb(c):
+            assert c == 0
+            r.enter_in_parallel()
+            p2 = lib.stm_read_barrier(p)    # steals
+            assert lib.rawgetlong(p2, 0) == 2782172
+            assert p2 == lib.stm_read_barrier(p)
+            assert classify(p2) == "public"
+            r.leave_in_parallel()
+        perform_transaction(cb)
+
     run_parallel(f1, f2)

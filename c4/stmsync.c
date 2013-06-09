@@ -87,8 +87,8 @@ gcptr stm_read_barrier(gcptr obj)
 gcptr stm_write_barrier(gcptr obj)
 {
     /* XXX inline in the caller */
-    if (UNLIKELY(((obj->h_tid & GCFLAG_WRITE_BARRIER) != 0) |
-                 (obj->h_revision != stm_private_rev_num)))
+    if (UNLIKELY((obj->h_revision != stm_private_rev_num) &
+                 ((obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) == 0)))
         obj = stm_WriteBarrier(obj);
     return obj;
 }

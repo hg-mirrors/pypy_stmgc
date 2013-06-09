@@ -66,11 +66,16 @@ gcptr stm_DirectReadBarrier(gcptr G)
   gcptr P = G;
   revision_t v;
 
-  if (UNLIKELY(d->public_descriptor->stolen_objects.size > 0))
+  if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
     {
-      spinlock_acquire(d->public_descriptor->collection_lock, 'N');
-      stm_normalize_stolen_objects(d->public_descriptor);
-      spinlock_release(d->public_descriptor->collection_lock);
+    private_from_protected:
+      /* check P->h_revision->h_revision: if a pointer, then it means
+         the backup copy has been stolen into a public object and then
+         modified by some other thread.  Abort. */
+      if (!(((gcptr)P->h_revision)->h_revision & 1))
+        AbortTransaction(ABRT_STOLEN_MODIFIED);
+
+      goto add_in_recent_reads_cache;
     }
 
   if (P->h_tid & GCFLAG_PUBLIC)
@@ -142,8 +147,10 @@ gcptr stm_DirectReadBarrier(gcptr G)
     }
 
  register_in_list_of_read_objects:
-  fxcache_add(&d->recent_reads_cache, P);
   gcptrlist_insert(&d->list_of_read_objects, P);
+
+ add_in_recent_reads_cache:
+  fxcache_add(&d->recent_reads_cache, P);
   return P;
 
  follow_stub:;
@@ -158,6 +165,12 @@ gcptr stm_DirectReadBarrier(gcptr G)
           fprintf(stderr, "read_barrier: %p -> %p handle "
                   "private\n", G, P);
           return P;
+        }
+      else if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+        {
+          fprintf(stderr, "read_barrier: %p -> %p handle "
+                  "private_from_protected\n", G, P);
+          goto private_from_protected;
         }
       else if (FXCACHE_AT(P) == P)
         {
@@ -307,24 +320,15 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
   assert(!(P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
   assert(!(P->h_tid & GCFLAG_BACKUP_COPY));
   assert(!(P->h_tid & GCFLAG_STUB));
+  assert(!(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
 
-  if (P->h_revision & 1)
-    {
-      /* does not have a backup yet */
-      B = stmgc_duplicate(P);
-      B->h_tid |= GCFLAG_BACKUP_COPY;
-    }
-  else
-    {
-      B = (gcptr)P->h_revision;
-      assert(B->h_tid & GCFLAG_BACKUP_COPY);
-      size_t size = stmcb_size(P);
-      memcpy(B + 1, P + 1, size - sizeof(*B));
-    }
-  assert(B->h_tid & GCFLAG_BACKUP_COPY);
+  B = stmgc_duplicate(P);
+  B->h_tid |= GCFLAG_BACKUP_COPY;
 
-  gcptrlist_insert2(&d->public_descriptor->active_backup_copies, P, B);
-  P->h_revision = stm_private_rev_num;
+  P->h_tid |= GCFLAG_PRIVATE_FROM_PROTECTED;
+  P->h_revision = (revision_t)B;
+
+  gcptrlist_insert(&d->private_from_protected, P);
 
   spinlock_release(d->public_descriptor->collection_lock);
   return P;
@@ -333,21 +337,20 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 {
   assert(R->h_tid & GCFLAG_PUBLIC);
-  if (R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
-    {
-      wlog_t *entry;
-      gcptr L;
-      G2L_FIND(d->public_to_private, R, entry, goto not_found);
-      L = entry->val;
-      assert(L->h_revision == stm_private_rev_num);   /* private object */
-      return L;
-    }
+
+#ifdef _GC_DEBUG
+  wlog_t *entry;
+  G2L_FIND(d->public_to_private, R, entry, goto not_found);
+  assert(!"R is already in public_to_private");
+ not_found:
+#endif
+
   R->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
- not_found:;
   gcptr L = stmgc_duplicate(R);
   assert(!(L->h_tid & GCFLAG_BACKUP_COPY));
   assert(!(L->h_tid & GCFLAG_STUB));
+  assert(!(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
   L->h_tid &= ~(GCFLAG_OLD               |
                 GCFLAG_VISITED           |
                 GCFLAG_PUBLIC            |
@@ -369,36 +372,31 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 
 gcptr stm_WriteBarrier(gcptr P)
 {
-  gcptr W;
+  gcptr R, W;
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
- retry:
-  P = stm_read_barrier(P);
+  R = stm_read_barrier(P);
 
-  if (P->h_tid & GCFLAG_PUBLIC)
-    W = LocalizePublic(d, P);
+  if (R->h_revision == stm_private_rev_num ||
+      (R->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED))
+    return R;
+
+  if (R->h_tid & GCFLAG_PUBLIC)
+    W = LocalizePublic(d, R);
   else
-    W = LocalizeProtected(d, P);
+    W = LocalizeProtected(d, R);
 
-  fprintf(stderr, "write_barrier: %p -> %p\n", P, W);
+  fprintf(stderr, "write_barrier: %p -> %p -> %p\n", P, R, W);
 
   return W;
 }
 
-gcptr stm_get_backup_copy(long index)
+gcptr stm_get_private_from_protected(long index)
 {
-  struct tx_public_descriptor *pd = thread_descriptor->public_descriptor;
-  if (index < gcptrlist_size(&pd->active_backup_copies))
-    return pd->active_backup_copies.items[index];
-  return NULL;
-}
-
-gcptr stm_get_stolen_obj(long index)
-{
-  struct tx_public_descriptor *pd = thread_descriptor->public_descriptor;
-  if (index < gcptrlist_size(&pd->stolen_objects))
-    return pd->stolen_objects.items[index];
+  struct tx_descriptor *d = thread_descriptor;
+  if (index < gcptrlist_size(&d->private_from_protected))
+    return d->private_from_protected.items[index];
   return NULL;
 }
 
@@ -570,9 +568,9 @@ void AbortTransaction(int num)
   }
 
   gcptrlist_clear(&d->list_of_read_objects);
-  gcptrlist_clear(&d->public_descriptor->active_backup_copies);
   abort();
-  d->public_descriptor->stolen_objects;//XXX clean up
+  gcptrlist_clear(&d->private_from_protected);  //XXX clean up
+  abort();
   //stmgc_abort_transaction(d);
 
   fprintf(stderr,
@@ -636,14 +634,15 @@ static void init_transaction(struct tx_descriptor *d)
     d->start_real_time.tv_nsec = -1;
   }
   assert(d->list_of_read_objects.size == 0);
+  assert(d->private_from_protected.size == 0);
   assert(!g2l_any_entry(&d->public_to_private));
 
   d->count_reads = 1;
   fxcache_clear(&d->recent_reads_cache);
 #if 0
   gcptrlist_clear(&d->undolog);
-#endif
   gcptrlist_clear(&d->abortinfo);
+#endif
 }
 
 void BeginTransaction(jmp_buf* buf)
@@ -819,24 +818,41 @@ void UpdateProtectedChainHeads(struct tx_descriptor *d, revision_t cur_time,
 }
 #endif
 
-void TurnPrivateWithBackupToProtected(struct tx_descriptor *d,
-                                      revision_t cur_time)
+void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
 {
-  struct tx_public_descriptor *pd = d->public_descriptor;
-  long i, size = pd->active_backup_copies.size;
-  gcptr *items = pd->active_backup_copies.items;
+  long i, size = d->private_from_protected.size;
+  gcptr *items = d->private_from_protected.items;
 
-  for (i = 0; i < size; i += 2)
+  for (i = 0; i < size; i++)
     {
       gcptr P = items[i];
-      gcptr B = items[i + 1];
-      assert(B->h_tid & GCFLAG_BACKUP_COPY);
-      assert(!(B->h_tid & GCFLAG_PUBLIC));
-      assert(P->h_revision == stm_private_rev_num);
-      B->h_revision = cur_time;
-      P->h_revision = (revision_t)B;
+
+      assert(!(P->h_revision & 1));   // "is a pointer"
+      gcptr B = (gcptr)P->h_revision;
+
+      assert(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+      P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
+      P->h_revision = cur_time;
+
+      if (B->h_tid & GCFLAG_PUBLIC)
+        {
+          /* B was stolen */
+          while (1)
+            {
+              revision_t v = ACCESS_ONCE(B->h_revision);
+              if (!(v & 1))    // "is a pointer", i.e. "was modified"
+                AbortTransaction(ABRT_STOLEN_MODIFIED);
+
+              if (bool_cas(&B->h_revision, v, (revision_t)P))
+                break;
+            }
+        }
+      else
+        {
+          //stm_free(B);
+        }
     };
-  gcptrlist_clear(&pd->active_backup_copies);
+  gcptrlist_clear(&d->private_from_protected);
 }
 
 void CommitTransaction(void)
@@ -846,9 +862,6 @@ void CommitTransaction(void)
   assert(d->active >= 1);
 
   spinlock_acquire(d->public_descriptor->collection_lock, 'C');  /*committing*/
-  if (d->public_descriptor->stolen_objects.size)
-    stm_normalize_stolen_objects(d->public_descriptor);
-
   AcquireLocks(d);
 
   if (is_inevitable(d))
@@ -885,6 +898,8 @@ void CommitTransaction(void)
         if (!ValidateDuringTransaction(d, 1))
           AbortTransaction(ABRT_VALIDATE_COMMIT);
     }
+  CommitPrivateFromProtected(d, cur_time);
+
   /* we cannot abort any more from here */
   d->setjmp_buf = NULL;
   gcptrlist_clear(&d->list_of_read_objects);
@@ -894,8 +909,6 @@ void CommitTransaction(void)
           "**************************************  committed %ld\n"
           "*************************************\n",
           (long)cur_time);
-
-  TurnPrivateWithBackupToProtected(d, cur_time);
 
   revision_t localrev = stm_private_rev_num;
   //UpdateProtectedChainHeads(d, cur_time, localrev);
@@ -1159,12 +1172,12 @@ void DescriptorDone(void)
     thread_descriptor = NULL;
 
     g2l_delete(&d->public_to_private);
-    assert(d->public_descriptor->active_backup_copies.size == 0);
-    gcptrlist_delete(&d->public_descriptor->active_backup_copies);
+    assert(d->private_from_protected.size == 0);
+    gcptrlist_delete(&d->private_from_protected);
     gcptrlist_delete(&d->list_of_read_objects);
+#if 0
     gcptrlist_delete(&d->abortinfo);
     free(d->longest_abort_info);
-#if 0
     gcptrlist_delete(&d->undolog);
 #endif
 

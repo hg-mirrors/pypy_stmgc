@@ -68,8 +68,7 @@ ffi.cdef('''
     void stm_start_sharedlock(void);
     void stm_stop_sharedlock(void);
     void AbortTransaction(int);
-    gcptr stm_get_backup_copy(long index);
-    gcptr stm_get_stolen_obj(long index);
+    gcptr stm_get_private_from_protected(long index);
     gcptr stm_get_read_obj(long index);
     void *STUB_THREAD(gcptr);
 
@@ -105,6 +104,7 @@ ffi.cdef('''
     #define GCFLAG_WRITE_BARRIER     ...
     #define GCFLAG_NURSERY_MOVED     ...
     #define GCFLAG_STUB              ...
+    #define GCFLAG_PRIVATE_FROM_PROTECTED  ...
     #define ABRT_MANUAL              ...
     //typedef struct { ...; } page_header_t;
 ''')
@@ -524,7 +524,8 @@ def abort_and_retry():
     lib.AbortTransaction(lib.ABRT_MANUAL)
 
 def classify(p):
-    private = p.h_revision == lib.get_private_rev_num()
+    private = (p.h_revision == lib.get_private_rev_num() or
+               (p.h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) != 0)
     public  = (p.h_tid & GCFLAG_PUBLIC) != 0
     backup  = (p.h_tid & GCFLAG_BACKUP_COPY) != 0
     stub    = (p.h_tid & GCFLAG_STUB) != 0
@@ -541,34 +542,26 @@ def classify(p):
     else:
         return "protected"
 
-def list_of_read_objects():
+def _get_full_list(getter):
     result = []
     index = 0
     while 1:
-        p = lib.stm_get_read_obj(index)
+        p = getter(index)
         if p == ffi.NULL:
             break
         result.append(p)
         index += 1
     return result
 
-def _list2dict(getter):
-    result = {}
-    index = 0
-    while 1:
-        p = getter(index)
-        if p == ffi.NULL:
-            break
-        q = getter(index + 1)
-        assert q != ffi.NULL
-        result[p] = q
-        index += 2
-    return result
+def list_of_read_objects():
+    return _get_full_list(lib.stm_get_read_obj)
 
-def backup_copies():
-    return _list2dict(lib.stm_get_backup_copy)
-
-def stolen_objs():
-    return _list2dict(lib.stm_get_stolen_obj)
+def list_of_private_from_protected():
+    return _get_full_list(lib.stm_get_private_from_protected)
 
 stub_thread = lib.STUB_THREAD
+
+def follow_revision(p):
+    r = p.h_revision
+    assert (r % 4) == 0
+    return ffi.cast("gcptr", r)

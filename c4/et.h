@@ -62,6 +62,7 @@
 #define GCFLAG_NURSERY_MOVED     (STM_FIRST_GCFLAG << 6)
 #define GCFLAG_BACKUP_COPY       (STM_FIRST_GCFLAG << 7)   /* debugging */
 #define GCFLAG_STUB              (STM_FIRST_GCFLAG << 8)   /* debugging */
+#define GCFLAG_PRIVATE_FROM_PROTECTED (STM_FIRST_GCFLAG << 9)
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
 #define GCFLAG_PREBUILT  (GCFLAG_VISITED           | \
@@ -73,24 +74,25 @@
                          "VISITED",           \
                          "PUBLIC",            \
                          "PREBUILT_ORIGINAL", \
-                         "BACKUP_COPY",       \
                          "PUBLIC_TO_PRIVATE", \
                          "WRITE_BARRIER",     \
                          "NURSERY_MOVED",     \
-                         "STOLEN",            \
+                         "BACKUP_COPY",       \
                          "STUB",              \
+                         "PRIVATE_FROM_PROTECTED", \
                          NULL }
 
 /************************************************************/
 
 #define ABRT_MANUAL               0
 #define ABRT_COMMIT               1
-#define ABRT_VALIDATE_INFLIGHT    2
-#define ABRT_VALIDATE_COMMIT      3
-#define ABRT_VALIDATE_INEV        4
-#define ABRT_COLLECT_MINOR        5
-#define ABRT_COLLECT_MAJOR        6
-#define ABORT_REASONS         7
+#define ABRT_STOLEN_MODIFIED      2
+#define ABRT_VALIDATE_INFLIGHT    3
+#define ABRT_VALIDATE_COMMIT      4
+#define ABRT_VALIDATE_INEV        5
+#define ABRT_COLLECT_MINOR        6
+#define ABRT_COLLECT_MAJOR        7
+#define ABORT_REASONS         8
 
 #define SPLP_ABORT                0
 #define SPLP_LOCKED_INFLIGHT      1
@@ -105,8 +107,6 @@ struct tx_public_descriptor {
   revision_t collection_lock;
   struct stub_block_s *stub_blocks;
   gcptr stub_free_list;
-  struct GcPtrList active_backup_copies;  /* (P,B) where P=private, B=backup */
-  struct GcPtrList stolen_objects;      /* (P,Q) where P=priv/prot, Q=public */
   revision_t *private_revision_ref;
   revision_t free_list_next;
   /* xxx gcpage data here */
@@ -135,7 +135,8 @@ struct tx_descriptor {
   unsigned int num_aborts[ABORT_REASONS];
   unsigned int num_spinloops[SPINLOOP_REASONS];
   struct GcPtrList list_of_read_objects;
-  struct GcPtrList abortinfo;
+  //struct GcPtrList abortinfo;
+  struct GcPtrList private_from_protected;
   struct G2L public_to_private;
   char *longest_abort_info;
   long long longest_abort_info_time;
@@ -162,8 +163,7 @@ gcptr stm_DirectReadBarrier(gcptr);
 gcptr stm_RepeatReadBarrier(gcptr);
 gcptr stm_WriteBarrier(gcptr);
 gcptr _stm_nonrecord_barrier(gcptr, int *);
-gcptr stm_get_backup_copy(long);  /* debugging */
-gcptr stm_get_stolen_obj(long);  /* debugging */
+gcptr stm_get_private_from_protected(long);  /* debugging */
 gcptr stm_get_read_obj(long);  /* debugging */
 gcptr stmgc_duplicate(gcptr);
 

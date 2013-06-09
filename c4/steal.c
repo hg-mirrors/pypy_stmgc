@@ -54,54 +54,21 @@ void stm_steal_stub(gcptr P)
         goto done;     /* un-stubbed while we waited for the lock */
 
     gcptr L = (gcptr)(v - 2);
-    revision_t w = L->h_revision;
 
-    if (w == *foreign_pd->private_revision_ref) {
-        /* The stub points to a private object L.  Because it cannot point
-           to "really private" objects, it must mean that L used to be
-           a protected object, and it has an attached backed copy.
-           XXX find a way to optimize this search, maybe */
-        long i, size = foreign_pd->active_backup_copies.size;
-        gcptr *items = foreign_pd->active_backup_copies.items;
-        for (i = size - 2; ; i -= 2) {
-            assert(i >= 0);
-            if (items[i] == L)
-                break;
-        }
-        L = items[i + 1];
-        assert(L->h_tid & GCFLAG_BACKUP_COPY);
+    if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
+        L = (gcptr)L->h_revision;     /* the backup copy */
         L->h_tid &= ~GCFLAG_BACKUP_COPY;
     }
-    else if (L->h_tid & GCFLAG_PUBLIC) {
-        /* The stub already points to a public object */
-        goto unstub;
-    }
-    else if (!(w & 1)) {
-        /* The stub points to a protected object L which has a backup
-           copy attached.  Forget the backup copy. */
-        w = ((gcptr)w)->h_revision;
-        assert(w & 1);
-        L->h_revision = w;
-    }
-    /* turn L into a public object */
+
+    /* change L from protected to public */
     L->h_tid |= GCFLAG_PUBLIC;
 
- unstub:
+    smp_wmb();      /* the following update must occur "after" the flag
+                       GCFLAG_PUBLIC was added, for other threads */
+
+    /* update the original P->h_revision to point directly to L */
     P->h_revision = (revision_t)L;
 
  done:
     spinlock_release(foreign_pd->collection_lock);
-}
-
-void stm_normalize_stolen_objects(struct tx_public_descriptor *pd)
-{
-    long i, size = pd->stolen_objects.size;
-    gcptr *items = pd->stolen_objects.items;
-    for (i = 0; i < size; i += 2) {
-        gcptr L = items[i];
-        gcptr Q = items[i + 1];
-        if (L->h_revision == stm_private_rev_num) {
-            
-        }
-    }
 }

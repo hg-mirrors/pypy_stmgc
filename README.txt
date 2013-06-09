@@ -7,13 +7,13 @@ Welcome!
 This is a C library that combines a GC with STM capabilities.
 It is meant to be a general library that can be used in C programs.
 
-The library interface is in "c3/stmgc.h".
+The library interface is in "c4/stmgc.h".
 
-The file "c3/doc-stmgc.txt" contains a high-level overview followed by
-more detailled explanations.
+The file "c4/doc-objects.txt" contains some low-level explanations.
 
-A demo program can be found in "c3/demo1.c", but the code so far is
-outdated (it doesn't follow what c3/doc-stmgc describes).
+Run tests with "py.test".
+
+A demo program will be found in "c4/demo1.c" (not there yet).
 It can be built with "make debug-demo1" or "make build-demo1".
 
 The plan is to use this C code directly with PyPy, and not write
