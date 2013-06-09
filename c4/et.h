@@ -105,9 +105,10 @@
  * thread shuts down.  It is reused the next time a thread starts. */
 struct tx_public_descriptor {
   revision_t collection_lock;
+  struct tx_descriptor *descriptor;
   struct stub_block_s *stub_blocks;
   gcptr stub_free_list;
-  revision_t *private_revision_ref;
+  struct GcPtrList stolen_objects;
   revision_t free_list_next;
   /* xxx gcpage data here */
 };
@@ -140,6 +141,7 @@ struct tx_descriptor {
   struct G2L public_to_private;
   char *longest_abort_info;
   long long longest_abort_info_time;
+  revision_t *private_revision_ref;
   struct FXCache recent_reads_cache;
 };
 

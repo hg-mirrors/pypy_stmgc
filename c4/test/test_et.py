@@ -229,7 +229,6 @@ def test_stealing():
     run_parallel(f1, f2)
 
 def test_stealing_while_modifying():
-    py.test.skip("in-progress")
     p = palloc(HDR + WORD)
 
     def f1(r):
@@ -258,6 +257,7 @@ def test_stealing_while_modifying():
             assert pback.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
             assert lib.stm_read_barrier(p) == p1
             assert lib.stm_read_barrier(p1) == p1
+            assert lib.stm_read_barrier(pback) == p1
             assert pback.h_revision & 1
         perform_transaction(cb)
 
@@ -273,6 +273,8 @@ def test_stealing_while_modifying():
         def cb(c):
             assert c == 0
             r.enter_in_parallel()
+            lib.stm_commit_transaction()
+            lib.stm_begin_inevitable_transaction()
             p2 = lib.stm_read_barrier(p)    # steals
             assert lib.rawgetlong(p2, 0) == 2782172
             assert p2 == lib.stm_read_barrier(p)

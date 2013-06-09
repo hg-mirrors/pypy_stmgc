@@ -10,7 +10,7 @@
 gcptr stm_stub_malloc(struct tx_public_descriptor *);
 void stm_steal_stub(gcptr);
 gcptr stm_get_stolen_obj(long index);   /* debugging */
-void stm_normalize_stolen_objects(struct tx_public_descriptor *);
+void stm_normalize_stolen_objects(struct tx_descriptor *);
 
 
 #endif

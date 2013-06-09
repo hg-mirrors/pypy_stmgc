@@ -56,8 +56,16 @@ void stm_steal_stub(gcptr P)
     gcptr L = (gcptr)(v - 2);
 
     if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
-        L = (gcptr)L->h_revision;     /* the backup copy */
-        L->h_tid &= ~GCFLAG_BACKUP_COPY;
+        gcptr B = (gcptr)L->h_revision;     /* the backup copy */
+        B->h_tid &= ~GCFLAG_BACKUP_COPY;
+        L->h_revision = *foreign_pd->descriptor->private_revision_ref;
+
+        /* add {B: L} in 'public_to_private', but lazily, because we don't
+           want to walk over the feet of the foreign thread */
+        B->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
+        gcptrlist_insert2(&foreign_pd->stolen_objects, B, L);
+
+        L = B;
     }
 
     /* change L from protected to public */
@@ -71,4 +79,21 @@ void stm_steal_stub(gcptr P)
 
  done:
     spinlock_release(foreign_pd->collection_lock);
+}
+
+void stm_normalize_stolen_objects(struct tx_descriptor *d)
+{
+    spinlock_acquire(d->public_descriptor->collection_lock, 'N');
+
+    long i, size = d->public_descriptor->stolen_objects.size;
+    gcptr *items = d->public_descriptor->stolen_objects.items;
+
+    for (i = 0; i < size; i += 2) {
+        gcptr B = items[i];
+        gcptr L = items[i + 1];
+        g2l_insert(&d->public_to_private, B, L);
+    }
+    gcptrlist_clear(&d->public_descriptor->stolen_objects);
+
+    spinlock_release(d->public_descriptor->collection_lock);
 }
