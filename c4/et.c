@@ -289,12 +289,21 @@ gcptr stmgc_duplicate(gcptr P)
   return L;
 }
 
+static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R);
+
 static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 {
   gcptr B;
+  spinlock_acquire(d->public_descriptor->collection_lock, 'L');
+
+  if (P->h_tid & GCFLAG_PUBLIC)
+    {
+      /* became PUBLIC while waiting for the collection_lock */
+      spinlock_release(d->public_descriptor->collection_lock);
+      return LocalizePublic(d, P);
+    }
 
   assert(P->h_revision != stm_private_rev_num);
-  assert(!(P->h_tid & GCFLAG_PUBLIC));
   assert(!(P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
   assert(!(P->h_tid & GCFLAG_BACKUP_COPY));
   assert(!(P->h_tid & GCFLAG_STUB));
@@ -307,21 +316,17 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
     }
   else
     {
-      size_t size = stmcb_size(P);
       B = (gcptr)P->h_revision;
       assert(B->h_tid & GCFLAG_BACKUP_COPY);
+      size_t size = stmcb_size(P);
       memcpy(B + 1, P + 1, size - sizeof(*B));
     }
   assert(B->h_tid & GCFLAG_BACKUP_COPY);
 
-  gcptrlist_locked_insert2(&d->public_descriptor->active_backup_copies, P, B,
-                           &d->public_descriptor->collection_lock);
-
-  smp_wmb();   /* guarantees that stm_steal_stub() will see the list
-                  up to the (P, B) pair in case it goes the path
-                  h_revision == *foreign_pd->private_revision_ref */
-
+  gcptrlist_insert2(&d->public_descriptor->active_backup_copies, P, B);
   P->h_revision = stm_private_rev_num;
+
+  spinlock_release(d->public_descriptor->collection_lock);
   return P;
 }
 
@@ -368,6 +373,7 @@ gcptr stm_WriteBarrier(gcptr P)
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
+ retry:
   P = stm_read_barrier(P);
 
   if (P->h_tid & GCFLAG_PUBLIC)

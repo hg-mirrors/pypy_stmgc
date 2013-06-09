@@ -53,33 +53,41 @@ void stm_steal_stub(gcptr P)
     if ((v & 3) != 2)
         goto done;     /* un-stubbed while we waited for the lock */
 
-    gcptr Q, L = (gcptr)(v - 2);
-    revision_t w = ACCESS_ONCE(L->h_revision);
+    gcptr L = (gcptr)(v - 2);
+    revision_t w = L->h_revision;
 
     if (w == *foreign_pd->private_revision_ref) {
         /* The stub points to a private object L.  Because it cannot point
            to "really private" objects, it must mean that L used to be
            a protected object, and it has an attached backed copy.
            XXX find a way to optimize this search, maybe */
-        long i;
+        long i, size = foreign_pd->active_backup_copies.size;
         gcptr *items = foreign_pd->active_backup_copies.items;
-        /* we must find L as the first item of a pair in the list.  We
-           cannot rely on how big the list is here, but we know that
-           it will not be resized while we hold collection_lock. */
-        for (i = 0; items[i] != L; i += 2)
-            ;
+        for (i = size - 2; ; i -= 2) {
+            assert(i >= 0);
+            if (items[i] == L)
+                break;
+        }
         L = items[i + 1];
         assert(L->h_tid & GCFLAG_BACKUP_COPY);
+        L->h_tid &= ~GCFLAG_BACKUP_COPY;
     }
-    /* duplicate L */
-    Q = stmgc_duplicate(L);  XXX RACE
-    Q->h_tid &= ~GCFLAG_BACKUP_COPY;
-    Q->h_tid |= GCFLAG_PUBLIC;
-    gcptrlist_insert2(&foreign_pd->stolen_objects, L, Q);
+    else if (L->h_tid & GCFLAG_PUBLIC) {
+        /* The stub already points to a public object */
+        goto unstub;
+    }
+    else if (!(w & 1)) {
+        /* The stub points to a protected object L which has a backup
+           copy attached.  Forget the backup copy. */
+        w = ((gcptr)w)->h_revision;
+        assert(w & 1);
+        L->h_revision = w;
+    }
+    /* turn L into a public object */
+    L->h_tid |= GCFLAG_PUBLIC;
 
-    smp_wmb();
-
-    P->h_revision = (revision_t)Q;
+ unstub:
+    P->h_revision = (revision_t)L;
 
  done:
     spinlock_release(foreign_pd->collection_lock);
