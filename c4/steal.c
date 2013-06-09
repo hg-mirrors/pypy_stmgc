@@ -49,18 +49,17 @@ void stm_steal_stub(gcptr P)
 
     spinlock_acquire(foreign_pd->collection_lock, 'S');   /*stealing*/
 
-    if (!(P->h_tid & GCFLAG_STUB))
+    revision_t v = ACCESS_ONCE(P->h_revision);
+    if ((v & 3) != 2)
         goto done;     /* un-stubbed while we waited for the lock */
 
-    /* XXX check for now that P is a regular protected object */
-    gcptr L = (gcptr)P->h_revision;
+    gcptr L = (gcptr)(v - 2);
     gcptr Q = stmgc_duplicate(L);
     Q->h_tid |= GCFLAG_PUBLIC;
-    P->h_revision = (revision_t)Q;
 
     smp_wmb();
 
-    P->h_tid &= ~GCFLAG_STUB;
+    P->h_revision = (revision_t)Q;
 
  done:
     spinlock_release(foreign_pd->collection_lock);

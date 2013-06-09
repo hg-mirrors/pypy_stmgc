@@ -74,25 +74,18 @@ gcptr stm_DirectReadBarrier(gcptr G)
       v = ACCESS_ONCE(P->h_revision);
       if (!(v & 1))  // "is a pointer", i.e.
         {            //      "has a more recent revision"
-          /* if we land on a P in read_barrier_cache: just return it */
-          gcptr P_next = (gcptr)v;
-          if (FXCACHE_AT(P_next) == P_next)
-            {
-              fprintf(stderr, "read_barrier: %p -> %p fxcache\n", G, P_next);
-              return P_next;
-            }
-
-          if (P->h_tid & GCFLAG_STUB)
+          if (v & 2)
             goto follow_stub;
 
           gcptr P_prev = P;
-          P = P_next;
+          P = (gcptr)v;
           assert(P->h_tid & GCFLAG_PUBLIC);
 
           v = ACCESS_ONCE(P->h_revision);
+
           if (!(v & 1))  // "is a pointer", i.e.
             {            //      "has a more recent revision"
-              if (P->h_tid & GCFLAG_STUB)
+              if (v & 2)
                 goto follow_stub;
 
               /* we update P_prev->h_revision as a shortcut */
@@ -102,6 +95,13 @@ gcptr stm_DirectReadBarrier(gcptr G)
               P = (gcptr)v;
               goto retry;
             }
+        }
+
+      /* if we land on a P in read_barrier_cache: just return it */
+      if (FXCACHE_AT(P) == P)
+        {
+          fprintf(stderr, "read_barrier: %p -> %p fxcache\n", G, P);
+          return P;
         }
 
       if (P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
@@ -144,7 +144,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
   if (foreign_pd == d->public_descriptor)
     {
       /* same thread */
-      P = (gcptr)P->h_revision;
+      P = (gcptr)v;
       assert(!(P->h_tid & GCFLAG_PUBLIC));
       if (P->h_revision == stm_private_rev_num)
         {
@@ -735,7 +735,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
 
       gcptr stub = stm_stub_malloc(d->public_descriptor);
       stub->h_tid = GCFLAG_PUBLIC | GCFLAG_STUB;
-      stub->h_revision = (revision_t)L;
+      stub->h_revision = ((revision_t)L) | 2;
       item->val = stub;
 
     } G2L_LOOP_END;

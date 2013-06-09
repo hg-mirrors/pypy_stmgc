@@ -50,9 +50,10 @@
  * GCFLAG_STOLEN is set of protected objects after we notice that they
  * have been stolen.
  *
- * GCFLAG_STUB is set on stub objects made by stealing or by major
- * collections.  It's removed once the stub's protected h_revision
- * target is stolen and replaced by a regular public object.
+ * GCFLAG_STUB is set for debugging on stub objects made by stealing or
+ * by major collections.  'p_stub->h_revision' might be a value
+ * that is == 2 (mod 4): in this case they point to a protected/private
+ * object that belongs to the thread 'STUB_THREAD(p_stub)'.
  */
 #define GCFLAG_OLD               (STM_FIRST_GCFLAG << 0)
 #define GCFLAG_VISITED           (STM_FIRST_GCFLAG << 1)
@@ -63,7 +64,7 @@
 #define GCFLAG_WRITE_BARRIER     (STM_FIRST_GCFLAG << 6)
 #define GCFLAG_NURSERY_MOVED     (STM_FIRST_GCFLAG << 7)
 #define GCFLAG_STOLEN            (STM_FIRST_GCFLAG << 8)
-#define GCFLAG_STUB              (STM_FIRST_GCFLAG << 9)
+#define GCFLAG_STUB              (STM_FIRST_GCFLAG << 9)   /* debugging */
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
 #define GCFLAG_PREBUILT  (GCFLAG_VISITED           | \
@@ -166,6 +167,7 @@ gcptr stm_WriteBarrier(gcptr);
 gcptr _stm_nonrecord_barrier(gcptr, int *);
 gcptr stm_get_backup_copy(gcptr);
 gcptr stm_get_read_obj(long);  /* debugging */
+gcptr stmgc_duplicate(gcptr);
 
 int DescriptorInit(void);
 void DescriptorDone(void);
