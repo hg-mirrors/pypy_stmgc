@@ -33,12 +33,12 @@ Object copies state transitions (changes of state of the *same* copy)
                  \          /  /
                   V        /  V
                    Protected
-                  ^
-                 /
-         commit /
-               /
-              /
-    Private copy of
+                  ^        \         Backup of a private
+                 /          \         /
+         commit /            \ steal /
+               /              \     /
+              /                V   V
+    Private copy of           Public
     a public obj
 
 
