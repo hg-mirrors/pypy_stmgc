@@ -129,14 +129,16 @@ gcptr stm_DirectReadBarrier(gcptr G)
 
           P = item->val;
           assert(!(P->h_tid & GCFLAG_PUBLIC));
-          assert(P->h_revision == stm_private_rev_num);
+          assert(is_private(P));
           fprintf(stderr, "read_barrier: %p -> %p public_to_private\n", G, P);
           return P;
 
         no_private_obj:
           if (d->public_descriptor->stolen_objects.size > 0)
             {
+              spinlock_acquire(d->public_descriptor->collection_lock, 'N');
               stm_normalize_stolen_objects(d);
+              spinlock_release(d->public_descriptor->collection_lock);
               goto retry_public_to_private;
             }
         }
@@ -433,11 +435,6 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
   long i, size = d->list_of_read_objects.size;
   gcptr *items = d->list_of_read_objects.items;
 
-  if (size == 0)
-    return 1;
-  abort();
-
-#if 0
   for (i=0; i<size; i++)
     {
       gcptr R = items[i];
@@ -446,18 +443,7 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
       v = ACCESS_ONCE(R->h_revision);
       if (!(v & 1))               // "is a pointer", i.e.
         {                         //   "has a more recent revision"
-          /* ... unless it's a protected-to-private link */
-          if (((gcptr)v)->h_revision == stm_local_revision)
-            continue;
-          /* ... or unless it is a GCFLAG_STOLEN object */
-          if (R->h_tid & GCFLAG_STOLEN)
-            {
-              assert(is_young(R));
-              assert(!is_young((gcptr)v));
-              R = (gcptr)v;
-              goto retry;
-            }
-          return 0;               // really has a more recent revision
+          return 0;
         }
       if (v >= LOCKED)            // locked
         {
@@ -475,7 +461,6 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
         }
     }
   return 1;
-#endif
 }
 
 static void ValidateNow(struct tx_descriptor *d)
@@ -703,8 +688,11 @@ static void AcquireLocks(struct tx_descriptor *d)
         goto retry;
 
       gcptr L = item->val;
-      assert(L->h_revision == stm_private_rev_num);
+      assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED ?
+             L->h_revision == (revision_t)R :
+             L->h_revision == stm_private_rev_num);
       assert(v != stm_private_rev_num);
+      assert(v & 1);
       L->h_revision = v;   /* store temporarily this value here */
 
     } G2L_LOOP_END;
@@ -712,8 +700,6 @@ static void AcquireLocks(struct tx_descriptor *d)
 
 static void CancelLocks(struct tx_descriptor *d)
 {
-  abort();
-#if 0
   revision_t my_lock = d->my_lock;
   wlog_t *item;
 
@@ -724,13 +710,20 @@ static void CancelLocks(struct tx_descriptor *d)
     {
       gcptr R = item->addr;
       gcptr L = item->val;
-      revision_t v = L->h_revision;
-      if (v == stm_local_revision)
+      revision_t expected, v = L->h_revision;
+
+      if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+        expected = (revision_t)R;
+      else
+        expected = stm_private_rev_num;
+
+      if (v == expected)
         {
           assert(R->h_revision != my_lock);
           break;    /* done */
         }
-      L->h_revision = stm_local_revision;
+
+      L->h_revision = expected;
 
 #ifdef DUMP_EXTRA
       fprintf(stderr, "%p->h_revision = %p (CancelLocks)\n", R, (gcptr)v);
@@ -739,7 +732,6 @@ static void CancelLocks(struct tx_descriptor *d)
       ACCESS_ONCE(R->h_revision) = v;
 
     } G2L_LOOP_END;
-#endif
 }
 
 //static pthread_mutex_t mutex_prebuilt_gcroots = PTHREAD_MUTEX_INITIALIZER;
@@ -812,27 +804,6 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
   g2l_clear(&d->public_to_private);
 }
 
-#if 0
-void UpdateProtectedChainHeads(struct tx_descriptor *d, revision_t cur_time,
-                               revision_t localrev)
-{
-  revision_t new_revision = cur_time + 1;     // make an odd number
-  assert(new_revision & 1);
-
-  long i, size = d->protected_with_private_copy.size;
-  gcptr *items = d->protected_with_private_copy.items;
-  for (i = 0; i < size; i++)
-    {
-      gcptr R = items[i];
-      if (R->h_tid & GCFLAG_STOLEN)       /* ignore stolen objects */
-        continue;
-      gcptr L = (gcptr)R->h_revision;
-      assert(L->h_revision == localrev);
-      L->h_revision = new_revision;
-    }
-}
-#endif
-
 void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
 {
   long i, size = d->private_from_protected.size;
@@ -841,12 +812,19 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
   for (i = 0; i < size; i++)
     {
       gcptr P = items[i];
-
-      assert(!(P->h_revision & 1));   // "is a pointer"
-      gcptr B = (gcptr)P->h_revision;
-
       assert(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
       P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
+
+      if (P->h_revision & 1)   // "is not a pointer"
+        {
+          /* This case occurs when a GCFLAG_PRIVATE_FROM_PROTECTED object
+             is stolen: it ends up as a value in 'public_to_private'.
+             Its h_revision is then mangled by AcquireLocks(). */
+          assert(P->h_revision != stm_private_rev_num);
+          continue;
+        }
+
+      gcptr B = (gcptr)P->h_revision;
       P->h_revision = cur_time;
 
       if (B->h_tid & GCFLAG_PUBLIC)
@@ -876,10 +854,10 @@ void CommitTransaction(void)
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
+  spinlock_acquire(d->public_descriptor->collection_lock, 'C');  /*committing*/
   if (d->public_descriptor->stolen_objects.size != 0)
     stm_normalize_stolen_objects(d);
 
-  spinlock_acquire(d->public_descriptor->collection_lock, 'C');  /*committing*/
   AcquireLocks(d);
 
   if (is_inevitable(d))
@@ -1219,7 +1197,7 @@ void DescriptorDone(void)
                      d->num_spinloops[i]);
 
     p += sprintf(p, "]\n");
-    fwrite(line, 1, p - line, stderr);
+    fprintf(stderr, "%s", line);
 
     stm_free(d, sizeof(struct tx_descriptor));
 }

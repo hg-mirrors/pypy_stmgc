@@ -236,6 +236,7 @@ def test_stealing_while_modifying():
         assert classify(p) == "public"
         assert classify(p1) == "private"
         lib.rawsetlong(p1, 0, 2782172)
+        pback_ = []
 
         def cb(c):
             assert c == 0
@@ -246,6 +247,7 @@ def test_stealing_while_modifying():
             assert p2 == p1
             lib.rawsetlong(p2, 0, -451112)
             pback = follow_revision(p1)
+            pback_.append(pback)
             assert classify(p1) == "private"
             assert classify(pback) == "backup"
             assert lib.stm_read_barrier(p) == p1
@@ -263,11 +265,12 @@ def test_stealing_while_modifying():
 
         lib.stm_commit_transaction()
         lib.stm_begin_inevitable_transaction()
+        [pback] = pback_
         assert classify(p1) == "protected"
         assert classify(pback) == "public"
         assert classify(follow_revision(pback)) == "stub"
         assert follow_revision(pback).h_revision == (
-            ffi.cast("revision_t", p1) | 2)
+            int(ffi.cast("revision_t", p1)) | 2)
 
     def f2(r):
         def cb(c):
