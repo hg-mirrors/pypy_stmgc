@@ -228,7 +228,7 @@ def test_stealing():
         r.set(3)
     run_parallel(f1, f2)
 
-def test_stealing_while_modifying():
+def test_stealing_while_modifying(aborting=False):
     p = palloc(HDR + WORD)
 
     def f1(r):
@@ -239,7 +239,15 @@ def test_stealing_while_modifying():
         pback_ = []
 
         def cb(c):
-            assert c == 0
+            if c != 0:
+                assert aborting
+                [pback] = pback_
+                assert classify(p) == "public"
+                assert classify(p1) == "public"
+                assert classify(pback) == "public"
+                assert lib.stm_read_barrier(p) == pback
+                assert lib.stm_read_barrier(p1) == pback
+                return
             assert classify(p) == "public"
             assert classify(p1) == "protected"
             assert classify(follow_revision(p)) == "stub"
@@ -261,16 +269,24 @@ def test_stealing_while_modifying():
             assert lib.stm_read_barrier(p1) == p1
             assert lib.stm_read_barrier(pback) == p1
             assert pback.h_revision & 1
+            if aborting:
+                abort_and_retry()
         perform_transaction(cb)
 
         lib.stm_commit_transaction()
         lib.stm_begin_inevitable_transaction()
         [pback] = pback_
-        assert classify(p1) == "protected"
-        assert classify(pback) == "public"
-        assert classify(follow_revision(pback)) == "stub"
-        assert follow_revision(pback).h_revision == (
-            int(ffi.cast("revision_t", p1)) | 2)
+        if aborting:
+            assert classify(p1) == "public"
+            assert classify(pback) == "public"
+            assert pback.h_revision & 1
+            assert p1.h_revision == int(ffi.cast("revision_t", pback))
+        else:
+            assert classify(p1) == "protected"
+            assert classify(pback) == "public"
+            assert classify(follow_revision(pback)) == "stub"
+            assert follow_revision(pback).h_revision == (
+                int(ffi.cast("revision_t", p1)) | 2)
 
     def f2(r):
         def cb(c):
@@ -286,3 +302,22 @@ def test_stealing_while_modifying():
         perform_transaction(cb)
 
     run_parallel(f1, f2)
+
+def test_abort_private_from_protected():
+    p = nalloc(HDR + WORD)
+    lib.setlong(p, 0, 897987)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    #
+    def cb(c):
+        assert classify(p) == "protected"
+        assert lib.getlong(p, 0) == 897987
+        if c == 0:
+            lib.setlong(p, 0, -38383)
+            assert lib.getlong(p, 0) == -38383
+            assert classify(p) == "private"
+            abort_and_retry()
+    perform_transaction(cb)
+
+def test_abort_stealing_while_modifying():
+    test_stealing_while_modifying(aborting=True)

@@ -494,6 +494,10 @@ void AbortTransaction(int num)
   struct timespec now;
   long long elapsed_time;
 
+  /* acquire the lock, but don't double-acquire it if already committing */
+  if (d->public_descriptor->collection_lock != 'C')
+    spinlock_acquire(d->public_descriptor->collection_lock, 'C');
+
   assert(d->active != 0);
   assert(!is_inevitable(d));
   assert(num < ABORT_REASONS);
@@ -566,11 +570,13 @@ void AbortTransaction(int num)
       d->reads_size_limit_nonatomic = limit;
   }
 
+  AbortPrivateFromProtected(d);
   gcptrlist_clear(&d->list_of_read_objects);
-  abort();
-  gcptrlist_clear(&d->private_from_protected);  //XXX clean up
-  abort();
-  //stmgc_abort_transaction(d);
+  g2l_clear(&d->public_to_private);
+  gcptrlist_clear(&d->public_descriptor->stolen_objects);
+
+  /* release the lock */
+  spinlock_release(d->public_descriptor->collection_lock);
 
   fprintf(stderr,
           "\n"
@@ -843,6 +849,35 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
       else
         {
           //stm_free(B);
+        }
+    };
+  gcptrlist_clear(&d->private_from_protected);
+}
+
+void AbortPrivateFromProtected(struct tx_descriptor *d)
+{
+  long i, size = d->private_from_protected.size;
+  gcptr *items = d->private_from_protected.items;
+
+  for (i = 0; i < size; i++)
+    {
+      gcptr P = items[i];
+      assert(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+      assert(!(P->h_revision & 1));   // "is a pointer"
+
+      gcptr B = (gcptr)P->h_revision;
+      if (B->h_tid & GCFLAG_PUBLIC)
+        {
+          assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
+          P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
+          P->h_tid |= GCFLAG_PUBLIC;
+          /* P becomes a public outdated object */
+        }
+      else
+        {
+          assert(B->h_tid & GCFLAG_BACKUP_COPY);
+          memcpy(P, B, stmcb_size(P));
+          P->h_tid &= ~GCFLAG_BACKUP_COPY;
         }
     };
   gcptrlist_clear(&d->private_from_protected);
