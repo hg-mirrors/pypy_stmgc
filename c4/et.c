@@ -487,6 +487,8 @@ size_t _stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
                               int abort_reason, char *output);
 #endif
 
+void AbortPrivateFromProtected(struct tx_descriptor *d);
+
 void AbortTransaction(int num)
 {
   struct tx_descriptor *d = thread_descriptor;
