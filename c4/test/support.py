@@ -63,7 +63,8 @@ ffi.cdef('''
     //void stmgcpage_add_prebuilt_root(gcptr);
     void stm_clear_between_tests(void);
     //void stmgc_minor_collect(void);
-    //gcptr _stm_nonrecord_barrier(gcptr, int *);
+    gcptr _stm_nonrecord_barrier(gcptr);
+    int _stm_is_private(gcptr);
     int stm_dbgmem_is_active(void *p, int allow_outside);
     void stm_start_sharedlock(void);
     void stm_stop_sharedlock(void);
@@ -436,7 +437,7 @@ def nalloc(size):
 def nalloc_refs(nrefs):
     "Allocate a fresh object from the nursery, with nrefs pointers"
     p = lib.stm_allocate(HDR + WORD * nrefs, 421 + nrefs)
-    assert p.h_revision == lib.get_local_revision()
+    assert p.h_revision == lib.get_private_rev_num()
     for i in range(nrefs):
         assert rawgetptr(p, i) == ffi.NULL   # must already be zero-filled
     return p

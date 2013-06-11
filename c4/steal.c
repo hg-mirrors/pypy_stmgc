@@ -96,3 +96,20 @@ void stm_normalize_stolen_objects(struct tx_descriptor *d)
     }
     gcptrlist_clear(&d->public_descriptor->stolen_objects);
 }
+
+gcptr _stm_find_stolen_objects(struct tx_descriptor *d, gcptr obj)
+{
+    /* read-only, for debugging */
+    long i, size = d->public_descriptor->stolen_objects.size;
+    gcptr *items = d->public_descriptor->stolen_objects.items;
+
+    for (i = 0; i < size; i += 2) {
+        gcptr B = items[i];
+        gcptr L = items[i + 1];
+
+        assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+        if (B == obj)
+            return L;
+    }
+    return NULL;
+}

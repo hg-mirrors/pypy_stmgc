@@ -164,7 +164,9 @@ void SpinLoop(int);
 gcptr stm_DirectReadBarrier(gcptr);
 gcptr stm_RepeatReadBarrier(gcptr);
 gcptr stm_WriteBarrier(gcptr);
-gcptr _stm_nonrecord_barrier(gcptr, int *);
+gcptr _stm_nonrecord_barrier(gcptr);  /* debugging: read barrier, but
+                                         not recording anything */
+int _stm_is_private(gcptr);  /* debugging */
 gcptr stm_get_private_from_protected(long);  /* debugging */
 gcptr stm_get_read_obj(long);  /* debugging */
 gcptr stmgc_duplicate(gcptr);

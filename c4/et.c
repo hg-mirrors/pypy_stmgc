@@ -35,6 +35,10 @@ static int is_private(gcptr P)
   return (P->h_revision == stm_private_rev_num) ||
     (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
 }
+int _stm_is_private(gcptr P)
+{
+  return is_private(P);
+}
 
 /************************************************************/
 
@@ -208,82 +212,89 @@ gcptr stm_DirectReadBarrier(gcptr G)
     }
 }
 
-#if 0
-static gcptr _latest_gcptr(gcptr R)
+gcptr _stm_nonrecord_barrier(gcptr G)
 {
-  /* don't use, for tests only */
-  revision_t v;
- retry:
-  v = R->h_revision;
-  if (!(v & 1))  // "is a pointer", i.e.
-    {            //      "has a more recent revision"
-      if (v & 2)
-        {
-          v &= ~2;
-          if (!stmgc_is_young_in(thread_descriptor, (gcptr)v))
-            return NULL;   /* can't access */
-        }
-      R = (gcptr)v;
-      goto retry;
-    }
-  return R;
-}
-
-gcptr _stm_nonrecord_barrier(gcptr obj, int *result)
-{
-  /* warning, this is for tests only, and it is not thread-safe! */
+  /* follows the logic in stm_DirectReadBarrier() */
   struct tx_descriptor *d = thread_descriptor;
-  if (gcptrlist_size(&d->stolen_objects) > 0)
-    stmgc_normalize_stolen_objects();
+  gcptr P = G;
+  revision_t v;
 
-  enum protection_class_t e = stmgc_classify(obj);
-  if (e == K_PRIVATE)
+  if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
     {
-      *result = 2;   /* 'obj' a private object to start with */
-      return obj;
-    }
-  obj = _latest_gcptr(obj);
-  if (obj == NULL)
-    {
-      assert(e == K_PUBLIC);
-      *result = 3;   /* can't check anything: we'd need foreign access */
-      return NULL;
-    }
-  if (stmgc_classify(obj) == K_PRIVATE)
-    {
-      *result = 1;
-      return obj;
-    }
-
-  wlog_t *item;
-  G2L_LOOP_FORWARD(d->public_to_private, item)
-    {
-      gcptr R = item->addr;
-      gcptr L = item->val;
-      if (_latest_gcptr(R) == obj)
+    private_from_protected:
+      if (!(((gcptr)P->h_revision)->h_revision & 1))
         {
-          /* 'obj' has a private version.  The way we detect this lets us
-             find it even if we already have a committed version that
-             will cause conflict. */
-          *result = 1;
-          return L;
+          fprintf(stderr, "_stm_nonrecord_barrier: %p -> NULL "
+                  "private_from_protected but protected changed\n", G);
+          return NULL;
         }
-    } G2L_LOOP_END;
+      goto add_in_recent_reads_cache;
+    }
 
-  if (obj->h_revision > d->start_time)
+  if (P->h_tid & GCFLAG_PUBLIC)
     {
-      /* 'obj' has no private version, and the public version was modified */
-      *result = -1;
-      return NULL;
+      while (v = ACCESS_ONCE(P->h_revision), !(v & 1))
+        {
+          if (v & 2)
+            goto follow_stub;
+
+          P = (gcptr)v;
+          assert(P->h_tid & GCFLAG_PUBLIC);
+        }
+
+      if (P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
+        {
+          wlog_t *item;
+          G2L_FIND(d->public_to_private, P, item, goto no_private_obj);
+
+          P = item->val;
+        found_in_stolen_objects:
+          assert(!(P->h_tid & GCFLAG_PUBLIC));
+          assert(is_private(P));
+          fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p "
+                  "public_to_private\n", G, P);
+          return P;
+
+        no_private_obj:;
+          gcptr L = _stm_find_stolen_objects(d, P);
+          if (L != NULL)
+            {
+              P = L;
+              goto found_in_stolen_objects;
+            }
+        }
+
+      if (UNLIKELY(v > d->start_time))
+        {
+          fprintf(stderr, "_stm_nonrecord_barrier: %p -> NULL changed\n", G);
+          return NULL;   // object too recent
+        }
+      fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p public\n", G, P);
     }
   else
     {
-      /* 'obj' has only an up-to-date public version */
-      *result = 0;
-      return obj;
+      fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p protected\n", G, P);
+    }
+
+ register_in_list_of_read_objects:
+ add_in_recent_reads_cache:
+  return P;
+
+ follow_stub:;
+  P = (gcptr)(v - 2);
+  assert(!(P->h_tid & GCFLAG_PUBLIC));
+  if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+    {
+      fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p handle "
+              "private_from_protected\n", G, P);
+      goto private_from_protected;
+    }
+  else
+    {
+      fprintf(stderr, "read_barrier: %p -> %p handle\n", G, P);
+      goto register_in_list_of_read_objects;
     }
 }
-#endif
 
 #if 0
 void *stm_DirectReadBarrierFromR(void *G1, void *R_Container1, size_t offset)
