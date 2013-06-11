@@ -55,25 +55,60 @@ void stm_steal_stub(gcptr P)
 
     gcptr L = (gcptr)(v - 2);
 
+    /* L might be a private_from_protected, or just a protected copy.
+       To know which case it is, read GCFLAG_PRIVATE_FROM_PROTECTED.
+    */
     if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
         gcptr B = (gcptr)L->h_revision;     /* the backup copy */
+
+        /* B is now a backup copy, i.e. a protected object, and we own
+           the foreign thread's collection_lock, so we can read/write the
+           flags
+        */
+        assert(B->h_tid & GCFLAG_BACKUP_COPY);
         B->h_tid &= ~GCFLAG_BACKUP_COPY;
 
-        /* add {B: L} in 'public_to_private', but lazily, because we don't
-           want to walk over the feet of the foreign thread */
-        B->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
-        gcptrlist_insert2(&foreign_pd->stolen_objects, B, L);
-
+        if (B->h_tid & GCFLAG_PUBLIC_TO_PRIVATE) {
+            /* already stolen */
+        }
+        else {
+            B->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
+            /* add {B: L} in 'public_to_private', but lazily, because we
+               don't want to walk over the feet of the foreign thread
+            */
+            gcptrlist_insert2(&foreign_pd->stolen_objects, B, L);
+        }
         fprintf(stderr, "stolen: %p -> %p - - -> %p\n", P, B, L);
-
         L = B;
     }
 
-    /* change L from protected to public */
+    /* Here L is a protected (or backup) copy, and we own the foreign
+       thread's collection_lock, so we can read/write the flags.  Change
+       it from protected to public.
+    */
     L->h_tid |= GCFLAG_PUBLIC;
 
-    smp_wmb();      /* the following update must occur "after" the flag
-                       GCFLAG_PUBLIC was added, for other threads */
+    /* Note that all protected or backup copies have a h_revision that
+       is odd.
+    */
+    assert(L->h_revision & 1);
+
+    /* At this point, the object can only be seen by its owning foreign
+       thread and by us.  No 3rd thread can see it as long as we own
+       the foreign thread's collection_lock.  For the foreign thread,
+       it might suddenly see the GCFLAG_PUBLIC being added to L
+       (but it may not do any change to the flags itself, because
+       it cannot grab its own collection_lock).  L->h_revision is an
+       odd number that is also valid on a public up-to-date object.
+    */
+
+    /* If another thread (the foreign or a 3rd party) does a read
+       barrier from P, it must only reach L if all writes to L are
+       visible; i.e. it must not see P->h_revision => L that still
+       doesn't have the GCFLAG_PUBLIC.  So we need a CPU write
+       barrier here.
+    */
+    smp_wmb();
 
     /* update the original P->h_revision to point directly to L */
     P->h_revision = (revision_t)L;
@@ -92,6 +127,8 @@ void stm_normalize_stolen_objects(struct tx_descriptor *d)
         gcptr L = items[i + 1];
 
         assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+        assert(!(B->h_tid & GCFLAG_BACKUP_COPY));  /* already removed */
+
         g2l_insert(&d->public_to_private, B, L);
     }
     gcptrlist_clear(&d->public_descriptor->stolen_objects);

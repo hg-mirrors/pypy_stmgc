@@ -245,3 +245,28 @@ public_to_private:
     make a stub with h_revision = private object | 2
 
     after a CPU write barrier, make the public h_revision to point to the stub
+
+
+
+Change to the flags and h_revision
+----------------------------------
+
+The flags are in `h_tid`.  Changes to this field and `h_revision` must
+not occur uncontrolled:
+
+- private copies: the thread that owns the private copy can change
+freely the `h_tid` and `h_revision` fields.  The other threads must not
+touch them, and must read them carefully.  This concerns only stealing
+threads, on GCFLAG_PRIVATE_FROM_PROTECTED objects.  The flag
+GCFLAG_PRIVATE_FROM_PROTECTED itself is only changed when the owning
+thread has got its collection_lock, and as long as it is set, h_revision
+points to the backup copy.
+
+- protected copies (includes backup copies): any change requires the
+owning thread's collection_lock.  During stealing, other threads
+might add (with the collection_lock) the flags GCFLAG_PUBLIC or
+GCFLAG_PUBLIC_TO_PRIVATE.
+
+- public copies: must be changed carefully: `h_tid` is only modified to
+add GCFLAG_PUBLIC_TO_PRIVATE; and `h_revision` changes are done with
+bool_cas() in a thread-controlled way.
