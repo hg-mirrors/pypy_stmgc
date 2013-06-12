@@ -214,14 +214,17 @@ class RandomSingleThreadTester(object):
             ptr = self.nonrecord_barrier(p.ptr)
             has_private_copy = p.obj in self.current_rev.content
             if has_private_copy:
-                assert ptr != ffi.NULL and self.is_private(ptr)
+                assert ptr != ffi.NULL and ptr != nrb_protected
+                assert self.is_private(ptr)
                 content = self.current_rev.content[p.obj]
             else:
                 try:
                     content = self.current_rev._try_read(p.obj)
                 except model.Deleted:
-                    assert ptr == ffi.NULL
+                    assert ptr == ffi.NULL or ptr == nrb_protected
                     continue
+                if ptr == nrb_protected:
+                    continue    # not much we can do
                 assert ptr != ffi.NULL and not self.is_private(ptr)
 
             self.check_not_free(ptr)

@@ -564,3 +564,5 @@ def follow_revision(p):
     r = p.h_revision
     assert (r % 4) == 0
     return ffi.cast("gcptr", r)
+
+nrb_protected = ffi.cast("gcptr", -1)

@@ -2,7 +2,7 @@ import py
 from support import *
 
 
-SHORTCUT = False   # XXXXXXXXXXXXXXXXX
+SHORTCUT = True
 
 
 def setup_function(f):

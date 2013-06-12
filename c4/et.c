@@ -120,7 +120,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
               /* we update P_prev->h_revision as a shortcut */
               /* XXX check if this really gives a worse performance than only
                  doing this write occasionally based on a counter in d */
-              //P_prev->h_revision = v;  XXX re-enable!
+              P_prev->h_revision = v;
               P = (gcptr)v;
               v = ACCESS_ONCE(P->h_revision);
               if (!(v & 1))  // "is a pointer", i.e. "has a more recent rev"
@@ -229,6 +229,50 @@ gcptr stm_DirectReadBarrier(gcptr G)
     }
 }
 
+static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj)
+{
+  while ((pubobj->h_revision & 3) == 0)
+    {
+      assert(pubobj != P);
+      pubobj = (gcptr)pubobj->h_revision;
+    }
+  if (pubobj == P)
+    {
+      assert(!(privobj->h_tid & GCFLAG_PUBLIC));
+      assert(is_private(privobj));
+      fprintf(stderr, "-public_to_private-> %p private\n", privobj);
+      return privobj;
+    }
+  return NULL;
+}
+
+static gcptr _find_public_to_private(gcptr P)
+{
+  gcptr R;
+  wlog_t *item;
+  struct tx_descriptor *d = thread_descriptor;
+
+  G2L_LOOP_FORWARD(d->public_to_private, item)
+    {
+      R = _match_public_to_private(P, item->addr, item->val);
+      if (R != NULL)
+        return R;
+
+    } G2L_LOOP_END;
+
+  long i, size = d->public_descriptor->stolen_objects.size;
+  gcptr *items = d->public_descriptor->stolen_objects.items;
+
+  for (i = 0; i < size; i += 2)
+    {
+      R = _match_public_to_private(P, items[i], items[i + 1]);
+      if (R != NULL)
+        return R;
+    }
+
+  return NULL;
+}
+
 gcptr _stm_nonrecord_barrier(gcptr P)
 {
   /* follows the logic in stm_DirectReadBarrier() */
@@ -247,6 +291,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
 
   if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
     {
+      /* private too, with a backup copy */
       assert(!(P->h_revision & 1));
       fprintf(stderr, "private_from_protected\n");
       return P;
@@ -254,36 +299,27 @@ gcptr _stm_nonrecord_barrier(gcptr P)
 
   if (P->h_tid & GCFLAG_PUBLIC)
     {
-      while (1)
+      fprintf(stderr, "public ");
+
+      while (v = P->h_revision, !(v & 1))
         {
-          assert(P->h_tid & GCFLAG_PUBLIC);
-          fprintf(stderr, "public ");
-
-          wlog_t *item;
-          gcptr L;
-          G2L_FIND(d->public_to_private, P, item, goto no_private_obj);
-
-          L = item->val;
-        found_in_stolen_objects:
-          assert(P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
-          assert(!(L->h_tid & GCFLAG_PUBLIC));
-          assert(is_private(L));
-          fprintf(stderr, "-public_to_private-> %p private\n", L);
-          return L;
-
-        no_private_obj:;
-          L = _stm_find_stolen_objects(d, P);
-          if (L != NULL)
-            goto found_in_stolen_objects;
-
-          v = ACCESS_ONCE(P->h_revision);
-          if (v & 1)
-            break;
           if (v & 2)
-            goto follow_stub;
+            {
+              gcptr L = _find_public_to_private(P);
+              if (L != NULL)
+                return L;
+              goto follow_stub;
+            }
+
           P = (gcptr)v;
-          fprintf(stderr, "-> %p ", P);
+          assert(P->h_tid & GCFLAG_PUBLIC);
+          fprintf(stderr, "-> %p public ", P);
         }
+
+      gcptr L = _find_public_to_private(P);
+      if (L != NULL)
+        return L;
+
       if (UNLIKELY(v > d->start_time))
         {
           fprintf(stderr, "too recent!\n");
@@ -311,6 +347,11 @@ gcptr _stm_nonrecord_barrier(gcptr P)
         {
           P = (gcptr)P->h_revision;     /* the backup copy */
           fprintf(stderr, "-backup-> %p ", P);
+        }
+      if (!(P->h_tid & GCFLAG_PUBLIC))
+        {
+          fprintf(stderr, "protected by someone else!\n");
+          return (gcptr)-1;
         }
     }
   goto restart_all;
