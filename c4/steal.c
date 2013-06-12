@@ -105,7 +105,6 @@ void stm_steal_stub(gcptr P)
            the foreign thread's collection_lock, so we can read/write the
            flags
         */
-        assert(B->h_tid & GCFLAG_BACKUP_COPY);
         B->h_tid &= ~GCFLAG_BACKUP_COPY;
 
         if (B->h_tid & GCFLAG_PUBLIC_TO_PRIVATE) {
