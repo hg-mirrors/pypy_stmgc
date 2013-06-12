@@ -5,6 +5,11 @@ import model
 # a default seed that changes every day, but that can be easily recovered
 DEFAULT_SEED = int(time.strftime("%y%m%d", time.gmtime()))
 
+# XXXXXXXXXXXXXXXXXXXXXX
+# XXX reintroduce me XXX
+# XXXXXXXXXXXXXXXXXXXXXX
+DO_MAJOR_COLLECTS = False
+
 
 def setup_function(_):
     lib.stm_clear_between_tests()
@@ -375,7 +380,8 @@ class RandomSingleThreadTester(object):
             if k1 == 7:
                 self.dump('major collect')
                 self.push_roots()
-                major_collect()
+                if DO_MAJOR_COLLECTS:
+                    major_collect()
                 self.pop_roots()
                 p = emptypair
             if k1 == 82 and self.interruptible_transaction:
