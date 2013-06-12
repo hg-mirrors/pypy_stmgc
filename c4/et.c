@@ -511,7 +511,18 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
       v = ACCESS_ONCE(R->h_revision);
       if (!(v & 1))               // "is a pointer", i.e.
         {                         //   "has a more recent revision"
-          return 0;
+          if (R->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+            {
+              /* such an object R might be listed in list_of_read_objects
+                 before it was turned from protected to private */
+              continue;
+            }
+          else
+            {
+              fprintf(stderr, "validation failed: "
+                      "%p has a more recent revision\n", R);
+              return 0;
+            }
         }
       if (v >= LOCKED)            // locked
         {
@@ -524,7 +535,11 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
           else
             {
               if (v != d->my_lock)         // not locked by me: conflict
-                return 0;
+                {
+                  fprintf(stderr, "validation failed: "
+                          "%p is locked by another thread\n", R);
+                  return 0;
+                }
             }
         }
     }
