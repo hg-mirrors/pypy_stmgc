@@ -83,10 +83,11 @@ class RandomSingleThreadTester(object):
 
     def check(self, p):
         assert isinstance(p, Pair)
-        if p != emptypair and not is_stub(p.ptr):
+        if p != emptypair:
             self.check_not_free(p.ptr)
-            pid = lib.rawgetptr(p.ptr, 2)
-            assert pid == p.obj.identity
+            if not is_stub(p.ptr):
+                pid = lib.rawgetptr(p.ptr, 2)
+                assert pid == p.obj.identity
 
     def expected_abort(self, manual=False):
         if manual:

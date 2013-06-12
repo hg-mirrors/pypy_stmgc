@@ -465,11 +465,9 @@ def major_collect():
 def minor_collect():
     lib.stmgc_minor_collect()
 
-STUB_TID = GCFLAG_STUB | GCFLAG_OLD | 0   # no user tid
-
 def is_stub(p):
     assert lib.stm_dbgmem_is_active(p, 1) != 0
-    return p.h_tid == STUB_TID
+    return p.h_tid & GCFLAG_STUB
 
 def check_not_free(p):
     assert lib.stm_dbgmem_is_active(p, 1) == 1

@@ -321,3 +321,6 @@ def test_abort_private_from_protected():
 
 def test_abort_stealing_while_modifying():
     test_stealing_while_modifying(aborting=True)
+
+def test_stub_for_refs_from_stolen():
+    xxx
