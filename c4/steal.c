@@ -73,7 +73,8 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
 
  not_found:
     stub = stm_stub_malloc(sd->foreign_pd);
-    stub->h_tid = obj->h_tid | GCFLAG_PUBLIC | GCFLAG_STUB;
+    stub->h_tid = (obj->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
+                                                   | GCFLAG_STUB;
     stub->h_revision = ((revision_t)obj) | 2;
     g2l_insert(&sd->all_stubs, obj, stub);
 
