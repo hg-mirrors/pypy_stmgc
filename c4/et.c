@@ -238,7 +238,8 @@ static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj)
       assert(pubobj != P);
       pubobj = (gcptr)pubobj->h_revision;
     }
-  if (pubobj == P)
+  if (pubobj == P || ((P->h_revision & 3) == 2 &&
+                      pubobj->h_revision == P->h_revision))
     {
       assert(!(org_pubobj->h_tid & GCFLAG_STUB));
       assert(!(privobj->h_tid & GCFLAG_PUBLIC));
