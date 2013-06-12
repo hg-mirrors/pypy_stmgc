@@ -839,6 +839,8 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
 {
   long i, size = d->private_from_protected.size;
   gcptr *items = d->private_from_protected.items;
+  revision_t new_revision = cur_time + 1;     // make an odd number
+  assert(new_revision & 1);
 
   for (i = 0; i < size; i++)
     {
@@ -856,7 +858,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
         }
 
       gcptr B = (gcptr)P->h_revision;
-      P->h_revision = cur_time;
+      P->h_revision = new_revision;
 
       if (B->h_tid & GCFLAG_PUBLIC)
         {
