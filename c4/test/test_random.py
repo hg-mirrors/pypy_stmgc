@@ -112,6 +112,9 @@ class RandomSingleThreadTester(object):
                 self.dump('expecting abort: %r' % (e,))
                 self.expected_abort()
                 lib.setptr(r.ptr, index, p.ptr)   # should abort
+                # didn't?  try again by first clearing the fxcache
+                lib.stm_clear_read_cache()
+                lib.setptr(r.ptr, index, p.ptr)
                 raise MissingAbort
 
             lib.setptr(r.ptr, index, p.ptr)   # must not abort
@@ -175,6 +178,9 @@ class RandomSingleThreadTester(object):
                 # abort! try to reproduce with C code
                 self.expected_abort()
                 lib.stm_write_barrier(p.ptr)         # should abort
+                # didn't?  try again by first clearing the fxcache
+                lib.stm_clear_read_cache()
+                lib.stm_write_barrier(p.ptr)
                 raise MissingAbort
 
             nptr = lib.stm_write_barrier(p.ptr)
@@ -481,5 +487,5 @@ def test_multi_thread(seed=DEFAULT_SEED):
 
 def test_more_multi_thread():
     #py.test.skip("more random tests")
-    for i in range(9, 1000):
+    for i in range(12, 1000):
         yield test_multi_thread, i
