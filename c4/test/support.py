@@ -72,6 +72,7 @@ ffi.cdef('''
     gcptr stm_get_private_from_protected(long index);
     gcptr stm_get_read_obj(long index);
     void *STUB_THREAD(gcptr);
+    void stm_clear_read_cache(void);
 
     gcptr getptr(gcptr, long);
     void setptr(gcptr, long, gcptr);

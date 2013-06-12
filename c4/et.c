@@ -39,6 +39,10 @@ int _stm_is_private(gcptr P)
 {
   return is_private(P);
 }
+void stm_clear_read_cache(void)
+{
+  fxcache_clear(&thread_descriptor->recent_reads_cache);
+}
 
 /************************************************************/
 

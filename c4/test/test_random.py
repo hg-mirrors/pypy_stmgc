@@ -126,9 +126,11 @@ class RandomSingleThreadTester(object):
             pobj = self.current_rev.read(r.obj, index)
             if not self.is_private(r.ptr):
                 self.current_rev.check_not_outdated(r.obj)
-        except (model.Deleted, model.Conflict):
+        except (model.Deleted, model.Conflict), e:
             # abort! try to reproduce with C code
+            self.dump('expecting abort: %r' % (e,))
             self.expected_abort()
+            lib.stm_clear_read_cache()
             lib.getptr(r.ptr, index)             # should abort
             raise MissingAbort
 
