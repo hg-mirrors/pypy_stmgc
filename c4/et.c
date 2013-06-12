@@ -120,7 +120,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
               /* we update P_prev->h_revision as a shortcut */
               /* XXX check if this really gives a worse performance than only
                  doing this write occasionally based on a counter in d */
-              P_prev->h_revision = v;
+              //P_prev->h_revision = v;  XXX re-enable!
               P = (gcptr)v;
               v = ACCESS_ONCE(P->h_revision);
               if (!(v & 1))  // "is a pointer", i.e. "has a more recent rev"
@@ -229,16 +229,26 @@ gcptr stm_DirectReadBarrier(gcptr G)
     }
 }
 
-gcptr _stm_nonrecord_barrier(gcptr G)
+gcptr _stm_nonrecord_barrier(gcptr P)
 {
   /* follows the logic in stm_DirectReadBarrier() */
   struct tx_descriptor *d = thread_descriptor;
-  gcptr P = G;
   revision_t v;
+
+  fprintf(stderr, "_stm_nonrecord_barrier: %p ", P);
+
+ restart_all:
+  if (P->h_revision == stm_private_rev_num)
+    {
+      /* private */
+      fprintf(stderr, "private\n");
+      return P;
+    }
 
   if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
     {
       assert(!(P->h_revision & 1));
+      fprintf(stderr, "private_from_protected\n");
       return P;
     }
 
@@ -246,6 +256,9 @@ gcptr _stm_nonrecord_barrier(gcptr G)
     {
       while (1)
         {
+          assert(P->h_tid & GCFLAG_PUBLIC);
+          fprintf(stderr, "public ");
+
           wlog_t *item;
           gcptr L;
           G2L_FIND(d->public_to_private, P, item, goto no_private_obj);
@@ -255,8 +268,7 @@ gcptr _stm_nonrecord_barrier(gcptr G)
           assert(P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
           assert(!(L->h_tid & GCFLAG_PUBLIC));
           assert(is_private(L));
-          fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p "
-                  "public_to_private\n", G, L);
+          fprintf(stderr, "-public_to_private-> %p private\n", L);
           return L;
 
         no_private_obj:;
@@ -270,25 +282,38 @@ gcptr _stm_nonrecord_barrier(gcptr G)
           if (v & 2)
             goto follow_stub;
           P = (gcptr)v;
-          assert(P->h_tid & GCFLAG_PUBLIC);
+          fprintf(stderr, "-> %p ", P);
         }
       if (UNLIKELY(v > d->start_time))
         {
-          fprintf(stderr, "_stm_nonrecord_barrier: %p -> NULL changed\n", G);
+          fprintf(stderr, "too recent!\n");
           return NULL;   // object too recent
         }
-      fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p public\n", G, P);
+      fprintf(stderr, "\n");
     }
   else
     {
-      fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p protected\n", G, P);
+      fprintf(stderr, "protected\n");
     }
   return P;
 
  follow_stub:;
-  fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p stub\n  ", G, P);
-  P = (gcptr)(v - 2);
-  return _stm_nonrecord_barrier(P);
+  if (STUB_THREAD(P) == d->public_descriptor)
+    {
+      P = (gcptr)(v - 2);
+      fprintf(stderr, "stub -> %p ", P);
+    }
+  else
+    {
+      P = (gcptr)(v - 2);
+      fprintf(stderr, "stub -foreign-> %p ", P);
+      if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+        {
+          P = (gcptr)P->h_revision;     /* the backup copy */
+          fprintf(stderr, "-backup-> %p ", P);
+        }
+    }
+  goto restart_all;
 }
 
 #if 0
