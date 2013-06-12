@@ -41,7 +41,7 @@ class RandomSingleThreadTester(object):
         self.sync_wait = sync_wait
         self.counter = 0
         self.current_rev = None
-        self.expecting_gap_in_commit_time = 2
+        #self.expecting_gap_in_commit_time = 2
         self.dump('run')
         #
         if sync.prebuilt_object is None:
@@ -290,12 +290,12 @@ class RandomSingleThreadTester(object):
             self.commit()
         except model.Conflict, e:
             self.dump("interruptible_transaction expecting %s" % (e,))
-            if isinstance(e, model.ReadWriteConflict):
-                self.expecting_gap_in_commit_time += 2
+            #if isinstance(e, model.ReadWriteConflict):
+            #    self.expecting_gap_in_commit_time += 2
             self.expected_abort()
             return 0
         #
-        self.expecting_gap_in_commit_time = 2
+        #self.expecting_gap_in_commit_time = 2
         if restart:
             self.dump("interruptible_transaction break")
             return 1
@@ -308,16 +308,16 @@ class RandomSingleThreadTester(object):
         t = lib.get_start_time()
         self.current_rev.start_time = t
         if self.current_rev.previous is not None:
-            t_prev = t - self.expecting_gap_in_commit_time
+            t_prev = t - 2  #self.expecting_gap_in_commit_time
             if hasattr(self.current_rev.previous, 'commit_time'):
-                assert self.current_rev.previous.commit_time == t_prev
+                pass #assert self.current_rev.previous.commit_time == t_prev
             else:
                 self.current_rev.previous.commit_time = t_prev
 
     def possibly_update_time(self):
         t = lib.get_start_time()
-        t_prev = t - self.expecting_gap_in_commit_time
-        assert self.current_rev.previous.commit_time == t_prev
+        #t_prev = t - self.expecting_gap_in_commit_time
+        #assert self.current_rev.previous.commit_time == t_prev
         self.current_rev.start_time = t
 
     def commit(self):
@@ -479,6 +479,6 @@ def test_multi_thread(seed=DEFAULT_SEED):
 
 
 def test_more_multi_thread():
-    py.test.skip("more random tests")
-    for i in range(2, 1000):
+    #py.test.skip("more random tests")
+    for i in range(7, 1000):
         yield test_multi_thread, i
