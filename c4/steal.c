@@ -183,6 +183,14 @@ void stm_normalize_stolen_objects(struct tx_descriptor *d)
         assert(!(B->h_tid & GCFLAG_BACKUP_COPY));  /* already removed */
 
         g2l_insert(&d->public_to_private, B, L);
+
+        /* to be on the safe side */
+        fxcache_remove(&d->recent_reads_cache, B);
+
+        /* but this is definitely needed: all keys in public_to_private
+           must appear in list_of_read_objects */
+        fprintf(stderr, "n.readobj: %p\n", B);
+        gcptrlist_insert(&d->list_of_read_objects, B);
     }
     gcptrlist_clear(&d->public_descriptor->stolen_objects);
 }

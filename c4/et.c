@@ -193,6 +193,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
       /*assert(P->h_revision & 1);*/
     }
 
+  fprintf(stderr, "readobj: %p\n", P);
   gcptrlist_insert(&d->list_of_read_objects, P);
 
  add_in_recent_reads_cache:
@@ -231,6 +232,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
 
 static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj)
 {
+  gcptr org_pubobj = pubobj;
   while ((pubobj->h_revision & 3) == 0)
     {
       assert(pubobj != P);
@@ -238,8 +240,11 @@ static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj)
     }
   if (pubobj == P)
     {
+      assert(!(org_pubobj->h_tid & GCFLAG_STUB));
       assert(!(privobj->h_tid & GCFLAG_PUBLIC));
       assert(is_private(privobj));
+      if (P != org_pubobj)
+        fprintf(stderr, "| actually %p ", org_pubobj);
       fprintf(stderr, "-public_to_private-> %p private\n", privobj);
       return privobj;
     }
@@ -305,6 +310,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
         {
           if (v & 2)
             {
+              fprintf(stderr, "stub ");
               gcptr L = _find_public_to_private(P);
               if (L != NULL)
                 return L;
@@ -337,12 +343,12 @@ gcptr _stm_nonrecord_barrier(gcptr P)
   if (STUB_THREAD(P) == d->public_descriptor)
     {
       P = (gcptr)(v - 2);
-      fprintf(stderr, "stub -> %p ", P);
+      fprintf(stderr, "-> %p ", P);
     }
   else
     {
       P = (gcptr)(v - 2);
-      fprintf(stderr, "stub -foreign-> %p ", P);
+      fprintf(stderr, "-foreign-> %p ", P);
       if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
         {
           P = (gcptr)P->h_revision;     /* the backup copy */
@@ -550,6 +556,16 @@ static void ValidateNow(struct tx_descriptor *d)
 {
   d->start_time = GetGlobalCurTime(d);   // copy from the global time
   fprintf(stderr, "et.c: ValidateNow: %ld\n", (long)d->start_time);
+
+  /* subtle: we have to normalize stolen objects, because doing so
+     might add a few extra objects in the list_of_read_objects */
+  if (d->public_descriptor->stolen_objects.size != 0)
+    {
+      spinlock_acquire(d->public_descriptor->collection_lock, 'N');
+      stm_normalize_stolen_objects(d);
+      spinlock_release(d->public_descriptor->collection_lock);
+    }
+
   if (!ValidateDuringTransaction(d, 0))
     AbortTransaction(ABRT_VALIDATE_INFLIGHT);
 }
