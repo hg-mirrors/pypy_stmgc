@@ -154,6 +154,7 @@ class RandomSingleThreadTester(object):
             except (model.Deleted, model.Conflict):
                 # abort! try to reproduce with C code
                 self.expected_abort()
+                lib.stm_clear_read_cache()
                 lib.stm_read_barrier(p.ptr)          # should abort
                 raise MissingAbort
 
@@ -480,5 +481,5 @@ def test_multi_thread(seed=DEFAULT_SEED):
 
 def test_more_multi_thread():
     #py.test.skip("more random tests")
-    for i in range(7, 1000):
+    for i in range(9, 1000):
         yield test_multi_thread, i
