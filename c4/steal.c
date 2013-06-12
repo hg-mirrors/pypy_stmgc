@@ -13,6 +13,8 @@ struct stub_block_s {
 
 gcptr stm_stub_malloc(struct tx_public_descriptor *pd)
 {
+    assert(pd->collection_lock != 0);
+
     gcptr p = pd->stub_free_list;
     if (p == NULL) {
         assert(sizeof(struct stub_block_s) == STUB_BLOCK_SIZE);
@@ -41,6 +43,43 @@ gcptr stm_stub_malloc(struct tx_public_descriptor *pd)
     pd->stub_free_list = (gcptr)p->h_revision;
     assert(STUB_THREAD(p) == pd);
     return p;
+}
+
+
+struct tx_steal_data {
+    struct tx_public_descriptor *foreign_pd;
+    struct G2L all_stubs;   /* { protected: public_stub } */
+};
+static __thread struct tx_steal_data *steal_data;
+
+static void replace_ptr_to_protected_with_stub(gcptr *pobj)
+{
+    gcptr stub, obj = *pobj;
+    if (obj == NULL || (obj->h_tid & GCFLAG_PUBLIC) != 0)
+        return;
+
+    /* we use 'all_stubs', a dictionary, in order to try to avoid
+       duplicate stubs for the same object.  XXX maybe it would be
+       better to use a fast approximative cache that stays around for
+       several stealings. */
+    struct tx_steal_data *sd = steal_data;
+    wlog_t *item;
+    G2L_FIND(sd->all_stubs, obj, item, goto not_found);
+
+    /* found already */
+    stub = item->val;
+    assert(stub->h_revision == (((revision_t)obj) | 2));
+    goto done;
+
+ not_found:
+    stub = stm_stub_malloc(sd->foreign_pd);
+    stub->h_tid = obj->h_tid | GCFLAG_PUBLIC | GCFLAG_STUB;
+    stub->h_revision = ((revision_t)obj) | 2;
+    g2l_insert(&sd->all_stubs, obj, stub);
+
+ done:
+    *pobj = stub;
+    fprintf(stderr, "  stolen: fixing *%p: %p -> %p\n", pobj, obj, stub);
 }
 
 void stm_steal_stub(gcptr P)
@@ -81,6 +120,9 @@ void stm_steal_stub(gcptr P)
         fprintf(stderr, "stolen: %p -> %p - - -> %p\n", P, B, L);
         L = B;
     }
+    else {
+        fprintf(stderr, "stolen: %p -> %p\n", P, L);
+    }
 
     /* Here L is a protected (or backup) copy, and we own the foreign
        thread's collection_lock, so we can read/write the flags.  Change
@@ -101,6 +143,17 @@ void stm_steal_stub(gcptr P)
        it cannot grab its own collection_lock).  L->h_revision is an
        odd number that is also valid on a public up-to-date object.
     */
+
+    /* Fix the content of the object: we need to change all pointers
+       that reference protected copies into pointers that reference
+       stub copies.
+    */
+    struct tx_steal_data sd;
+    sd.foreign_pd = foreign_pd;
+    memset(&sd.all_stubs, 0, sizeof(sd.all_stubs));
+    steal_data = &sd;
+    stmcb_trace(L, &replace_ptr_to_protected_with_stub);
+    g2l_delete_not_used_any_more(&sd.all_stubs);
 
     /* If another thread (the foreign or a 3rd party) does a read
        barrier from P, it must only reach L if all writes to L are

@@ -219,6 +219,7 @@ def test_stealing():
     def f2(r):
         r.wait(2)
         p2 = lib.stm_read_barrier(p)    # steals
+        assert classify(p2) == "public"
         assert lib.rawgetlong(p2, 0) == 2782172
         assert p2 == lib.stm_read_barrier(p)    # short-circuit h_revision
         assert p.h_revision == int(ffi.cast("revision_t", p2))
@@ -323,4 +324,40 @@ def test_abort_stealing_while_modifying():
     test_stealing_while_modifying(aborting=True)
 
 def test_stub_for_refs_from_stolen():
-    xxx
+    p = palloc_refs(1)
+    qlist = []
+    def f1(r):
+        assert (p.h_tid & GCFLAG_PUBLIC_TO_PRIVATE) == 0
+        p1 = lib.stm_write_barrier(p)   # private copy
+        assert p1 != p
+        assert classify(p) == "public"
+        assert classify(p1) == "private"
+        assert p.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
+        q1 = nalloc(HDR + WORD)
+        qlist.append(q1)
+        lib.setlong(q1, 0, -29187)
+        lib.setptr(p1, 0, q1)
+        lib.stm_commit_transaction()
+        lib.stm_begin_inevitable_transaction()
+        assert classify(p) == "public"
+        assert classify(p1) == "protected"
+        assert classify(follow_revision(p)) == "stub"
+        assert p1.h_revision & 1
+        r.set(2)
+        r.wait(3)   # wait until the other thread really starts
+    def f2(r):
+        r.wait(2)
+        r.set(3)
+        p2 = lib.stm_read_barrier(p)    # steals
+        assert classify(p2) == "public"
+        q2 = lib.getptr(p2, 0)
+        assert q2 != ffi.NULL
+        assert q2 != qlist[0]
+        assert classify(q2) == "stub"
+        assert q2.h_revision % 4 == 2
+        q3 = lib.stm_read_barrier(q2)
+        assert q3 != q2
+        assert q3 == qlist[0]
+        assert classify(q3) == "public"   # has been stolen
+        assert lib.getlong(q3, 0) == -29187
+    run_parallel(f1, f2)

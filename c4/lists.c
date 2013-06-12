@@ -22,19 +22,6 @@ void g2l_delete(struct G2L *g2l)
   memset(g2l, 0, sizeof(struct G2L));
 }
 
-struct G2L *g2l_malloc(void)
-{
-  struct G2L *g2l = malloc(sizeof(struct G2L));
-  memset(g2l, 0, sizeof(struct G2L));
-  return g2l;
-}
-
-void g2l_free(struct G2L *g2l)
-{
-  free(g2l->raw_start);
-  free(g2l);
-}
-
 wlog_t *_g2l_find(char *entry, gcptr addr)
 {
   revision_t key = (revision_t)addr;

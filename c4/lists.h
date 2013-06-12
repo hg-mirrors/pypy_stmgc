@@ -35,8 +35,9 @@ struct G2L {
 
 void g2l_clear(struct G2L *g2l);
 void g2l_delete(struct G2L *g2l);
-struct G2L *g2l_malloc(void);
-void g2l_free(struct G2L *g2l);
+static inline void g2l_delete_not_used_any_more(struct G2L *g2l) {
+    free(g2l->raw_start);
+}
 
 static inline int g2l_any_entry(struct G2L *g2l) {
     return g2l->raw_current != g2l->raw_start;
