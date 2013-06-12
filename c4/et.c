@@ -98,6 +98,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
          along this chain.
       */
     restart_all_public:
+      assert(P->h_tid & GCFLAG_PUBLIC);
       v = ACCESS_ONCE(P->h_revision);
       if (!(v & 1))  // "is a pointer", i.e.
         {            //      "has a more recent revision"
@@ -172,10 +173,10 @@ gcptr stm_DirectReadBarrier(gcptr G)
           if (v >= LOCKED)
             {
               SpinLoop(SPLP_LOCKED_INFLIGHT);
-              goto retry;           // spinloop until it is no longer LOCKED
+              goto restart_all_public; // spinloop until it is no longer LOCKED
             }
           ValidateNow(d);                  // try to move start_time forward
-          goto retry;                      // restart searching from P
+          goto restart_all_public;         // restart searching from P
         }
       fprintf(stderr, "read_barrier: %p -> %p public\n", G, P);
     }
