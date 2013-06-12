@@ -238,49 +238,40 @@ gcptr _stm_nonrecord_barrier(gcptr G)
 
   if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
     {
-    private_from_protected:
-      if (!(((gcptr)P->h_revision)->h_revision & 1))
-        {
-          fprintf(stderr, "_stm_nonrecord_barrier: %p -> NULL "
-                  "private_from_protected but protected changed\n", G);
-          return NULL;
-        }
-      goto add_in_recent_reads_cache;
+      assert(!(P->h_revision & 1));
+      return P;
     }
 
   if (P->h_tid & GCFLAG_PUBLIC)
     {
-      while (v = ACCESS_ONCE(P->h_revision), !(v & 1))
+      while (1)
         {
+          wlog_t *item;
+          gcptr L;
+          G2L_FIND(d->public_to_private, P, item, goto no_private_obj);
+
+          L = item->val;
+        found_in_stolen_objects:
+          assert(P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
+          assert(!(L->h_tid & GCFLAG_PUBLIC));
+          assert(is_private(L));
+          fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p "
+                  "public_to_private\n", G, L);
+          return L;
+
+        no_private_obj:;
+          L = _stm_find_stolen_objects(d, P);
+          if (L != NULL)
+            goto found_in_stolen_objects;
+
+          v = ACCESS_ONCE(P->h_revision);
+          if (v & 1)
+            break;
           if (v & 2)
             goto follow_stub;
-
           P = (gcptr)v;
           assert(P->h_tid & GCFLAG_PUBLIC);
         }
-
-      if (P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
-        {
-          wlog_t *item;
-          G2L_FIND(d->public_to_private, P, item, goto no_private_obj);
-
-          P = item->val;
-        found_in_stolen_objects:
-          assert(!(P->h_tid & GCFLAG_PUBLIC));
-          assert(is_private(P));
-          fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p "
-                  "public_to_private\n", G, P);
-          return P;
-
-        no_private_obj:;
-          gcptr L = _stm_find_stolen_objects(d, P);
-          if (L != NULL)
-            {
-              P = L;
-              goto found_in_stolen_objects;
-            }
-        }
-
       if (UNLIKELY(v > d->start_time))
         {
           fprintf(stderr, "_stm_nonrecord_barrier: %p -> NULL changed\n", G);
@@ -292,25 +283,12 @@ gcptr _stm_nonrecord_barrier(gcptr G)
     {
       fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p protected\n", G, P);
     }
-
- register_in_list_of_read_objects:
- add_in_recent_reads_cache:
   return P;
 
  follow_stub:;
+  fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p stub\n  ", G, P);
   P = (gcptr)(v - 2);
-  assert(!(P->h_tid & GCFLAG_PUBLIC));
-  if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
-    {
-      fprintf(stderr, "_stm_nonrecord_barrier: %p -> %p handle "
-              "private_from_protected\n", G, P);
-      goto private_from_protected;
-    }
-  else
-    {
-      fprintf(stderr, "read_barrier: %p -> %p handle\n", G, P);
-      goto register_in_list_of_read_objects;
-    }
+  return _stm_nonrecord_barrier(P);
 }
 
 #if 0
