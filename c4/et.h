@@ -105,7 +105,6 @@
  * thread shuts down.  It is reused the next time a thread starts. */
 struct tx_public_descriptor {
   revision_t collection_lock;
-  NURSERY_FIELDS_DECL
   struct tx_descriptor *descriptor;
   struct stub_block_s *stub_blocks;
   gcptr stub_free_list;
@@ -124,6 +123,8 @@ struct tx_descriptor {
   revision_t my_lock;
   gcptr *shadowstack;
   gcptr **shadowstack_end_ref;
+
+  NURSERY_FIELDS_DECL
 
   long atomic;   /* 0 = not atomic, > 0 atomic */
   unsigned long count_reads;
