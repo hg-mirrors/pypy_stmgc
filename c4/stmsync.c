@@ -59,7 +59,7 @@ void stm_initialize(void)
 {
     int r = DescriptorInit();
     assert(r == 1);
-    //stmgc_init_tls();
+    stm_init_nursery();
     init_shadowstack();
     //stmgcpage_init_tls();
     BeginInevitableTransaction();
@@ -91,20 +91,6 @@ gcptr stm_write_barrier(gcptr obj)
                  ((obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) == 0)))
         obj = stm_WriteBarrier(obj);
     return obj;
-}
-
-gcptr stm_allocate(size_t size, unsigned long tid)
-{
-    gcptr result = stm_malloc(size);
-    assert(tid == (tid & STM_USER_TID_MASK));
-    result->h_tid = tid;
-    result->h_revision = stm_private_rev_num;
-    return result;
-}
-
-gcptr _stm_allocate_old(size_t size, unsigned long tid)
-{
-    abort();
 }
 
 /************************************************************/
