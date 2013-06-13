@@ -98,46 +98,65 @@ class RandomSingleThreadTester(object):
         self.aborted_rev = self.current_rev
         self.current_rev = None
 
+    def cancel_expected_abort(self):
+        lib.stm_set_max_aborts(0)
+        self.expected_conflict = False
+        self.current_rev = self.aborted_rev
+        del self.aborted_rev
+
     def set_into_root(self, p, index):
         r = self._r
         if r != emptypair:
             self.check(r)
             self.check(p)
-            try:
-                self.current_rev.write(r.obj, index, p.obj)
-                if not self.is_private(r.ptr):
-                    self.current_rev.check_not_outdated(r.obj)
-            except (model.Deleted, model.Conflict), e:
-                # abort! try to reproduce with C code
-                self.dump('expecting abort: %r' % (e,))
-                self.expected_abort()
-                lib.setptr(r.ptr, index, p.ptr)   # should abort
-                # didn't?  try again by first clearing the fxcache
-                lib.stm_clear_read_cache()
-                lib.setptr(r.ptr, index, p.ptr)
-                raise MissingAbort
-
-            lib.setptr(r.ptr, index, p.ptr)   # must not abort
+            self.do(r, (self.current_rev.write, r.obj, index, p.obj),
+                       (lib.setptr, r.ptr, index, p.ptr))
             self.possibly_update_time()
             self.dump('set_into_root(%r, %r, %r)' % (r.obj, index, p.obj))
+
+    def do(self, r, model_operation, real_operation):
+        abort = None
+        try:
+            x = model_operation[0](*model_operation[1:])
+        except (model.Deleted, model.Conflict), e:
+            # the model says that we should definitely get an abort
+            abort = e.__class__.__name__
+        else:
+            if r.obj.created_in_revision is not self.current_rev:
+                try:
+                    self.current_rev.check_not_outdated(r.obj)
+                except model.Deleted:
+                    if not self.is_private(r.ptr):
+                        # the model says that we should definitely get an abort
+                        abort = "CheckDeleted"
+                    else:
+                        # the model says that we *might* get an abort
+                        abort = "MaybeDeleted"
+        #
+        if abort:
+            self.dump('expecting abort: %r' % (abort,))
+            self.expected_abort()
+        y = real_operation[0](*real_operation[1:])
+        if abort:
+            # didn't abort? try again by first clearing the fxcache
+            lib.stm_clear_read_cache()
+            y = real_operation[0](*real_operation[1:])
+            # still didn't abort?
+            if abort != "MaybeDeleted":
+                raise MissingAbort
+            else:
+                # ok, it's fine if we don't actually get an abort
+                self.cancel_expected_abort()
+        #
+        return x, y
 
     def get_ref(self, r, index):
         self.check(r)
         if r == emptypair:
             return emptypair
-        try:
-            pobj = self.current_rev.read(r.obj, index)
-            if not self.is_private(r.ptr):
-                self.current_rev.check_not_outdated(r.obj)
-        except (model.Deleted, model.Conflict), e:
-            # abort! try to reproduce with C code
-            self.dump('expecting abort: %r' % (e,))
-            self.expected_abort()
-            lib.stm_clear_read_cache()
-            lib.getptr(r.ptr, index)             # should abort
-            raise MissingAbort
-
-        pptr = lib.getptr(r.ptr, index)
+        self.dump('get_ref(%s, %d)' % (r, index))
+        pobj, pptr = self.do(r, (self.current_rev.read, r.obj, index),
+                                (lib.getptr, r.ptr, index))
         self.possibly_update_time()
         p = pair(pobj, pptr)
         self.check(p)
@@ -150,18 +169,8 @@ class RandomSingleThreadTester(object):
     def read_barrier(self, p):
         if p != emptypair:
             self.check(p)
-            try:
-                self.current_rev.read_barrier(p.obj)
-                if not self.is_private(p.ptr):
-                    self.current_rev.check_not_outdated(p.obj)
-            except (model.Deleted, model.Conflict):
-                # abort! try to reproduce with C code
-                self.expected_abort()
-                lib.stm_clear_read_cache()
-                lib.stm_read_barrier(p.ptr)          # should abort
-                raise MissingAbort
-
-            nptr = lib.stm_read_barrier(p.ptr)
+            _, nptr = self.do(p, (self.current_rev.read_barrier, p.obj),
+                                 (lib.stm_read_barrier, p.ptr))
             self.possibly_update_time()
             p = pair(p.obj, nptr)
             self.check(p)
@@ -170,20 +179,8 @@ class RandomSingleThreadTester(object):
     def write_barrier(self, p):
         if p != emptypair:
             self.check(p)
-            try:
-                self.current_rev.write_barrier(p.obj)
-                if not self.is_private(p.ptr):
-                    self.current_rev.check_not_outdated(p.obj)
-            except (model.Deleted, model.Conflict):
-                # abort! try to reproduce with C code
-                self.expected_abort()
-                lib.stm_write_barrier(p.ptr)         # should abort
-                # didn't?  try again by first clearing the fxcache
-                lib.stm_clear_read_cache()
-                lib.stm_write_barrier(p.ptr)
-                raise MissingAbort
-
-            nptr = lib.stm_write_barrier(p.ptr)
+            _, nptr = self.do(p, (self.current_rev.write_barrier, p.obj),
+                                 (lib.stm_write_barrier, p.ptr))
             self.possibly_update_time()
             p = pair(p.obj, nptr)
             self.check(p)
@@ -487,5 +484,5 @@ def test_multi_thread(seed=DEFAULT_SEED):
 
 def test_more_multi_thread():
     #py.test.skip("more random tests")
-    for i in range(12, 1000):
+    for i in range(326//2, 1000):
         yield test_multi_thread, i
