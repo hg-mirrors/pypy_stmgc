@@ -61,7 +61,7 @@ ffi.cdef('''
     revision_t stm_global_cur_time(void);
     //void stmgcpage_add_prebuilt_root(gcptr);
     void stm_clear_between_tests(void);
-    //void stmgc_minor_collect(void);
+    void stmgc_minor_collect(void);
     gcptr _stm_nonrecord_barrier(gcptr);
     int _stm_is_private(gcptr);
     void stm_start_sharedlock(void);
@@ -445,6 +445,9 @@ def is_stub(p):
 
 def check_not_free(p):
     assert 42 < (p.h_tid & 0xFFFF) < 521
+
+def check_nursery_free(p):
+    assert p.h_tid == p.h_revision == 0
 
 def check_prebuilt(p):
     assert 42 < (p.h_tid & 0xFFFF) < 521

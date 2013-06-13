@@ -60,11 +60,20 @@ static void visit_if_young(gcptr *root)
     }
     else {
         /* a nursery object */
+        assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
+        assert(!(obj->h_tid & GCFLAG_OLD));
+        assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
+
+        /* make a copy of it outside */
         fresh_old_copy = stmgc_duplicate(obj);
-        fresh_old_copy->h_tid |= GCFLAG_OLD;
         obj->h_tid |= GCFLAG_NURSERY_MOVED;
         obj->h_revision = (revision_t)fresh_old_copy;
+
+        /* fix the original reference */
         *root = fresh_old_copy;
+
+        /* add 'fresh_old_copy' to the list of objects to trace */
+        gcptrlist_insert(&d->old_objects_to_trace, fresh_old_copy);
     }
 }
 
@@ -73,6 +82,19 @@ static void mark_young_roots(gcptr *root, gcptr *end)
     /* XXX use a way to avoid walking all roots again and again */
     for (; root != end; root++) {
         visit_if_young(root);
+    }
+}
+
+static void visit_all_outside_objects(struct tx_descriptor *d)
+{
+    while (gcptrlist_size(&d->old_objects_to_trace) > 0) {
+        gcptr obj = gcptrlist_pop(&d->old_objects_to_trace);
+
+        assert(!(obj->h_tid & GCFLAG_OLD));
+        assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
+        obj->h_tid |= GCFLAG_OLD | GCFLAG_WRITE_BARRIER;
+
+        stmcb_trace(obj, &visit_if_young);
     }
 }
 
@@ -109,8 +131,10 @@ static void minor_collect(struct tx_descriptor *d)
     mark_public_to_young(d);
 
     mark_private_old_pointing_to_young(d);
+#endif
 
     visit_all_outside_objects(d);
+#if 0
     fix_list_of_read_objects(d);
 
     /* now all surviving nursery objects have been moved out, and all
