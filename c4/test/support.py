@@ -530,7 +530,7 @@ def classify(p):
     backup  = (p.h_tid & GCFLAG_BACKUP_COPY) != 0
     stub    = (p.h_tid & GCFLAG_STUB) != 0
     assert private + public + backup <= 1
-    assert stub <= public
+    assert (public, stub) != (False, True)
     if private:
         return "private"
     if public:

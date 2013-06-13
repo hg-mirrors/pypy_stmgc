@@ -210,7 +210,7 @@ class RandomSingleThreadTester(object):
         return lib._stm_nonrecord_barrier(ptr)
 
     def is_private(self, ptr):
-        return lib._stm_is_private(ptr)
+        return classify(ptr) == "private"
 
     def check_valid(self, lst):
         lst = list(lst)
@@ -349,7 +349,7 @@ class RandomSingleThreadTester(object):
         self.interruptible_transaction = False
         self.startrev()
         #
-        self.steps_remaining = 10000
+        self.steps_remaining = 1000
         #
         self.run_me(do_wait=False)
         #
