@@ -1274,7 +1274,7 @@ int DescriptorInit(void)
       d->my_lock = LOCKED + 2 * i;
       assert(d->my_lock & 1);
       assert(d->my_lock >= LOCKED);
-      stm_private_rev_num = -1;
+      stm_private_rev_num = -d->my_lock;
       d->private_revision_ref = &stm_private_rev_num;
       d->max_aborts = -1;
       pd->descriptor = d;
