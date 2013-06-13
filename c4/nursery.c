@@ -8,7 +8,7 @@ static int is_in_nursery(struct tx_descriptor *d, gcptr obj)
 
 /************************************************************/
 
-void stm_init_nursery(void)
+void stmgc_init_nursery(void)
 {
     struct tx_descriptor *d = thread_descriptor;
 
@@ -17,6 +17,15 @@ void stm_init_nursery(void)
     memset(d->nursery_base, 0, GC_NURSERY);
     d->nursery_end = d->nursery_base + GC_NURSERY;
     d->nursery_current = d->nursery_base;
+}
+
+void stmgc_done_nursery(void)
+{
+    struct tx_descriptor *d = thread_descriptor;
+    assert(!stmgc_minor_collect_anything_to_do(d));
+    stm_free(d->nursery_base, GC_NURSERY);
+
+    gcptrlist_delete(&d->old_objects_to_trace);
 }
 
 static char *collect_and_allocate_size(size_t size);  /* forward */

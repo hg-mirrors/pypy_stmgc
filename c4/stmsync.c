@@ -59,7 +59,7 @@ void stm_initialize(void)
 {
     int r = DescriptorInit();
     assert(r == 1);
-    stm_init_nursery();
+    stmgc_init_nursery();
     init_shadowstack();
     //stmgcpage_init_tls();
     BeginInevitableTransaction();
@@ -67,11 +67,11 @@ void stm_initialize(void)
 
 void stm_finalize(void)
 {
-    //stmgc_minor_collect();   /* force everything out of the nursery */
+    stmgc_minor_collect();   /* force everything out of the nursery */
     CommitTransaction();
     //stmgcpage_done_tls();
     done_shadowstack();
-    //stmgc_done_tls();
+    stmgc_done_nursery();
     DescriptorDone();
 }
 
