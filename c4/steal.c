@@ -109,6 +109,10 @@ void stm_steal_stub(gcptr P)
 
         if (B->h_tid & GCFLAG_PUBLIC_TO_PRIVATE) {
             /* already stolen */
+            assert(B->h_tid & GCFLAG_PUBLIC);
+            fprintf(stderr, "already stolen: %p -> %p <-> %p\n", P, L, B);
+            L = B;
+            goto already_stolen;
         }
         else {
             B->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
@@ -116,18 +120,26 @@ void stm_steal_stub(gcptr P)
                don't want to walk over the feet of the foreign thread
             */
             gcptrlist_insert2(&foreign_pd->stolen_objects, B, L);
+            fprintf(stderr, "stolen: %p -> %p <-> %p\n", P, L, B);
+            L = B;
         }
-        fprintf(stderr, "stolen: %p -> %p - - -> %p\n", P, B, L);
-        L = B;
     }
     else {
-        fprintf(stderr, "stolen: %p -> %p\n", P, L);
+        if (L->h_tid & GCFLAG_PUBLIC) {
+            /* already stolen */
+            fprintf(stderr, "already stolen: %p -> %p\n", P, L);
+            goto already_stolen;
+        }
+        else {
+            fprintf(stderr, "stolen: %p -> %p\n", P, L);
+        }
     }
 
     /* Here L is a protected (or backup) copy, and we own the foreign
        thread's collection_lock, so we can read/write the flags.  Change
        it from protected to public.
     */
+    assert(!(L->h_tid & GCFLAG_PUBLIC));
     L->h_tid |= GCFLAG_PUBLIC;
 
     /* Note that all protected or backup copies have a h_revision that
@@ -163,6 +175,7 @@ void stm_steal_stub(gcptr P)
     */
     smp_wmb();
 
+ already_stolen:
     /* update the original P->h_revision to point directly to L */
     P->h_revision = (revision_t)L;
 
