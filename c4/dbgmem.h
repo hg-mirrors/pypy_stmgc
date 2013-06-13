@@ -6,6 +6,7 @@
 
 void *stm_malloc(size_t);
 void stm_free(void *, size_t);
+int _stm_can_access_memory(char *);
 
 #else
 
