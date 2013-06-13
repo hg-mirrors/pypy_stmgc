@@ -87,8 +87,7 @@ ffi.cdef('''
     revision_t get_start_time(void);
     void *my_stub_thread(void);
 
-    //gcptr *addr_of_thread_local(void);
-    //int in_nursery(gcptr);
+    int _stm_can_access_memory(char *);
     void stm_initialize_tests(int max_aborts);
 
     /* some constants normally private that are useful in the tests */
@@ -448,6 +447,9 @@ def check_not_free(p):
 
 def check_nursery_free(p):
     assert p.h_tid == p.h_revision == 0
+
+def check_inaccessible(p):
+    assert not lib._stm_can_access_memory(p)
 
 def check_prebuilt(p):
     assert 42 < (p.h_tid & 0xFFFF) < 521

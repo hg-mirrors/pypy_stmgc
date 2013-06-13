@@ -43,3 +43,9 @@ def test_nursery_follows():
     p1b = lib.stm_pop_root()
     p2b = rawgetptr(p1b, 0)
     assert rawgetptr(p2b, 0) == ffi.NULL
+
+def test_free_nursery_at_thread_end():
+    p1 = nalloc(HDR)
+    lib.stm_finalize()
+    check_inaccessible(p1)
+    lib.stm_initialize_tests(0)

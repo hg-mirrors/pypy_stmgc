@@ -9,7 +9,8 @@
 #define MMAP_TOTAL  671088640   /* 640MB */
 
 static pthread_mutex_t malloc_mutex = PTHREAD_MUTEX_INITIALIZER;
-static char *zone_current = NULL, *zone_end = NULL;
+static char *zone_start, *zone_current = NULL, *zone_end = NULL;
+static signed char accessible_pages[MMAP_TOTAL / PAGE_SIZE] = {0};
 
 
 static void _stm_dbgmem(void *p, size_t sz, int prot)
@@ -30,15 +31,16 @@ void *stm_malloc(size_t sz)
     pthread_mutex_lock(&malloc_mutex);
 
     if (zone_current == NULL) {
-        zone_current = mmap(NULL, MMAP_TOTAL, PROT_NONE,
-                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (zone_current == NULL || zone_current == MAP_FAILED) {
+        zone_start = mmap(NULL, MMAP_TOTAL, PROT_NONE,
+                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (zone_start == NULL || zone_start == MAP_FAILED) {
             fprintf(stderr, "not enough memory: mmap() failed\n");
             abort();
         }
-        zone_end = zone_current + MMAP_TOTAL;
+        zone_current = zone_start;
+        zone_end = zone_start + MMAP_TOTAL;
         assert((MMAP_TOTAL % PAGE_SIZE) == 0);
-        _stm_dbgmem(zone_current, MMAP_TOTAL, PROT_NONE);
+        _stm_dbgmem(zone_start, MMAP_TOTAL, PROT_NONE);
     }
 
     size_t nb_pages = (sz + PAGE_SIZE - 1) / PAGE_SIZE + 1;
@@ -54,13 +56,32 @@ void *stm_malloc(size_t sz)
     result += (-sz) & (PAGE_SIZE-1);
     assert(((intptr_t)(result + sz) & (PAGE_SIZE-1)) == 0);
     _stm_dbgmem(result, sz, PROT_READ | PROT_WRITE);
+
+    long i, base = (result - zone_start) / PAGE_SIZE;
+    for (i = 0; i < nb_pages; i++)
+        accessible_pages[base + i] = 42;
+
     return result;
 }
 
 void stm_free(void *p, size_t sz)
 {
+    size_t nb_pages = (sz + PAGE_SIZE - 1) / PAGE_SIZE + 1;
+    long i, base = ((char *)p - zone_start) / PAGE_SIZE;
+    assert(0 <= base && base < (MMAP_TOTAL / PAGE_SIZE));
+    for (i = 0; i < nb_pages; i++) {
+        assert(accessible_pages[base + i] == 42);
+        accessible_pages[base + i] = -1;
+    }
     memset(p, 0xDD, sz);
     _stm_dbgmem(p, sz, PROT_NONE);
+}
+
+int _stm_can_access_memory(char *p)
+{
+    long base = ((char *)p - zone_start) / PAGE_SIZE;
+    assert(0 <= base && base < (MMAP_TOTAL / PAGE_SIZE));
+    return accessible_pages[base] == 42;
 }
 
 /************************************************************/
