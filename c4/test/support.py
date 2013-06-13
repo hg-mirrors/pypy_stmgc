@@ -5,11 +5,11 @@ import os, cffi, thread, sys
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 header_files = [os.path.join(parent_dir, _n) for _n in
-                "et.h lists.h steal.h "
+                "et.h lists.h steal.h nursery.h "
                 "stmsync.h dbgmem.h fprintcolor.h "
                 "stmgc.h stmimpl.h atomic_ops.h".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
-                "et.c lists.c steal.c "
+                "et.c lists.c steal.c nursery.c "
                 "stmsync.c dbgmem.c fprintcolor.c".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
@@ -40,8 +40,7 @@ ffi.cdef('''
     #define PREBUILT_FLAGS         ...
     #define PREBUILT_REVISION      ...
 
-    //gcptr stm_allocate_object_of_size(size_t size);
-    gcptr stm_allocate(size_t size, unsigned long tid);
+    gcptr stm_allocate(size_t size, unsigned int tid);
     void stm_push_root(gcptr);
     gcptr stm_pop_root(void);
     void stm_set_max_aborts(int max_aborts);
@@ -65,7 +64,6 @@ ffi.cdef('''
     //void stmgc_minor_collect(void);
     gcptr _stm_nonrecord_barrier(gcptr);
     int _stm_is_private(gcptr);
-    int stm_dbgmem_is_active(void *p, int allow_outside);
     void stm_start_sharedlock(void);
     void stm_stop_sharedlock(void);
     void AbortTransaction(int);
@@ -125,7 +123,6 @@ lib = ffi.verify(r'''
 
     int gettid(gcptr obj)
     {
-        assert(stm_dbgmem_is_active(obj, 1));
         int result = stm_get_tid(obj);
         assert(0 <= result && result < 521);
         return result;
@@ -133,13 +130,11 @@ lib = ffi.verify(r'''
 
     void settid(gcptr obj, int newtid)
     {
-        assert(stm_dbgmem_is_active(obj, 1));
         stm_set_tid(obj, newtid);
     }
 
     gcptr rawgetptr(gcptr obj, long index)
     {
-        assert(stm_dbgmem_is_active(obj, 1));
         assert(gettid(obj) > 421 + index);
         return ((gcptr *)(obj + 1))[index];
     }
@@ -147,21 +142,18 @@ lib = ffi.verify(r'''
     void rawsetptr(gcptr obj, long index, gcptr newvalue)
     {
         fprintf(stderr, "%p->[%ld] = %p\n", obj, index, newvalue);
-        assert(stm_dbgmem_is_active(obj, 1));
         assert(gettid(obj) > 421 + index);
         ((gcptr *)(obj + 1))[index] = newvalue;
     }
 
     gcptr getptr(gcptr obj, long index)
     {
-        assert(stm_dbgmem_is_active(obj, 1));
         obj = stm_read_barrier(obj);
         return rawgetptr(obj, index);
     }
 
     void setptr(gcptr obj, long index, gcptr newvalue)
     {
-        assert(stm_dbgmem_is_active(obj, 1));
         obj = stm_write_barrier(obj);
         fprintf(stderr, "setptr: write_barrier: %p, writing [%ld] = %p\n",
                 obj, index, newvalue);
@@ -170,28 +162,24 @@ lib = ffi.verify(r'''
 
     long rawgetlong(gcptr obj, long index)
     {
-        assert(stm_dbgmem_is_active(obj, 1));
         assert(stmcb_size(obj) >= sizeof(gcptr *) + (index+1)*sizeof(void *));
         return (long)((void **)(obj + 1))[index];
     }
 
     void rawsetlong(gcptr obj, long index, long newvalue)
     {
-        assert(stm_dbgmem_is_active(obj, 1));
         assert(stmcb_size(obj) >= sizeof(gcptr *) + (index+1)*sizeof(void *));
         ((void **)(obj + 1))[index] = (void *)newvalue;
     }
 
     long getlong(gcptr obj, long index)
     {
-        assert(stm_dbgmem_is_active(obj, 1));
         obj = stm_read_barrier(obj);
         return rawgetlong(obj, index);
     }
 
     void setlong(gcptr obj, long index, long newvalue)
     {
-        assert(stm_dbgmem_is_active(obj, 1));
         obj = stm_write_barrier(obj);
         rawsetlong(obj, index, newvalue);
     }
@@ -214,18 +202,6 @@ lib = ffi.verify(r'''
         return (void *)thread_descriptor->public_descriptor;
     }
 
-    /*gcptr *addr_of_thread_local(void)
-    {
-        return &stm_thread_local_obj;
-    }*/
-
-    /*int in_nursery(gcptr obj)
-    {
-        assert(stm_dbgmem_is_active(obj, 1));
-        struct tx_descriptor *d = thread_descriptor;
-        return (d->nursery <= (char*)obj && ((char*)obj) < d->nursery_end);
-    }*/
-
     void stm_initialize_tests(int max_aborts)
     {
         stm_initialize();
@@ -234,7 +210,6 @@ lib = ffi.verify(r'''
 
     size_t stmcb_size(gcptr obj)
     {
-        assert(stm_dbgmem_is_active(obj, 1));
         if (gettid(obj) < 421) {
             /* basic case: tid equals 42 plus the size of the object */
             assert(gettid(obj) >= 42 + sizeof(struct stm_object_s));
@@ -250,7 +225,6 @@ lib = ffi.verify(r'''
     void stmcb_trace(gcptr obj, void visit(gcptr *))
     {
         int i;
-        assert(stm_dbgmem_is_active(obj, 1));
         if (gettid(obj) < 421) {
             /* basic case: no references */
             return;
@@ -467,23 +441,14 @@ def minor_collect():
     lib.stmgc_minor_collect()
 
 def is_stub(p):
-    assert lib.stm_dbgmem_is_active(p, 1) != 0
     return p.h_tid & GCFLAG_STUB
 
 def check_not_free(p):
-    assert lib.stm_dbgmem_is_active(p, 1) == 1
     assert 42 < (p.h_tid & 0xFFFF) < 521
 
 def check_prebuilt(p):
-    assert lib.stm_dbgmem_is_active(p, 1) == -1
     assert 42 < (p.h_tid & 0xFFFF) < 521
     assert p.h_tid & GCFLAG_PREBUILT_ORIGINAL
-
-def check_free(p):
-    assert not lib.stm_dbgmem_is_active(p, 0)
-
-def check_nursery_free(p):
-    assert not lib.stm_dbgmem_is_active(p, 0) or p.h_tid == 0
 
 def make_global(p1):
     assert p1.h_revision == lib.get_local_revision()

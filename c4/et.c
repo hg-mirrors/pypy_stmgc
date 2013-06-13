@@ -956,7 +956,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
         }
       else
         {
-          //stm_free(B);
+          stm_free(B, stmcb_size(B));
         }
     };
   gcptrlist_clear(&d->private_from_protected);

@@ -30,6 +30,7 @@
 #include "fprintcolor.h"
 #include "lists.h"
 #include "dbgmem.h"
+#include "nursery.h"
 #include "et.h"
 #include "steal.h"
 #include "stmsync.h"

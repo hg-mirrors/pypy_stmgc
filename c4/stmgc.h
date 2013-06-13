@@ -26,7 +26,6 @@ typedef struct stm_object_s {
 
 
 /* allocate an object out of the local nursery */
-gcptr stm_allocate_object_of_size(size_t size);
 gcptr stm_allocate(size_t size, unsigned long tid);
 
 /* to push/pop objects into the local shadowstack */
@@ -64,10 +63,6 @@ extern size_t stmcb_size(gcptr);
 
 /* callback: trace the content of an object */
 extern void stmcb_trace(gcptr, void visit(gcptr *));
-
-/* debugging: allocate but immediately old, not via the nursery */
-gcptr _stm_allocate_object_of_size_old(size_t size);
-gcptr _stm_allocate_old(size_t size, unsigned long tid);
 
 /* You can put one GC-tracked thread-local object here.
    (Obviously it can be a container type containing more GC objects.)
