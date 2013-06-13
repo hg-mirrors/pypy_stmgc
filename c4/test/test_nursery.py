@@ -31,3 +31,15 @@ def test_stm_roots():
         check_not_free(p1)
         check_not_free(p3)
     assert p2 in seen    # the pointer location was reused
+
+def test_nursery_follows():
+    p1 = nalloc_refs(1)
+    p2 = nalloc_refs(1)
+    rawsetptr(p1, 0, p2)
+    lib.stm_push_root(p1)
+    minor_collect()
+    check_nursery_free(p1)
+    check_nursery_free(p2)
+    p1b = lib.stm_pop_root()
+    p2b = rawgetptr(p1b, 0)
+    assert rawgetptr(p2b, 0) == ffi.NULL
