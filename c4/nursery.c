@@ -119,16 +119,75 @@ static void mark_young_roots(struct tx_descriptor *d)
 
 static void mark_public_to_young(struct tx_descriptor *d)
 {
+    /* "public_to_young" contains ptrs to the public copies used as
+       key of "public_to_private", but only the ones that were added
+       since the last minor collection.  Once the transaction commit,
+       they stay in "public_to_young", and so they become public
+       objects whose h_revision is a public stub, which itself points
+       (originally) to a protected young object.
+
+       Be careful and accept more or less any object in the list, which
+       can show up because of aborted transactions.
+    */
     long i, size = d->public_to_young.size;
     gcptr *items = d->public_to_young.items;
 
     for (i = 0; i < size; i++) {
         gcptr P = items[i];
-        wlog_t *item;
+        assert(P->h_tid & GCFLAG_PUBLIC);
 
-        G2L_FIND(d->public_to_private, P, item, continue);
+        revision_t v = ACCESS_ONCE(P->h_revision);
+        wlog_t *item;
+        G2L_FIND(d->public_to_private, P, item, goto not_in_public_to_private);
+
+        if (!(v & 1)) {   // "is a pointer"
+            /* P is both a key in public_to_private and an outdated copy.
+               We are in a case where we know the transaction will not
+               be able to commit successfully.
+            */
+            abort();
+            AbortTransactionAfterCollect(d, ABRT_COLLECT_MINOR);
+            //...
+        }
+
         visit_if_young(&item->val);
+        continue;
+
+    not_in_public_to_private:
+        if (v & 1) {   // "is not a pointer"
+            /* P is neither a key in public_to_private nor outdated.
+               It must come from an older transaction that aborted.
+               Nothing to do now.
+            */
+            continue;
+        }
+
+        gcptr S = (gcptr)v;
+        revision_t w = ACCESS_ONCE(S->h_revision);
+        if ((w & 3) != 2) {
+            /* P has a ptr in h_revision, but this object is not a stub
+               with a protected pointer.  It has likely been the case
+               in the past, but someone made even more changes.
+               Nothing to do now.
+            */
+            continue;
+        }
+
+        if (STUB_THREAD(S) != d->public_descriptor) {
+            /* Bah, it's indeed a stub but for another thread.  Nothing
+               to do now.
+            */
+            continue;
+        }
+
+        /* It's a stub for us.  It cannot be un-stubbed under our
+           feet because we hold our own collection_lock.
+        */
+        gcptr L = (gcptr)(w - 2);
+        visit_if_young(&L);
+        S->h_revision = ((revision_t)L) | 2;
     }
+
     gcptrlist_clear(&d->public_to_young);
 }
 
