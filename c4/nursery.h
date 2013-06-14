@@ -11,7 +11,8 @@
     char *nursery_end;                                  \
     char *nursery_base;                                 \
     struct GcPtrList old_objects_to_trace;              \
-    struct GcPtrList public_to_young;
+    struct GcPtrList public_to_young;                   \
+    struct GcPtrList private_old_pointing_to_young;
 
 struct tx_descriptor;  /* from et.h */
 

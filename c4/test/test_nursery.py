@@ -71,3 +71,24 @@ def test_local_copy_out_of_nursery():
     p3 = lib.stm_read_barrier(p1)
     assert not lib.in_nursery(p3) and p3 != p2
     assert lib.rawgetlong(p3, 0) == -91467
+
+def test_outer2inner():   # test mark_private_old_pointing_to_young()
+    p1 = nalloc_refs(1)
+    lib.stm_push_root(p1)
+    minor_collect()
+    check_nursery_free(p1)
+    p1 = lib.stm_pop_root()
+    assert classify(p1) == "private"
+    p2 = nalloc(HDR + WORD)
+    lib.setlong(p2, 0, 8972981)
+    lib.setptr(p1, 0, p2)
+    #
+    lib.stm_push_root(p1)
+    minor_collect()
+    p1b = lib.stm_pop_root()
+    assert p1b == p1
+    check_nursery_free(p2)
+    p2b = lib.getptr(p1b, 0)
+    assert p2b != p2
+    check_not_free(p2b)
+    assert lib.getlong(p2b, 0) == 8972981
