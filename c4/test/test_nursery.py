@@ -92,3 +92,35 @@ def test_outer2inner():   # test mark_private_old_pointing_to_young()
     assert p2b != p2
     check_not_free(p2b)
     assert lib.getlong(p2b, 0) == 8972981
+
+def test_outer2inner_after_transaction_end():
+    p1 = palloc(HDR + WORD)
+    lib.rawsetlong(p1, 0, 420063)
+    p2 = lib.stm_write_barrier(p1)
+    lib.rawsetlong(p2, 0, -91467)
+    assert lib.in_nursery(p2)
+    lib.stm_push_root(p1)
+    print "committing..."
+    transaction_break()
+    print "done"
+
+    # first check that the situation is still the same in the next transaction
+    p1b = lib.stm_pop_root()
+    assert p1b == p1
+    assert classify(p1b) == "public"
+    p2b = lib.stm_read_barrier(p1b)
+    assert lib.in_nursery(p2b)
+    assert p2b == p2
+    assert classify(p2) == "protected"
+    check_not_free(p2b)
+    lib.stm_push_root(p1b)
+    print 'ok'
+
+    # then do a minor collection
+    minor_collect()
+    p1b = lib.stm_pop_root()
+    assert p1b == p1
+    # check that the link p1 -> p2 was kept alive by moving p2 outside
+    p2b = lib.stm_read_barrier(p1b)
+    assert not lib.in_nursery(p2b)
+    check_not_free(p2b)
