@@ -450,16 +450,29 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
   return L;
 }
 
+static inline gcptr check_flag_write_barrier(gcptr W)
+{
+  if (W->h_tid & GCFLAG_WRITE_BARRIER)
+    {
+      struct tx_descriptor *d = thread_descriptor;
+      gcptrlist_insert(&d->private_old_pointing_to_young, W);
+      W->h_tid &= ~GCFLAG_WRITE_BARRIER;
+    }
+  return W;
+}
+
 gcptr stm_WriteBarrier(gcptr P)
 {
+  if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+    return check_flag_write_barrier(P);
+
   gcptr R, W;
+  R = stm_read_barrier(P);
+  if (is_private(R))
+    return check_flag_write_barrier(R);
+
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
-
-  R = stm_read_barrier(P);
-
-  if (is_private(R))
-    return R;
 
   spinlock_acquire(d->public_descriptor->collection_lock, 'L');
   if (d->public_descriptor->stolen_objects.size != 0)

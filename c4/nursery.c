@@ -27,6 +27,7 @@ void stmgc_done_nursery(void)
 
     gcptrlist_delete(&d->old_objects_to_trace);
     gcptrlist_delete(&d->public_to_young);
+    gcptrlist_delete(&d->private_old_pointing_to_young);
 }
 
 static char *collect_and_allocate_size(size_t size);  /* forward */
@@ -131,6 +132,13 @@ static void mark_public_to_young(struct tx_descriptor *d)
     gcptrlist_clear(&d->public_to_young);
 }
 
+static void mark_private_old_pointing_to_young(struct tx_descriptor *d)
+{
+    /* trace the objects recorded earlier by stmgc_write_barrier() */
+    gcptrlist_move(&d->old_objects_to_trace,
+                   &d->private_old_pointing_to_young);
+}
+
 static void visit_all_outside_objects(struct tx_descriptor *d)
 {
     while (gcptrlist_size(&d->old_objects_to_trace) > 0) {
@@ -177,9 +185,7 @@ static void minor_collect(struct tx_descriptor *d)
 
     mark_public_to_young(d);
 
-#if 0
     mark_private_old_pointing_to_young(d);
-#endif
 
     visit_all_outside_objects(d);
 #if 0
@@ -216,8 +222,8 @@ int stmgc_minor_collect_anything_to_do(struct tx_descriptor *d)
     if (d->nursery_current == d->nursery_base /*&&
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
-        //assert(gcptrlist_size(&d->private_old_pointing_to_young) == 0);
-        //assert(gcptrlist_size(&d->public_to_young) == 0);
+        assert(gcptrlist_size(&d->private_old_pointing_to_young) == 0);
+        assert(gcptrlist_size(&d->public_to_young) == 0);
         return 0;
     }
     else {
