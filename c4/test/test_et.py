@@ -189,7 +189,7 @@ def test_read_barrier_handle_private():
     p2b = lib.stm_write_barrier(p)
     assert p2b == p2
     assert classify(p) == "public"
-    assert classify(p2) == "private"
+    assert classify(p2) == "private_from_protected"
     assert list_of_read_objects() == [p2]
     p3 = lib.stm_read_barrier(p)
     assert p3 == p2
