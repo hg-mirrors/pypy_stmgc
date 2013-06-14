@@ -476,8 +476,8 @@ gcptr stm_WriteBarrier(gcptr P)
 
   if (is_private(R))
     {
-      record_write_barrier(P);
-      return P;
+      record_write_barrier(R);
+      return R;
     }
 
   struct tx_descriptor *d = thread_descriptor;
@@ -498,6 +498,7 @@ gcptr stm_WriteBarrier(gcptr P)
       assert(R->h_tid & GCFLAG_OLD);
       gcptrlist_insert(&d->public_with_young_copy, R);
       W = LocalizePublic(d, R);
+      assert(is_private(W));
     }
   else
     {
@@ -505,6 +506,7 @@ gcptr stm_WriteBarrier(gcptr P)
          an old object that still has GCFLAG_WRITE_BARRIER, then we must
          also record it in the list 'old_objects_to_trace'. */
       W = LocalizeProtected(d, R);
+      assert(is_private(W));
       record_write_barrier(W);
     }
 
