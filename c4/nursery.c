@@ -67,11 +67,11 @@ gcptr stmgc_duplicate(gcptr P)
 
 static inline gcptr create_old_object_copy(gcptr obj)
 {
-    assert(!(obj->h_tid & GCFLAG_NURSERY_MOVED));
-    assert(!(obj->h_tid & GCFLAG_VISITED));
-    assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
-    assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
-    assert(!(obj->h_tid & GCFLAG_OLD));
+    assert(!gcflag_nursery_moved(obj));
+    assert(!gcflag_visited(obj));
+    assert(!gcflag_write_barrier(obj));
+    assert(!gcflag_prebuilt_original(obj));
+    assert(!gcflag_old(obj));
 
     size_t size = stmcb_size(obj);
     gcptr fresh_old_copy = stm_malloc(size);
@@ -134,7 +134,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
 
     for (i = 0; i < size; i++) {
         gcptr P = items[i];
-        assert(P->h_tid & GCFLAG_PUBLIC);
+        assert(gcflag_public(P));
 
         revision_t v = ACCESS_ONCE(P->h_revision);
         wlog_t *item;
@@ -145,11 +145,14 @@ static void mark_public_to_young(struct tx_descriptor *d)
                We are in a case where we know the transaction will not
                be able to commit successfully.
             */
+            fprintf(stderr, "public_to_young: %p was modified! abort!\n", P);
             abort();
             AbortTransactionAfterCollect(d, ABRT_COLLECT_MINOR);
             //...
         }
 
+        fprintf(stderr, "public_to_young: %p -> %p in public_to_private\n",
+                item->addr, item->val);
         visit_if_young(&item->val);
         continue;
 
@@ -159,6 +162,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
                It must come from an older transaction that aborted.
                Nothing to do now.
             */
+            fprintf(stderr, "public_to_young: %p ignored\n", P);
             continue;
         }
 
@@ -170,6 +174,8 @@ static void mark_public_to_young(struct tx_descriptor *d)
                in the past, but someone made even more changes.
                Nothing to do now.
             */
+            fprintf(stderr, "public_to_young: %p -> %p not a stub, ignored\n",
+                    P, S);
             continue;
         }
 
@@ -177,6 +183,8 @@ static void mark_public_to_young(struct tx_descriptor *d)
             /* Bah, it's indeed a stub but for another thread.  Nothing
                to do now.
             */
+            fprintf(stderr, "public_to_young: %p -> %p stub wrong thread, "
+                    "ignored\n", P, S);
             continue;
         }
 
@@ -184,6 +192,9 @@ static void mark_public_to_young(struct tx_descriptor *d)
            feet because we hold our own collection_lock.
         */
         gcptr L = (gcptr)(w - 2);
+        fprintf(stderr, "public_to_young: %p -> %p stub -> %p\n",
+                P, S, L);
+
         visit_if_young(&L);
         S->h_revision = ((revision_t)L) | 2;
     }
@@ -203,8 +214,8 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
     while (gcptrlist_size(&d->old_objects_to_trace) > 0) {
         gcptr obj = gcptrlist_pop(&d->old_objects_to_trace);
 
-        assert(obj->h_tid & GCFLAG_OLD);
-        assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
+        assert(gcflag_old(obj));
+        assert(!gcflag_write_barrier(obj));
         obj->h_tid |= GCFLAG_WRITE_BARRIER;
 
         stmcb_trace(obj, &visit_if_young);

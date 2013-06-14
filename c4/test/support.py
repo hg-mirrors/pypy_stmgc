@@ -391,18 +391,19 @@ class run_parallel(object):
 # ____________________________________________________________
 
 def oalloc(size):
-    "Allocate an 'old' public object, outside any nursery"
+    "Allocate an 'old' protected object, outside any nursery"
     p = ffi.cast("gcptr", lib.stm_malloc(size))
-    p.h_tid = GCFLAG_OLD | GCFLAG_PUBLIC
-    p.h_revision = 1
+    p.h_tid = GCFLAG_OLD | GCFLAG_WRITE_BARRIER
+    p.h_revision = -sys.maxint
     lib.settid(p, 42 + size)
     return p
 
 def oalloc_refs(nrefs):
-    "Allocate an 'old' public object, outside any nursery, with nrefs pointers"
+    """Allocate an 'old' protected object, outside any nursery,
+    with nrefs pointers"""
     p = ffi.cast("gcptr", lib.stm_malloc(HDR + WORD * nrefs))
-    p.h_tid = GCFLAG_OLD | GCFLAG_PUBLIC
-    p.h_revision = 1
+    p.h_tid = GCFLAG_OLD | GCFLAG_WRITE_BARRIER
+    p.h_revision = -sys.maxint
     lib.settid(p, 421 + nrefs)
     for i in range(nrefs):
         rawsetptr(p, i, ffi.NULL)

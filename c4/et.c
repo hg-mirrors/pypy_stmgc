@@ -33,7 +33,7 @@ struct tx_descriptor *stm_thread_descriptor(void)  /* for tests */
 static int is_private(gcptr P)
 {
   return (P->h_revision == stm_private_rev_num) ||
-    (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+            gcflag_private_from_protected(P);
 }
 int _stm_is_private(gcptr P)
 {
@@ -80,7 +80,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
   revision_t v;
 
  restart_all:
-  if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+  if (gcflag_private_from_protected(P))
     {
       assert(!(P->h_revision & 1));   /* pointer to the backup copy */
 
@@ -95,14 +95,14 @@ gcptr stm_DirectReadBarrier(gcptr G)
   /* else, for the rest of this function, we can assume that P was not
      a private copy */
 
-  if (P->h_tid & GCFLAG_PUBLIC)
+  if (gcflag_public(P))
     {
       /* follow the chained list of h_revision's as long as they are
          regular pointers.  We will only find more public objects
          along this chain.
       */
     restart_all_public:
-      assert(P->h_tid & GCFLAG_PUBLIC);
+      assert(gcflag_public(P));
       v = ACCESS_ONCE(P->h_revision);
       if (!(v & 1))  // "is a pointer", i.e.
         {            //      "has a more recent revision"
@@ -112,7 +112,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
 
           gcptr P_prev = P;
           P = (gcptr)v;
-          assert(P->h_tid & GCFLAG_PUBLIC);
+          assert(gcflag_public(P));
 
           v = ACCESS_ONCE(P->h_revision);
 
@@ -145,7 +145,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
          because *we* have an entry in d->public_to_private.  (It might
          also be someone else.)
       */
-      if (P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
+      if (gcflag_public_to_private(P))
         {
           wlog_t *item;
         retry_public_to_private:;
@@ -154,7 +154,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
           /* We have a key in 'public_to_private'.  The value is the
              corresponding private object. */
           P = item->val;
-          assert(!(P->h_tid & GCFLAG_PUBLIC));
+          assert(!gcflag_public(P));
           assert(is_private(P));
           fprintf(stderr, "read_barrier: %p -> %p public_to_private\n", G, P);
           return P;
@@ -229,7 +229,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
       fprintf(stderr, "read_barrier: %p -> stealing %p...\n  ", G, P);
       stm_steal_stub(P);
 
-      assert(P->h_tid & GCFLAG_PUBLIC);
+      assert(gcflag_public(P));
       goto restart_all_public;
     }
 }
@@ -245,8 +245,8 @@ static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj)
   if (pubobj == P || ((P->h_revision & 3) == 2 &&
                       pubobj->h_revision == P->h_revision))
     {
-      assert(!(org_pubobj->h_tid & GCFLAG_STUB));
-      assert(!(privobj->h_tid & GCFLAG_PUBLIC));
+      assert(!gcflag_stub(org_pubobj));
+      assert(!gcflag_public(privobj));
       assert(is_private(privobj));
       if (P != org_pubobj)
         fprintf(stderr, "| actually %p ", org_pubobj);
@@ -299,7 +299,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
       return P;
     }
 
-  if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+  if (gcflag_private_from_protected(P))
     {
       /* private too, with a backup copy */
       assert(!(P->h_revision & 1));
@@ -307,7 +307,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
       return P;
     }
 
-  if (P->h_tid & GCFLAG_PUBLIC)
+  if (gcflag_public(P))
     {
       fprintf(stderr, "public ");
 
@@ -323,7 +323,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
             }
 
           P = (gcptr)v;
-          assert(P->h_tid & GCFLAG_PUBLIC);
+          assert(gcflag_public(P));
           fprintf(stderr, "-> %p public ", P);
         }
 
@@ -354,12 +354,12 @@ gcptr _stm_nonrecord_barrier(gcptr P)
     {
       P = (gcptr)(v - 2);
       fprintf(stderr, "-foreign-> %p ", P);
-      if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+      if (gcflag_private_from_protected(P))
         {
           P = (gcptr)P->h_revision;     /* the backup copy */
           fprintf(stderr, "-backup-> %p ", P);
         }
-      if (!(P->h_tid & GCFLAG_PUBLIC))
+      if (!gcflag_public(P))
         {
           fprintf(stderr, "protected by someone else!\n");
           return (gcptr)-1;
@@ -397,10 +397,10 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 
   assert(P->h_revision != stm_private_rev_num);
   assert(P->h_revision & 1);
-  assert(!(P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
-  assert(!(P->h_tid & GCFLAG_BACKUP_COPY));
-  assert(!(P->h_tid & GCFLAG_STUB));
-  assert(!(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+  assert(!gcflag_public_to_private(P));
+  assert(!gcflag_backup_copy(P));
+  assert(!gcflag_stub(P));
+  assert(!gcflag_private_from_protected(P));
 
   B = stmgc_duplicate(P);
   B->h_tid |= GCFLAG_BACKUP_COPY;
@@ -410,12 +410,12 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 
   gcptrlist_insert(&d->private_from_protected, P);
 
-  return P;
+  return P;   /* always returns its arg: the object is converted in-place */
 }
 
 static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 {
-  assert(R->h_tid & GCFLAG_PUBLIC);
+  assert(gcflag_public(R));
 
 #ifdef _GC_DEBUG
   wlog_t *entry;
@@ -427,9 +427,9 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
   R->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
   gcptr L = stmgc_duplicate(R);
-  assert(!(L->h_tid & GCFLAG_BACKUP_COPY));
-  assert(!(L->h_tid & GCFLAG_STUB));
-  assert(!(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+  assert(!gcflag_backup_copy(L));
+  assert(!gcflag_stub(L));
+  assert(!gcflag_private_from_protected(L));
   L->h_tid &= ~(GCFLAG_OLD               |
                 GCFLAG_VISITED           |
                 GCFLAG_PUBLIC            |
@@ -439,7 +439,6 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
                 0);
   L->h_revision = stm_private_rev_num;
   g2l_insert(&d->public_to_private, R, L);
-  gcptrlist_insert(&d->public_to_young, R);
   fprintf(stderr, "write_barrier: adding %p -> %p to public_to_private\n",
           R, L);
 
@@ -450,38 +449,64 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
   return L;
 }
 
-static inline gcptr check_flag_write_barrier(gcptr W)
+static inline void record_write_barrier(gcptr P)
 {
-  if (W->h_tid & GCFLAG_WRITE_BARRIER)
+  if (gcflag_write_barrier(P))
     {
-      struct tx_descriptor *d = thread_descriptor;
-      gcptrlist_insert(&d->private_old_pointing_to_young, W);
-      W->h_tid &= ~GCFLAG_WRITE_BARRIER;
+      P->h_tid &= ~GCFLAG_WRITE_BARRIER;
+      gcptrlist_insert(&thread_descriptor->old_with_young_pointers_inside, P);
     }
-  return W;
 }
 
 gcptr stm_WriteBarrier(gcptr P)
 {
-  if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
-    return check_flag_write_barrier(P);
+  if (is_private(P))
+    {
+      /* If we have GCFLAG_WRITE_BARRIER in P, then list it into
+         old_with_young_pointers_inside: it's a private object that may
+         be modified by the program after we return, and the mutation
+         may be to write young pointers (in fact it's a common case).
+      */
+      record_write_barrier(P);
+      return P;
+    }
 
   gcptr R, W;
   R = stm_read_barrier(P);
+
   if (is_private(R))
-    return check_flag_write_barrier(R);
+    {
+      record_write_barrier(P);
+      return P;
+    }
 
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
+  /* We need the collection_lock for the sequel; this is required notably
+     because we're about to edit flags on a protected object.
+  */
   spinlock_acquire(d->public_descriptor->collection_lock, 'L');
   if (d->public_descriptor->stolen_objects.size != 0)
     stm_normalize_stolen_objects(d);
 
-  if (R->h_tid & GCFLAG_PUBLIC)
-    W = LocalizePublic(d, R);
+  if (gcflag_public(R))
+    {
+      /* Make and return a new (young) private copy of the public R.
+         Add R into the list 'old_public_with_young_copy'.
+      */
+      assert(gcflag_old(R));
+      gcptrlist_insert(&d->old_public_with_young_copy, R);
+      W = LocalizePublic(d, R);
+    }
   else
-    W = LocalizeProtected(d, R);
+    {
+      /* Turn the protected copy in-place into a private copy.  If it's
+         an old object that still has GCFLAG_WRITE_BARRIER, then we must
+         also record it in the list 'old_with_young_pointers_inside'. */
+      W = LocalizeProtected(d, R);
+      record_write_barrier(W);
+    }
 
   spinlock_release(d->public_descriptor->collection_lock);
 
@@ -528,7 +553,7 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
       v = ACCESS_ONCE(R->h_revision);
       if (!(v & 1))               // "is a pointer", i.e.
         {                         //   "has a more recent revision"
-          if (R->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+          if (gcflag_private_from_protected(R))
             {
               /* such an object R might be listed in list_of_read_objects
                  before it was turned from protected to private */
@@ -786,7 +811,7 @@ static void AcquireLocks(struct tx_descriptor *d)
       gcptr R = item->addr;
       revision_t v;
     retry:
-      assert(R->h_tid & GCFLAG_PUBLIC);
+      assert(gcflag_public(R));
       v = ACCESS_ONCE(R->h_revision);
       if (!(v & 1))            // "is a pointer", i.e.
         {                      //   "has a more recent revision"
@@ -806,7 +831,7 @@ static void AcquireLocks(struct tx_descriptor *d)
         goto retry;
 
       gcptr L = item->val;
-      assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED ?
+      assert(gcflag_private_from_protected(L) ?
              L->h_revision == (revision_t)R :
              L->h_revision == stm_private_rev_num);
       assert(v != stm_private_rev_num);
@@ -830,7 +855,7 @@ static void CancelLocks(struct tx_descriptor *d)
       gcptr L = item->val;
       revision_t expected, v = L->h_revision;
 
-      if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+      if (gcflag_private_from_protected(L))
         expected = (revision_t)R;
       else
         expected = stm_private_rev_num;
@@ -867,10 +892,10 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
   G2L_LOOP_FORWARD(d->public_to_private, item)
     {
       gcptr L = item->val;
-      assert(!(L->h_tid & GCFLAG_VISITED));
-      assert(!(L->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
-      assert(!(L->h_tid & GCFLAG_PREBUILT_ORIGINAL));
-      assert(!(L->h_tid & GCFLAG_NURSERY_MOVED));
+      assert(!gcflag_visited(L));
+      assert(!gcflag_public_to_private(L));
+      assert(!gcflag_prebuilt_original(L));
+      assert(!gcflag_nursery_moved(L));
       assert(L->h_revision != localrev);   /* modified by AcquireLocks() */
 
 #ifdef DUMP_EXTRA
@@ -894,9 +919,9 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       gcptr R = item->addr;
       revision_t v = (revision_t)item->val;
 
-      assert(R->h_tid & GCFLAG_PUBLIC);
-      assert(R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
-      assert(!(R->h_tid & GCFLAG_NURSERY_MOVED));
+      assert(gcflag_public(R));
+      assert(gcflag_public_to_private(R));
+      assert(!gcflag_nursery_moved(R));
       assert(R->h_revision != localrev);
 
 #ifdef DUMP_EXTRA
@@ -907,7 +932,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       ACCESS_ONCE(R->h_revision) = v;
 
 #if 0
-      if (R->h_tid & GCFLAG_PREBUILT_ORIGINAL)
+      if (gcflag_prebuilt_original(R))
         {
           /* cannot possibly get here more than once for a given value of R */
           pthread_mutex_lock(&mutex_prebuilt_gcroots);
@@ -932,7 +957,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
   for (i = 0; i < size; i++)
     {
       gcptr P = items[i];
-      assert(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+      assert(gcflag_private_from_protected(P));
       P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
 
       if (P->h_revision & 1)   // "is not a pointer"
@@ -947,7 +972,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
       gcptr B = (gcptr)P->h_revision;
       P->h_revision = new_revision;
 
-      if (B->h_tid & GCFLAG_PUBLIC)
+      if (gcflag_public(B))
         {
           /* B was stolen */
           while (1)
@@ -976,20 +1001,20 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
   for (i = 0; i < size; i++)
     {
       gcptr P = items[i];
-      assert(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+      assert(gcflag_private_from_protected(P));
       assert(!(P->h_revision & 1));   // "is a pointer"
 
       gcptr B = (gcptr)P->h_revision;
-      if (B->h_tid & GCFLAG_PUBLIC)
+      if (gcflag_public(B))
         {
-          assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
+          assert(!gcflag_backup_copy(B));
           P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
           P->h_tid |= GCFLAG_PUBLIC;
           /* P becomes a public outdated object */
         }
       else
         {
-          assert(B->h_tid & GCFLAG_BACKUP_COPY);
+          assert(gcflag_backup_copy(B));
           memcpy(P, B, stmcb_size(P));
           P->h_tid &= ~GCFLAG_BACKUP_COPY;
         }
