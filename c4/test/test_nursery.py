@@ -49,3 +49,25 @@ def test_free_nursery_at_thread_end():
     lib.stm_finalize()
     check_inaccessible(p1)
     lib.stm_initialize_tests(0)
+
+def test_local_copy_out_of_nursery():
+    p1 = palloc(HDR + WORD)
+    lib.rawsetlong(p1, 0, 420063)
+    assert not lib.in_nursery(p1)
+    assert p1.h_revision != lib.get_private_rev_num()
+    #
+    p2 = lib.stm_write_barrier(p1)
+    assert lib.rawgetlong(p2, 0) == 420063
+    lib.rawsetlong(p2, 0, -91467)
+    assert lib.in_nursery(p2)
+    assert p2.h_revision == lib.get_private_rev_num()
+    #
+    lib.stm_push_root(p1)
+    minor_collect()
+    p1b = lib.stm_pop_root()
+    assert p1b == p1
+    assert lib.rawgetlong(p1b, 0) == 420063
+    #
+    p3 = lib.stm_read_barrier(p1)
+    assert not lib.in_nursery(p3) and p3 != p2
+    assert lib.rawgetlong(p3, 0) == -91467
