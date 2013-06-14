@@ -195,3 +195,24 @@ def test_old_private_from_protected_to_young_private():
     assert not lib.in_nursery(p2)
     check_not_free(p2)
     assert classify(p2) == "private"
+
+def test_new_version():
+    p1 = oalloc(HDR)
+    assert lib.stm_write_barrier(p1) == p1
+    lib.stm_push_root(p1)
+    transaction_break()
+    p1b = lib.stm_pop_root()
+    assert p1b == p1
+    p2 = lib.stm_write_barrier(p1)
+    assert p2 == p1
+    assert not lib.in_nursery(p2)
+    check_not_free(p1)
+    lib.stm_push_root(p1)
+    minor_collect()
+    p1b = lib.stm_pop_root()
+    assert p1b == p1
+    check_not_free(p1)
+    p2 = lib.stm_read_barrier(p1)
+    assert p2 == p1
+    assert not lib.in_nursery(p2)
+    assert classify(p2) == "private_from_protected"
