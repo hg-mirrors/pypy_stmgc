@@ -391,14 +391,6 @@ gcptr stm_RepeatReadBarrier(gcptr O)
 #endif
 }
 
-gcptr stmgc_duplicate(gcptr P)
-{
-  size_t size = stmcb_size(P);
-  gcptr L = stm_malloc(size);
-  memcpy(L, P, size);
-  return L;
-}
-
 static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 {
   gcptr B;
@@ -447,6 +439,7 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
                 0);
   L->h_revision = stm_private_rev_num;
   g2l_insert(&d->public_to_private, R, L);
+  gcptrlist_insert(&d->public_to_young, R);
   fprintf(stderr, "write_barrier: adding %p -> %p to public_to_private\n",
           R, L);
 

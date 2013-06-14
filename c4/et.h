@@ -172,7 +172,6 @@ int _stm_is_private(gcptr);  /* debugging */
 gcptr stm_get_private_from_protected(long);  /* debugging */
 gcptr stm_get_read_obj(long);  /* debugging */
 void stm_clear_read_cache(void);  /* debugging */
-gcptr stmgc_duplicate(gcptr);
 
 int DescriptorInit(void);
 void DescriptorDone(void);

@@ -26,13 +26,13 @@ void stmgc_done_nursery(void)
     stm_free(d->nursery_base, GC_NURSERY);
 
     gcptrlist_delete(&d->old_objects_to_trace);
+    gcptrlist_delete(&d->public_to_young);
 }
 
 static char *collect_and_allocate_size(size_t size);  /* forward */
 
-gcptr stm_allocate(size_t size, unsigned long tid)
+inline static char *allocate_nursery(size_t size)
 {
-    /* XXX inline the fast path */
     struct tx_descriptor *d = thread_descriptor;
     char *cur = d->nursery_current;
     char *end = cur + size;
@@ -40,14 +40,46 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     if (end > d->nursery_end) {
         cur = collect_and_allocate_size(size);
     }
-    gcptr P = (gcptr)cur;
+    return cur;
+}
+
+gcptr stm_allocate(size_t size, unsigned long tid)
+{
+    /* XXX inline the fast path */
+    gcptr P = (gcptr)allocate_nursery(size);
     assert(tid == (tid & STM_USER_TID_MASK));
     P->h_tid = tid;
     P->h_revision = stm_private_rev_num;
     return P;
 }
 
+gcptr stmgc_duplicate(gcptr P)
+{
+    size_t size = stmcb_size(P);
+    gcptr L = (gcptr)allocate_nursery(size);
+    memcpy(L, P, size);
+    L->h_tid &= ~GCFLAG_OLD;
+    return L;
+}
+
 /************************************************************/
+
+static inline gcptr create_old_object_copy(gcptr obj)
+{
+    assert(!(obj->h_tid & GCFLAG_NURSERY_MOVED));
+    assert(!(obj->h_tid & GCFLAG_VISITED));
+    assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
+    assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
+    assert(!(obj->h_tid & GCFLAG_OLD));
+
+    size_t size = stmcb_size(obj);
+    gcptr fresh_old_copy = stm_malloc(size);
+    memcpy(fresh_old_copy, obj, size);
+    fresh_old_copy->h_tid |= GCFLAG_OLD;
+
+    fprintf(stderr, "minor: %p is copied to %p\n", obj, fresh_old_copy);
+    return fresh_old_copy;
+}
 
 static void visit_if_young(gcptr *root)
 {
@@ -60,12 +92,8 @@ static void visit_if_young(gcptr *root)
     }
     else {
         /* a nursery object */
-        assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
-        assert(!(obj->h_tid & GCFLAG_OLD));
-        assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
-
         /* make a copy of it outside */
-        fresh_old_copy = stmgc_duplicate(obj);
+        fresh_old_copy = create_old_object_copy(obj);
         obj->h_tid |= GCFLAG_NURSERY_MOVED;
         obj->h_revision = (revision_t)fresh_old_copy;
 
@@ -77,12 +105,30 @@ static void visit_if_young(gcptr *root)
     }
 }
 
-static void mark_young_roots(gcptr *root, gcptr *end)
+static void mark_young_roots(struct tx_descriptor *d)
 {
+    gcptr *root = d->shadowstack;
+    gcptr *end = *d->shadowstack_end_ref;
+
     /* XXX use a way to avoid walking all roots again and again */
     for (; root != end; root++) {
         visit_if_young(root);
     }
+}
+
+static void mark_public_to_young(struct tx_descriptor *d)
+{
+    long i, size = d->public_to_young.size;
+    gcptr *items = d->public_to_young.items;
+
+    for (i = 0; i < size; i++) {
+        gcptr P = items[i];
+        wlog_t *item;
+
+        G2L_FIND(d->public_to_private, P, item, continue);
+        visit_if_young(&item->val);
+    }
+    gcptrlist_clear(&d->public_to_young);
 }
 
 static void visit_all_outside_objects(struct tx_descriptor *d)
@@ -90,9 +136,9 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
     while (gcptrlist_size(&d->old_objects_to_trace) > 0) {
         gcptr obj = gcptrlist_pop(&d->old_objects_to_trace);
 
-        assert(!(obj->h_tid & GCFLAG_OLD));
+        assert(obj->h_tid & GCFLAG_OLD);
         assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
-        obj->h_tid |= GCFLAG_OLD | GCFLAG_WRITE_BARRIER;
+        obj->h_tid |= GCFLAG_WRITE_BARRIER;
 
         stmcb_trace(obj, &visit_if_young);
     }
@@ -123,13 +169,15 @@ static void minor_collect(struct tx_descriptor *d)
     /* acquire the "collection lock" first */
     setup_minor_collect(d);
 
-    mark_young_roots(d->shadowstack, *d->shadowstack_end_ref);
+    mark_young_roots(d);
 
 #if 0
     mark_private_from_protected(d);
+#endif
 
     mark_public_to_young(d);
 
+#if 0
     mark_private_old_pointing_to_young(d);
 #endif
 

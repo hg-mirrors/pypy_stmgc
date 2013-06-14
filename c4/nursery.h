@@ -10,7 +10,8 @@
     char *nursery_current;                              \
     char *nursery_end;                                  \
     char *nursery_base;                                 \
-    struct GcPtrList old_objects_to_trace;
+    struct GcPtrList old_objects_to_trace;              \
+    struct GcPtrList public_to_young;
 
 struct tx_descriptor;  /* from et.h */
 
@@ -18,5 +19,6 @@ void stmgc_init_nursery(void);
 void stmgc_done_nursery(void);
 void stmgc_minor_collect(void);
 int stmgc_minor_collect_anything_to_do(struct tx_descriptor *);
+gcptr stmgc_duplicate(gcptr);
 
 #endif

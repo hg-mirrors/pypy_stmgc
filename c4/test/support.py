@@ -71,6 +71,7 @@ ffi.cdef('''
     gcptr stm_get_read_obj(long index);
     void *STUB_THREAD(gcptr);
     void stm_clear_read_cache(void);
+    int in_nursery(gcptr);
 
     gcptr getptr(gcptr, long);
     void setptr(gcptr, long, gcptr);
@@ -181,6 +182,13 @@ lib = ffi.verify(r'''
     {
         obj = stm_write_barrier(obj);
         rawsetlong(obj, index, newvalue);
+    }
+
+    int in_nursery(gcptr obj)
+    {
+        struct tx_descriptor *d = thread_descriptor;
+        return (d->nursery_base <= (char*)obj &&
+                ((char*)obj) < d->nursery_end);
     }
 
     gcptr pseudoprebuilt(size_t size, int tid)
