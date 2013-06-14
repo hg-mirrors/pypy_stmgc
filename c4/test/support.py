@@ -54,6 +54,7 @@ ffi.cdef('''
     void stm_set_transaction_length(long length_max);
 
     /* extra non-public code */
+    void *stm_malloc(size_t size);
     //gcptr stmgcpage_malloc(size_t size);
     //void stmgcpage_free(gcptr obj);
     //long stmgcpage_count(int quantity);
@@ -390,20 +391,18 @@ class run_parallel(object):
 # ____________________________________________________________
 
 def oalloc(size):
-    "Allocate an 'old' object, i.e. outside any nursery"
-    p = lib.stmgcpage_malloc(size)
-    p.h_tid = GCFLAG_WRITE_BARRIER | GCFLAG_OLD
-    p.h_revision = lib.get_local_revision()
+    "Allocate an 'old' public object, outside any nursery"
+    p = ffi.cast("gcptr", lib.stm_malloc(size))
+    p.h_tid = GCFLAG_OLD | GCFLAG_PUBLIC
+    p.h_revision = 1
     lib.settid(p, 42 + size)
     return p
 
-#ofree = lib.stmgcpage_free
-
 def oalloc_refs(nrefs):
-    "Allocate an 'old' object, i.e. outside any nursery, with nrefs pointers"
-    p = lib.stmgcpage_malloc(HDR + WORD * nrefs)
-    p.h_tid = GCFLAG_WRITE_BARRIER | GCFLAG_OLD
-    p.h_revision = lib.get_local_revision()
+    "Allocate an 'old' public object, outside any nursery, with nrefs pointers"
+    p = ffi.cast("gcptr", lib.stm_malloc(HDR + WORD * nrefs))
+    p.h_tid = GCFLAG_OLD | GCFLAG_PUBLIC
+    p.h_revision = 1
     lib.settid(p, 421 + nrefs)
     for i in range(nrefs):
         rawsetptr(p, i, ffi.NULL)
