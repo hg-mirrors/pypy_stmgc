@@ -39,11 +39,12 @@
  * GCFLAG_PREBUILT_ORIGINAL is only set on the original version of
  * prebuilt objects.
  *
- * GCFLAG_WRITE_BARRIER is set on *old* objects to track old-to- young
- * pointers.  It may be left set on *public* objects but is ignored
- * there, because public objects are read-only.  The flag is removed
- * once a write occurs and the object is recorded in the list
- * 'old_pointing_to_young'; it is set again at the next minor
+ * GCFLAG_WRITE_BARRIER is set on *old* objects to track old-to-young
+ * pointers.  It is only useful on private objects, and on protected
+ * objects (which may be turned private again).  It may be left set on
+ * public objects but is ignored there, because such objects are read-only.
+ * The flag is removed once a write occurs and the object is recorded in
+ * the list 'old_pointing_to_young'; it is set again at the next minor
  * collection.
  *
  * GCFLAG_NURSERY_MOVED is used temporarily during minor collections.
@@ -81,6 +82,20 @@
                          "STUB",              \
                          "PRIVATE_FROM_PROTECTED", \
                          NULL }
+
+#define _DECLARE_FLAG(funcname, flagname)       \
+    static inline _Bool funcname(gcptr P) {     \
+        return (P->h_tid & flagname) != 0; }
+_DECLARE_FLAG(gcflag_old,                    GCFLAG_OLD)
+_DECLARE_FLAG(gcflag_visited,                GCFLAG_VISITED)
+_DECLARE_FLAG(gcflag_public,                 GCFLAG_PUBLIC)
+_DECLARE_FLAG(gcflag_prebuilt_original,      GCFLAG_PREBUILT_ORIGINAL)
+_DECLARE_FLAG(gcflag_public_to_private,      GCFLAG_PUBLIC_TO_PRIVATE)
+_DECLARE_FLAG(gcflag_write_barrier,          GCFLAG_WRITE_BARRIER)
+_DECLARE_FLAG(gcflag_nursery_moved,          GCFLAG_NURSERY_MOVED)
+_DECLARE_FLAG(gcflag_backup_copy,            GCFLAG_BACKUP_COPY)
+_DECLARE_FLAG(gcflag_stub,                   GCFLAG_STUB)
+_DECLARE_FLAG(gcflag_private_from_protected, GCFLAG_PRIVATE_FROM_PROTECTED)
 
 /************************************************************/
 

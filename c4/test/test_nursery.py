@@ -126,7 +126,7 @@ def test_outer2inner_after_transaction_end():
     check_not_free(p2b)
 
 def test_minor_collection_at_thread_end():
-    p1 = oalloc_refs(1)
+    p1 = palloc_refs(1)
     p2 = nalloc(HDR)
     setptr(p1, 0, p2)
     lib.stm_finalize()
@@ -156,3 +156,31 @@ def test_prebuilt_keeps_alive_at_thread_end():
     check_prebuilt(p0)
     p2 = lib.getptr(p0, 0)
     check_not_free(p2)
+
+def test_old_protected_stay_alive():
+    p0 = oalloc(HDR + WORD)
+    assert classify(p0) == "protected"
+    lib.rawsetlong(p0, 0, 81211)
+    lib.stm_push_root(p0)
+    minor_collect()
+    p0b = lib.stm_pop_root()
+    assert p0b == p0
+    assert classify(p0) == "protected"
+    assert lib.rawgetlong(p0, 0) == 81211
+
+def test_old_private_from_protected_to_young_private():
+    p0 = oalloc_refs(1)
+    assert classify(p0) == "protected"
+    p1 = nalloc(HDR)
+    lib.setptr(p0, 0, p1)
+    assert classify(p0) == "private"   # private_from_protected
+    lib.stm_push_root(p0)
+    minor_collect()
+    p0b = lib.stm_pop_root()
+    assert p0b == p0
+    check_nursery_free(p1)
+    assert classify(p0) == "private"   # private_from_protected
+    p2 = lib.getptr(p0, 0)
+    assert not lib.in_nursery(p2)
+    check_not_free(p2)
+    assert classify(p2) == "private"

@@ -55,7 +55,7 @@ static __thread struct tx_steal_data *steal_data;
 static void replace_ptr_to_protected_with_stub(gcptr *pobj)
 {
     gcptr stub, obj = *pobj;
-    if (obj == NULL || (obj->h_tid & GCFLAG_PUBLIC) != 0)
+    if (obj == NULL || gcflag_public(obj))
         return;
 
     /* we use 'all_stubs', a dictionary, in order to try to avoid
@@ -98,7 +98,7 @@ void stm_steal_stub(gcptr P)
     /* L might be a private_from_protected, or just a protected copy.
        To know which case it is, read GCFLAG_PRIVATE_FROM_PROTECTED.
     */
-    if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
+    if (gcflag_private_from_protected(L)) {
         gcptr B = (gcptr)L->h_revision;     /* the backup copy */
 
         /* B is now a backup copy, i.e. a protected object, and we own
@@ -107,9 +107,9 @@ void stm_steal_stub(gcptr P)
         */
         B->h_tid &= ~GCFLAG_BACKUP_COPY;
 
-        if (B->h_tid & GCFLAG_PUBLIC_TO_PRIVATE) {
+        if (gcflag_public_to_private(B)) {
             /* already stolen */
-            assert(B->h_tid & GCFLAG_PUBLIC);
+            assert(gcflag_public(B));
             fprintf(stderr, "already stolen: %p -> %p <-> %p\n", P, L, B);
             L = B;
             goto already_stolen;
@@ -125,7 +125,7 @@ void stm_steal_stub(gcptr P)
         }
     }
     else {
-        if (L->h_tid & GCFLAG_PUBLIC) {
+        if (gcflag_public(L)) {
             /* already stolen */
             fprintf(stderr, "already stolen: %p -> %p\n", P, L);
             goto already_stolen;
@@ -139,7 +139,7 @@ void stm_steal_stub(gcptr P)
        thread's collection_lock, so we can read/write the flags.  Change
        it from protected to public.
     */
-    assert(!(L->h_tid & GCFLAG_PUBLIC));
+    assert(!gcflag_public(L));
     L->h_tid |= GCFLAG_PUBLIC;
 
     /* Note that all protected or backup copies have a h_revision that
@@ -192,8 +192,8 @@ void stm_normalize_stolen_objects(struct tx_descriptor *d)
         gcptr B = items[i];
         gcptr L = items[i + 1];
 
-        assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
-        assert(!(B->h_tid & GCFLAG_BACKUP_COPY));  /* already removed */
+        assert(gcflag_private_from_protected(L));
+        assert(!gcflag_backup_copy(B));  /* already removed */
 
         g2l_insert(&d->public_to_private, B, L);
 
@@ -218,7 +218,7 @@ gcptr _stm_find_stolen_objects(struct tx_descriptor *d, gcptr obj)
         gcptr B = items[i];
         gcptr L = items[i + 1];
 
-        assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+        assert(gcflag_private_from_protected(L));
         if (B == obj)
             return L;
     }
