@@ -26,8 +26,7 @@ void stmgc_done_nursery(void)
     stm_free(d->nursery_base, GC_NURSERY);
 
     gcptrlist_delete(&d->old_objects_to_trace);
-    gcptrlist_delete(&d->public_to_young);
-    gcptrlist_delete(&d->private_old_pointing_to_young);
+    gcptrlist_delete(&d->public_with_young_copy);
 }
 
 static char *collect_and_allocate_size(size_t size);  /* forward */
@@ -67,11 +66,11 @@ gcptr stmgc_duplicate(gcptr P)
 
 static inline gcptr create_old_object_copy(gcptr obj)
 {
-    assert(!gcflag_nursery_moved(obj));
-    assert(!gcflag_visited(obj));
-    assert(!gcflag_write_barrier(obj));
-    assert(!gcflag_prebuilt_original(obj));
-    assert(!gcflag_old(obj));
+    assert(!(obj->h_tid & GCFLAG_NURSERY_MOVED));
+    assert(!(obj->h_tid & GCFLAG_VISITED));
+    assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
+    assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
+    assert(!(obj->h_tid & GCFLAG_OLD));
 
     size_t size = stmcb_size(obj);
     gcptr fresh_old_copy = stm_malloc(size);
@@ -119,26 +118,26 @@ static void mark_young_roots(struct tx_descriptor *d)
 
 static void mark_public_to_young(struct tx_descriptor *d)
 {
-    /* "public_to_young" contains ptrs to the public copies used as
-       key of "public_to_private", but only the ones that were added
-       since the last minor collection.  Once the transaction commit,
-       they stay in "public_to_young", and so they become public
-       objects whose h_revision is a public stub, which itself points
-       (originally) to a protected young object.
+    /* "public_with_young_copy" lists the public copies that may have
+       a more recent (or in-progress) private or protected object that
+       is young.  Note that public copies themselves are always old.
 
-       Be careful and accept more or less any object in the list, which
-       can show up because of aborted transactions.
+       The list should only contain public objects, but beyong that, be
+       careful and ignore any strange object: it can show up because of
+       aborted transactions (and then some different changes).
     */
-    long i, size = d->public_to_young.size;
-    gcptr *items = d->public_to_young.items;
+    long i, size = d->public_with_young_copy.size;
+    gcptr *items = d->public_with_young_copy.items;
 
     for (i = 0; i < size; i++) {
         gcptr P = items[i];
-        assert(gcflag_public(P));
+        assert(P->h_tid & GCFLAG_PUBLIC);
 
         revision_t v = ACCESS_ONCE(P->h_revision);
         wlog_t *item;
         G2L_FIND(d->public_to_private, P, item, goto not_in_public_to_private);
+
+        /* found P in 'public_to_private' */
 
         if (!(v & 1)) {   // "is a pointer"
             /* P is both a key in public_to_private and an outdated copy.
@@ -153,6 +152,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
 
         fprintf(stderr, "public_to_young: %p -> %p in public_to_private\n",
                 item->addr, item->val);
+        assert(_stm_is_private(item->val));
         visit_if_young(&item->val);
         continue;
 
@@ -199,14 +199,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
         S->h_revision = ((revision_t)L) | 2;
     }
 
-    gcptrlist_clear(&d->public_to_young);
-}
-
-static void mark_private_old_pointing_to_young(struct tx_descriptor *d)
-{
-    /* trace the objects recorded earlier by stmgc_write_barrier() */
-    gcptrlist_move(&d->old_objects_to_trace,
-                   &d->private_old_pointing_to_young);
+    gcptrlist_clear(&d->public_with_young_copy);
 }
 
 static void visit_all_outside_objects(struct tx_descriptor *d)
@@ -214,8 +207,8 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
     while (gcptrlist_size(&d->old_objects_to_trace) > 0) {
         gcptr obj = gcptrlist_pop(&d->old_objects_to_trace);
 
-        assert(gcflag_old(obj));
-        assert(!gcflag_write_barrier(obj));
+        assert(obj->h_tid & GCFLAG_OLD);
+        assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
         obj->h_tid |= GCFLAG_WRITE_BARRIER;
 
         stmcb_trace(obj, &visit_if_young);
@@ -225,8 +218,6 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
 static void setup_minor_collect(struct tx_descriptor *d)
 {
     spinlock_acquire(d->public_descriptor->collection_lock, 'M');  /*minor*/
-    assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
-
     if (d->public_descriptor->stolen_objects.size != 0)
         stm_normalize_stolen_objects(d);
 }
@@ -234,6 +225,7 @@ static void setup_minor_collect(struct tx_descriptor *d)
 static void teardown_minor_collect(struct tx_descriptor *d)
 {
     assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
+    assert(gcptrlist_size(&d->public_with_young_copy) == 0);
     assert(gcptrlist_size(&d->public_descriptor->stolen_objects) == 0);
 
     spinlock_release(d->public_descriptor->collection_lock);
@@ -254,8 +246,6 @@ static void minor_collect(struct tx_descriptor *d)
 #endif
 
     mark_public_to_young(d);
-
-    mark_private_old_pointing_to_young(d);
 
     visit_all_outside_objects(d);
 #if 0
@@ -292,8 +282,7 @@ int stmgc_minor_collect_anything_to_do(struct tx_descriptor *d)
     if (d->nursery_current == d->nursery_base /*&&
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
-        assert(gcptrlist_size(&d->private_old_pointing_to_young) == 0);
-        assert(gcptrlist_size(&d->public_to_young) == 0);
+        assert(gcptrlist_size(&d->public_with_young_copy) == 0);
         return 0;
     }
     else {

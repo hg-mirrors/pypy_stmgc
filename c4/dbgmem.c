@@ -22,6 +22,7 @@ static void _stm_dbgmem(void *p, size_t sz, int prot)
     intptr_t align = ((intptr_t)p) & (PAGE_SIZE-1);
     p = ((char *)p) - align;
     sz += align;
+    fprintf(stderr, "dbgmem: %p, %ld, %d\n", p, (long)sz, prot);
     int err = mprotect(p, sz, prot);
     assert(err == 0);
 }

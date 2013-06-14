@@ -44,7 +44,7 @@
  * objects (which may be turned private again).  It may be left set on
  * public objects but is ignored there, because such objects are read-only.
  * The flag is removed once a write occurs and the object is recorded in
- * the list 'old_pointing_to_young'; it is set again at the next minor
+ * the list 'old_objects_to_trace'; it is set again at the next minor
  * collection.
  *
  * GCFLAG_NURSERY_MOVED is used temporarily during minor collections.
@@ -54,16 +54,16 @@
  * that is == 2 (mod 4): in this case they point to a protected/private
  * object that belongs to the thread 'STUB_THREAD(p_stub)'.
  */
-#define GCFLAG_OLD               (STM_FIRST_GCFLAG << 0)
-#define GCFLAG_VISITED           (STM_FIRST_GCFLAG << 1)
-#define GCFLAG_PUBLIC            (STM_FIRST_GCFLAG << 2)
-#define GCFLAG_PREBUILT_ORIGINAL (STM_FIRST_GCFLAG << 3)
-#define GCFLAG_PUBLIC_TO_PRIVATE (STM_FIRST_GCFLAG << 4)
-#define GCFLAG_WRITE_BARRIER     (STM_FIRST_GCFLAG << 5)
-#define GCFLAG_NURSERY_MOVED     (STM_FIRST_GCFLAG << 6)
-#define GCFLAG_BACKUP_COPY       (STM_FIRST_GCFLAG << 7)   /* debugging */
-#define GCFLAG_STUB              (STM_FIRST_GCFLAG << 8)   /* debugging */
-#define GCFLAG_PRIVATE_FROM_PROTECTED (STM_FIRST_GCFLAG << 9)
+static const revision_t GCFLAG_OLD                    = STM_FIRST_GCFLAG << 0;
+static const revision_t GCFLAG_VISITED                = STM_FIRST_GCFLAG << 1;
+static const revision_t GCFLAG_PUBLIC                 = STM_FIRST_GCFLAG << 2;
+static const revision_t GCFLAG_PREBUILT_ORIGINAL      = STM_FIRST_GCFLAG << 3;
+static const revision_t GCFLAG_PUBLIC_TO_PRIVATE      = STM_FIRST_GCFLAG << 4;
+static const revision_t GCFLAG_WRITE_BARRIER          = STM_FIRST_GCFLAG << 5;
+static const revision_t GCFLAG_NURSERY_MOVED          = STM_FIRST_GCFLAG << 6;
+static const revision_t GCFLAG_BACKUP_COPY  /*debug*/ = STM_FIRST_GCFLAG << 7;
+static const revision_t GCFLAG_STUB         /*debug*/ = STM_FIRST_GCFLAG << 8;
+static const revision_t GCFLAG_PRIVATE_FROM_PROTECTED = STM_FIRST_GCFLAG << 9;
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
 #define GCFLAG_PREBUILT  (GCFLAG_VISITED           | \
@@ -82,20 +82,6 @@
                          "STUB",              \
                          "PRIVATE_FROM_PROTECTED", \
                          NULL }
-
-#define _DECLARE_FLAG(funcname, flagname)       \
-    static inline _Bool funcname(gcptr P) {     \
-        return (P->h_tid & flagname) != 0; }
-_DECLARE_FLAG(gcflag_old,                    GCFLAG_OLD)
-_DECLARE_FLAG(gcflag_visited,                GCFLAG_VISITED)
-_DECLARE_FLAG(gcflag_public,                 GCFLAG_PUBLIC)
-_DECLARE_FLAG(gcflag_prebuilt_original,      GCFLAG_PREBUILT_ORIGINAL)
-_DECLARE_FLAG(gcflag_public_to_private,      GCFLAG_PUBLIC_TO_PRIVATE)
-_DECLARE_FLAG(gcflag_write_barrier,          GCFLAG_WRITE_BARRIER)
-_DECLARE_FLAG(gcflag_nursery_moved,          GCFLAG_NURSERY_MOVED)
-_DECLARE_FLAG(gcflag_backup_copy,            GCFLAG_BACKUP_COPY)
-_DECLARE_FLAG(gcflag_stub,                   GCFLAG_STUB)
-_DECLARE_FLAG(gcflag_private_from_protected, GCFLAG_PRIVATE_FROM_PROTECTED)
 
 /************************************************************/
 

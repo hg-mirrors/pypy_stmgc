@@ -502,14 +502,16 @@ def abort_and_retry():
     lib.AbortTransaction(lib.ABRT_MANUAL)
 
 def classify(p):
-    private = (p.h_revision == lib.get_private_rev_num() or
-               (p.h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) != 0)
+    private_from_protected = (p.h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) != 0
+    private_other = p.h_revision == lib.get_private_rev_num()
     public  = (p.h_tid & GCFLAG_PUBLIC) != 0
     backup  = (p.h_tid & GCFLAG_BACKUP_COPY) != 0
     stub    = (p.h_tid & GCFLAG_STUB) != 0
-    assert private + public + backup <= 1
+    assert private_from_protected + private_other + public + backup <= 1
     assert (public, stub) != (False, True)
-    if private:
+    if private_from_protected:
+        return "private_from_protected"
+    if private_other:
         return "private"
     if public:
         if stub:

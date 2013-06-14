@@ -168,18 +168,29 @@ def test_old_protected_stay_alive():
     assert classify(p0) == "protected"
     assert lib.rawgetlong(p0, 0) == 81211
 
+def test_old_private_from_protected():
+    p0 = oalloc(HDR + WORD)
+    assert classify(p0) == "protected"
+    lib.setlong(p0, 0, 29820298)
+    assert classify(p0) == "private_from_protected"
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert classify(p0) == "protected"
+    assert lib.getlong(p0, 0) == 29820298
+    assert classify(p0) == "protected"
+
 def test_old_private_from_protected_to_young_private():
     p0 = oalloc_refs(1)
     assert classify(p0) == "protected"
     p1 = nalloc(HDR)
     lib.setptr(p0, 0, p1)
-    assert classify(p0) == "private"   # private_from_protected
+    assert classify(p0) == "private_from_protected"
     lib.stm_push_root(p0)
     minor_collect()
     p0b = lib.stm_pop_root()
     assert p0b == p0
     check_nursery_free(p1)
-    assert classify(p0) == "private"   # private_from_protected
+    assert classify(p0) == "private_from_protected"
     p2 = lib.getptr(p0, 0)
     assert not lib.in_nursery(p2)
     check_not_free(p2)

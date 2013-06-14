@@ -52,7 +52,7 @@ def test_private_with_backup():
     assert classify(p) == "protected"
     p2 = lib.stm_write_barrier(p)
     assert p2 == p       # does not move
-    assert classify(p) == "private"
+    assert classify(p) == "private_from_protected"
     pback = follow_revision(p)
     assert classify(pback) == "backup"
     assert list_of_private_from_protected() == [p]
@@ -65,7 +65,7 @@ def test_get_backup_copy():
     org_r = p.h_revision
     assert classify(p) == "protected"
     lib.setlong(p, 0, 927122)
-    assert classify(p) == "private"
+    assert classify(p) == "private_from_protected"
     pback = follow_revision(p)
     assert pback and pback != p
     assert pback.h_revision == org_r
@@ -73,7 +73,7 @@ def test_get_backup_copy():
                            GCFLAG_BACKUP_COPY)
     assert lib.rawgetlong(pback, 0) == 78927812
     assert lib.rawgetlong(p, 0) == 927122
-    assert classify(p) == "private"
+    assert classify(p) == "private_from_protected"
     assert classify(pback) == "backup"
 
 def test_prebuilt_is_public():
@@ -263,13 +263,13 @@ def test_stealing_while_modifying(aborting=False):
             lib.rawsetlong(p2, 0, -451112)
             pback = follow_revision(p1)
             pback_.append(pback)
-            assert classify(p1) == "private"
+            assert classify(p1) == "private_from_protected"
             assert classify(pback) == "backup"
             assert lib.stm_read_barrier(p) == p1
             assert lib.stm_read_barrier(p1) == p1
             assert pback.h_revision & 1
             r.wait_while_in_parallel()
-            assert classify(p1) == "private"
+            assert classify(p1) == "private_from_protected"
             assert classify(pback) == "public"
             assert pback.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
             assert lib.stm_read_barrier(p) == p1
@@ -322,7 +322,7 @@ def test_abort_private_from_protected():
         if c == 0:
             lib.setlong(p, 0, -38383)
             assert lib.getlong(p, 0) == -38383
-            assert classify(p) == "private"
+            assert classify(p) == "private_from_protected"
             abort_and_retry()
     perform_transaction(cb)
 
