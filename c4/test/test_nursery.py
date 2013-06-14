@@ -124,3 +124,35 @@ def test_outer2inner_after_transaction_end():
     p2b = lib.stm_read_barrier(p1b)
     assert not lib.in_nursery(p2b)
     check_not_free(p2b)
+
+def test_minor_collection_at_thread_end():
+    p1 = palloc_refs(1)
+    p2 = nalloc(HDR)
+    setptr(p1, 0, p2)
+    lib.stm_finalize()
+    lib.stm_initialize_tests(0)
+    p1b = getptr(p1, 0)
+    assert p1b != p1
+    assert not lib.in_nursery(p1b)
+    check_not_free(p1b)
+
+def test_prebuilt_keeps_alive():
+    p0 = palloc_refs(1)
+    p1 = nalloc(HDR)
+    lib.setptr(p0, 0, p1)
+    minor_collect()
+    check_nursery_free(p1)
+    check_prebuilt(p0)
+    p2 = lib.getptr(p0, 0)
+    assert not lib.in_nursery(p2)
+    check_not_free(p2)
+
+def test_prebuilt_keeps_alive_at_thread_end():
+    p0 = palloc_refs(1)
+    p1 = nalloc(HDR)
+    lib.setptr(p0, 0, p1)
+    lib.stm_finalize()
+    lib.stm_initialize_tests(0)
+    check_prebuilt(p0)
+    p2 = lib.getptr(p0, 0)
+    check_not_free(p2)
