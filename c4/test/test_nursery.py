@@ -126,7 +126,7 @@ def test_outer2inner_after_transaction_end():
     check_not_free(p2b)
 
 def test_minor_collection_at_thread_end():
-    p1 = palloc_refs(1)
+    p1 = oalloc_refs(1)
     p2 = nalloc(HDR)
     setptr(p1, 0, p2)
     lib.stm_finalize()
