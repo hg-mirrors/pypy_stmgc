@@ -216,3 +216,19 @@ def test_new_version():
     assert p2 == p1
     assert not lib.in_nursery(p2)
     assert classify(p2) == "private_from_protected"
+
+def test_prebuilt_version():
+    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p2 = lib.stm_write_barrier(p1)
+    assert p2 != p1
+    check_prebuilt(p1)
+    check_not_free(p2)
+    minor_collect()
+    check_prebuilt(p1)
+    check_nursery_free(p2)
+    p2 = lib.stm_read_barrier(p1)
+    assert classify(p2) == "private"
+    p3 = lib.stm_write_barrier(p1)
+    assert classify(p3) == "private"
+    assert p3 == p2 != p1
+    assert not lib.in_nursery(p2)
