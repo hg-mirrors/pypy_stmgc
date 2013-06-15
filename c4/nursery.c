@@ -97,7 +97,14 @@ static void visit_if_young(gcptr *root)
         /* not a nursery object */
     }
     else {
-        /* a nursery object */
+        /* it's a nursery object.  Was it already moved? */
+
+        if (UNLIKELY(obj->h_tid & GCFLAG_NURSERY_MOVED)) {
+            /* yes: just fix the ref. */
+            *root = (gcptr)obj->h_revision;
+            return;
+        }
+
         /* make a copy of it outside */
         fresh_old_copy = create_old_object_copy(obj);
         obj->h_tid |= GCFLAG_NURSERY_MOVED;
@@ -126,11 +133,12 @@ static void mark_public_to_young(struct tx_descriptor *d)
 {
     /* "public_with_young_copy" lists the public copies that may have
        a more recent (or in-progress) private or protected object that
-       is young.  Note that public copies themselves are always old.
+       is young.  Note that public copies themselves are always old
+       (short of a few exceptions that don't end up in this list).
 
-       The list should only contain public objects, but beyong that, be
-       careful and ignore any strange object: it can show up because of
-       aborted transactions (and then some different changes).
+       The list should only contain old public objects, but beyong that,
+       be careful and ignore any strange object: it can show up because
+       of aborted transactions (and then some different changes).
     */
     long i, size = d->public_with_young_copy.size;
     gcptr *items = d->public_with_young_copy.items;
@@ -138,6 +146,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
     for (i = 0; i < size; i++) {
         gcptr P = items[i];
         assert(P->h_tid & GCFLAG_PUBLIC);
+        assert(P->h_tid & GCFLAG_OLD);
 
         revision_t v = ACCESS_ONCE(P->h_revision);
         wlog_t *item;
@@ -246,10 +255,6 @@ static void minor_collect(struct tx_descriptor *d)
     setup_minor_collect(d);
 
     mark_young_roots(d);
-
-#if 0
-    mark_private_from_protected(d);
-#endif
 
     mark_public_to_young(d);
 

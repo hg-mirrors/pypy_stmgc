@@ -207,7 +207,7 @@ class RandomSingleThreadTester(object):
         return lib._stm_nonrecord_barrier(ptr)
 
     def is_private(self, ptr):
-        return classify(ptr) == "private"
+        return classify(ptr) in ("private", "private_from_protected")
 
     def check_valid(self, lst):
         lst = list(lst)
