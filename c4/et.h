@@ -83,6 +83,8 @@ static const revision_t GCFLAG_PRIVATE_FROM_PROTECTED = STM_FIRST_GCFLAG << 9;
                          "PRIVATE_FROM_PROTECTED", \
                          NULL }
 
+#define IS_POINTER(v)    (!((v) & 1))   /* even-valued number */
+
 /************************************************************/
 
 #define ABRT_MANUAL               0

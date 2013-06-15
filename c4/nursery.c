@@ -139,7 +139,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
 
         /* found P in 'public_to_private' */
 
-        if (!(v & 1)) {   // "is a pointer"
+        if (IS_POINTER(v)) {
             /* P is both a key in public_to_private and an outdated copy.
                We are in a case where we know the transaction will not
                be able to commit successfully.
@@ -157,7 +157,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
         continue;
 
     not_in_public_to_private:
-        if (v & 1) {   // "is not a pointer"
+        if (!IS_POINTER(v)) {
             /* P is neither a key in public_to_private nor outdated.
                It must come from an older transaction that aborted.
                Nothing to do now.

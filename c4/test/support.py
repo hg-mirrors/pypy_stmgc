@@ -188,8 +188,18 @@ lib = ffi.verify(r'''
     int in_nursery(gcptr obj)
     {
         struct tx_descriptor *d = thread_descriptor;
-        return (d->nursery_base <= (char*)obj &&
-                ((char*)obj) < d->nursery_end);
+        int result1 = (d->nursery_base <= (char*)obj &&
+                       ((char*)obj) < d->nursery_end);
+        if (obj->h_tid & GCFLAG_OLD) {
+            assert(result1 == 0);
+        }
+        else {
+            /* this assert() also fails if "obj" is in another nursery than
+               the one of the current thread.  This is ok, because we
+               should not see such pointers. */
+            assert(result1 == 1);
+        }
+        return result1;
     }
 
     gcptr pseudoprebuilt(size_t size, int tid)
@@ -515,8 +525,15 @@ def classify(p):
         return "private"
     if public:
         if stub:
+            assert not lib.in_nursery(p)
             return "stub"
-        return "public"
+        else:
+            # public objects usually never live in the nursery, but
+            # if stealing makes one, it has GCFLAG_NURSERY_MOVED.
+            if lib.in_nursery(p):
+                assert p.h_tid & GCFLAG_NURSERY_MOVED
+                assert not (p.h_revision & 1)   # "is a pointer"
+            return "public"
     if backup:
         return "backup"
     else:

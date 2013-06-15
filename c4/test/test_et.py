@@ -198,7 +198,7 @@ def test_read_barrier_handle_private():
     assert p4 == p2
     assert list_of_read_objects() == [p2]
 
-def test_stealing():
+def test_stealing_old():
     p = palloc(HDR + WORD)
     plist = [p]
     def f1(r):
@@ -207,6 +207,10 @@ def test_stealing():
         assert p1 != p
         assert classify(p) == "public"
         assert classify(p1) == "private"
+        minor_collect()
+        check_nursery_free(p1)
+        p1 = lib.stm_read_barrier(p)
+        assert p1.h_tid & GCFLAG_OLD
         assert p.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
         lib.rawsetlong(p1, 0, 2782172)
         lib.stm_commit_transaction()
@@ -231,6 +235,51 @@ def test_stealing():
             assert p.h_revision == int(ffi.cast("revision_t", p2))
         assert p2 == lib.stm_read_barrier(p)
         assert p2 == plist[-1]
+        assert classify(p2) == "public"
+        r.set(3)
+    run_parallel(f1, f2)
+
+def test_stealing_young():
+    p = palloc(HDR + WORD)
+    plist = [p]
+    def f1(r):
+        assert (p.h_tid & GCFLAG_PUBLIC_TO_PRIVATE) == 0
+        p1 = lib.stm_write_barrier(p)   # private copy
+        assert p1 != p
+        assert classify(p) == "public"
+        assert classify(p1) == "private"
+        assert p.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
+        lib.rawsetlong(p1, 0, 2782172)
+        lib.stm_commit_transaction()
+        lib.stm_begin_inevitable_transaction()
+        assert classify(p) == "public"
+        assert classify(p1) == "protected"
+        plist.append(p1)     # now p's most recent revision is protected
+        assert classify(follow_revision(p)) == "stub"
+        assert p1.h_revision & 1
+        r.set(2)
+        r.wait(3)
+        assert classify(p1) == "public"
+        assert (p1.h_revision & 1) == 0    # outdated
+        p2 = ffi.cast("gcptr", p1.h_revision)
+        assert lib.in_nursery(p1)
+        assert not lib.in_nursery(p2)
+        assert lib.stm_read_barrier(p) == p2
+        assert lib.stm_read_barrier(p1) == p2
+        assert lib.stm_read_barrier(p2) == p2
+    def f2(r):
+        r.wait(2)
+        p2 = lib.stm_read_barrier(p)    # steals
+        assert classify(p2) == "public"
+        assert lib.rawgetlong(p2, 0) == 2782172
+        assert p2 == lib.stm_read_barrier(p)    # short-circuit h_revision
+        if SHORTCUT:
+            assert p.h_revision == int(ffi.cast("revision_t", p2))
+        assert p2 == lib.stm_read_barrier(p)
+        assert p2 != plist[-1]   # p2 is a public moved-out-of-nursery
+        assert plist[-1].h_tid & GCFLAG_PUBLIC
+        assert plist[-1].h_tid & GCFLAG_NURSERY_MOVED
+        assert plist[-1].h_revision == int(ffi.cast("revision_t", p2))
         assert classify(p2) == "public"
         r.set(3)
     run_parallel(f1, f2)
