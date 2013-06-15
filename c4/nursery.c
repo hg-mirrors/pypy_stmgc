@@ -266,11 +266,13 @@ static void minor_collect(struct tx_descriptor *d)
     /* acquire the "collection lock" first */
     setup_minor_collect(d);
 
+    /* first do this, which asserts that some objects are private ---
+       which fails if they have already been GCFLAG_NURSERY_MOVED */
+    mark_public_to_young(d);
+
     mark_young_roots(d);
 
     mark_private_from_protected(d);
-
-    mark_public_to_young(d);
 
     visit_all_outside_objects(d);
 #if 0
