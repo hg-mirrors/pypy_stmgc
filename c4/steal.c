@@ -104,8 +104,9 @@ void stm_steal_stub(gcptr P)
 
         /* B is now a backup copy, i.e. a protected object, and we own
            the foreign thread's collection_lock, so we can read/write the
-           flags
+           flags.  B is old, like all backup copies.
         */
+        assert(B->h_tid & GCFLAG_OLD);
         B->h_tid &= ~GCFLAG_BACKUP_COPY;
 
         if (B->h_tid & GCFLAG_PUBLIC_TO_PRIVATE) {
@@ -129,10 +130,26 @@ void stm_steal_stub(gcptr P)
         if (L->h_tid & GCFLAG_PUBLIC) {
             /* already stolen */
             fprintf(stderr, "already stolen: %p -> %p\n", P, L);
+
+            /* note that we should follow h_revision at least one more
+               step: it is necessary if L is public but young (and then
+               has GCFLAG_NURSERY_MOVED), but it is fine to do it more
+               generally. */
+            v = ACCESS_ONCE(L->h_revision);
+            if (IS_POINTER(v))
+                L = (gcptr)v;
             goto already_stolen;
         }
         else {
             fprintf(stderr, "stolen: %p -> %p\n", P, L);
+        }
+
+        /* Copy the object out of the other thread's nursery, if needed */
+        if (!(L->h_tid & GCFLAG_OLD)) {
+            gcptr O = stmgc_duplicate_old(L);
+            L->h_revision = (revision_t)O;
+            L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
+            L = O;
         }
     }
 
@@ -157,17 +174,6 @@ void stm_steal_stub(gcptr P)
        odd number that is also valid on a public up-to-date object.
     */
 
-    /* Move the object out of the other thread's nursery, if needed */
-    if (!(L->h_tid & GCFLAG_OLD)) {
-        size_t size = stmcb_size(L);
-        gcptr O = stm_malloc(size);
-        memcpy(O, L, size);
-        L->h_revision = (revision_t)O;
-        L->h_tid |= GCFLAG_NURSERY_MOVED;
-        O->h_tid |= GCFLAG_OLD;
-        L = O;
-    }
-
     /* Fix the content of the object: we need to change all pointers
        that reference protected copies into pointers that reference
        stub copies.
@@ -188,6 +194,8 @@ void stm_steal_stub(gcptr P)
     smp_wmb();
 
  already_stolen:
+    assert(L->h_tid & GCFLAG_OLD);
+
     /* update the original P->h_revision to point directly to L */
     P->h_revision = (revision_t)L;
 

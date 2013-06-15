@@ -270,3 +270,26 @@ GCFLAG_PUBLIC_TO_PRIVATE.
 - public copies: must be changed carefully: `h_tid` is only modified to
 add GCFLAG_PUBLIC_TO_PRIVATE; and `h_revision` changes are done with
 bool_cas() in a thread-controlled way.
+
+
+
+Nursery and minor collections
+-----------------------------
+
+Every thread has its own nursery.  When it's full, the thread does a
+minor collection and proceed.
+
+Most object copies are allocated "young", i.e. from the nursery of its
+thread, with the following exceptions.
+
+Any public object (GCFLAG_PUBLIC) must be old.  This is a consequence of
+the fact that public objects may be accessed concurrently by any thead,
+but young objects are moved during a minor collection.  The rule admits
+one exception: a young object may be turned GCFLAG_PUBLIC during its
+existence (together with GCFLAG_NURSERY_MOVED) in order to get the
+behavior of public objects, but only if we know that no other thread
+will access it anyway.
+
+The backup copy of a GCFLAG_PRIVATE_FROM_PROTECTED copy is allocated
+old, and explicitly freed when the thread commits (unless it was
+stolen).

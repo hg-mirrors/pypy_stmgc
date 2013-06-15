@@ -81,10 +81,7 @@ static inline gcptr create_old_object_copy(gcptr obj)
     assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
     assert(!(obj->h_tid & GCFLAG_OLD));
 
-    size_t size = stmcb_size(obj);
-    gcptr fresh_old_copy = stm_malloc(size);
-    memcpy(fresh_old_copy, obj, size);
-    fresh_old_copy->h_tid |= GCFLAG_OLD;
+    gcptr fresh_old_copy = stmgc_duplicate_old(obj);
 
     fprintf(stderr, "minor: %p is copied to %p\n", obj, fresh_old_copy);
     return fresh_old_copy;
