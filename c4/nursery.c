@@ -131,8 +131,8 @@ static void mark_young_roots(struct tx_descriptor *d)
 
 static void mark_private_from_protected(struct tx_descriptor *d)
 {
-    long i, size = d->public_with_young_copy.size;
-    gcptr *items = d->public_with_young_copy.items;
+    long i, size = d->private_from_protected.size;
+    gcptr *items = d->private_from_protected.items;
 
     for (i = d->num_private_from_protected_known_old; i < size; i++) {
         visit_if_young(&items[i]);
