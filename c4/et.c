@@ -402,7 +402,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
   assert(!(P->h_tid & GCFLAG_STUB));
   assert(!(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
 
-  B = stmgc_duplicate(P);
+  B = stmgc_duplicate_old(P);
   B->h_tid |= GCFLAG_BACKUP_COPY;
 
   P->h_tid |= GCFLAG_PRIVATE_FROM_PROTECTED;
@@ -989,7 +989,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
         }
       else
         {
-          //stm_free(B, stmcb_size(B));
+          stm_free(B, stmcb_size(B));
         }
     };
   gcptrlist_clear(&d->private_from_protected);
@@ -1011,8 +1011,8 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
         {
           assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
           P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
-          P->h_tid |= GCFLAG_PUBLIC;      abort();
-          /* P becomes a public outdated object */
+          P->h_tid |= GCFLAG_PUBLIC;
+          /* P becomes a public (possibly young) outdated object */
         }
       else
         {

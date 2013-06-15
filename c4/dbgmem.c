@@ -67,6 +67,8 @@ void *stm_malloc(size_t sz)
 
 void stm_free(void *p, size_t sz)
 {
+    assert(((intptr_t)((char *)p + sz) & (PAGE_SIZE-1)) == 0);
+
     size_t nb_pages = (sz + PAGE_SIZE - 1) / PAGE_SIZE + 1;
     long i, base = ((char *)p - zone_start) / PAGE_SIZE;
     assert(0 <= base && base < (MMAP_TOTAL / PAGE_SIZE));
