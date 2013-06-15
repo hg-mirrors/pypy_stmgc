@@ -232,3 +232,32 @@ def test_prebuilt_version():
     assert classify(p3) == "private"
     assert p3 == p2 != p1
     assert not lib.in_nursery(p2)
+
+def _public_and_protected_in_nursery():
+    p1 = palloc(HDR + WORD)
+    lib.rawsetlong(p1, 0, 1000000)
+    p2 = lib.stm_write_barrier(p1)
+    assert lib.in_nursery(p2)
+    lib.setlong(p1, 0, 2000000)
+    assert lib.rawgetlong(p2, 0) == 2000000
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert classify(p1) == "public"
+    assert classify(p2) == "protected"
+    check_not_free(p2)
+    return p1, p2
+
+def test_public_not_in_nursery():
+    p1, p2 = _public_and_protected_in_nursery()
+    plist = []
+    def f1(_):
+        p3 = lib.stm_read_barrier(p1)
+        assert classify(p3) == "public"
+        assert not lib.in_nursery(p3)
+        assert p3 != p2    # not in-place, because p2 is in the nursery
+        plist.append(p3)
+    run_parallel(f1)
+    p3 = lib.stm_read_barrier(p1)
+    assert plist == [p3]
+    assert classify(p3) == "public"
+    assert not lib.in_nursery(p3)

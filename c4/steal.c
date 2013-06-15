@@ -74,7 +74,8 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
  not_found:
     stub = stm_stub_malloc(sd->foreign_pd);
     stub->h_tid = (obj->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
-                                                   | GCFLAG_STUB;
+                                                   | GCFLAG_STUB
+                                                   | GCFLAG_OLD;
     stub->h_revision = ((revision_t)obj) | 2;
     g2l_insert(&sd->all_stubs, obj, stub);
 
@@ -155,6 +156,17 @@ void stm_steal_stub(gcptr P)
        it cannot grab its own collection_lock).  L->h_revision is an
        odd number that is also valid on a public up-to-date object.
     */
+
+    /* Move the object out of the other thread's nursery, if needed */
+    if (!(L->h_tid & GCFLAG_OLD)) {
+        size_t size = stmcb_size(L);
+        gcptr O = stm_malloc(size);
+        memcpy(O, L, size);
+        L->h_revision = (revision_t)O;
+        L->h_tid |= GCFLAG_NURSERY_MOVED;
+        O->h_tid |= GCFLAG_OLD;
+        L = O;
+    }
 
     /* Fix the content of the object: we need to change all pointers
        that reference protected copies into pointers that reference

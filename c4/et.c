@@ -82,12 +82,12 @@ gcptr stm_DirectReadBarrier(gcptr G)
  restart_all:
   if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
     {
-      assert(!(P->h_revision & 1));   /* pointer to the backup copy */
+      assert(IS_POINTER(P->h_revision));   /* pointer to the backup copy */
 
       /* check P->h_revision->h_revision: if a pointer, then it means
          the backup copy has been stolen into a public object and then
          modified by some other thread.  Abort. */
-      if (!(((gcptr)P->h_revision)->h_revision & 1))
+      if (IS_POINTER(((gcptr)P->h_revision)->h_revision))
         AbortTransaction(ABRT_STOLEN_MODIFIED);
 
       goto add_in_recent_reads_cache;
@@ -104,8 +104,8 @@ gcptr stm_DirectReadBarrier(gcptr G)
     restart_all_public:
       assert(P->h_tid & GCFLAG_PUBLIC);
       v = ACCESS_ONCE(P->h_revision);
-      if (!(v & 1))  // "is a pointer", i.e.
-        {            //      "has a more recent revision"
+      if (IS_POINTER(v))  /* "is a pointer", "has a more recent revision" */
+        {
         retry:
           if (v & 2)
             goto follow_stub;
@@ -116,8 +116,8 @@ gcptr stm_DirectReadBarrier(gcptr G)
 
           v = ACCESS_ONCE(P->h_revision);
 
-          if (!(v & 1))  // "is a pointer", i.e.
-            {            //      "has a more recent revision"
+          if (IS_POINTER(v))
+            {
               if (v & 2)
                 goto follow_stub;
 
@@ -127,7 +127,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
               P_prev->h_revision = v;
               P = (gcptr)v;
               v = ACCESS_ONCE(P->h_revision);
-              if (!(v & 1))  // "is a pointer", i.e. "has a more recent rev"
+              if (IS_POINTER(v))
                 goto retry;
             }
 
@@ -302,7 +302,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
   if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
     {
       /* private too, with a backup copy */
-      assert(!(P->h_revision & 1));
+      assert(IS_POINTER(P->h_revision));
       fprintf(stderr, "private_from_protected\n");
       return P;
     }
@@ -311,7 +311,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
     {
       fprintf(stderr, "public ");
 
-      while (v = P->h_revision, !(v & 1))
+      while (v = P->h_revision, IS_POINTER(v))
         {
           if (v & 2)
             {
@@ -553,8 +553,8 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
       revision_t v;
     retry:
       v = ACCESS_ONCE(R->h_revision);
-      if (!(v & 1))               // "is a pointer", i.e.
-        {                         //   "has a more recent revision"
+      if (IS_POINTER(v))  /* "is a pointer", i.e. has a more recent revision */
+        {
           if (R->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
             {
               /* such an object R might be listed in list_of_read_objects
@@ -815,8 +815,8 @@ static void AcquireLocks(struct tx_descriptor *d)
     retry:
       assert(R->h_tid & GCFLAG_PUBLIC);
       v = ACCESS_ONCE(R->h_revision);
-      if (!(v & 1))            // "is a pointer", i.e.
-        {                      //   "has a more recent revision"
+      if (IS_POINTER(v))     /* "has a more recent revision" */
+        {
           assert(v != 0);
           AbortTransaction(ABRT_COMMIT);
         }
@@ -907,7 +907,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       L->h_revision = new_revision;
 
       gcptr stub = stm_stub_malloc(d->public_descriptor);
-      stub->h_tid = GCFLAG_PUBLIC | GCFLAG_STUB;
+      stub->h_tid = GCFLAG_PUBLIC | GCFLAG_STUB | GCFLAG_OLD;
       stub->h_revision = ((revision_t)L) | 2;
       item->val = stub;
 
@@ -962,7 +962,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
       assert(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
       P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
 
-      if (P->h_revision & 1)   // "is not a pointer"
+      if (!IS_POINTER(P->h_revision))
         {
           /* This case occurs when a GCFLAG_PRIVATE_FROM_PROTECTED object
              is stolen: it ends up as a value in 'public_to_private'.
@@ -980,7 +980,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
           while (1)
             {
               revision_t v = ACCESS_ONCE(B->h_revision);
-              if (!(v & 1))    // "is a pointer", i.e. "was modified"
+              if (IS_POINTER(v))    /* "was modified" */
                 AbortTransaction(ABRT_STOLEN_MODIFIED);
 
               if (bool_cas(&B->h_revision, v, (revision_t)P))
@@ -1004,14 +1004,14 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
     {
       gcptr P = items[i];
       assert(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
-      assert(!(P->h_revision & 1));   // "is a pointer"
+      assert(IS_POINTER(P->h_revision));
 
       gcptr B = (gcptr)P->h_revision;
       if (B->h_tid & GCFLAG_PUBLIC)
         {
           assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
           P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
-          P->h_tid |= GCFLAG_PUBLIC;
+          P->h_tid |= GCFLAG_PUBLIC;      abort();
           /* P becomes a public outdated object */
         }
       else
