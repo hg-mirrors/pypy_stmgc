@@ -261,3 +261,14 @@ def test_public_not_in_nursery():
     assert plist == [p3]
     assert classify(p3) == "public"
     assert not lib.in_nursery(p3)
+
+def test_move_to_one_place():
+    p1 = nalloc(HDR)
+    lib.stm_push_root(p1)
+    lib.stm_push_root(p1)
+    lib.stm_push_root(p1)
+    minor_collect()
+    p2a = lib.stm_pop_root()
+    p2b = lib.stm_pop_root()
+    p2c = lib.stm_pop_root()
+    assert p2a == p2b == p2c
