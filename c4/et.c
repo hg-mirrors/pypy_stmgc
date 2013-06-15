@@ -1007,12 +1007,20 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
       assert(IS_POINTER(P->h_revision));
 
       gcptr B = (gcptr)P->h_revision;
+      assert(B->h_tid & GCFLAG_OLD);
+
       if (B->h_tid & GCFLAG_PUBLIC)
         {
           assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
           P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
           P->h_tid |= GCFLAG_PUBLIC;
-          /* P becomes a public (possibly young) outdated object */
+          if (!(P->h_tid & GCFLAG_OLD)) P->h_tid |= GCFLAG_NURSERY_MOVED;
+          /* P becomes a public outdated object.  It may create an
+             exception documented in doc-objects.txt: a public but young
+             object.  It's still fine because it should only be seen by
+             other threads during stealing, and as it's outdated,
+             stealing will follow its h_revision (to B).
+          */
         }
       else
         {
