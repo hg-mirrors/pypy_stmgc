@@ -129,6 +129,18 @@ static void mark_young_roots(struct tx_descriptor *d)
     }
 }
 
+static void mark_private_from_protected(struct tx_descriptor *d)
+{
+    long i, size = d->public_with_young_copy.size;
+    gcptr *items = d->public_with_young_copy.items;
+
+    for (i = d->num_private_from_protected_known_old; i < size; i++) {
+        visit_if_young(&items[i]);
+    }
+
+    d->num_private_from_protected_known_old = size;
+}
+
 static void mark_public_to_young(struct tx_descriptor *d)
 {
     /* "public_with_young_copy" lists the public copies that may have
@@ -255,6 +267,8 @@ static void minor_collect(struct tx_descriptor *d)
     setup_minor_collect(d);
 
     mark_young_roots(d);
+
+    mark_private_from_protected(d);
 
     mark_public_to_young(d);
 

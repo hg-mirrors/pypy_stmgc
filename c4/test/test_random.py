@@ -411,7 +411,7 @@ def test_single_thread(seed=DEFAULT_SEED):
     tester.run_single_thread()
 
 def test_more_single_thread():
-    py.test.skip("more random tests")
+    #py.test.skip("more random tests")
     for i in range(100):
         yield test_single_thread, i + 3900
 

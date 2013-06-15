@@ -409,6 +409,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
   P->h_revision = (revision_t)B;
 
   gcptrlist_insert(&d->private_from_protected, P);
+  fprintf(stderr, "private_from_protected: insert %p\n", P);
 
   return P;   /* always returns its arg: the object is converted in-place */
 }
@@ -779,6 +780,7 @@ static void init_transaction(struct tx_descriptor *d)
   }
   assert(d->list_of_read_objects.size == 0);
   assert(d->private_from_protected.size == 0);
+  assert(d->num_private_from_protected_known_old == 0);
   assert(!g2l_any_entry(&d->public_to_private));
   assert(d->public_descriptor->stolen_objects.size == 0);
 
@@ -993,6 +995,8 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
         }
     };
   gcptrlist_clear(&d->private_from_protected);
+  d->num_private_from_protected_known_old = 0;
+  fprintf(stderr, "private_from_protected: clear (commit)\n");
 }
 
 void AbortPrivateFromProtected(struct tx_descriptor *d)
@@ -1005,6 +1009,7 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
       gcptr P = items[i];
       assert(P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
       assert(IS_POINTER(P->h_revision));
+      P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
 
       gcptr B = (gcptr)P->h_revision;
       assert(B->h_tid & GCFLAG_OLD);
@@ -1012,7 +1017,6 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
       if (B->h_tid & GCFLAG_PUBLIC)
         {
           assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
-          P->h_tid &= ~GCFLAG_PRIVATE_FROM_PROTECTED;
           P->h_tid |= GCFLAG_PUBLIC;
           if (!(P->h_tid & GCFLAG_OLD)) P->h_tid |= GCFLAG_NURSERY_MOVED;
           /* P becomes a public outdated object.  It may create an
@@ -1024,12 +1028,20 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
         }
       else
         {
+          /* copy the backup copy B back over the now-protected object P,
+             and then free B, which will not be used any more. */
+          size_t size = stmcb_size(B);
           assert(B->h_tid & GCFLAG_BACKUP_COPY);
-          memcpy(P, B, stmcb_size(P));
-          P->h_tid &= ~GCFLAG_BACKUP_COPY;
+          memcpy(((char *)P) + offsetof(struct stm_object_s, h_revision),
+                 ((char *)B) + offsetof(struct stm_object_s, h_revision),
+                 size - offsetof(struct stm_object_s, h_revision));
+          assert(!(P->h_tid & GCFLAG_BACKUP_COPY));
+          stm_free(B, size);
         }
     };
   gcptrlist_clear(&d->private_from_protected);
+  d->num_private_from_protected_known_old = 0;
+  fprintf(stderr, "private_from_protected: clear (abort)\n");
 }
 
 void CommitTransaction(void)
