@@ -70,7 +70,7 @@ def test_get_backup_copy():
     assert pback and pback != p
     assert pback.h_revision == org_r
     assert pback.h_tid == ((p.h_tid & ~GCFLAG_PRIVATE_FROM_PROTECTED) |
-                           GCFLAG_BACKUP_COPY)
+                           GCFLAG_BACKUP_COPY | GCFLAG_OLD)
     assert lib.rawgetlong(pback, 0) == 78927812
     assert lib.rawgetlong(p, 0) == 927122
     assert classify(p) == "private_from_protected"
@@ -292,6 +292,10 @@ def test_stealing_while_modifying(aborting=False):
         assert classify(p) == "public"
         assert classify(p1) == "private"
         lib.rawsetlong(p1, 0, 2782172)
+        minor_collect()
+        check_nursery_free(p1)
+        p1 = lib.stm_read_barrier(p)
+        assert p1.h_tid & GCFLAG_OLD
         pback_ = []
 
         def cb(c):
@@ -378,17 +382,21 @@ def test_abort_private_from_protected():
 def test_abort_stealing_while_modifying():
     test_stealing_while_modifying(aborting=True)
 
-def test_stub_for_refs_from_stolen():
+def test_stub_for_refs_from_stolen(old=False):
     p = palloc_refs(1)
     qlist = []
     def f1(r):
+        q1 = nalloc(HDR + WORD)
+        if old:
+            lib.stm_push_root(q1)
+            minor_collect()
+            q1 = lib.stm_pop_root()
         assert (p.h_tid & GCFLAG_PUBLIC_TO_PRIVATE) == 0
         p1 = lib.stm_write_barrier(p)   # private copy
         assert p1 != p
         assert classify(p) == "public"
         assert classify(p1) == "private"
         assert p.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
-        q1 = nalloc(HDR + WORD)
         qlist.append(q1)
         lib.setlong(q1, 0, -29187)
         lib.setptr(p1, 0, q1)
@@ -412,7 +420,11 @@ def test_stub_for_refs_from_stolen():
         assert q2.h_revision % 4 == 2
         q3 = lib.stm_read_barrier(q2)
         assert q3 != q2
-        assert q3 == qlist[0]
+        if old:
+            assert q3 == qlist[0]
         assert classify(q3) == "public"   # has been stolen
         assert lib.getlong(q3, 0) == -29187
     run_parallel(f1, f2)
+
+def test_stub_for_refs_from_stolen_old():
+    test_stub_for_refs_from_stolen(old=True)

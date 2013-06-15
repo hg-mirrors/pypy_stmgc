@@ -62,6 +62,15 @@ gcptr stmgc_duplicate(gcptr P)
     return L;
 }
 
+gcptr stmgc_duplicate_old(gcptr P)
+{
+    size_t size = stmcb_size(P);
+    gcptr L = (gcptr)stm_malloc(size);
+    memcpy(L, P, size);
+    L->h_tid |= GCFLAG_OLD;
+    return L;
+}
+
 /************************************************************/
 
 static inline gcptr create_old_object_copy(gcptr obj)

@@ -20,5 +20,6 @@ void stmgc_done_nursery(void);
 void stmgc_minor_collect(void);
 int stmgc_minor_collect_anything_to_do(struct tx_descriptor *);
 gcptr stmgc_duplicate(gcptr);
+gcptr stmgc_duplicate_old(gcptr);
 
 #endif
