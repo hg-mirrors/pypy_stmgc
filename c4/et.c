@@ -414,7 +414,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
   return P;   /* always returns its arg: the object is converted in-place */
 }
 
-static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
+static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R, gcptr L)
 {
   assert(R->h_tid & GCFLAG_PUBLIC);
 
@@ -427,7 +427,6 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 
   R->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
-  gcptr L = stmgc_duplicate(R);
   assert(!(L->h_tid & GCFLAG_BACKUP_COPY));
   assert(!(L->h_tid & GCFLAG_STUB));
   assert(!(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
@@ -472,7 +471,7 @@ gcptr stm_WriteBarrier(gcptr P)
       return P;
     }
 
-  gcptr R, W;
+  gcptr R, L, W;
   R = stm_read_barrier(P);
 
   if (is_private(R))
@@ -484,6 +483,13 @@ gcptr stm_WriteBarrier(gcptr P)
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
 
+  L = NULL;
+  if (R->h_tid & GCFLAG_PUBLIC)
+    {
+    retry:
+      L = stmgc_duplicate(R);
+    }
+
   /* We need the collection_lock for the sequel; this is required notably
      because we're about to edit flags on a protected object.
   */
@@ -493,12 +499,19 @@ gcptr stm_WriteBarrier(gcptr P)
 
   if (R->h_tid & GCFLAG_PUBLIC)
     {
+      if (L == NULL)
+        {
+          /* Oups, the flags on R changed while we where waiting for
+             the collection_lock. */
+          spinlock_release(d->public_descriptor->collection_lock);
+          goto retry;
+        }
       /* Make and return a new (young) private copy of the public R.
          Add R into the list 'public_with_young_copy'.
       */
       assert(R->h_tid & GCFLAG_OLD);
       gcptrlist_insert(&d->public_with_young_copy, R);
-      W = LocalizePublic(d, R);
+      W = LocalizePublic(d, R, L);
       assert(is_private(W));
     }
   else
