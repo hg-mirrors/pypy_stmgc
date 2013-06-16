@@ -41,6 +41,7 @@ class RandomSingleThreadTester(object):
         self.sync_wait = sync_wait
         self.counter = 0
         self.current_rev = None
+        self.awaiting_abort = False
         #self.expecting_gap_in_commit_time = 2
         self.dump('run')
         #
@@ -100,7 +101,7 @@ class RandomSingleThreadTester(object):
         self.current_rev = None
 
     def cancel_expected_abort(self):
-        lib.stm_set_max_aborts(0)
+        lib.stm_set_max_aborts(int(self.awaiting_abort))
         self.expected_conflict = False
         self.current_rev = self.aborted_rev
         del self.aborted_rev
@@ -248,6 +249,16 @@ class RandomSingleThreadTester(object):
                 if q not in seen:
                     lst.append(q)
                     seen.add(q)
+
+            if self.is_private(ptr) and (p.obj.created_in_revision is not
+                                         self.current_rev):
+                try:
+                    self.current_rev.check_not_outdated(p.obj)
+                except model.Deleted:
+                    self.dump('POTENTIAL ABORT: %s' % (p,))
+                    self.awaiting_abort = True
+                    lib.stm_set_max_aborts(1)
+
         #self.dump('ok')
 
     def transaction_break(self):
@@ -273,9 +284,12 @@ class RandomSingleThreadTester(object):
         #
         if retry_counter == 0:
             assert not self.expected_conflict
+            assert not self.awaiting_abort
         else:
-            assert self.expected_conflict
+            assert self.expected_conflict or self.awaiting_abort
             self.expected_conflict = False
+            if self.awaiting_abort: self.current_rev = None
+            self.awaiting_abort = False
         #
         self.roots = self.roots_outside_perform[:]
         self.startrev()
@@ -330,6 +344,8 @@ class RandomSingleThreadTester(object):
 
     def commit(self):
         assert self.current_rev.start_time == lib.get_start_time()
+        if self.awaiting_abort:
+            raise model.Conflict("awaiting abort")
         self.current_rev.commit_transaction()
         self.current_rev = None
 
