@@ -31,14 +31,20 @@ void stmgc_done_nursery(void)
 
 static char *collect_and_allocate_size(size_t size);  /* forward */
 
-inline static char *allocate_nursery(size_t size)
+inline static char *allocate_nursery(size_t size, int can_collect)
 {
     struct tx_descriptor *d = thread_descriptor;
     char *cur = d->nursery_current;
     char *end = cur + size;
     d->nursery_current = end;
     if (end > d->nursery_end) {
-        cur = collect_and_allocate_size(size);
+        if (can_collect) {
+            cur = collect_and_allocate_size(size);
+        }
+        else {
+            d->nursery_current = cur;
+            cur = NULL;
+        }
     }
     return cur;
 }
@@ -46,7 +52,7 @@ inline static char *allocate_nursery(size_t size)
 gcptr stm_allocate(size_t size, unsigned long tid)
 {
     /* XXX inline the fast path */
-    gcptr P = (gcptr)allocate_nursery(size);
+    gcptr P = (gcptr)allocate_nursery(size, 1);
     assert(tid == (tid & STM_USER_TID_MASK));
     P->h_tid = tid;
     P->h_revision = stm_private_rev_num;
@@ -56,7 +62,10 @@ gcptr stm_allocate(size_t size, unsigned long tid)
 gcptr stmgc_duplicate(gcptr P)
 {
     size_t size = stmcb_size(P);
-    gcptr L = (gcptr)allocate_nursery(size);
+    gcptr L = (gcptr)allocate_nursery(size, 0);
+    if (L == NULL)
+        return stmgc_duplicate_old(P);
+
     memcpy(L, P, size);
     L->h_tid &= ~GCFLAG_OLD;
     return L;
@@ -290,7 +299,14 @@ static void minor_collect(struct tx_descriptor *d)
     teardown_minor_collect(d);
 
     /* clear the nursery */
+#if defined(_GC_DEBUG) && _GC_DEBUG >= 2
+    stm_free(d->nursery_base, GC_NURSERY);
+    d->nursery_base = stm_malloc(GC_NURSERY);
     memset(d->nursery_base, 0, GC_NURSERY);
+    d->nursery_end = d->nursery_base + GC_NURSERY;
+#else
+    memset(d->nursery_base, 0, GC_NURSERY);
+#endif
     d->nursery_current = d->nursery_base;
 
     assert(!stmgc_minor_collect_anything_to_do(d));

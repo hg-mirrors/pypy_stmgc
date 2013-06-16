@@ -2,6 +2,9 @@ import py
 from support import *
 
 
+COLLECT_MOVES_NURSERY = True
+
+
 def setup_function(f):
     lib.stm_clear_between_tests()
     lib.stm_initialize_tests(getattr(f, 'max_aborts', 0))
@@ -30,7 +33,8 @@ def test_stm_roots():
         p1 = lib.stm_pop_root()
         check_not_free(p1)
         check_not_free(p3)
-    assert p2 in seen    # the pointer location was reused
+    if not COLLECT_MOVES_NURSERY:
+        assert p2 in seen    # the pointer location was reused
 
 def test_nursery_follows():
     p1 = nalloc_refs(1)

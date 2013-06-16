@@ -464,7 +464,8 @@ def check_not_free(p):
     assert 42 < (p.h_tid & 0xFFFF) < 521
 
 def check_nursery_free(p):
-    assert p.h_tid == p.h_revision == 0
+    #assert p.h_tid == p.h_revision == 0
+    assert not lib._stm_can_access_memory(p)
 
 def check_inaccessible(p):
     assert not lib._stm_can_access_memory(p)
