@@ -179,3 +179,10 @@ class StmObject(object):
     def __init__(self, current_revision, numrefs):
         self.created_in_revision = current_revision
         current_revision.content[self] = [None] * numrefs
+
+    def __repr__(self):
+        if hasattr(self, 'identity') and hasattr(self, 'ffi'):
+            return '<StmObject 0x%x>' % (
+                int(self.ffi.cast('intptr_t', self.identity)),)
+        else:
+            return '<StmObject at 0x%x>' % (id(self),)

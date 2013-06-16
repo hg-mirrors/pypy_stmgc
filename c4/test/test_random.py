@@ -57,7 +57,7 @@ class RandomSingleThreadTester(object):
         text = '%d.%d$ %s\n' % (self.seed, self.counter, text)
         sys.stderr.write(text)
         self.counter += 1
-        #if text.startswith('261225.987$'):
+        #if text.startswith('3970.539$'):
         #    import pdb; pdb.set_trace()
 
     def check_not_free(self, ptr):
@@ -78,6 +78,7 @@ class RandomSingleThreadTester(object):
         assert self.current_rev is not None
         obj = model.StmObject(self.current_rev, 2)
         obj.identity = pid
+        obj.ffi = ffi
         self.sync.id2stmobj[pid] = obj
         return pair(obj, nptr)
 
@@ -216,6 +217,7 @@ class RandomSingleThreadTester(object):
             p = lst.pop()
             if p == emptypair:
                 continue
+            self.dump(repr(p))
             self.check(p)
 
             ptr = self.nonrecord_barrier(p.ptr)
@@ -241,10 +243,12 @@ class RandomSingleThreadTester(object):
                 qobj = content[i]
                 qptr = lib.rawgetptr(ptr, i)
                 q = pair(qobj, qptr)
+                self.dump('[%d] = %r' % (i, q))
                 self.check(q)
                 if q not in seen:
                     lst.append(q)
                     seen.add(q)
+        self.dump('ok')
 
     def transaction_break(self):
         if self.interruptible_transaction:
@@ -412,7 +416,7 @@ def test_single_thread(seed=DEFAULT_SEED):
 
 def test_more_single_thread():
     #py.test.skip("more random tests")
-    for i in range(100):
+    for i in range(70, 100):
         yield test_single_thread, i + 3900
 
 
