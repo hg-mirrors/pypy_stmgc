@@ -955,7 +955,9 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       L->h_revision = new_revision;
 
       gcptr stub = stm_stub_malloc(d->public_descriptor);
-      stub->h_tid = GCFLAG_PUBLIC | GCFLAG_STUB | GCFLAG_OLD;
+      stub->h_tid = (L->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
+                                                   | GCFLAG_STUB
+                                                   | GCFLAG_OLD;
       stub->h_revision = ((revision_t)L) | 2;
       item->val = stub;
 
