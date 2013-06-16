@@ -186,9 +186,9 @@ static void mark_public_to_young(struct tx_descriptor *d)
                be able to commit successfully.
             */
             fprintf(stderr, "public_to_young: %p was modified! abort!\n", P);
-            abort();
+            item->val = NULL;
             AbortTransactionAfterCollect(d, ABRT_COLLECT_MINOR);
-            //...
+            continue;
         }
 
         fprintf(stderr, "public_to_young: %p -> %p in public_to_private\n",
