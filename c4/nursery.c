@@ -269,6 +269,31 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
     }
 }
 
+static void fix_list_of_read_objects(struct tx_descriptor *d)
+{
+    long i, limit = d->num_read_objects_known_old;
+    gcptr *items = d->list_of_read_objects.items;
+    assert(d->list_of_read_objects.size >= limit);
+
+    for (i = d->list_of_read_objects.size - 1; i >= limit; --i) {
+        gcptr obj = items[i];
+
+        if (!is_in_nursery(d, obj)) {
+            /* non-young or visited young objects are kept */
+            continue;
+        }
+        else if (obj->h_tid & GCFLAG_NURSERY_MOVED) {
+            /* visited nursery objects are kept and updated */
+            items[i] = (gcptr)obj->h_revision;
+            continue;
+        }
+        /* The listed object was not visited.  Unlist it. */
+        items[i] = items[--d->list_of_read_objects.size];
+    }
+    d->num_read_objects_known_old = d->list_of_read_objects.size;
+    fxcache_clear(&d->recent_reads_cache);
+}
+
 static void setup_minor_collect(struct tx_descriptor *d)
 {
     spinlock_acquire(d->public_descriptor->collection_lock, 'M');  /*minor*/
@@ -304,18 +329,13 @@ static void minor_collect(struct tx_descriptor *d)
     mark_private_from_protected(d);
 
     visit_all_outside_objects(d);
-#if 0
+
     fix_list_of_read_objects(d);
 
     /* now all surviving nursery objects have been moved out, and all
        surviving young-but-outside-the-nursery objects have been flagged
-       with GCFLAG_OLD */
-    finish_public_to_young(d);
-
-    if (g2l_any_entry(&d->young_objects_outside_nursery))
-        free_unvisited_young_objects_outside_nursery(d);
-#endif
-
+       with GCFLAG_OLD
+    */
     teardown_minor_collect(d);
 
     /* clear the nursery */
