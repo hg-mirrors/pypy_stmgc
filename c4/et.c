@@ -112,7 +112,8 @@ gcptr stm_DirectReadBarrier(gcptr G)
 
           gcptr P_prev = P;
           P = (gcptr)v;
-          assert(P->h_tid & GCFLAG_PUBLIC);
+          assert((P->h_tid & GCFLAG_PUBLIC) ||
+                 (P_prev->h_tid & GCFLAG_NURSERY_MOVED));
 
           v = ACCESS_ONCE(P->h_revision);
 
