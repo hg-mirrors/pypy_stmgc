@@ -144,7 +144,12 @@ static void mark_private_from_protected(struct tx_descriptor *d)
     gcptr *items = d->private_from_protected.items;
 
     for (i = d->num_private_from_protected_known_old; i < size; i++) {
+        assert(items[i]->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+        assert(IS_POINTER(items[i]->h_revision));
+
         visit_if_young(&items[i]);
+
+        stmcb_trace((gcptr)items[i]->h_revision, &visit_if_young);
     }
 
     d->num_private_from_protected_known_old = size;
