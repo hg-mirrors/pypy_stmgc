@@ -87,6 +87,7 @@ gcptr stmgc_duplicate_old(gcptr P)
 
 static inline gcptr create_old_object_copy(gcptr obj)
 {
+    assert(!(obj->h_tid & GCFLAG_PUBLIC));
     assert(!(obj->h_tid & GCFLAG_NURSERY_MOVED));
     assert(!(obj->h_tid & GCFLAG_VISITED));
     assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
