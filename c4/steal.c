@@ -224,6 +224,10 @@ void stm_normalize_stolen_objects(struct tx_descriptor *d)
            must appear in list_of_read_objects */
         fprintf(stderr, "n.readobj: %p\n", B);
         gcptrlist_insert(&d->list_of_read_objects, B);
+
+        /* must also list it here, in case the next minor collect moves it */
+        if (!(L->h_tid & GCFLAG_OLD))
+            gcptrlist_insert(&d->public_with_young_copy, B);
     }
     gcptrlist_clear(&d->public_descriptor->stolen_objects);
 }
