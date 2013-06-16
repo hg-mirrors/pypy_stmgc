@@ -1363,6 +1363,7 @@ void DescriptorDone(void)
     assert(d->active == 0);
     assert(d->public_descriptor->stolen_objects.size == 0);
     gcptrlist_delete(&d->public_descriptor->stolen_objects);
+    gcptrlist_delete(&d->public_descriptor->stolen_young_stubs);
 
     spinlock_acquire(descriptor_array_lock, 1);
     i = d->public_descriptor_index;

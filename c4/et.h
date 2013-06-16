@@ -112,6 +112,7 @@ struct tx_public_descriptor {
   struct stub_block_s *stub_blocks;
   gcptr stub_free_list;
   struct GcPtrList stolen_objects;
+  struct GcPtrList stolen_young_stubs;
   revision_t free_list_next;
   /* xxx gcpage data here */
 };

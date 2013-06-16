@@ -155,6 +155,48 @@ static void mark_private_from_protected(struct tx_descriptor *d)
     d->num_private_from_protected_known_old = size;
 }
 
+static void trace_stub(struct tx_descriptor *d, gcptr S)
+{
+    revision_t w = ACCESS_ONCE(S->h_revision);
+    if ((w & 3) != 2) {
+        /* P has a ptr in h_revision, but this object is not a stub
+           with a protected pointer.  It has likely been the case
+           in the past, but someone made even more changes.
+           Nothing to do now.
+        */
+        fprintf(stderr, "trace_stub: %p not a stub, ignored\n", S);
+        return;
+    }
+
+    assert(S->h_tid & GCFLAG_STUB);
+    if (STUB_THREAD(S) != d->public_descriptor) {
+        /* Bah, it's indeed a stub but for another thread.  Nothing
+           to do now.
+        */
+        fprintf(stderr, "trace_stub: %p stub wrong thread, ignored\n", S);
+        return;
+    }
+
+    /* It's a stub for us.  It cannot be un-stubbed under our
+       feet because we hold our own collection_lock.
+    */
+    gcptr L = (gcptr)(w - 2);
+    fprintf(stderr, "trace_stub: %p stub -> %p\n", S, L);
+    visit_if_young(&L);
+    S->h_revision = ((revision_t)L) | 2;
+}
+
+static void mark_stolen_young_stubs(struct tx_descriptor *d)
+{
+    long i, size = d->public_descriptor->stolen_young_stubs.size;
+    gcptr *items = d->public_descriptor->stolen_young_stubs.items;
+
+    for (i = 0; i < size; i++) {
+        trace_stub(d, items[i]);
+    }
+    gcptrlist_clear(&d->public_descriptor->stolen_young_stubs);
+}
+
 static void mark_public_to_young(struct tx_descriptor *d)
 {
     /* "public_with_young_copy" lists the public copies that may have
@@ -207,37 +249,8 @@ static void mark_public_to_young(struct tx_descriptor *d)
             continue;
         }
 
-        gcptr S = (gcptr)v;
-        revision_t w = ACCESS_ONCE(S->h_revision);
-        if ((w & 3) != 2) {
-            /* P has a ptr in h_revision, but this object is not a stub
-               with a protected pointer.  It has likely been the case
-               in the past, but someone made even more changes.
-               Nothing to do now.
-            */
-            fprintf(stderr, "public_to_young: %p -> %p not a stub, ignored\n",
-                    P, S);
-            continue;
-        }
-
-        if (STUB_THREAD(S) != d->public_descriptor) {
-            /* Bah, it's indeed a stub but for another thread.  Nothing
-               to do now.
-            */
-            fprintf(stderr, "public_to_young: %p -> %p stub wrong thread, "
-                    "ignored\n", P, S);
-            continue;
-        }
-
-        /* It's a stub for us.  It cannot be un-stubbed under our
-           feet because we hold our own collection_lock.
-        */
-        gcptr L = (gcptr)(w - 2);
-        fprintf(stderr, "public_to_young: %p -> %p stub -> %p\n",
-                P, S, L);
-
-        visit_if_young(&L);
-        S->h_revision = ((revision_t)L) | 2;
+        fprintf(stderr, "public_to_young: %p -> ", P);
+        trace_stub(d, (gcptr)v);
     }
 
     gcptrlist_clear(&d->public_with_young_copy);
@@ -286,6 +299,8 @@ static void minor_collect(struct tx_descriptor *d)
 
     mark_young_roots(d);
 
+    mark_stolen_young_stubs(d);
+
     mark_private_from_protected(d);
 
     visit_all_outside_objects(d);
@@ -309,6 +324,8 @@ static void minor_collect(struct tx_descriptor *d)
     d->nursery_base = stm_malloc(GC_NURSERY);
     memset(d->nursery_base, 0, GC_NURSERY);
     d->nursery_end = d->nursery_base + GC_NURSERY;
+    fprintf(stderr, "minor: nursery moved to [%p to %p]\n", d->nursery_base,
+            d->nursery_end);
 #else
     memset(d->nursery_base, 0, GC_NURSERY);
 #endif
