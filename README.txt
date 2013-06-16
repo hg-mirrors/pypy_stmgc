@@ -9,6 +9,10 @@ It is meant to be a general library that can be used in C programs.
 
 The library interface is in "c4/stmgc.h".
 
+Progress (these revisions are roughly stable versions, pick the latest):
+- f1ccf5bbcb6f: first step, working but with no GC
+- 8da924453f29: minor collection seems to be working, no major GC
+
 The file "c4/doc-objects.txt" contains some low-level explanations.
 
 Run tests with "py.test".
