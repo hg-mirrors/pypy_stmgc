@@ -12,7 +12,8 @@
     char *nursery_base;                                 \
     struct GcPtrList old_objects_to_trace;              \
     struct GcPtrList public_with_young_copy;            \
-    long num_private_from_protected_known_old;
+    long num_private_from_protected_known_old;          \
+    long num_read_objects_known_old;
 
 struct tx_descriptor;  /* from et.h */
 

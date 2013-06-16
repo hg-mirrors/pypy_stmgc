@@ -790,6 +790,7 @@ static void init_transaction(struct tx_descriptor *d)
   assert(d->list_of_read_objects.size == 0);
   assert(d->private_from_protected.size == 0);
   assert(d->num_private_from_protected_known_old == 0);
+  assert(d->num_read_objects_known_old == 0);
   assert(!g2l_any_entry(&d->public_to_private));
   assert(d->public_descriptor->stolen_objects.size == 0);
 
@@ -1008,6 +1009,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
     };
   gcptrlist_clear(&d->private_from_protected);
   d->num_private_from_protected_known_old = 0;
+  d->num_read_objects_known_old = 0;
   fprintf(stderr, "private_from_protected: clear (commit)\n");
 }
 
@@ -1053,6 +1055,7 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
     };
   gcptrlist_clear(&d->private_from_protected);
   d->num_private_from_protected_known_old = 0;
+  d->num_read_objects_known_old = 0;
   fprintf(stderr, "private_from_protected: clear (abort)\n");
 }
 
