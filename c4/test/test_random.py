@@ -217,7 +217,7 @@ class RandomSingleThreadTester(object):
             p = lst.pop()
             if p == emptypair:
                 continue
-            self.dump(repr(p))
+            #self.dump(repr(p))
             self.check(p)
 
             ptr = self.nonrecord_barrier(p.ptr)
@@ -243,12 +243,12 @@ class RandomSingleThreadTester(object):
                 qobj = content[i]
                 qptr = lib.rawgetptr(ptr, i)
                 q = pair(qobj, qptr)
-                self.dump('[%d] = %r' % (i, q))
+                #self.dump('[%d] = %r' % (i, q))
                 self.check(q)
                 if q not in seen:
                     lst.append(q)
                     seen.add(q)
-        self.dump('ok')
+        #self.dump('ok')
 
     def transaction_break(self):
         if self.interruptible_transaction:
@@ -415,9 +415,9 @@ def test_single_thread(seed=DEFAULT_SEED):
     tester.run_single_thread()
 
 def test_more_single_thread():
-    #py.test.skip("more random tests")
-    for i in range(70, 100):
-        yield test_single_thread, i + 3900
+    py.test.skip("more random tests")
+    for i in range(200):
+        yield test_single_thread, i + 3800
 
 
 class Sync(object):
