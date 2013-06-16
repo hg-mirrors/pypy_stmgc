@@ -448,6 +448,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 {
   assert(R->h_tid & GCFLAG_PUBLIC);
+  assert(!(R->h_tid & GCFLAG_NURSERY_MOVED));
 
 #ifdef _GC_DEBUG
   wlog_t *entry;
@@ -529,6 +530,14 @@ gcptr stm_WriteBarrier(gcptr P)
          Add R into the list 'public_with_young_copy', unless W is
          actually an old object, in which case we need to record W.
       */
+      if (R->h_tid & GCFLAG_NURSERY_MOVED)
+        {
+          /* Bah, the object turned into this kind of stub while we
+             were waiting for the collection_lock, because it was
+             stolen by someone else.  Use R->h_revision instead. */
+          assert(IS_POINTER(R->h_revision));
+          R = (gcptr)R->h_revision;
+        }
       assert(R->h_tid & GCFLAG_OLD);
       W = LocalizePublic(d, R);
       assert(is_private(W));
