@@ -17,6 +17,9 @@ void stmgc_init_nursery(void)
     memset(d->nursery_base, 0, GC_NURSERY);
     d->nursery_end = d->nursery_base + GC_NURSERY;
     d->nursery_current = d->nursery_base;
+
+    fprintf(stderr, "minor: nursery is at [%p to %p]\n", d->nursery_base,
+            d->nursery_end);
 }
 
 void stmgc_done_nursery(void)
