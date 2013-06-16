@@ -866,6 +866,9 @@ static void CancelLocks(struct tx_descriptor *d)
     {
       gcptr R = item->addr;
       gcptr L = item->val;
+      if (L == NULL)
+        continue;
+
       revision_t expected, v = L->h_revision;
 
       if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
