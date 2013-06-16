@@ -283,6 +283,23 @@ static gcptr _find_public_to_private(gcptr P)
   return NULL;
 }
 
+static void _check_flags(gcptr P)
+{
+  struct tx_descriptor *d = thread_descriptor;
+  int is_old = (P->h_tid & GCFLAG_OLD) != 0;
+  int in_nurs = (d->nursery_base <= (char*)P && ((char*)P) < d->nursery_end);
+  if (in_nurs)
+    {
+      assert(!is_old);
+      fprintf(stderr, "Y ");
+    }
+  else
+    {
+      assert(is_old);
+      fprintf(stderr, "O ");
+    }
+}
+
 gcptr _stm_nonrecord_barrier(gcptr P)
 {
   /* follows the logic in stm_DirectReadBarrier() */
@@ -290,6 +307,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
   revision_t v;
 
   fprintf(stderr, "_stm_nonrecord_barrier: %p ", P);
+  _check_flags(P);
 
  restart_all:
   if (P->h_revision == stm_private_rev_num)
@@ -313,6 +331,9 @@ gcptr _stm_nonrecord_barrier(gcptr P)
 
       while (v = P->h_revision, IS_POINTER(v))
         {
+          if (P->h_tid & GCFLAG_NURSERY_MOVED)
+            fprintf(stderr, "nursery_moved ");
+
           if (v & 2)
             {
               fprintf(stderr, "stub ");
@@ -323,6 +344,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
             }
 
           P = (gcptr)v;
+          _check_flags(P);
           assert(P->h_tid & GCFLAG_PUBLIC);
           fprintf(stderr, "-> %p public ", P);
         }
@@ -348,15 +370,18 @@ gcptr _stm_nonrecord_barrier(gcptr P)
   if (STUB_THREAD(P) == d->public_descriptor)
     {
       P = (gcptr)(v - 2);
+      _check_flags(P);
       fprintf(stderr, "-> %p ", P);
     }
   else
     {
       P = (gcptr)(v - 2);
+      /* cannot _check_flags(P): foreign! */
       fprintf(stderr, "-foreign-> %p ", P);
       if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
         {
           P = (gcptr)P->h_revision;     /* the backup copy */
+          /* cannot _check_flags(P): foreign! */
           fprintf(stderr, "-backup-> %p ", P);
         }
       if (!(P->h_tid & GCFLAG_PUBLIC))
@@ -365,6 +390,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
           return (gcptr)-1;
         }
     }
+  /* cannot _check_flags(P): foreign! */
   goto restart_all;
 }
 
@@ -409,7 +435,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
   P->h_revision = (revision_t)B;
 
   gcptrlist_insert(&d->private_from_protected, P);
-  fprintf(stderr, "private_from_protected: insert %p\n", P);
+  fprintf(stderr, "private_from_protected: insert %p (backup %p)\n", P, B);
 
   return P;   /* always returns its arg: the object is converted in-place */
 }
@@ -1006,6 +1032,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
       else
         {
           stm_free(B, stmcb_size(B));
+          fprintf(stderr, "commit: free backup at %p\n", B);
         }
     };
   gcptrlist_clear(&d->private_from_protected);
@@ -1052,6 +1079,7 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
                  size - offsetof(struct stm_object_s, h_revision));
           assert(!(P->h_tid & GCFLAG_BACKUP_COPY));
           stm_free(B, size);
+          fprintf(stderr, "abort: free backup at %p\n", B);
         }
     };
   gcptrlist_clear(&d->private_from_protected);

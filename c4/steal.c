@@ -55,7 +55,8 @@ static __thread struct tx_steal_data *steal_data;
 static void replace_ptr_to_protected_with_stub(gcptr *pobj)
 {
     gcptr stub, obj = *pobj;
-    if (obj == NULL || (obj->h_tid & GCFLAG_PUBLIC) != 0)
+    if (obj == NULL || (obj->h_tid & (GCFLAG_PUBLIC | GCFLAG_OLD)) ==
+                        (GCFLAG_PUBLIC | GCFLAG_OLD))
         return;
 
     /* we use 'all_stubs', a dictionary, in order to try to avoid
@@ -138,8 +139,10 @@ void stm_steal_stub(gcptr P)
                has GCFLAG_NURSERY_MOVED), but it is fine to do it more
                generally. */
             v = ACCESS_ONCE(L->h_revision);
-            if (IS_POINTER(v))
+            if (IS_POINTER(v)) {
                 L = (gcptr)v;
+                fprintf(stderr, "\t---> %p\n", L);
+            }
             goto already_stolen;
         }
 
@@ -151,6 +154,7 @@ void stm_steal_stub(gcptr P)
             L->h_revision = (revision_t)O;
             L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
             L = O;
+            fprintf(stderr, "\t---> %p\n", L);
         }
         assert(L->h_tid & GCFLAG_OLD);
     }
