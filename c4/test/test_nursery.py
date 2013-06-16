@@ -276,3 +276,23 @@ def test_move_to_one_place():
     p2b = lib.stm_pop_root()
     p2c = lib.stm_pop_root()
     assert p2a == p2b == p2c
+
+def test_backup_ptr_update():
+    p1 = nalloc_refs(1)
+    p2 = nalloc(HDR + WORD)
+    lib.setlong(p2, 0, 389719)
+    lib.setptr(p1, 0, p2)
+    lib.stm_push_root(p1)
+    assert lib.in_nursery(p1)
+
+    @perform_transaction
+    def run(retry_counter):
+        if retry_counter == 0:
+            lib.stm_write_barrier(p1)
+            minor_collect()
+            abort_and_retry()
+
+    p1 = lib.stm_pop_root()
+    assert not lib.in_nursery(p1)
+    p2 = lib.getptr(p1, 0)
+    assert lib.getlong(p2, 0) == 389719
