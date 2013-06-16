@@ -286,6 +286,10 @@ static gcptr _find_public_to_private(gcptr P)
 static void _check_flags(gcptr P)
 {
   struct tx_descriptor *d = thread_descriptor;
+  if (P->h_tid & GCFLAG_STUB)
+    {
+      fprintf(stderr, "S");
+    }
   int is_old = (P->h_tid & GCFLAG_OLD) != 0;
   int in_nurs = (d->nursery_base <= (char*)P && ((char*)P) < d->nursery_end);
   if (in_nurs)
@@ -344,9 +348,9 @@ gcptr _stm_nonrecord_barrier(gcptr P)
             }
 
           P = (gcptr)v;
-          _check_flags(P);
           assert(P->h_tid & GCFLAG_PUBLIC);
           fprintf(stderr, "-> %p public ", P);
+          _check_flags(P);
         }
 
       gcptr L = _find_public_to_private(P);
@@ -370,8 +374,8 @@ gcptr _stm_nonrecord_barrier(gcptr P)
   if (STUB_THREAD(P) == d->public_descriptor)
     {
       P = (gcptr)(v - 2);
-      _check_flags(P);
       fprintf(stderr, "-> %p ", P);
+      _check_flags(P);
     }
   else
     {

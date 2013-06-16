@@ -112,7 +112,24 @@ static void visit_if_young(gcptr *root)
         /* it's a nursery object.  Was it already moved? */
 
         if (UNLIKELY(obj->h_tid & GCFLAG_NURSERY_MOVED)) {
-            /* yes: just fix the ref. */
+
+            /* yes, but was it actually a public object in the nursery?
+               (such objects are always NURSERY_MOVED) */
+            if (obj->h_tid & GCFLAG_PUBLIC) {
+
+                /* follow the chain of revisions.  Necessary, otherwise
+                   we could end up with 'obj' being an incomplete stub. */
+                while (1) {
+                    revision_t v = ACCESS_ONCE(obj->h_revision);
+                    if (!IS_POINTER(v))
+                        break;
+                    obj = (gcptr)v;
+                }
+                *root = obj;
+                return;
+            }
+
+            /* common case: multiple refs, just fix the ref. */
             *root = (gcptr)obj->h_revision;
             return;
         }
