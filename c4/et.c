@@ -601,6 +601,13 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
                  before it was turned from protected to private */
               continue;
             }
+          else if ((R->h_tid & (GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED))
+                            == (GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED))
+            {
+              /* such an object is identical to the one it points to */
+              R = (gcptr)v;
+              goto retry;
+            }
           else
             {
               fprintf(stderr, "validation failed: "
@@ -611,19 +618,14 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
       if (v >= LOCKED)            // locked
         {
           if (!during_commit)
+            assert(v != d->my_lock);    // we don't hold any lock
+
+          if (v != d->my_lock)
             {
-              assert(v != d->my_lock);    // we don't hold any lock
+              /* not locked by me: spinloop until the other thread releases
+                 its lock */
               SpinLoop(SPLP_LOCKED_VALIDATE);
               goto retry;
-            }
-          else
-            {
-              if (v != d->my_lock)         // not locked by me: conflict
-                {
-                  fprintf(stderr, "validation failed: "
-                          "%p is locked by another thread\n", R);
-                  return 0;
-                }
             }
         }
     }
