@@ -9,8 +9,8 @@ clean:
 
 
 H_FILES = atomic_ops.h stmgc.h stmimpl.h \
-          dbgmem.h et.h fprintcolor.h lists.h steal.h stmsync.h
-C_FILES = dbgmem.c et.c fprintcolor.c lists.c steal.c stmsync.c
+	  et.h lists.h steal.h nursery.h stmsync.h dbgmem.h fprintcolor.h
+C_FILES = et.c lists.c steal.c nursery.c stmsync.c dbgmem.c fprintcolor.c
 
 DEBUG = -g -DGC_NURSERY=0x10000  #-D_GC_DEBUG=1
 
