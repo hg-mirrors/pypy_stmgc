@@ -79,6 +79,9 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
     stub->h_revision = ((revision_t)obj) | 2;
     g2l_insert(&sd->all_stubs, obj, stub);
 
+    if (!(obj->h_tid & GCFLAG_OLD))
+        gcptrlist_insert(&sd->foreign_pd->stolen_young_stubs, stub);
+
  done:
     *pobj = stub;
     fprintf(stderr, "  stolen: fixing *%p: %p -> %p\n", pobj, obj, stub);
@@ -116,15 +119,14 @@ void stm_steal_stub(gcptr P)
             L = B;
             goto already_stolen;
         }
-        else {
-            B->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
-            /* add {B: L} in 'public_to_private', but lazily, because we
-               don't want to walk over the feet of the foreign thread
-            */
-            gcptrlist_insert2(&foreign_pd->stolen_objects, B, L);
-            fprintf(stderr, "stolen: %p -> %p <-> %p\n", P, L, B);
-            L = B;
-        }
+
+        B->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
+        /* add {B: L} in 'public_to_private', but lazily, because we
+           don't want to walk over the feet of the foreign thread
+        */
+        gcptrlist_insert2(&foreign_pd->stolen_objects, B, L);
+        fprintf(stderr, "stolen: %p -> %p <-> %p\n", P, L, B);
+        L = B;
     }
     else {
         if (L->h_tid & GCFLAG_PUBLIC) {
@@ -140,9 +142,8 @@ void stm_steal_stub(gcptr P)
                 L = (gcptr)v;
             goto already_stolen;
         }
-        else {
-            fprintf(stderr, "stolen: %p -> %p\n", P, L);
-        }
+
+        fprintf(stderr, "stolen: %p -> %p\n", P, L);
 
         /* Copy the object out of the other thread's nursery, if needed */
         if (!(L->h_tid & GCFLAG_OLD)) {
@@ -151,6 +152,7 @@ void stm_steal_stub(gcptr P)
             L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
             L = O;
         }
+        assert(L->h_tid & GCFLAG_OLD);
     }
 
     /* Here L is a protected (or backup) copy, and we own the foreign
