@@ -15,7 +15,7 @@ int threadcolor_fprintf(FILE *stream, const char *format, ...)
             if (bool_cas(&tnextid, tcolor, tcolor + 1))
                 break;
         }
-        tcolor = 31 + tcolor % 7;
+        tcolor = 31 + tcolor % 6;
     }
     int size = (int)sprintf(buffer, "\033[%dm", (int)tcolor);
     assert(size >= 0);
