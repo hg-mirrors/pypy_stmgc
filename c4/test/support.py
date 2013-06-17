@@ -5,11 +5,11 @@ import os, cffi, thread, sys
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 header_files = [os.path.join(parent_dir, _n) for _n in
-                "et.h lists.h steal.h nursery.h "
+                "et.h lists.h steal.h nursery.h gcpage.h "
                 "stmsync.h dbgmem.h fprintcolor.h "
                 "stmgc.h stmimpl.h atomic_ops.h".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
-                "et.c lists.c steal.c nursery.c "
+                "et.c lists.c steal.c nursery.c gcpage.c "
                 "stmsync.c dbgmem.c fprintcolor.c".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
@@ -57,7 +57,7 @@ ffi.cdef('''
     void *stm_malloc(size_t size);
     //gcptr stmgcpage_malloc(size_t size);
     //void stmgcpage_free(gcptr obj);
-    //long stmgcpage_count(int quantity);
+    long stmgcpage_count(int quantity);
     //void stmgcpage_possibly_major_collect(int);
     revision_t stm_global_cur_time(void);
     //void stmgcpage_add_prebuilt_root(gcptr);
@@ -116,7 +116,6 @@ lib = ffi.verify(r'''
 
     //extern gcptr stmgcpage_malloc(size_t size);
     //extern void stmgcpage_free(gcptr obj);
-    //extern long stmgcpage_count(int quantity);
     //extern void stmgcpage_possibly_major_collect(int);
     extern revision_t stm_global_cur_time(void);
     //extern void stmgcpage_add_prebuilt_root(gcptr);

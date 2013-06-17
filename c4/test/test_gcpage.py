@@ -1,0 +1,34 @@
+import py
+from support import *
+
+
+def setup_function(f):
+    lib.stm_clear_between_tests()
+    lib.stm_initialize_tests(getattr(f, 'max_aborts', 0))
+
+def teardown_function(_):
+    lib.stm_finalize()
+
+
+def test_HDR():
+    import struct
+    assert HDR == struct.calcsize("PP")
+
+def test_malloc_simple():
+    assert count_pages() == 0
+    p1 = lib.stmgcpage_malloc(HDR)
+    print p1
+    p2 = lib.stmgcpage_malloc(HDR)
+    print p2
+    p3 = lib.stmgcpage_malloc(HDR)
+    print p3
+    assert count_pages() == 1
+    p4 = lib.stmgcpage_malloc(HDR + 1)
+    print p4
+    assert count_pages() == 2
+    p5 = lib.stmgcpage_malloc(HDR + 1)
+    print p5
+    assert distance(p1, p2) == HDR
+    assert distance(p2, p3) == HDR
+    assert abs(distance(p3, p4)) > PAGE_ROOM / 2
+    assert distance(p4, p5) == HDR + WORD
