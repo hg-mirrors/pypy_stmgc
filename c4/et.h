@@ -53,6 +53,11 @@
  * by major collections.  'p_stub->h_revision' might be a value
  * that is == 2 (mod 4): in this case they point to a protected/private
  * object that belongs to the thread 'STUB_THREAD(p_stub)'.
+ *
+ * GCFLAG_PRIVATE_FROM_PROTECTED is set on objects that are private
+ * but converted from a protected.  These are precisely the objects
+ * that have a backup copy (in h_revision), which gives a copy of the
+ * original protected object.
  */
 static const revision_t GCFLAG_OLD                    = STM_FIRST_GCFLAG << 0;
 static const revision_t GCFLAG_VISITED                = STM_FIRST_GCFLAG << 1;
