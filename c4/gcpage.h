@@ -60,7 +60,7 @@ typedef struct page_header_s {
     gcptr free_loc_for_size[GC_SMALL_REQUESTS];                         \
                                                                         \
     /* For statistics */                                                \
-    uintptr_t count_pages;
+    revision_t count_pages;
 
 
 #define LOCAL_GCPAGES()  (thread_descriptor->public_descriptor)

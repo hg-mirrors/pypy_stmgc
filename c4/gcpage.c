@@ -12,7 +12,7 @@ static pthread_mutex_t mutex_gc_lock = PTHREAD_MUTEX_INITIALIZER;
 static revision_t countdown_next_major_coll = GC_MIN;
 
 /* For statistics */
-static uintptr_t count_global_pages;
+static revision_t count_global_pages;
 
 /* For tests */
 long stmgcpage_count(int quantity)
@@ -20,6 +20,7 @@ long stmgcpage_count(int quantity)
     switch (quantity) {
     case 0: return count_global_pages;
     case 1: return LOCAL_GCPAGES()->count_pages;
+    case 2: count_global_pages = 0; return 0;
     default: return -1;
     }
 }
@@ -62,13 +63,8 @@ void stmgcpage_done_tls(void)
     /* Send to the shared area all my pages.  For now we don't extract
        the information about which locations are free or not; we just
        leave it to the next major GC to figure them out. */
-#if 0
     struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
-
-    gcp->gcp_next = finished_thread_gcpages;
-    finished_thread_gcpages = gcp;
-    count_global_pages += gcp->count_pages;*/
-#endif
+    count_global_pages += gcp->count_pages;
 }
 
 
