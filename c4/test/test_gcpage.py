@@ -72,3 +72,18 @@ def test_move_away_as_full_pages():
     lib.stm_initialize_and_set_max_abort(0)    # reuse the same
     assert count_global_pages() == 0
     assert count_pages() == 1
+
+def test_move_away_as_full_pages_2():
+    def f1(r):
+        assert count_global_pages() == 0
+        oalloc(HDR)
+        assert count_pages() == 1
+        return 2
+    def f2(r):
+        r.wait(2)
+        assert count_global_pages() == 1
+        assert count_pages() == 0
+        oalloc(HDR)
+        assert count_global_pages() == 1
+        assert count_pages() == 1
+    run_parallel(f1, f2)
