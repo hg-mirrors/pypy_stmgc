@@ -308,11 +308,15 @@ class run_parallel(object):
         self.parallel_locks = (thread.allocate_lock(), thread.allocate_lock())
         self.parallel_locks[0].acquire()
         self.resulting_exception = None
-        locks = []
+        self.start_locks = []
         for fn in fns:
+            self.start_locks.append(thread.allocate_lock())
+            self.start_locks[-1].acquire()
+        locks = []
+        for i, fn in enumerate(fns):
             lck = thread.allocate_lock()
             lck.acquire()
-            thread.start_new_thread(self.run, (fn, lck))
+            thread.start_new_thread(self.run, (fn, lck, i))
             locks.append(lck)
         for lck in locks:
             lck.acquire()
@@ -322,11 +326,17 @@ class run_parallel(object):
             exc, val, tb = self.resulting_exception
             raise exc, val, tb
 
-    def run(self, fn, lck):
+    def run(self, fn, lck, i):
         try:
             try:
                 lib.stm_initialize_and_set_max_abort(self.max_aborts)
                 try:
+                    # wait here until all threads reach this point
+                    self.start_locks[i].release()
+                    for _lck1 in self.start_locks:
+                        acquire_lock(_lck1)
+                        _lck1.release()
+                    #
                     fn(self)
                 finally:
                     lib.stm_finalize()
