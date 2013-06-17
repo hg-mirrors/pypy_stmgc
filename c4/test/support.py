@@ -337,9 +337,11 @@ class run_parallel(object):
                         acquire_lock(_lck1)
                         _lck1.release()
                     #
-                    fn(self)
+                    set_value = fn(self)
                 finally:
                     lib.stm_finalize()
+                if set_value is not None:
+                    self.set_afterwards(set_value)
             except Interrupted:
                 pass
             except:
@@ -376,6 +378,14 @@ class run_parallel(object):
             acquire_lock(self._get_lock(self.step))
             self.step = num
             print 'set(%d)' % num
+            self._get_lock(num).release()
+
+    def set_afterwards(self, num):
+        # Set the value of 'self.step' to 'num'.
+        with self.settinglock:
+            self._get_lock(self.step).acquire()
+            self.step = num
+            print 'set_afterwards(%d)' % num
             self._get_lock(num).release()
 
     def set_interrupted(self):
