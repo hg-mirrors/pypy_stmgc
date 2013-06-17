@@ -133,3 +133,13 @@ def test_keep_local_roots_alive():
     p3 = oalloc(HDR)
     p4 = oalloc(HDR)
     assert p2 != p3 != p4 != p2
+
+def test_trace_simple():
+    p1 = oalloc_refs(1)
+    p2 = oalloc(HDR)
+    rawsetptr(p1, 0, p2)
+    lib.stm_push_root(p1)
+    major_collect()
+    p1b = lib.stm_pop_root()
+    assert p1b == p1    # oalloc() does not use the nursery
+    assert count_pages() == 2   # one for p1, one for p2, which have != sizes
