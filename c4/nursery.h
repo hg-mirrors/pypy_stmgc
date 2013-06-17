@@ -6,14 +6,34 @@
 #endif
 
 
-#define NURSERY_FIELDS_DECL                             \
-    char *nursery_current;                              \
-    char *nursery_end;                                  \
-    char *nursery_base;                                 \
-    struct GcPtrList old_objects_to_trace;              \
-    struct GcPtrList public_with_young_copy;            \
-    long num_private_from_protected_known_old;          \
+#define NURSERY_FIELDS_DECL                                             \
+    /* the nursery */                                                   \
+    char *nursery_current;                                              \
+    char *nursery_end;                                                  \
+    char *nursery_base;                                                 \
+                                                                        \
+    /* Between collections, we add to 'old_objects_to_trace' the        \
+       private objects that are old but may contain pointers to         \
+       young objects.  During minor collections the same list is        \
+       used to record all other old objects pending tracing; in         \
+       other words minor collection is a process that works             \
+       until the list is empty again. */                                \
+    struct GcPtrList old_objects_to_trace;                              \
+                                                                        \
+    /* 'public_with_young_copy' is a list of all public objects         \
+       that are outdated and whose 'h_revision' points to a             \
+       young object. */                                                 \
+    struct GcPtrList public_with_young_copy;                            \
+                                                                        \
+    /* These numbers are initially zero, but after a minor              \
+       collection, they are set to the size of the two lists            \
+       'private_from_protected' and 'list_of_read_objects'.             \
+       It's used on the following minor collection, if we're            \
+       still in the same transaction, to know that the initial          \
+       part of the lists cannot contain young objects any more. */      \
+    long num_private_from_protected_known_old;                          \
     long num_read_objects_known_old;
+
 
 struct tx_descriptor;  /* from et.h */
 
