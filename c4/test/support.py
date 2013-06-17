@@ -55,8 +55,8 @@ ffi.cdef('''
 
     /* extra non-public code */
     void *stm_malloc(size_t size);
-    //gcptr stmgcpage_malloc(size_t size);
-    //void stmgcpage_free(gcptr obj);
+    gcptr stmgcpage_malloc(size_t size);
+    void stmgcpage_free(gcptr obj);
     long stmgcpage_count(int quantity);
     //void stmgcpage_possibly_major_collect(int);
     revision_t stm_global_cur_time(void);
@@ -107,7 +107,7 @@ ffi.cdef('''
     #define GCFLAG_STUB              ...
     #define GCFLAG_PRIVATE_FROM_PROTECTED  ...
     #define ABRT_MANUAL              ...
-    //typedef struct { ...; } page_header_t;
+    typedef struct { ...; } page_header_t;
 ''')
 
 lib = ffi.verify(r'''
@@ -266,7 +266,7 @@ lib = ffi.verify(r'''
 
 HDR = ffi.sizeof("struct stm_object_s")
 WORD = lib.WORD
-#PAGE_ROOM = lib.GC_PAGE_SIZE - ffi.sizeof("page_header_t")
+PAGE_ROOM = lib.GC_PAGE_SIZE - ffi.sizeof("page_header_t")
 for name in lib.__dict__:
     if name.startswith('GCFLAG_') or name.startswith('PREBUILT_'):
         globals()[name] = getattr(lib, name)
