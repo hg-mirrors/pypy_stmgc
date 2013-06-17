@@ -183,6 +183,95 @@ void stmgcpage_free(gcptr obj)
 }
 
 
+/***** Major collections: marking *****/
+
+static struct GcPtrList objects_to_trace;
+
+static void visit(gcptr *pobj)
+{
+    gcptr obj = *pobj;
+    if (obj == NULL)
+        return;
+
+ restart:
+    if (obj->h_tid & GCFLAG_VISITED)
+        return;    /* already seen */
+
+    if (obj->h_tid & (GCFLAG_PUBLIC_TO_PRIVATE | GCFLAG_STUB)) {
+        if (obj->h_revision & 1) { // "is not a ptr", so no more recent version
+            obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE; // see also fix_outdated()
+        }
+        else {
+            obj = (gcptr)obj->h_revision;   // go visit the more recent version
+            *pobj = obj;
+            goto restart;
+        }
+    }
+    else
+        assert(obj->h_revision & 1);
+
+    obj->h_tid |= GCFLAG_VISITED;
+    gcptrlist_insert(&objects_to_trace, obj);
+}
+
+static void visit_all_objects(void)
+{
+    while (gcptrlist_size(&objects_to_trace) > 0) {
+        gcptr obj = gcptrlist_pop(&objects_to_trace);
+        stmcb_trace(obj, &visit);
+    }
+}
+
+static void mark_roots(gcptr *root, gcptr *end)
+{
+    //assert(*root == END_MARKER);
+    //root++;
+    while (root != end)
+        visit(root++);
+}
+
+static void mark_all_stack_roots(void)
+{
+    struct tx_descriptor *d;
+    for (d = stm_tx_head; d; d = d->tx_next) {
+
+        /* the roots pushed on the shadowstack */
+        mark_roots(d->shadowstack, *d->shadowstack_end_ref);
+
+#if 0
+        /* the thread-local object */
+        visit(d->thread_local_obj_ref);
+#endif
+
+        /* the current transaction's private copies of public objects */
+        wlog_t *item;
+        G2L_LOOP_FORWARD(d->public_to_private, item) {
+
+            /* note that 'item->addr' is also in the read set, so if it was
+               outdated, it will be found at that time */
+            visit(&item->addr);
+            visit(&item->val);
+
+        } G2L_LOOP_END;
+
+        /* make sure that the other lists are empty */
+        assert(gcptrlist_size(&d->public_with_young_copy) == 0);
+        assert(gcptrlist_size(&d->public_descriptor->stolen_objects) == 0);
+        assert(gcptrlist_size(&d->public_descriptor->stolen_young_stubs) == 0);
+        /* NOT NECESSARILY EMPTY:
+           - list_of_read_objects
+           - private_from_protected
+           - public_to_private
+           - old_objects_to_trace
+        */
+        assert(gcptrlist_size(&d->list_of_read_objects) ==
+               d->num_read_objects_known_old);
+        assert(gcptrlist_size(&d->private_from_protected) ==
+               d->num_private_from_protected_known_old);
+    }
+}
+
+
 /***** Major collections: sweeping *****/
 
 static void sweep_pages(struct tx_public_descriptor *gcp, int size_class,
@@ -313,7 +402,9 @@ void stm_major_collect(void)
 
     assert(gcptrlist_size(&objects_to_trace) == 0);
     mark_prebuilt_roots();
+#endif
     mark_all_stack_roots();
+#if 0
     visit_all_objects();
     gcptrlist_delete(&objects_to_trace);
     clean_up_lists_of_read_objects_and_fix_outdated_flags();
