@@ -43,3 +43,16 @@ def test_malloc_page_full():
     p = lib.stmgcpage_malloc(HDR)
     assert distance(plist[-1], p) != HDR
     assert count_pages() == 2
+
+def test_thread_local_malloc():
+    assert count_global_pages() == 0
+    where = []
+    def f1(r):
+        where.append(oalloc(HDR))
+    def f2(r):
+        where.append(oalloc(HDR))
+    run_parallel(f1, f2)
+    assert count_pages() == 0
+    assert count_global_pages() == 2
+    p3, p4 = where
+    assert abs(distance(p3, p4)) > PAGE_ROOM / 2

@@ -1347,10 +1347,12 @@ static revision_t descriptor_array_free_list = 0;
 
 void _stm_test_forget_previous_state(void)
 {
+  /* debug: reset all global states, between tests */
   fprintf(stderr, "=======================================================\n");
   assert(thread_descriptor == NULL);
   memset(stm_descriptor_array, 0, sizeof(stm_descriptor_array));
   descriptor_array_free_list = 0;
+  stmgcpage_count(2);
 }
 
 int DescriptorInit(void)

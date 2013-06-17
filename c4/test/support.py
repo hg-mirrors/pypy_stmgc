@@ -115,8 +115,6 @@ lib = ffi.verify(r'''
     #include "stmgc.h"
     #include "stmimpl.h"
 
-    //extern gcptr stmgcpage_malloc(size_t size);
-    //extern void stmgcpage_free(gcptr obj);
     //extern void stmgcpage_possibly_major_collect(int);
     extern revision_t stm_global_cur_time(void);
     //extern void stmgcpage_add_prebuilt_root(gcptr);
@@ -408,7 +406,7 @@ class run_parallel(object):
 
 def oalloc(size):
     "Allocate an 'old' protected object, outside any nursery"
-    p = ffi.cast("gcptr", lib.stm_malloc(size))
+    p = lib.stmgcpage_malloc(size)
     p.h_tid = GCFLAG_OLD | GCFLAG_WRITE_BARRIER
     p.h_revision = -sys.maxint
     lib.settid(p, 42 + size)
@@ -417,7 +415,7 @@ def oalloc(size):
 def oalloc_refs(nrefs):
     """Allocate an 'old' protected object, outside any nursery,
     with nrefs pointers"""
-    p = ffi.cast("gcptr", lib.stm_malloc(HDR + WORD * nrefs))
+    p = lib.stmgcpage_malloc(HDR + WORD * nrefs)
     p.h_tid = GCFLAG_OLD | GCFLAG_WRITE_BARRIER
     p.h_revision = -sys.maxint
     lib.settid(p, 421 + nrefs)
