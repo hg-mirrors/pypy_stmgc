@@ -19,6 +19,7 @@ gcptr stm_stub_malloc(struct tx_public_descriptor *pd)
     if (p == NULL) {
         assert(sizeof(struct stub_block_s) == STUB_BLOCK_SIZE);
 
+        /* XXX free! */
         char *page = stm_malloc(STUB_PAGE);
         char *page_end = page + STUB_PAGE;
         page += (-(revision_t)page) & (STUB_BLOCK_SIZE-1);  /* round up */

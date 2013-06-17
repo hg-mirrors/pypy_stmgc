@@ -153,11 +153,13 @@ struct tx_descriptor {
   long long longest_abort_info_time;
   revision_t *private_revision_ref;
   struct FXCache recent_reads_cache;
+  struct tx_descriptor *tx_prev, *tx_next;
 };
 
 extern __thread struct tx_descriptor *thread_descriptor;
 extern __thread revision_t stm_private_rev_num;
 extern struct tx_public_descriptor *stm_descriptor_array[];
+extern struct tx_descriptor *stm_tx_head;
 
 /************************************************************/
 
@@ -182,8 +184,8 @@ gcptr stm_get_read_obj(long);  /* debugging */
 void stm_clear_read_cache(void);  /* debugging */
 void _stm_test_forget_previous_state(void);  /* debugging */
 
+struct tx_public_descriptor *stm_get_free_public_descriptor(revision_t *);
 int DescriptorInit(void);
 void DescriptorDone(void);
-struct tx_public_descriptor *stm_remove_next_public_descriptor(void);
 
 #endif  /* _ET_H */
