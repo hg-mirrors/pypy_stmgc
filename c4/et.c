@@ -1345,6 +1345,14 @@ void stm_ThreadLocalRef_LLSet(void **addr, void *newvalue)
 struct tx_public_descriptor *stm_descriptor_array[MAX_THREADS] = {0};
 static revision_t descriptor_array_free_list = 0;
 
+void _stm_test_forget_previous_state(void)
+{
+  fprintf(stderr, "=======================================================\n");
+  assert(thread_descriptor == NULL);
+  memset(stm_descriptor_array, 0, sizeof(stm_descriptor_array));
+  descriptor_array_free_list = 0;
+}
+
 int DescriptorInit(void)
 {
   if (GCFLAG_PREBUILT != PREBUILT_FLAGS)

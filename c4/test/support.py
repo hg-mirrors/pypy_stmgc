@@ -90,6 +90,7 @@ ffi.cdef('''
     void *my_stub_thread(void);
 
     int _stm_can_access_memory(char *);
+    void stm_initialize_and_set_max_abort(int max_aborts);
     void stm_initialize_tests(int max_aborts);
 
     /* some constants normally private that are useful in the tests */
@@ -219,10 +220,16 @@ lib = ffi.verify(r'''
         return (void *)thread_descriptor->public_descriptor;
     }
 
-    void stm_initialize_tests(int max_aborts)
+    void stm_initialize_and_set_max_abort(int max_aborts)
     {
         stm_initialize();
         stm_set_max_aborts(max_aborts);
+    }
+
+    void stm_initialize_tests(int max_aborts)
+    {
+        _stm_test_forget_previous_state();
+        stm_initialize_and_set_max_abort(max_aborts);
     }
 
     size_t stmcb_size(gcptr obj)
@@ -320,7 +327,7 @@ class run_parallel(object):
     def run(self, fn, lck):
         try:
             try:
-                lib.stm_initialize_tests(self.max_aborts)
+                lib.stm_initialize_and_set_max_abort(self.max_aborts)
                 try:
                     fn(self)
                 finally:

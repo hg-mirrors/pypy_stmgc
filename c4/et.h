@@ -181,6 +181,7 @@ int _stm_is_private(gcptr);  /* debugging */
 gcptr stm_get_private_from_protected(long);  /* debugging */
 gcptr stm_get_read_obj(long);  /* debugging */
 void stm_clear_read_cache(void);  /* debugging */
+void _stm_test_forget_previous_state(void);  /* debugging */
 
 int DescriptorInit(void);
 void DescriptorDone(void);
