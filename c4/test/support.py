@@ -58,7 +58,7 @@ ffi.cdef('''
     gcptr stmgcpage_malloc(size_t size);
     void stmgcpage_free(gcptr obj);
     long stmgcpage_count(int quantity);
-    //void stmgcpage_possibly_major_collect(int);
+    void stmgcpage_possibly_major_collect(int);
     revision_t stm_global_cur_time(void);
     //void stmgcpage_add_prebuilt_root(gcptr);
     void stm_clear_between_tests(void);
@@ -115,7 +115,6 @@ lib = ffi.verify(r'''
     #include "stmgc.h"
     #include "stmimpl.h"
 
-    //extern void stmgcpage_possibly_major_collect(int);
     extern revision_t stm_global_cur_time(void);
     //extern void stmgcpage_add_prebuilt_root(gcptr);
     extern revision_t get_private_rev_num(void);

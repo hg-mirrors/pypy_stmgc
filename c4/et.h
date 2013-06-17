@@ -112,7 +112,6 @@ static const revision_t GCFLAG_PRIVATE_FROM_PROTECTED = STM_FIRST_GCFLAG << 9;
  * thread shuts down.  It is reused the next time a thread starts. */
 struct tx_public_descriptor {
   revision_t collection_lock;
-  struct tx_descriptor *descriptor;
   struct stub_block_s *stub_blocks;
   gcptr stub_free_list;
   struct GcPtrList stolen_objects;
@@ -185,5 +184,6 @@ void _stm_test_forget_previous_state(void);  /* debugging */
 
 int DescriptorInit(void);
 void DescriptorDone(void);
+struct tx_public_descriptor *stm_remove_next_public_descriptor(void);
 
 #endif  /* _ET_H */

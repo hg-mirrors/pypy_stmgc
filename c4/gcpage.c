@@ -1,6 +1,11 @@
 #include "stmimpl.h"
 
 
+/* In this file, we use size_t to measure various sizes that can poten-
+ * tially be large.  Be careful that it's an unsigned type --- but it
+ * is needed to represent more than 2GB on 32-bit machines (up to 4GB).
+ */
+
 /* This maps each small request size to the number of blocks of this size
    that fit in a page. */
 static int nblocks_for_size[GC_SMALL_REQUESTS];
@@ -12,7 +17,10 @@ static pthread_mutex_t mutex_gc_lock = PTHREAD_MUTEX_INITIALIZER;
 static revision_t countdown_next_major_coll = GC_MIN;
 
 /* For statistics */
-static revision_t count_global_pages;
+static size_t count_global_pages;
+
+/* Only computed during a major collection */
+static size_t mc_total_in_use, mc_total_reserved;
 
 /* For tests */
 long stmgcpage_count(int quantity)
@@ -59,8 +67,6 @@ void stmgcpage_init_tls(void)
 
     /* Take back ownership of the pages currently assigned to
        LOCAL_GCPAGES that come from a previous thread. */
-    struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
-    count_global_pages -= gcp->count_pages;
 }
 
 void stmgcpage_done_tls(void)
@@ -68,8 +74,6 @@ void stmgcpage_done_tls(void)
     /* Send to the shared area all my pages.  For now we don't extract
        the information about which locations are free or not; we just
        leave it to the next major GC to figure them out. */
-    struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
-    count_global_pages += gcp->count_pages;
 }
 
 
@@ -102,6 +106,7 @@ static gcptr allocate_new_page(int size_class)
     }
     struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
     gcp->count_pages++;
+    count_global_pages++;
 
     /* Initialize the fields of the resulting page */
     page->next_page = gcp->pages_for_size[size_class];
@@ -175,4 +180,157 @@ void stmgcpage_free(gcptr obj)
         fprintf(stderr, "XXX stmgcpage_free: too big!\n");
         abort();
     }
+}
+
+
+/***** Major collections: sweeping *****/
+
+static void sweep_pages(struct tx_public_descriptor *gcp, int size_class,
+                        page_header_t *lpage)
+{
+    int objs_per_page = nblocks_for_size[size_class];
+    revision_t obj_size = size_class * WORD;
+    gcptr freelist = gcp->free_loc_for_size[size_class];
+    page_header_t *lpagenext;
+    int j;
+    gcptr p;
+
+    for (; lpage; lpage = lpagenext) {
+        lpagenext = lpage->next_page;
+        /* sweep 'page': any object with GCFLAG_VISITED stays alive
+           and the flag is removed; other locations are marked as free. */
+        p = (gcptr)(lpage + 1);
+        for (j = 0; j < objs_per_page; j++) {
+            if (p->h_tid & GCFLAG_VISITED)
+                break;  /* first object that stays alive */
+            p = (gcptr)(((char *)p) + obj_size);
+        }
+        if (j < objs_per_page) {
+            /* the page contains at least one object that stays alive */
+            lpage->next_page = gcp->pages_for_size[size_class];
+            gcp->pages_for_size[size_class] = lpage;
+            p = (gcptr)(lpage + 1);
+            for (j = 0; j < objs_per_page; j++) {
+                if (p->h_tid & GCFLAG_VISITED) {
+                    p->h_tid &= ~GCFLAG_VISITED;
+                    mc_total_in_use += obj_size;
+                }
+                else {
+#ifdef DUMP_EXTRA
+                    if (p->h_tid != DEBUG_WORD(0xDD)) {
+                        fprintf(stderr, "| freeing %p\n", p);
+                    }
+#endif
+                    /* skip the assignment if compiled without asserts */
+                    assert(!(GCFLAG_VISITED & DEBUG_WORD(0xDD)));
+                    assert(p->h_tid = DEBUG_WORD(0xDD));
+                    p->h_revision = (revision_t)freelist;
+                    //stm_dbgmem_not_used(p, size_class * WORD, 0);
+                    freelist = p;
+                }
+                p = (gcptr)(((char *)p) + obj_size);
+            }
+            mc_total_reserved += obj_size * objs_per_page;
+        }
+        else {
+            /* the page is fully free */
+#ifdef DUMP_EXTRA
+            p = (gcptr)(lpage + 1);
+            for (j = 0; j < objs_per_page; j++) {
+                assert(!(p->h_tid & GCFLAG_VISITED));
+                if (p->h_tid != DEBUG_WORD(0xDD)) {
+                    fprintf(stderr, "| freeing %p (with page %p)\n", p, lpage);
+                }
+                p = (gcptr)(((char *)p) + obj_size);
+            }
+#endif
+            stm_free(lpage, GC_PAGE_SIZE);
+            assert(gcp->count_pages > 0);
+            assert(count_global_pages > 0);
+            gcp->count_pages--;
+            count_global_pages--;
+        }
+    }
+    gcp->free_loc_for_size[size_class] = freelist;
+}
+
+
+/***** Major collections: main *****/
+
+static void free_closed_thread_descriptors(void)
+{
+    int i;
+    page_header_t *gpage;
+    struct tx_public_descriptor *gcp;
+
+    while ((gcp = stm_remove_next_public_descriptor()) != NULL) {
+        for (i = 1; i < GC_SMALL_REQUESTS; i++) {
+            gpage = gcp->pages_for_size[i];
+            sweep_pages(gcp, i, gpage);
+        }
+        assert(gcp->collection_lock == 0);
+        /* XXX ...stub_blocks... */
+        assert(gcp->stolen_objects.size == 0);
+        assert(gcp->stolen_young_stubs.size == 0);
+        gcptrlist_delete(&gcp->stolen_objects);
+        gcptrlist_delete(&gcp->stolen_young_stubs);
+        stm_free(gcp, sizeof(struct tx_public_descriptor));
+    }
+}
+
+void stm_major_collect(void)
+{
+    stmgcpage_acquire_global_lock();
+    fprintf(stderr, ",-----\n| running major collection...\n");
+
+#if 0
+    force_minor_collections();
+
+    assert(gcptrlist_size(&objects_to_trace) == 0);
+    mark_prebuilt_roots();
+    mark_all_stack_roots();
+    visit_all_objects();
+    gcptrlist_delete(&objects_to_trace);
+    clean_up_lists_of_read_objects_and_fix_outdated_flags();
+#endif
+
+    mc_total_in_use = mc_total_reserved = 0;
+#if 0
+    free_all_unused_local_pages();
+    free_unused_global_pages();
+#endif
+    free_closed_thread_descriptors();
+#if 0
+    update_next_threshold();
+#endif
+
+    fprintf(stderr, "| %lu bytes alive, %lu not used, countdown %lu\n`-----\n",
+            (unsigned long)mc_total_in_use,
+            (unsigned long)(mc_total_reserved - mc_total_in_use),
+            (unsigned long)countdown_next_major_coll);
+    stmgcpage_release_global_lock();
+}
+
+void stmgcpage_possibly_major_collect(int force)
+{
+    if (force)
+        stmgcpage_reduce_threshold((size_t)-1);
+
+    /* If 'countdown_next_major_coll' reached 0, then run a major coll now. */
+    if (ACCESS_ONCE(countdown_next_major_coll) > 0)
+        return;
+
+    stm_start_single_thread();
+
+    /* If several threads were blocked on the previous line, the first
+       one to proceed sees 0 in 'countdown_next_major_coll'.  It's the
+       thread that will do the major collection.  Afterwards the other
+       threads will also acquire the RW lock in exclusive mode, but won't
+       do anything. */
+    if (countdown_next_major_coll == 0)
+        stm_major_collect();
+
+    stm_stop_single_thread();
+
+    AbortNowIfDelayed();
 }
