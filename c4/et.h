@@ -13,7 +13,6 @@
 
 #define MAX_THREADS         1024
 #define LOCKED              (INTPTR_MAX - 2*(MAX_THREADS-1))
-#define WORD                sizeof(gcptr)
 
 /* Description of the flags
  * ------------------------
@@ -119,7 +118,8 @@ struct tx_public_descriptor {
   struct GcPtrList stolen_objects;
   struct GcPtrList stolen_young_stubs;
   revision_t free_list_next;
-  /* xxx gcpage data here */
+
+  GCPAGE_FIELDS_DECL
 };
 
 /* this struct contains all thread-local data that is never accessed
