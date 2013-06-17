@@ -499,17 +499,13 @@ def check_prebuilt(p):
     assert 42 < (p.h_tid & 0xFFFF) < 521
     assert p.h_tid & GCFLAG_PREBUILT_ORIGINAL
 
-def make_global(p1):
-    assert p1.h_revision == lib.get_local_revision()
-    p1.h_revision = (lib.stm_global_cur_time() | 1) - 2
-
-def delegate(p1, p2):
-    assert p1.h_revision != lib.get_local_revision()
-    assert p2.h_revision != lib.get_local_revision()
-    p1.h_revision = ffi.cast("revision_t", p2)
-    p1.h_tid |= GCFLAG_PUBLIC_TO_PRIVATE
-    if p1.h_tid & GCFLAG_PREBUILT_ORIGINAL:
-        lib.stmgcpage_add_prebuilt_root(p1)
+def make_public(p1):
+    """Hack at an object returned by oalloc() to force it public."""
+    assert classify(p1) == "protected"
+    assert p1.h_tid & GCFLAG_OLD
+    p1.h_tid |= GCFLAG_PUBLIC
+    assert classify(p1) == "public"
+    assert (p1.h_tid & GCFLAG_PUBLIC_TO_PRIVATE) == 0
 
 def transaction_break():
     lib.stm_commit_transaction()

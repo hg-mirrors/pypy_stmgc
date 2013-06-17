@@ -271,6 +271,74 @@ static void mark_all_stack_roots(void)
     }
 }
 
+static void cleanup_for_thread(struct tx_descriptor *d)
+{
+    long i;
+    gcptr *items = d->list_of_read_objects.items;
+
+    if (d->active < 0)
+        return;       /* already "aborted" during forced minor collection */
+
+    for (i = d->list_of_read_objects.size - 1; i >= 0; --i) {
+        gcptr obj = items[i];
+
+        /* Warning: in case the object listed is outdated and has been
+           replaced with a more recent revision, then it might be the
+           case that obj->h_revision doesn't have GCFLAG_VISITED, but
+           just removing it is very wrong --- we want 'd' to abort.
+        */
+        revision_t v = obj->h_revision;
+        if (IS_POINTER(v)) {    /* has a more recent revision.  Oups. */
+            fprintf(stderr,
+                    "ABRT_COLLECT_MAJOR: %p was read but modified already\n",
+                    obj);
+            AbortTransactionAfterCollect(d, ABRT_COLLECT_MAJOR);
+            return;
+        }
+
+        /* on the other hand, if we see a non-visited object in the read
+           list, then we need to remove it --- it's wrong to just abort.
+           Consider the following case: the transaction is inevitable,
+           and since it started, it popped objects out of its shadow
+           stack.  Some popped objects might become free even if they
+           have been read from.  We must not abort such transactions
+           (and cannot anyway: they are inevitable!). */
+        if (!(obj->h_tid & GCFLAG_VISITED)) {
+            items[i] = items[--d->list_of_read_objects.size];
+        }
+    }
+
+    d->num_read_objects_known_old = d->list_of_read_objects.size;
+    fxcache_clear(&d->recent_reads_cache);
+
+    /* We are now after visiting all objects, and we know the
+     * transaction isn't aborting because of this collection.  We have
+     * cleared GCFLAG_PUBLIC_TO_PRIVATE from public objects at the end
+     * of the chain.  Now we have to set it again on public objects that
+     * have a private copy.
+     */
+    wlog_t *item;
+
+    G2L_LOOP_FORWARD(d->public_to_private, item) {
+
+        assert(item->addr->h_tid & GCFLAG_PUBLIC);
+        /* assert(is_private(item->val)); but in the other thread,
+           which becomes: */
+        assert((item->val->h_revision == *d->private_revision_ref) ||
+               (item->val->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+
+        item->addr->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
+
+    } G2L_LOOP_END;
+}
+
+static void clean_up_lists_of_read_objects_and_fix_outdated_flags(void)
+{
+    struct tx_descriptor *d;
+    for (d = stm_tx_head; d; d = d->tx_next)
+        cleanup_for_thread(d);
+}
+
 
 /***** Major collections: sweeping *****/
 
@@ -434,10 +502,8 @@ void stm_major_collect(void)
 #endif
     mark_all_stack_roots();
     visit_all_objects();
-#if 0
     gcptrlist_delete(&objects_to_trace);
     clean_up_lists_of_read_objects_and_fix_outdated_flags();
-#endif
 
     mc_total_in_use = mc_total_reserved = 0;
     free_all_unused_local_pages();
