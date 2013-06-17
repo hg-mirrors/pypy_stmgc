@@ -32,3 +32,14 @@ def test_malloc_simple():
     assert distance(p2, p3) == HDR
     assert abs(distance(p3, p4)) > PAGE_ROOM / 2
     assert distance(p4, p5) == HDR + WORD
+
+def test_malloc_page_full():
+    plist = []
+    for i in range(PAGE_ROOM // HDR):
+        plist.append(lib.stmgcpage_malloc(HDR))
+    for p1, p2 in zip(plist[:-1], plist[1:]):
+        assert distance(p1, p2) == HDR
+    assert count_pages() == 1
+    p = lib.stmgcpage_malloc(HDR)
+    assert distance(plist[-1], p) != HDR
+    assert count_pages() == 2

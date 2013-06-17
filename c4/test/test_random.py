@@ -362,7 +362,7 @@ class RandomSingleThreadTester(object):
                 p = self.pop_roots(extra=p)
 
     def run_single_thread(self):
-        lib.stm_initialize_tests(0)
+        lib.stm_initialize_and_set_max_abort(0)
         self.interruptible_transaction = False
         self.startrev()
         #
