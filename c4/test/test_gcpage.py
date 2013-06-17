@@ -199,3 +199,25 @@ def test_new_version():
     p3 = lib.stm_write_barrier(p2)
     assert p3 != p2
     assert p3 == lib.stm_write_barrier(p2)
+
+def test_new_version_kill_intermediate():
+    p1 = oalloc(HDR); make_public(p1)
+    p2 = oalloc(HDR); make_public(p2)
+    p3 = oalloc(HDR); make_public(p3)
+    p4 = oalloc(HDR); make_public(p4)
+    delegate(p1, p2)
+    delegate(p2, p3)
+    delegate(p3, p4)
+    lib.stm_push_root(p2)
+    major_collect()
+    major_collect()
+    p2b = lib.stm_pop_root()
+    assert p2b == p4
+    check_free_old(p1)
+    check_free_old(p2)
+    check_free_old(p3)
+    check_not_free(p4)
+    p5 = lib.stm_write_barrier(p4)
+    assert p5 != p4
+    assert p5 == lib.stm_write_barrier(p4)
+    assert p5 == lib.stm_write_barrier(p5)
