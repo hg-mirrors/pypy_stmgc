@@ -13,7 +13,8 @@
 /* Linux's glibc is good at 'malloc(1023*WORD)': the blocks ("pages") it
    returns are exactly 1024 words apart, reserving only one extra word
    for its internal data.  Here we assume that even on other systems it
-   will not use more than three words. */
+   will not use more than three words.  It results in pages of 1020
+   WORDs, which is a number that divides well by many small values. */
 #ifndef GC_PAGE_SIZE
 #define GC_PAGE_SIZE   (1021 * WORD)
 #endif
@@ -65,8 +66,10 @@ typedef struct page_header_s {
 #define LOCAL_GCPAGES()  (thread_descriptor->public_descriptor)
 
 
-void stmgcpage_init_tls(void);
-void stmgcpage_done_tls(void);
+void stmgcpage_acquire_global_lock(void);
+void stmgcpage_release_global_lock(void);
+void stmgcpage_init_tls(void);   /* must hold the global lock */
+void stmgcpage_done_tls(void);   /* must hold the global lock */
 gcptr stmgcpage_malloc(size_t size);
 void stmgcpage_free(gcptr obj);
 void stmgcpage_add_prebuilt_root(gcptr obj);

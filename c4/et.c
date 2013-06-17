@@ -1344,7 +1344,6 @@ void stm_ThreadLocalRef_LLSet(void **addr, void *newvalue)
 
 struct tx_public_descriptor *stm_descriptor_array[MAX_THREADS] = {0};
 static revision_t descriptor_array_free_list = 0;
-static revision_t descriptor_array_lock = 0;
 
 int DescriptorInit(void)
 {
@@ -1360,7 +1359,7 @@ int DescriptorInit(void)
       revision_t i;
       struct tx_descriptor *d = stm_malloc(sizeof(struct tx_descriptor));
       memset(d, 0, sizeof(struct tx_descriptor));
-      spinlock_acquire(descriptor_array_lock, 1);
+      stmgcpage_acquire_global_lock();
 
       struct tx_public_descriptor *pd;
       i = descriptor_array_free_list;
@@ -1398,7 +1397,8 @@ int DescriptorInit(void)
       fprintf(stderr, "[%lx] pthread %lx starting\n",
               (long)d->public_descriptor_index, (long)pthread_self());
 
-      spinlock_release(descriptor_array_lock);
+      stmgcpage_init_tls();
+      stmgcpage_release_global_lock();
       return 1;
     }
   else
@@ -1415,12 +1415,13 @@ void DescriptorDone(void)
     gcptrlist_delete(&d->public_descriptor->stolen_objects);
     gcptrlist_delete(&d->public_descriptor->stolen_young_stubs);
 
-    spinlock_acquire(descriptor_array_lock, 1);
+    stmgcpage_acquire_global_lock();
+    stmgcpage_done_tls();
     i = d->public_descriptor_index;
     assert(stm_descriptor_array[i] == d->public_descriptor);
     d->public_descriptor->free_list_next = descriptor_array_free_list;
     descriptor_array_free_list = i;
-    spinlock_release(descriptor_array_lock);
+    stmgcpage_release_global_lock();
 
     thread_descriptor = NULL;
 
