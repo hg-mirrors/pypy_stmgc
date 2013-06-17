@@ -157,3 +157,28 @@ def test_keep_global_roots_alive_2():
         assert rawgetptr(p, 1) == ffi.NULL
         assert rawgetptr(p, 2) == p
     lib.stm_pop_root()
+
+def test_local_copy_from_global_obj():
+    p1 = oalloc(HDR); make_public(p1)
+    p2n = lib.stm_write_barrier(p1)
+    assert p2n != p1
+    assert lib.stm_write_barrier(p1) == p2n
+    check_not_free(p1)
+    check_not_free(p2n)
+    assert p1.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
+    lib.stm_push_root(p1)
+    lib.stm_push_root(p2n)
+    minor_collect()    # move p2n out of the nursery
+    p2 = lib.stm_pop_root()
+    assert p2 != p2n
+    assert p1.h_tid & GCFLAG_PUBLIC_TO_PRIVATE
+    assert lib.stm_write_barrier(p1) == p2
+    print p1, p2
+    major_collect()
+    major_collect()
+    p1a = lib.stm_pop_root()
+    assert p1a == p1
+    check_not_free(p1)
+    check_not_free(p2)
+    p3 = lib.stm_write_barrier(p1)
+    assert p3 == p2
