@@ -433,6 +433,8 @@ def oalloc_refs(nrefs):
         rawsetptr(p, i, ffi.NULL)
     return p
 
+ofree = lib.stmgcpage_free
+
 def nalloc(size):
     "Allocate a fresh object from the nursery"
     p = lib.stm_allocate(size, 42 + size)

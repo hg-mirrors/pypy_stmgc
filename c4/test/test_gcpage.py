@@ -56,3 +56,9 @@ def test_thread_local_malloc():
     assert count_global_pages() == 2
     p3, p4 = where
     assert abs(distance(p3, p4)) > PAGE_ROOM / 2
+
+def test_malloc_reuse():
+    p1 = oalloc(HDR)
+    ofree(p1)
+    p2 = oalloc(HDR)
+    assert p2 == p1
