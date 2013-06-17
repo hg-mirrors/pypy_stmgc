@@ -404,8 +404,8 @@ void stm_major_collect(void)
     mark_prebuilt_roots();
 #endif
     mark_all_stack_roots();
-#if 0
     visit_all_objects();
+#if 0
     gcptrlist_delete(&objects_to_trace);
     clean_up_lists_of_read_objects_and_fix_outdated_flags();
 #endif
