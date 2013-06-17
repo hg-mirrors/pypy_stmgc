@@ -1355,6 +1355,18 @@ void _stm_test_forget_previous_state(void)
   stmgcpage_count(2);
 }
 
+struct tx_public_descriptor *stm_remove_next_public_descriptor(void)
+{
+  revision_t i = descriptor_array_free_list;
+  struct tx_public_descriptor *pd = stm_descriptor_array[i];
+  if (pd != NULL)
+    {
+      descriptor_array_free_list = pd->free_list_next;
+      assert(descriptor_array_free_list >= 0);
+    }
+  return pd;
+}
+
 int DescriptorInit(void)
 {
   if (GCFLAG_PREBUILT != PREBUILT_FLAGS)
@@ -1401,7 +1413,6 @@ int DescriptorInit(void)
       stm_private_rev_num = -d->my_lock;
       d->private_revision_ref = &stm_private_rev_num;
       d->max_aborts = -1;
-      pd->descriptor = d;
       thread_descriptor = d;
 
       fprintf(stderr, "[%lx] pthread %lx starting\n",
