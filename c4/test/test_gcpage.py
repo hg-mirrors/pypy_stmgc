@@ -105,3 +105,19 @@ def test_free_unused_local_pages():
     assert count_pages() == 1
     major_collect()
     assert count_pages() == 0
+
+def test_free_all_unused_local_pages():
+    def f1(r):
+        p1 = oalloc(HDR)
+        assert count_pages() == 1
+        r.set(1)
+        r.wait(2)
+        assert count_pages() == 0
+    def f2(r):
+        p2 = oalloc(HDR)
+        r.wait(1)
+        assert count_pages() == 1
+        major_collect()
+        assert count_pages() == 0
+        r.set(2)
+    run_parallel(f1, f2)
