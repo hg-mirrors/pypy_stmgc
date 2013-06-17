@@ -77,7 +77,7 @@ gcptr stmgc_duplicate(gcptr P)
 gcptr stmgc_duplicate_old(gcptr P)
 {
     size_t size = stmcb_size(P);
-    gcptr L = (gcptr)stm_malloc(size);
+    gcptr L = (gcptr)stmgcpage_malloc(size);
     memcpy(L, P, size);
     L->h_tid |= GCFLAG_OLD;
     return L;

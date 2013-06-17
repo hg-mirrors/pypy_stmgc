@@ -99,3 +99,9 @@ def test_free_unused_global_pages():
         major_collect()
         assert count_global_pages() == 0
     run_parallel(f1, f2)
+
+def test_free_unused_local_pages():
+    p1 = oalloc(HDR)
+    assert count_pages() == 1
+    major_collect()
+    assert count_pages() == 0

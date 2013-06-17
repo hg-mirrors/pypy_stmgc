@@ -66,7 +66,7 @@ void stmgcpage_init_tls(void)
         init_global_data();
 
     /* Take back ownership of the pages currently assigned to
-       LOCAL_GCPAGES that come from a previous thread. */
+       LOCAL_GCPAGES that might come from a previous thread. */
 }
 
 void stmgcpage_done_tls(void)
@@ -254,29 +254,54 @@ static void sweep_pages(struct tx_public_descriptor *gcp, int size_class,
     gcp->free_loc_for_size[size_class] = freelist;
 }
 
+static void free_unused_local_pages(struct tx_public_descriptor *gcp)
+{
+    int i;
+    page_header_t *lpage;
 
-/***** Major collections: main *****/
+    for (i = 1; i < GC_SMALL_REQUESTS; i++) {
+        lpage = gcp->pages_for_size[i];
+        gcp->pages_for_size[i] = NULL;
+        gcp->free_loc_for_size[i] = NULL;
+        sweep_pages(gcp, i, lpage);
+    }
+}
+
+static void free_all_unused_local_pages(void)
+{
+    struct tx_descriptor *d;
+    for (d = stm_tx_head; d; d = d->tx_next) {
+        free_unused_local_pages(d->public_descriptor);
+    }
+}
 
 static void free_closed_thread_descriptors(void)
 {
     int i;
     page_header_t *gpage;
     struct tx_public_descriptor *gcp;
+    revision_t index = -1;
 
-    while ((gcp = stm_remove_next_public_descriptor()) != NULL) {
+    while ((gcp = stm_get_free_public_descriptor(&index)) != NULL) {
+        if (gcp->collection_lock == -1)
+            continue;
+
         for (i = 1; i < GC_SMALL_REQUESTS; i++) {
             gpage = gcp->pages_for_size[i];
             sweep_pages(gcp, i, gpage);
         }
         assert(gcp->collection_lock == 0);
+        gcp->collection_lock = -1;
         /* XXX ...stub_blocks... */
         assert(gcp->stolen_objects.size == 0);
         assert(gcp->stolen_young_stubs.size == 0);
         gcptrlist_delete(&gcp->stolen_objects);
         gcptrlist_delete(&gcp->stolen_young_stubs);
-        stm_free(gcp, sizeof(struct tx_public_descriptor));
     }
 }
+
+
+/***** Major collections: main *****/
 
 void stm_major_collect(void)
 {
@@ -295,8 +320,8 @@ void stm_major_collect(void)
 #endif
 
     mc_total_in_use = mc_total_reserved = 0;
-#if 0
     free_all_unused_local_pages();
+#if 0
     free_unused_global_pages();
 #endif
     free_closed_thread_descriptors();

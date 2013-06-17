@@ -1049,7 +1049,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
         }
       else
         {
-          stm_free(B, stmcb_size(B));
+          stmgcpage_free(B);
           fprintf(stderr, "commit: free backup at %p\n", B);
         }
     };
@@ -1096,7 +1096,7 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
                  ((char *)B) + offsetof(struct stm_object_s, h_revision),
                  size - offsetof(struct stm_object_s, h_revision));
           assert(!(P->h_tid & GCFLAG_BACKUP_COPY));
-          stm_free(B, size);
+          stmgcpage_free(B);
           fprintf(stderr, "abort: free backup at %p\n", B);
         }
     };
@@ -1342,6 +1342,7 @@ void stm_ThreadLocalRef_LLSet(void **addr, void *newvalue)
 
 /************************************************************/
 
+struct tx_descriptor *stm_tx_head = NULL;
 struct tx_public_descriptor *stm_descriptor_array[MAX_THREADS] = {0};
 static revision_t descriptor_array_free_list = 0;
 
@@ -1352,17 +1353,20 @@ void _stm_test_forget_previous_state(void)
   assert(thread_descriptor == NULL);
   memset(stm_descriptor_array, 0, sizeof(stm_descriptor_array));
   descriptor_array_free_list = 0;
-  stmgcpage_count(2);
+  stm_tx_head = NULL;
+  stmgcpage_count(2);  /* reset */
 }
 
-struct tx_public_descriptor *stm_remove_next_public_descriptor(void)
+struct tx_public_descriptor *stm_get_free_public_descriptor(revision_t *pindex)
 {
-  revision_t i = descriptor_array_free_list;
-  struct tx_public_descriptor *pd = stm_descriptor_array[i];
+  if (*pindex < 0)
+    *pindex = descriptor_array_free_list;
+
+  struct tx_public_descriptor *pd = stm_descriptor_array[*pindex];
   if (pd != NULL)
     {
-      descriptor_array_free_list = pd->free_list_next;
-      assert(descriptor_array_free_list >= 0);
+      *pindex = pd->free_list_next;
+      assert(*pindex >= 0);
     }
   return pd;
 }
@@ -1390,6 +1394,8 @@ int DescriptorInit(void)
           /* we are reusing 'pd' */
           descriptor_array_free_list = pd->free_list_next;
           assert(descriptor_array_free_list >= 0);
+          assert(pd->collection_lock == 0 || pd->collection_lock == -1);
+          pd->collection_lock = 0;
       }
       else {
           /* no item in the free list */
@@ -1413,6 +1419,10 @@ int DescriptorInit(void)
       stm_private_rev_num = -d->my_lock;
       d->private_revision_ref = &stm_private_rev_num;
       d->max_aborts = -1;
+      d->tx_prev = NULL;
+      d->tx_next = stm_tx_head;
+      if (d->tx_next != NULL) d->tx_next->tx_prev = d;
+      stm_tx_head = d;
       thread_descriptor = d;
 
       fprintf(stderr, "[%lx] pthread %lx starting\n",
@@ -1442,6 +1452,9 @@ void DescriptorDone(void)
     assert(stm_descriptor_array[i] == d->public_descriptor);
     d->public_descriptor->free_list_next = descriptor_array_free_list;
     descriptor_array_free_list = i;
+    if (d->tx_prev != NULL) d->tx_prev->tx_next = d->tx_next;
+    if (d->tx_next != NULL) d->tx_next->tx_prev = d->tx_prev;
+    if (d == stm_tx_head) stm_tx_head = d->tx_next;
     stmgcpage_release_global_lock();
 
     thread_descriptor = NULL;
