@@ -121,3 +121,15 @@ def test_free_all_unused_local_pages():
         assert count_pages() == 0
         r.set(2)
     run_parallel(f1, f2)
+
+def test_keep_local_roots_alive():
+    p1 = oalloc(HDR)
+    assert count_pages() == 1
+    lib.stm_push_root(p1)
+    major_collect()
+    p2 = lib.stm_pop_root()
+    assert p2 == p1    # oalloc() does not use the nursery
+    assert count_pages() == 1
+    p3 = oalloc(HDR)
+    p4 = oalloc(HDR)
+    assert p2 != p3 != p4 != p2
