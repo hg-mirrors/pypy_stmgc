@@ -182,3 +182,20 @@ def test_local_copy_from_global_obj():
     check_not_free(p2)
     p3 = lib.stm_write_barrier(p1)
     assert p3 == p2
+
+def test_new_version():
+    p1 = oalloc(HDR); make_public(p1)
+    p2 = oalloc(HDR); make_public(p2)
+    delegate(p1, p2)
+    check_not_free(p1)
+    check_not_free(p2)
+    lib.stm_push_root(p1)
+    major_collect()
+    major_collect()
+    p1b = lib.stm_pop_root()
+    assert p1b == p2
+    check_free_old(p1)
+    check_not_free(p2)
+    p3 = lib.stm_write_barrier(p2)
+    assert p3 != p2
+    assert p3 == lib.stm_write_barrier(p2)

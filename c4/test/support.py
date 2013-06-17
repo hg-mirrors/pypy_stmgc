@@ -495,9 +495,27 @@ def check_nursery_free(p):
 def check_inaccessible(p):
     assert not lib._stm_can_access_memory(p)
 
+def DEBUG_WORD(char):
+    return int(ffi.cast("revision_t", char * 0x0101010101010101))
+
+def check_free_old(p):
+    assert not lib._stm_can_access_memory(p) or p.h_tid == DEBUG_WORD(0xDD)
+
+def check_free_explicitly(p):
+    assert not lib._stm_can_access_memory(p) or p.h_tid in (
+        DEBUG_WORD(0x55), DEBUG_WORD(0xAA))
+
 def check_prebuilt(p):
     assert 42 < (p.h_tid & 0xFFFF) < 521
     assert p.h_tid & GCFLAG_PREBUILT_ORIGINAL
+
+def delegate(p1, p2):
+    assert classify(p1) == "public"
+    assert classify(p2) == "public"
+    p1.h_revision = ffi.cast("revision_t", p2)
+    p1.h_tid |= GCFLAG_PUBLIC_TO_PRIVATE
+    if p1.h_tid & GCFLAG_PREBUILT_ORIGINAL:
+        lib.stmgcpage_add_prebuilt_root(p1)
 
 def make_public(p1):
     """Hack at an object returned by oalloc() to force it public."""

@@ -160,7 +160,7 @@ gcptr stmgcpage_malloc(size_t size)
     }
 }
 
-static unsigned char random_char = 42;
+static unsigned char random_char = 0x55;
 
 void stmgcpage_free(gcptr obj)
 {
@@ -171,7 +171,8 @@ void stmgcpage_free(gcptr obj)
         assert(0 < size_class && size_class < GC_SMALL_REQUESTS);
 
         /* We simply re-add the object to the right chained list */
-        assert(obj->h_tid = DEBUG_WORD(random_char++));
+        assert(obj->h_tid = DEBUG_WORD(random_char));
+        assert(random_char ^= (0xAA ^ 0x55));
         obj->h_revision = (revision_t)gcp->free_loc_for_size[size_class];
         gcp->free_loc_for_size[size_class] = obj;
         //stm_dbgmem_not_used(obj, size_class * WORD, 0);
@@ -197,19 +198,22 @@ static void visit(gcptr *pobj)
     if (obj->h_tid & GCFLAG_VISITED)
         return;    /* already seen */
 
-    if (obj->h_tid & (GCFLAG_PUBLIC_TO_PRIVATE | GCFLAG_STUB)) {
-        if (obj->h_revision & 1) { // "is not a ptr", so no more recent version
-            obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE; // see also fix_outdated()
-        }
-        else {
-            obj = (gcptr)obj->h_revision;   // go visit the more recent version
-            *pobj = obj;
-            goto restart;
-        }
+    if (obj->h_revision & 1) {
+        obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;  /* see also fix_outdated() */
     }
-    else
-        assert(obj->h_revision & 1);
+    else {
+        /* h_revision is a ptr: we have a more recent version */
+        assert(!(obj->h_tid & GCFLAG_STUB));
+        gcptr prev_obj = obj;
+        obj = (gcptr)obj->h_revision;   /* go visit the more recent version */
 
+        if (!(obj->h_tid & GCFLAG_VISITED) && IS_POINTER(obj->h_revision)) {
+            obj = (gcptr)obj->h_revision;
+            prev_obj->h_revision = (revision_t)obj;
+        }
+        *pobj = obj;
+        goto restart;
+    }
     obj->h_tid |= GCFLAG_VISITED;
     gcptrlist_insert(&objects_to_trace, obj);
 }
