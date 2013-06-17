@@ -143,3 +143,17 @@ def test_trace_simple():
     p1b = lib.stm_pop_root()
     assert p1b == p1    # oalloc() does not use the nursery
     assert count_pages() == 2   # one for p1, one for p2, which have != sizes
+
+def test_keep_global_roots_alive_2():
+    p = oalloc_refs(3)
+    rawsetptr(p, 0, p)
+    rawsetptr(p, 1, ffi.NULL)
+    rawsetptr(p, 2, p)
+    lib.stm_push_root(p)
+    for i in range(3):
+        major_collect()
+        check_not_free(p)
+        assert rawgetptr(p, 0) == p
+        assert rawgetptr(p, 1) == ffi.NULL
+        assert rawgetptr(p, 2) == p
+    lib.stm_pop_root()
