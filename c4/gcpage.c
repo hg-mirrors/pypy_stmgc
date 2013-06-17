@@ -56,6 +56,11 @@ void stmgcpage_init_tls(void)
 {
     if (nblocks_for_size[1] == 0)
         init_global_data();
+
+    /* Take back ownership of the pages currently assigned to
+       LOCAL_GCPAGES that come from a previous thread. */
+    struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
+    count_global_pages -= gcp->count_pages;
 }
 
 void stmgcpage_done_tls(void)

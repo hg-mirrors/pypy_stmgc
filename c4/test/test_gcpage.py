@@ -62,3 +62,13 @@ def test_malloc_reuse():
     ofree(p1)
     p2 = oalloc(HDR)
     assert p2 == p1
+
+def test_move_away_as_full_pages():
+    assert count_global_pages() == 0
+    oalloc(HDR)
+    assert count_pages() == 1
+    lib.stm_finalize()
+    assert count_global_pages() == 1
+    lib.stm_initialize_and_set_max_abort(0)    # reuse the same
+    assert count_global_pages() == 0
+    assert count_pages() == 1
