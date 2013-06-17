@@ -392,6 +392,35 @@ static void free_closed_thread_descriptors(void)
 
 /***** Major collections: main *****/
 
+void update_next_threshold(void)
+{
+    uintptr_t free_space_in_pages, next;
+
+    /* the limit will be reached when we have allocated 0.82 times mc_total */
+    next = (uintptr_t)(mc_total_in_use * (GC_MAJOR_COLLECT-1.0));
+
+    /* this limit should be at least GC_MIN */
+    if (next < GC_MIN)
+        next = GC_MIN;
+
+    /* this difference gives the size allocated in pages but unused so far */
+    assert(mc_total_in_use <= mc_total_reserved);
+    free_space_in_pages = mc_total_reserved - mc_total_in_use;
+
+    /* decrement 'next' by this much, because it will not be accounted for */
+    if (next >= free_space_in_pages)
+        next -= free_space_in_pages;
+    else
+        next = 0;
+
+    /* allow for headroom: enforce the smallest allowed value */
+    if (next < GC_EXPAND)
+        next = GC_EXPAND;
+
+    /* done */
+    countdown_next_major_coll = next;
+}
+
 void stm_major_collect(void)
 {
     stmgcpage_acquire_global_lock();
@@ -416,9 +445,7 @@ void stm_major_collect(void)
     free_unused_global_pages();
 #endif
     free_closed_thread_descriptors();
-#if 0
     update_next_threshold();
-#endif
 
     fprintf(stderr, "| %lu bytes alive, %lu not used, countdown %lu\n`-----\n",
             (unsigned long)mc_total_in_use,
