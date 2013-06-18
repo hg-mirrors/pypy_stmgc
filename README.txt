@@ -18,7 +18,7 @@ The file "c4/doc-objects.txt" contains some low-level explanations.
 
 Run tests with "py.test".
 
-A demo program will be found in "c4/demo1.c" (not there yet).
+A demo program can be found in "c4/demo1.c".
 It can be built with "make debug-demo1" or "make build-demo1".
 
 The plan is to use this C code directly with PyPy, and not write
