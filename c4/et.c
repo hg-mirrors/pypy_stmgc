@@ -202,6 +202,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
   gcptrlist_insert(&d->list_of_read_objects, P);
 
  add_in_recent_reads_cache:
+  assert(!(P->h_tid & GCFLAG_NURSERY_MOVED));
   fxcache_add(&d->recent_reads_cache, P);
   return P;
 
@@ -235,7 +236,8 @@ gcptr stm_DirectReadBarrier(gcptr G)
     }
 }
 
-static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj)
+static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj,
+                                      int from_stolen)
 {
   gcptr org_pubobj = pubobj;
   while ((pubobj->h_revision & 3) == 0)
@@ -251,6 +253,10 @@ static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj)
       assert(is_private(privobj));
       if (P != org_pubobj)
         fprintf(stderr, "| actually %p ", org_pubobj);
+      if (from_stolen)
+        fprintf(stderr, "-stolen");
+      else
+        assert(org_pubobj->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
       fprintf(stderr, "-public_to_private-> %p private\n", privobj);
       return privobj;
     }
@@ -265,7 +271,8 @@ static gcptr _find_public_to_private(gcptr P)
 
   G2L_LOOP_FORWARD(d->public_to_private, item)
     {
-      R = _match_public_to_private(P, item->addr, item->val);
+      assert(item->addr->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
+      R = _match_public_to_private(P, item->addr, item->val, 0);
       if (R != NULL)
         return R;
 
@@ -276,7 +283,9 @@ static gcptr _find_public_to_private(gcptr P)
 
   for (i = 0; i < size; i += 2)
     {
-      R = _match_public_to_private(P, items[i], items[i + 1]);
+      if (items[i + 1] == NULL)
+        continue;
+      R = _match_public_to_private(P, items[i], items[i + 1], 1);
       if (R != NULL)
         return R;
     }
@@ -532,11 +541,12 @@ gcptr stm_WriteBarrier(gcptr P)
       */
       if (R->h_tid & GCFLAG_NURSERY_MOVED)
         {
-          /* Bah, the object turned into this kind of stub while we
-             were waiting for the collection_lock, because it was
-             stolen by someone else.  Use R->h_revision instead. */
+          /* Bah, the object turned into this kind of stub, possibly
+             while we were waiting for the collection_lock, because it
+             was stolen by someone else.  Use R->h_revision instead. */
           assert(IS_POINTER(R->h_revision));
           R = (gcptr)R->h_revision;
+          assert(R->h_tid & GCFLAG_PUBLIC);
         }
       assert(R->h_tid & GCFLAG_OLD);
       W = LocalizePublic(d, R);

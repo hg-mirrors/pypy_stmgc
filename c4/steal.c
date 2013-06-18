@@ -153,6 +153,13 @@ void stm_steal_stub(gcptr P)
             gcptr O = stmgc_duplicate_old(L);
             L->h_revision = (revision_t)O;
             L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
+            /* subtle: we need to remove L from the fxcache of the target
+               thread, otherwise its read barrier might not trigger on it.
+               It is mostly fine because it is anyway identical to O.  But
+               the issue is if the target thread adds a public_to_private
+               off O later: the write barrier will miss it if it only sees
+               L. */
+            gcptrlist_insert2(&foreign_pd->stolen_objects, L, NULL);
             L = O;
             fprintf(stderr, "\t---> %p\n", L);
         }
@@ -216,17 +223,20 @@ void stm_normalize_stolen_objects(struct tx_descriptor *d)
 
     for (i = 0; i < size; i += 2) {
         gcptr B = items[i];
-        gcptr L = items[i + 1];
-
-        assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
         assert(!(B->h_tid & GCFLAG_BACKUP_COPY));  /* already removed */
+
+        /* to be on the safe side --- but actually needed, see the
+           gcptrlist_insert2(L, NULL) above */
+        fxcache_remove(&d->recent_reads_cache, B);
+
+        gcptr L = items[i + 1];
+        if (L == NULL)
+            continue;
+        assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
 
         g2l_insert(&d->public_to_private, B, L);
 
-        /* to be on the safe side */
-        fxcache_remove(&d->recent_reads_cache, B);
-
-        /* but this is definitely needed: all keys in public_to_private
+        /* this is definitely needed: all keys in public_to_private
            must appear in list_of_read_objects */
         fprintf(stderr, "n.readobj: %p\n", B);
         gcptrlist_insert(&d->list_of_read_objects, B);
