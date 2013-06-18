@@ -221,3 +221,30 @@ def test_new_version_kill_intermediate():
     assert p5 != p4
     assert p5 == lib.stm_write_barrier(p4)
     assert p5 == lib.stm_write_barrier(p5)
+
+def test_new_version_kill_intermediate_non_root():
+    p1 = oalloc_refs(1); make_public(p1)
+    p2 = oalloc(HDR);    make_public(p2)
+    p3 = oalloc(HDR);    make_public(p3)
+    p4 = oalloc(HDR);    make_public(p4)
+    p5 = oalloc(HDR);    make_public(p5)
+    delegate(p2, p3)
+    delegate(p3, p4)
+    delegate(p4, p5)
+    rawsetptr(p1, 0, p3)
+    assert rawgetptr(p1, 0) == p3
+    lib.stm_push_root(p1)
+    major_collect()
+    lib.stm_pop_root()
+    check_not_free(p1)
+    check_free_old(p2)
+    check_free_old(p3)
+    check_free_old(p4)
+    check_not_free(p5)
+    print 'p1:', p1
+    print '      containing:', rawgetptr(p1, 0)
+    print 'p2:', p2
+    print 'p3:', p3
+    print 'p4:', p4
+    print 'p5:', p5
+    assert rawgetptr(p1, 0) == p5
