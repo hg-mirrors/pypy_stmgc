@@ -505,6 +505,6 @@ def test_multi_thread(seed=DEFAULT_SEED):
 
 
 def test_more_multi_thread():
-    py.test.skip("more random tests")
-    for i in range(100):
-        yield test_multi_thread, 1200 + i
+    #py.test.skip("more random tests")
+    for i in range(200):
+        yield test_multi_thread, 1624 + i
