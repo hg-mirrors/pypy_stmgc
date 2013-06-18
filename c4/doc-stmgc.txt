@@ -292,7 +292,7 @@ is simplified to a regular complete garbage collection.  Additionally,
 as hinted above, we can compact chains of public object copies.
 
 Note that our design relies on the following property: in a given copy
-of an object which was committed at revision N, all pointers points to
+of an object which was committed at revision N, all pointers point to
 copies of objects which were committed at or before revision N.  This
 property is true by construction, but we must be careful not to break it
 by "optimizing" the content of a copy.  In particular, major collections

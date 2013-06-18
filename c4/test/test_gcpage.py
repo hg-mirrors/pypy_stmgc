@@ -248,3 +248,9 @@ def test_new_version_kill_intermediate_non_root():
     print 'p4:', p4
     print 'p5:', p5
     assert rawgetptr(p1, 0) == p5
+
+def test_prebuilt_version_1():
+    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    check_prebuilt(p1)
+    major_collect()
+    check_prebuilt(p1)
