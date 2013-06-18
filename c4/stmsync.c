@@ -77,6 +77,9 @@ void stm_finalize(void)
 
 gcptr stm_read_barrier(gcptr obj)
 {
+    //if (FXCACHE_AT(obj) == obj)
+    //    fprintf(stderr, "read_barrier: in cache: %p\n", obj);
+
     /* XXX inline in the caller, optimize to get the smallest code */
     if (UNLIKELY((obj->h_revision != stm_private_rev_num) &&
                  (FXCACHE_AT(obj) != obj)))
