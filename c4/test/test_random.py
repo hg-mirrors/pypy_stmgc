@@ -504,7 +504,10 @@ def test_multi_thread(seed=DEFAULT_SEED):
     assert fine == [True, True]
 
 
+def test_specific_issue_1():
+    test_multi_thread(1624)
+
 def test_more_multi_thread():
-    #py.test.skip("more random tests")
+    py.test.skip("more random tests")
     for i in range(200):
         yield test_multi_thread, 1624 + i
