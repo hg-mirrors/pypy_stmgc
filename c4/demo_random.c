@@ -18,25 +18,25 @@
 
 
 // SUPPORT
-#define GCTID_STRUCT_ROOT     123
+#define GCTID_STRUCT_NODE     123
 
-struct root {
+struct node {
     struct stm_object_s hdr;
     long value;
-    struct root *next;
+    struct node *next;
 };
-typedef struct root * rootptr;
+typedef struct node * nodeptr;
 
 size_t stmcb_size(gcptr ob)
 {
-    assert(stm_get_tid(ob) == GCTID_STRUCT_ROOT);
-    return sizeof(struct root);
+    assert(stm_get_tid(ob) == GCTID_STRUCT_NODE);
+    return sizeof(struct node);
 }
 void stmcb_trace(gcptr ob, void visit(gcptr *))
 {
-    rootptr n;
-    assert(stm_get_tid(ob) == GCTID_STRUCT_ROOT);
-    n = (rootptr)ob;
+    nodeptr n;
+    assert(stm_get_tid(ob) == GCTID_STRUCT_NODE);
+    n = (nodeptr)ob;
     visit((gcptr *)&n->next);
 }
 
@@ -99,7 +99,7 @@ void del_root(int idx)
         td.roots[i] = td.roots[i + 1];
 }
 
-gcptr allocate_root(size_t size, int tid)
+gcptr allocate_node(size_t size, int tid)
 {
     gcptr r;
     push_roots();
@@ -124,11 +124,11 @@ void setup_thread()
     
     td.num_roots = PREBUILT + NUMROOTS;
     for (i = 0; i < PREBUILT; i++) {
-        td.roots[i] = allocate_pseudoprebuilt(sizeof(struct root), 
-                                              GCTID_STRUCT_ROOT);
+        td.roots[i] = allocate_pseudoprebuilt(sizeof(struct node), 
+                                              GCTID_STRUCT_NODE);
     }
     for (i = PREBUILT; i < PREBUILT + NUMROOTS; i++) {
-        td.roots[i] = allocate_root(sizeof(struct root), GCTID_STRUCT_ROOT);
+        td.roots[i] = allocate_node(sizeof(struct node), GCTID_STRUCT_NODE);
     }
 
 }
@@ -137,7 +137,7 @@ gcptr do_step(gcptr p)
 {
     fprintf(stdout, "#");
     
-    rootptr w_r, w_sr;
+    nodeptr w_r, w_sr;
     gcptr _r, _sr;
     int num, k;
 
@@ -150,7 +150,7 @@ gcptr do_step(gcptr p)
     k = get_rand(14);
 
     if (!p) // some parts expect it to be != 0
-        p = allocate_root(sizeof(struct root), GCTID_STRUCT_ROOT);
+        p = allocate_node(sizeof(struct node), GCTID_STRUCT_NODE);
 
     switch (k) {
     case 0: // remove a root
@@ -166,12 +166,12 @@ gcptr do_step(gcptr p)
             td.roots[td.num_roots++] = p;
         break;
     case 3: // allocate fresh 'p'
-        p = allocate_root(sizeof(struct root), GCTID_STRUCT_ROOT);
+        p = allocate_node(sizeof(struct node), GCTID_STRUCT_NODE);
         break;
     case 4: // set 'p' as *next in one of the roots
-        w_r = (rootptr)stm_write_barrier(_r);
+        w_r = (nodeptr)stm_write_barrier(_r);
         // XXX: do I have to read_barrier(p)?
-        w_r->next = (struct root*)p;
+        w_r->next = (struct node*)p;
         break;
     case 5:  // read and validate 'p'
         stm_read_barrier(p);
@@ -186,7 +186,7 @@ gcptr do_step(gcptr p)
         p = stm_write_barrier(p);
         break;
     case 8:
-        p = (gcptr)(((rootptr)stm_read_barrier(p))->next);
+        p = (gcptr)(((nodeptr)stm_read_barrier(p))->next);
         break;
     case 9: // XXX: rare events
         break;
@@ -200,8 +200,8 @@ gcptr do_step(gcptr p)
         stm_write_barrier(_sr);
         break;
     case 13:
-        w_sr = (rootptr)stm_write_barrier(_sr);
-        w_sr->next = (rootptr)shared_roots[get_rand(SHARED_ROOTS)];
+        w_sr = (nodeptr)stm_write_barrier(_sr);
+        w_sr->next = (nodeptr)shared_roots[get_rand(SHARED_ROOTS)];
     default:
         break;
     }
@@ -300,8 +300,8 @@ int main(void)
     default_seed = time(NULL) / 3600 / 24;
     
     for (i = 0; i < SHARED_ROOTS; i++) {
-        shared_roots[i] = allocate_pseudoprebuilt(sizeof(struct root), 
-                                                  GCTID_STRUCT_ROOT);
+        shared_roots[i] = allocate_pseudoprebuilt(sizeof(struct node), 
+                                                  GCTID_STRUCT_NODE);
     }    
     
     status = sem_init(&done, 0, 0);
