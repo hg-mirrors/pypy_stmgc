@@ -776,7 +776,6 @@ void AbortTransaction(int num)
   AbortPrivateFromProtected(d);
   gcptrlist_clear(&d->list_of_read_objects);
   g2l_clear(&d->public_to_private);
-  gcptrlist_clear(&d->public_descriptor->stolen_objects);
 
   /* release the lock */
   spinlock_release(d->public_descriptor->collection_lock);
@@ -1453,11 +1452,12 @@ void DescriptorDone(void)
     struct tx_descriptor *d = thread_descriptor;
     assert(d != NULL);
     assert(d->active == 0);
-    assert(d->public_descriptor->stolen_objects.size == 0);
-    gcptrlist_delete(&d->public_descriptor->stolen_objects);
+    stmgcpage_acquire_global_lock();
+
+    /* our nursery is empty at this point */
+    assert(d->public_descriptor->stolen_young_stubs.size == 0);
     gcptrlist_delete(&d->public_descriptor->stolen_young_stubs);
 
-    stmgcpage_acquire_global_lock();
     stmgcpage_done_tls();
     i = d->public_descriptor_index;
     assert(stm_descriptor_array[i] == d->public_descriptor);
