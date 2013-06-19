@@ -40,29 +40,33 @@ void stmcb_trace(gcptr ob, void visit(gcptr *))
     visit((gcptr *)&n->next);
 }
 
+
 // global and per-thread-data
 time_t default_seed;
 gcptr shared_roots[SHARED_ROOTS];
-__thread unsigned int thread_seed = 0;
-__thread gcptr roots[MAXROOTS];
-__thread gcptr roots_outside_perform[MAXROOTS];
-__thread gcptr current_root = 0;
-__thread int num_roots = 0;
-__thread int num_roots_outside_perform = 0;
-__thread int steps_left;
-__thread int interruptible = 0;
+struct thread_data {
+    unsigned int thread_seed;
+    gcptr roots[MAXROOTS];
+    gcptr roots_outside_perform[MAXROOTS];
+    gcptr current_root;
+    int num_roots;
+    int num_roots_outside_perform;
+    int steps_left;
+    int interruptible;
+};
+__thread struct thread_data td;
 
 
 // helper functions
 int get_rand(int max)
 {
-    return (int)(rand_r(&thread_seed) % (unsigned int)max);
+    return (int)(rand_r(&td.thread_seed) % (unsigned int)max);
 }
 
-void copy_roots(gcptr *from, gcptr *to)
+void copy_roots(gcptr *from, gcptr *to, int num)
 {
     int i;
-    for (i = 0; i < num_roots; i++)
+    for (i = 0; i < num; i++)
         *(to++) = *(from++);
 }
 
@@ -77,22 +81,22 @@ gcptr allocate_pseudoprebuilt(size_t size, int tid)
 void push_roots()
 {
     int i;
-    for (i = 0; i < num_roots; i++)
-        stm_push_root(roots[i]);
+    for (i = 0; i < td.num_roots; i++)
+        stm_push_root(td.roots[i]);
 }
 
 void pop_roots()
 {
     int i;
-    for (i = num_roots - 1; i >= 0; i--)
-        roots[i] = stm_pop_root();
+    for (i = td.num_roots - 1; i >= 0; i--)
+        td.roots[i] = stm_pop_root();
 }
 
 void del_root(int idx)
 {
     int i;
-    for (i = idx; i < num_roots - 1; i++)
-        roots[i] = roots[i + 1];
+    for (i = idx; i < td.num_roots - 1; i++)
+        td.roots[i] = td.roots[i + 1];
 }
 
 gcptr allocate_root(size_t size, int tid)
@@ -114,17 +118,17 @@ void transaction_break();
 void setup_thread()
 {
     int i;
-    thread_seed = default_seed;
-    steps_left = STEPS;
-    interruptible = 0;
+    td.thread_seed = default_seed;
+    td.steps_left = STEPS;
+    td.interruptible = 0;
     
-    num_roots = PREBUILT + NUMROOTS;
+    td.num_roots = PREBUILT + NUMROOTS;
     for (i = 0; i < PREBUILT; i++) {
-        roots[i] = allocate_pseudoprebuilt(sizeof(struct root), 
-                                           GCTID_STRUCT_ROOT);
+        td.roots[i] = allocate_pseudoprebuilt(sizeof(struct root), 
+                                              GCTID_STRUCT_ROOT);
     }
     for (i = PREBUILT; i < PREBUILT + NUMROOTS; i++) {
-        roots[i] = allocate_root(sizeof(struct root), GCTID_STRUCT_ROOT);
+        td.roots[i] = allocate_root(sizeof(struct root), GCTID_STRUCT_ROOT);
     }
 
 }
@@ -137,8 +141,8 @@ gcptr do_step(gcptr p)
     gcptr _r, _sr;
     int num, k;
 
-    num = get_rand(num_roots);
-    _r = roots[num];
+    num = get_rand(td.num_roots);
+    _r = td.roots[num];
 
     num = get_rand(SHARED_ROOTS);
     _sr = shared_roots[num];
@@ -158,8 +162,8 @@ gcptr do_step(gcptr p)
             p = _r;
         break;
     case 2: // add 'p' to roots
-        if (num_roots < MAXROOTS)
-            roots[num_roots++] = p;
+        if (td.num_roots < MAXROOTS)
+            td.roots[td.num_roots++] = p;
         break;
     case 3: // allocate fresh 'p'
         p = allocate_root(sizeof(struct root), GCTID_STRUCT_ROOT);
@@ -173,8 +177,8 @@ gcptr do_step(gcptr p)
         stm_read_barrier(p);
         break;
     case 6: // transaction break
-        if (interruptible)
-            return -1; // break current
+        if (td.interruptible)
+            return (gcptr)-1; // break current
         transaction_break();
         p = NULL;
         break;
@@ -196,8 +200,8 @@ gcptr do_step(gcptr p)
         stm_write_barrier(_sr);
         break;
     case 13:
-        w_sr = stm_write_barrier(_sr);
-        w_sr->next = shared_roots[get_rand(SHARED_ROOTS)];
+        w_sr = (rootptr)stm_write_barrier(_sr);
+        w_sr->next = (rootptr)shared_roots[get_rand(SHARED_ROOTS)];
     default:
         break;
     }
@@ -208,32 +212,32 @@ gcptr do_step(gcptr p)
 void transaction_break()
 {
     push_roots();
-    interruptible = 1;
+    td.interruptible = 1;
     
-    copy_roots(roots, roots_outside_perform);
-    num_roots_outside_perform = num_roots;
+    copy_roots(td.roots, td.roots_outside_perform, td.num_roots);
+    td.num_roots_outside_perform = td.num_roots;
     
     stm_perform_transaction(NULL, interruptible_callback);
     
-    num_roots = num_roots_outside_perform;
-    copy_roots(roots_outside_perform, roots);
+    td.num_roots = td.num_roots_outside_perform;
+    copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
     
-    interruptible = 0;
+    td.interruptible = 0;
     pop_roots();
 }
 
 
 int interruptible_callback(gcptr arg1, int retry_counter)
 {
-    num_roots = num_roots_outside_perform;
-    copy_roots(roots_outside_perform, roots);
+    td.num_roots = td.num_roots_outside_perform;
+    copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
 
     arg1 = stm_pop_root();
     pop_roots();
     push_roots();
     stm_push_root(arg1);
 
-    gcptr p = run_me();
+    int p = run_me();
     int restart = p == -1 ? get_rand(3) != 1 : 0;
 
     return restart;
@@ -242,12 +246,12 @@ int interruptible_callback(gcptr arg1, int retry_counter)
 int run_me()
 {
     gcptr p = NULL;
-    while (steps_left) {
-        steps_left--;
+    while (td.steps_left) {
+        td.steps_left--;
         p = do_step(p);
 
-        if (p == -1)
-            return p;
+        if (p == (gcptr)-1)
+            return -1;
     }
     return 0;
 }
@@ -258,7 +262,7 @@ static int thr_mynum = 0;
 
 void *demo(void *arg)
 {  
-    int status, i;
+    int status;
     
     stm_initialize();
     setup_thread();
