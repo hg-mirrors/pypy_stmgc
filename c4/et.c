@@ -202,7 +202,9 @@ gcptr stm_DirectReadBarrier(gcptr G)
   gcptrlist_insert(&d->list_of_read_objects, P);
 
  add_in_recent_reads_cache:
-  assert(!(P->h_tid & GCFLAG_NURSERY_MOVED));
+  /* The risks are that the following assert fails, because the flag was
+     added just now by a parallel thread during stealing... */
+  /*assert(!(P->h_tid & GCFLAG_NURSERY_MOVED));*/
   fxcache_add(&d->recent_reads_cache, P);
   return P;
 
