@@ -847,7 +847,6 @@ static void init_transaction(struct tx_descriptor *d)
   assert(d->num_private_from_protected_known_old == 0);
   assert(d->num_read_objects_known_old == 0);
   assert(!g2l_any_entry(&d->public_to_private));
-  assert(d->public_descriptor->stolen_objects.size == 0);
 
   d->count_reads = 1;
   fxcache_clear(&d->recent_reads_cache);
