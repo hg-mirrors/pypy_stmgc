@@ -11,6 +11,8 @@ void stm_stop_single_thread(void);
 
 void stm_possible_safe_point(void);
 
+extern struct GcPtrList stm_prebuilt_gcroots;
+void stm_add_prebuilt_root(gcptr);
 void stm_clear_between_tests(void);
 
 #endif

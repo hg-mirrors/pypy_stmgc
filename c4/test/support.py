@@ -60,7 +60,7 @@ ffi.cdef('''
     long stmgcpage_count(int quantity);
     void stmgcpage_possibly_major_collect(int);
     revision_t stm_global_cur_time(void);
-    //void stmgcpage_add_prebuilt_root(gcptr);
+    void stm_add_prebuilt_root(gcptr);
     void stm_clear_between_tests(void);
     void stmgc_minor_collect(void);
     gcptr _stm_nonrecord_barrier(gcptr);
@@ -116,7 +116,6 @@ lib = ffi.verify(r'''
     #include "stmimpl.h"
 
     extern revision_t stm_global_cur_time(void);
-    //extern void stmgcpage_add_prebuilt_root(gcptr);
     extern revision_t get_private_rev_num(void);
 
     int gettid(gcptr obj)
@@ -515,7 +514,7 @@ def delegate(p1, p2):
     p1.h_revision = ffi.cast("revision_t", p2)
     p1.h_tid |= GCFLAG_PUBLIC_TO_PRIVATE
     if p1.h_tid & GCFLAG_PREBUILT_ORIGINAL:
-        lib.stmgcpage_add_prebuilt_root(p1)
+        lib.stm_add_prebuilt_root(p1)
 
 def make_public(p1):
     """Hack at an object returned by oalloc() to force it public."""

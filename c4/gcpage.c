@@ -226,6 +226,27 @@ static void visit_all_objects(void)
     }
 }
 
+static void mark_prebuilt_roots(void)
+{
+    /* Note about prebuilt roots: 'stm_prebuilt_gcroots' is a list that
+       contains all the ones that have been modified.  Because they are
+       themselves not in any page managed by this file, their
+       GCFLAG_VISITED will not be removed at the end of the current
+       collection.  This is fine because the base object cannot contain
+       references to the heap.  So we decided to systematically set
+       GCFLAG_VISITED on prebuilt objects. */
+    gcptr *pobj = stm_prebuilt_gcroots.items;
+    gcptr *pend = stm_prebuilt_gcroots.items + stm_prebuilt_gcroots.size;
+    gcptr obj;
+    for (; pobj != pend; pobj++) {
+        obj = *pobj;
+        assert(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL);
+        assert(obj->h_tid & GCFLAG_VISITED);
+        assert((obj->h_revision & 1) == 0);   /* "is a pointer" */
+        visit((gcptr *)&obj->h_revision);
+    }
+}
+
 static void mark_roots(gcptr *root, gcptr *end)
 {
     //assert(*root == END_MARKER);
@@ -502,8 +523,8 @@ void stm_major_collect(void)
     force_minor_collections();
 
     assert(gcptrlist_size(&objects_to_trace) == 0);
-    mark_prebuilt_roots();
 #endif
+    mark_prebuilt_roots();
     mark_all_stack_roots();
     visit_all_objects();
     gcptrlist_delete(&objects_to_trace);
