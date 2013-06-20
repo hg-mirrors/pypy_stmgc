@@ -278,3 +278,20 @@ def test_prebuilt_version_to_protected():
     major_collect()
     check_prebuilt(p1)
     check_not_free(p2)     # XXX replace with p1
+
+def test_private():
+    p1 = nalloc(HDR)
+    lib.stm_push_root(p1)
+    minor_collect()
+    major_collect()
+    p1 = lib.stm_pop_root()
+    assert not lib.in_nursery(p1)
+    check_not_free(p1)
+
+def test_major_collect_first_does_minor_collect():
+    p1 = nalloc(HDR)
+    lib.stm_push_root(p1)
+    major_collect()
+    p1 = lib.stm_pop_root()
+    assert not lib.in_nursery(p1)
+    check_not_free(p1)

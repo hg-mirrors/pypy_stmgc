@@ -1430,6 +1430,8 @@ int DescriptorInit(void)
           /* we are reusing 'pd' */
           descriptor_array_free_list = pd->free_list_next;
           assert(descriptor_array_free_list >= 0);
+          assert(pd->stolen_objects.size == 0);
+          assert(pd->stolen_young_stubs.size == 0);
           assert(pd->collection_lock == 0 || pd->collection_lock == -1);
           pd->collection_lock = 0;
       }
