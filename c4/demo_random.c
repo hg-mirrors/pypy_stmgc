@@ -6,15 +6,19 @@
 #include <time.h>
 
 #include "stmgc.h"
+#include "stmimpl.h"
 #include "fprintcolor.h"
+
+extern revision_t get_private_rev_num(void);
 
 
 #define NUMTHREADS 4
 #define STEPS 100000
-#define NUMROOTS 10
-#define PREBUILT 3
+#define NUMROOTS 10 // per thread
+#define PREBUILT 3 // per thread
 #define MAXROOTS 1000
-#define SHARED_ROOTS 5
+#define SHARED_ROOTS 5 // shared by threads
+
 
 
 // SUPPORT
@@ -58,6 +62,9 @@ __thread struct thread_data td;
 
 
 // helper functions
+int classify(gcptr p);
+void check(gcptr p);
+
 int get_rand(int max)
 {
     return (int)(rand_r(&td.thread_seed) % (unsigned int)max);
@@ -81,15 +88,19 @@ gcptr allocate_pseudoprebuilt(size_t size, int tid)
 void push_roots()
 {
     int i;
-    for (i = 0; i < td.num_roots; i++)
+    for (i = 0; i < td.num_roots; i++) {
+        check(td.roots[i]);
         stm_push_root(td.roots[i]);
+    }
 }
 
 void pop_roots()
 {
     int i;
-    for (i = td.num_roots - 1; i >= 0; i--)
+    for (i = td.num_roots - 1; i >= 0; i--) {
         td.roots[i] = stm_pop_root();
+        check(td.roots[i]);
+    }
 }
 
 void del_root(int idx)
@@ -99,14 +110,116 @@ void del_root(int idx)
         td.roots[i] = td.roots[i + 1];
 }
 
-gcptr allocate_node(size_t size, int tid)
+nodeptr allocate_node()
 {
-    gcptr r;
+    nodeptr r;
     push_roots();
-    r = stm_allocate(size, tid);
+    r = (nodeptr)stm_allocate(sizeof(struct node), GCTID_STRUCT_NODE);
     pop_roots();
     return r;
 }
+
+int is_shared_prebuilt(gcptr p)
+{
+    int i;
+    for (i = 0; i < SHARED_ROOTS; i++)
+        if (shared_roots[i] == p)
+            return 1;
+    return 0;
+}
+
+void check_not_free(gcptr p)
+{
+    assert(p != NULL);
+    assert((p->h_tid & 0xFFFF) == GCTID_STRUCT_NODE);
+    if (is_shared_prebuilt(p))
+        assert(p->h_tid & GCFLAG_PREBUILT_ORIGINAL);
+}
+
+void check(gcptr p)
+{
+    if (p != NULL) {
+        check_not_free(p);
+        classify(p); // additional asserts
+    }
+}
+
+gcptr read_barrier(gcptr p)
+{
+    gcptr r = p;
+    if (p != NULL) {
+        check(p);
+        r = stm_read_barrier(p);
+        check(r);
+    }
+    return r;
+}
+
+gcptr write_barrier(gcptr p)
+{
+    gcptr w = p;
+    if (p != NULL) {
+        check(p);
+        w = stm_write_barrier(p);
+        check(w);
+    }
+    return w;
+}
+
+int in_nursery(gcptr obj)
+{
+    struct tx_descriptor *d = thread_descriptor;
+    int result1 = (d->nursery_base <= (char*)obj &&
+                   ((char*)obj) < d->nursery_end);
+    if (obj->h_tid & GCFLAG_OLD) {
+        assert(result1 == 0);
+    }
+    else {
+        /* this assert() also fails if "obj" is in another nursery than
+           the one of the current thread.  This is ok, because we
+           should not see such pointers. */
+        assert(result1 == 1);
+    }
+    return result1;
+}
+
+static const revision_t C_PRIVATE_FROM_PROTECTED = 1;
+static const revision_t C_PRIVATE                = 2;
+static const revision_t C_STUB                   = 3;
+static const revision_t C_PUBLIC                 = 4;
+static const revision_t C_BACKUP                 = 5;
+static const revision_t C_PROTECTED              = 6;
+int classify(gcptr p)
+{
+    int priv_from_prot = (p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) != 0;
+    int private_other = p->h_revision == get_private_rev_num();
+    int public = (p->h_tid & GCFLAG_PUBLIC) != 0;
+    int backup = (p->h_tid & GCFLAG_BACKUP_COPY) != 0;
+    int stub = (p->h_tid & GCFLAG_STUB) != 0;
+    assert(priv_from_prot + private_other + public + backup <= 1);
+    assert(public || !stub);
+    
+    if (priv_from_prot)
+        return C_PRIVATE_FROM_PROTECTED;
+    if (private_other)
+        return C_PRIVATE;
+    if (public) {
+        if (stub) {
+            assert(!in_nursery(p));
+        }
+        else {
+            if (in_nursery(p)) {
+                assert(p->h_tid & GCFLAG_NURSERY_MOVED);
+                assert(!(p->h_revision & 1));
+            }
+            return C_PUBLIC;
+        }
+    }
+    if (backup)
+        return C_BACKUP;
+    return C_PROTECTED;
+}
+
 
 
 
@@ -128,7 +241,7 @@ void setup_thread()
                                               GCTID_STRUCT_NODE);
     }
     for (i = PREBUILT; i < PREBUILT + NUMROOTS; i++) {
-        td.roots[i] = allocate_node(sizeof(struct node), GCTID_STRUCT_NODE);
+        td.roots[i] = (gcptr)allocate_node();
     }
 
 }
@@ -149,9 +262,6 @@ gcptr do_step(gcptr p)
 
     k = get_rand(14);
 
-    if (!p) // some parts expect it to be != 0
-        p = allocate_node(sizeof(struct node), GCTID_STRUCT_NODE);
-
     switch (k) {
     case 0: // remove a root
         if (num > 0)
@@ -162,19 +272,21 @@ gcptr do_step(gcptr p)
             p = _r;
         break;
     case 2: // add 'p' to roots
-        if (td.num_roots < MAXROOTS)
+        if (p && td.num_roots < MAXROOTS)
             td.roots[td.num_roots++] = p;
         break;
     case 3: // allocate fresh 'p'
-        p = allocate_node(sizeof(struct node), GCTID_STRUCT_NODE);
+        p = (gcptr)allocate_node();
         break;
     case 4: // set 'p' as *next in one of the roots
-        w_r = (nodeptr)stm_write_barrier(_r);
-        // XXX: do I have to read_barrier(p)?
+        check(_r);
+        w_r = (nodeptr)write_barrier(_r);
+        check((gcptr)w_r);
+        check(p);
         w_r->next = (struct node*)p;
         break;
     case 5:  // read and validate 'p'
-        stm_read_barrier(p);
+        read_barrier(p);
         break;
     case 6: // transaction break
         if (td.interruptible)
@@ -183,25 +295,27 @@ gcptr do_step(gcptr p)
         p = NULL;
         break;
     case 7: // only do a stm_write_barrier
-        p = stm_write_barrier(p);
+        p = write_barrier(p);
         break;
     case 8:
-        p = (gcptr)(((nodeptr)stm_read_barrier(p))->next);
+        if (p)
+            p = (gcptr)(((nodeptr)read_barrier(p))->next);
         break;
     case 9: // XXX: rare events
         break;
     case 10: // only do a stm_read_barrier
-        p = stm_read_barrier(p);
+        p = read_barrier(p);
         break;
     case 11:
-        stm_read_barrier(_sr);
+        read_barrier(_sr);
         break;
     case 12:
-        stm_write_barrier(_sr);
+        write_barrier(_sr);
         break;
     case 13:
-        w_sr = (nodeptr)stm_write_barrier(_sr);
+        w_sr = (nodeptr)write_barrier(_sr);
         w_sr->next = (nodeptr)shared_roots[get_rand(SHARED_ROOTS)];
+        break;
     default:
         break;
     }
