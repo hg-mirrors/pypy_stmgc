@@ -368,6 +368,12 @@ void stmgc_minor_collect(void)
     AbortNowIfDelayed();
 }
 
+void stmgc_minor_collect_no_abort(void)
+{
+    struct tx_descriptor *d = thread_descriptor;
+    minor_collect(d);
+}
+
 int stmgc_minor_collect_anything_to_do(struct tx_descriptor *d)
 {
     if (d->nursery_current == d->nursery_base /*&&

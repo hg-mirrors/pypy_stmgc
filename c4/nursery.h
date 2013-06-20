@@ -40,6 +40,7 @@ struct tx_descriptor;  /* from et.h */
 void stmgc_init_nursery(void);
 void stmgc_done_nursery(void);
 void stmgc_minor_collect(void);
+void stmgc_minor_collect_no_abort(void);
 int stmgc_minor_collect_anything_to_do(struct tx_descriptor *);
 gcptr stmgc_duplicate(gcptr);
 gcptr stmgc_duplicate_old(gcptr);

@@ -505,6 +505,36 @@ static void free_closed_thread_descriptors(void)
 }
 
 
+/***** Major collections: forcing minor collections *****/
+
+void force_minor_collections(void)
+{
+    struct tx_descriptor *d;
+    struct tx_descriptor *saved = thread_descriptor;
+    revision_t saved_private_rev = stm_private_rev_num;
+    assert(saved_private_rev == *saved->private_revision_ref);
+
+    for (d = stm_tx_head; d; d = d->tx_next) {
+        /* Force a minor collection to run in the thread 'd'.
+           Usually not needed, but it may be the case that this major
+           collection was not preceeded by a minor collection if the
+           thread is busy in a system call for example.
+        */
+        if (stmgc_minor_collect_anything_to_do(d)) {
+            /* Hack: temporarily pretend that we "are" the other thread...
+             */
+            thread_descriptor = d;
+            stm_private_rev_num = *d->private_revision_ref;
+            //assert(stmgc_nursery_hiding(d, 0));
+            stmgc_minor_collect_no_abort();
+            //assert(stmgc_nursery_hiding(d, 1));
+            thread_descriptor = saved;
+            stm_private_rev_num = saved_private_rev;
+        }
+    }
+}
+
+
 /***** Major collections: main *****/
 
 void update_next_threshold(void)
@@ -541,11 +571,9 @@ void stm_major_collect(void)
     stmgcpage_acquire_global_lock();
     fprintf(stderr, ",-----\n| running major collection...\n");
 
-#if 0
     force_minor_collections();
 
     assert(gcptrlist_size(&objects_to_trace) == 0);
-#endif
     mark_prebuilt_roots();
     mark_all_stack_roots();
     visit_all_objects();
