@@ -100,9 +100,10 @@ int bubble_run(gcptr arg1, int retry_counter)
         // results from consecutive read_barriers can differ. needs Ptr_Eq()
         int i = 0;
         while (!(stm_read_barrier((gcptr)r_prev->next) ==
-                 stm_read_barrier((gcptr)r_current) &&
+                 ((gcptr)r_current) &&
                  stm_read_barrier((gcptr)r_current->next) ==
-                 stm_read_barrier((gcptr)r_next))) {
+                 ((gcptr)r_next))) {
+            abort();
             asm volatile ("pause":::"memory");  /* smp_spinloop() */
             i++;
             assert(i < 1000);
