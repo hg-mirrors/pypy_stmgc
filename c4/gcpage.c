@@ -339,6 +339,11 @@ static void cleanup_for_thread(struct tx_descriptor *d)
     if (d->active < 0)
         return;       /* already "aborted" during forced minor collection */
 
+    if (d->active == 2) {
+        /* inevitable transaction: clear the list of read objects */
+        gcptrlist_clear(&d->list_of_read_objects);
+    }
+
     for (i = d->list_of_read_objects.size - 1; i >= 0; --i) {
         gcptr obj = items[i];
 
@@ -357,16 +362,13 @@ static void cleanup_for_thread(struct tx_descriptor *d)
             return;
         }
 
-        /* on the other hand, if we see a non-visited object in the read
-           list, then we need to remove it --- it's wrong to just abort.
-           Consider the following case: the transaction is inevitable,
-           and since it started, it popped objects out of its shadow
-           stack.  Some popped objects might become free even if they
-           have been read from.  We must not abort such transactions
-           (and cannot anyway: they are inevitable!). */
-        if (!(obj->h_tid & GCFLAG_VISITED)) {
-            items[i] = items[--d->list_of_read_objects.size];
-        }
+        /* It should not be possible to see a non-visited object in the
+           read list.  I think the only case is: the transaction is
+           inevitable, and since it started, it popped objects out of
+           its shadow stack.  Some popped objects might become free even
+           if they have been read from.  But for inevitable transactions,
+           we clear the 'list_of_read_objects' above anyway. */
+        assert(obj->h_tid & GCFLAG_VISITED);
     }
 
     d->num_read_objects_known_old = d->list_of_read_objects.size;
