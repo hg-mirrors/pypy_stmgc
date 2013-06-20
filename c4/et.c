@@ -640,14 +640,33 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
       if (v >= LOCKED)            // locked
         {
           if (!during_commit)
-            assert(v != d->my_lock);    // we don't hold any lock
-
-          if (v != d->my_lock)
             {
-              /* not locked by me: spinloop until the other thread releases
-                 its lock */
+              assert(v != d->my_lock);    // we don't hold any lock
+              /* spinloop until the other thread releases its lock */
               SpinLoop(SPLP_LOCKED_VALIDATE);
               goto retry;
+            }
+          else
+            {
+              if (v != d->my_lock)         // not locked by me: conflict
+                {
+                  /* A case that can occur: two threads A and B are both
+                     committing, thread A locked object a, thread B
+                     locked object b, and then thread A tries to
+                     validate the reads it did on object b and
+                     vice-versa.  In this case both threads cannot
+                     commit, but if they both enter the SpinLoop()
+                     above, then they will livelock.
+
+                     XXX This might lead both threads to cancel by
+                     reaching this point.  It might be possible to be
+                     more clever and let one of the threads commit
+                     anyway.
+                  */
+                  fprintf(stderr, "validation failed: "
+                          "%p is locked by another thread\n", R);
+                  return 0;
+                }
             }
         }
     }
