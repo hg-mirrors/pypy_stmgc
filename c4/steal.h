@@ -2,7 +2,7 @@
 #define _SRCSTM_STEAL_H
 
 
-#define STUB_BLOCK_SIZE   (16 * WORD)    /* power of two */
+#define STUB_BLOCK_SIZE   (32 * WORD)    /* power of two */
 
 #define STUB_THREAD(h)    (*(struct tx_public_descriptor **)           \
                             (((revision_t)(h)) & ~(STUB_BLOCK_SIZE-1)))

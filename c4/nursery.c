@@ -59,7 +59,7 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     assert(tid == (tid & STM_USER_TID_MASK));
     P->h_tid = tid;
     P->h_revision = stm_private_rev_num;
-    P->h_original = NULL;
+    P->h_original = 0;
     return P;
 }
 
@@ -77,7 +77,7 @@ gcptr stmgc_duplicate(gcptr P)
     if (P->h_original)
         L->h_original = P->h_original;
     else
-        L->h_original = P;
+        L->h_original = (revision_t)P;
 
     return L;
 }
@@ -93,7 +93,7 @@ gcptr stmgc_duplicate_old(gcptr P)
     if (P->h_original)
         L->h_original = P->h_original;
     else
-        L->h_original = P;
+        L->h_original = (revision_t)P;
 
     return L;
 }
@@ -114,28 +114,21 @@ revision_t stm_id(gcptr p)
     
     //p->h_original == NULL
     if (!(p->h_tid & GCFLAG_OLD)) {//(is_in_nursery(p)) {
-        // preallocate old "original" outside
+        struct tx_descriptor *d = thread_descriptor;
+        spinlock_acquire(d->public_descriptor->collection_lock, 'I');
+        // preallocate old "original" outside;
         // like stealing
-        gcptr O = stmgc_duplicate_old(L);
-        L->h_revision = (revision_t)O;
-        L->h_original = O;
-        L->h_tid |= GCFLAG_HAS_ID;
+        gcptr O = stmgc_duplicate_old(p);
+        p->h_revision = (revision_t)O;
+        p->h_original = (revision_t)O;
+        p->h_tid |= GCFLAG_HAS_ID;
         
-        
-        // could be stolen
-        if (p->h_tid & GCFLAG_NURSERY_MOVED) {
-            
-        }
-    }
-    else if (p->h_tid & GCFLAG_NURSERY_MOVED) {
-        if (p->h_tid & GCFLAG_PUBLIC) {
-            // moved by stealing
-            
-        }
-       
+        spinlock_release(d->public_descriptor->collection_lock);
+        return (revision_t)O;
     }
     else {
-        assert(0);
+        // p is the original itself
+        return (revision_t)p;
     }
 }
 
@@ -161,7 +154,7 @@ static inline gcptr create_old_object_copy(gcptr obj)
     return fresh_old_copy;
 }
 
-static inline void copy_to_old_id_copy(gcptr obj, gcptr id)
+inline void copy_to_old_id_copy(gcptr obj, gcptr id)
 {
     size_t size = stmcb_size(obj);
     memcpy(id, obj, size);
@@ -191,7 +184,8 @@ static void visit_if_young(gcptr *root)
 
         if (obj->h_tid & GCFLAG_HAS_ID) {
             /* already has a place to go to */
-            fresh_old_copy = copy_to_old_id_copy(obj, obj->h_original);
+            copy_to_old_id_copy(obj, (gcptr)obj->h_original);
+            fresh_old_copy = (gcptr)obj->h_original;
         } 
         else {
             /* make a copy of it outside */
