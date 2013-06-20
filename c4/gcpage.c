@@ -222,7 +222,7 @@ static void visit(gcptr *pobj)
                 prev_obj->h_tid |= GCFLAG_VISITED;
                 assert(*pobj == prev_obj);
                 gcptr obj1 = obj;
-                visit(&obj1);       /* xxx avoid recursion */
+                visit(&obj1);       /* recursion, but should be only once */
                 prev_obj->h_revision = ((revision_t)obj1) + 2;
                 return;
             }
