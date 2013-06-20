@@ -313,3 +313,38 @@ def test_private_from_protected_young():
     assert p1b == p1
     check_not_free(follow_revision(p1))
     assert follow_revision(p1).h_tid & GCFLAG_BACKUP_COPY
+
+def test_backup_stolen():
+    py.test.skip("unexpected abort")
+    p = palloc(HDR)
+    def f1(r):
+        p1 = lib.stm_write_barrier(p)   # private copy
+        lib.stm_commit_transaction()
+        lib.stm_begin_inevitable_transaction()
+        assert classify(p) == "public"
+        assert classify(p1) == "protected"
+        assert classify(follow_revision(p)) == "stub"
+        assert p1.h_revision & 1
+        def cb(c):
+            assert c == 0
+            p1b = lib.stm_write_barrier(p1)
+            assert p1b == p1
+            assert classify(p1) == "private_from_protected"
+            assert classify(follow_revision(p1)) == "backup"
+            r.wait_while_in_parallel()
+            check_not_free(p1)
+            assert classify(p1) == "private_from_protected"
+            assert classify(follow_revision(p1)) == "public"  # has been stolen
+        perform_transaction(cb)
+    def f2(r):
+        def cb(c):
+            assert c == 0
+            r.enter_in_parallel()
+            p2 = lib.stm_read_barrier(p)    # steals
+            assert classify(p2) == "public"
+            r.leave_in_parallel()
+            major_collect()
+            check_not_free(p2)
+            assert classify(p2) == "public"
+        perform_transaction(cb)
+    run_parallel(f1, f2)

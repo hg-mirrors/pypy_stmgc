@@ -385,6 +385,14 @@ int stmgc_minor_collect_anything_to_do(struct tx_descriptor *d)
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
+        assert(gcptrlist_size(&d->list_of_read_objects) >=
+               d->num_read_objects_known_old);
+        assert(gcptrlist_size(&d->private_from_protected) >=
+               d->num_private_from_protected_known_old);
+        d->num_read_objects_known_old =
+            gcptrlist_size(&d->list_of_read_objects);
+        d->num_private_from_protected_known_old =
+            gcptrlist_size(&d->private_from_protected);
         return 0;
     }
     else {
