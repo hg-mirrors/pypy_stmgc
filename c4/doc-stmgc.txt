@@ -291,6 +291,9 @@ the threads are all stopped at the next safe point.  Then the problem
 is simplified to a regular complete garbage collection.  Additionally,
 as hinted above, we can compact chains of public object copies.
 
+[why? write a justification for the next paragraph or drop it.  I'm not
+sure but it may be the case that we no longer rely on this.]
+
 Note that our design relies on the following property: in a given copy
 of an object which was committed at revision N, all pointers point to
 copies of objects which were committed at or before revision N.  This
