@@ -203,12 +203,34 @@ static void visit(gcptr *pobj)
     }
     else {
         /* h_revision is a ptr: we have a more recent version */
-        assert(!(obj->h_tid & GCFLAG_STUB));
         gcptr prev_obj = obj;
-        obj = (gcptr)obj->h_revision;   /* go visit the more recent version */
+        assert(obj->h_tid & GCFLAG_PUBLIC);
 
-        if (!(obj->h_tid & GCFLAG_VISITED) && IS_POINTER(obj->h_revision)) {
+        if (!(obj->h_revision & 2)) {
+            /* go visit the more recent version */
             obj = (gcptr)obj->h_revision;
+        }
+        else {
+            /* it's a stub: keep it if it points to a protected version,
+               because we need to keep the effect of stealing if it is
+               later accessed by the wrong thread.  If it points to a
+               public object (possibly outdated), we can ignore the stub.
+            */
+            assert(obj->h_tid & GCFLAG_STUB);
+            obj = (gcptr)(obj->h_revision - 2);
+            if (!(obj->h_tid & GCFLAG_PUBLIC)) {
+                prev_obj->h_tid |= GCFLAG_VISITED;
+                assert(*pobj == prev_obj);
+                gcptr obj1 = obj;
+                visit(&obj1);       /* xxx avoid recursion */
+                prev_obj->h_revision = ((revision_t)obj1) + 2;
+                return;
+            }
+        }
+
+        if (!(obj->h_revision & 3)) {
+            obj = (gcptr)obj->h_revision;
+            assert(obj->h_tid & GCFLAG_PUBLIC);
             prev_obj->h_revision = (revision_t)obj;
         }
         *pobj = obj;
