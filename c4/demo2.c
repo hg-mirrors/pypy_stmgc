@@ -105,7 +105,7 @@ int bubble_run(gcptr arg1, int retry_counter)
                  stm_read_barrier((gcptr)r_next))) {
             asm volatile ("pause":::"memory");  /* smp_spinloop() */
             i++;
-            assert(i < 1000);
+            assert(i < 1000000);
         }
         // for now:
         assert(((nodeptr)stm_read_barrier((gcptr)r_prev->next))->value 
