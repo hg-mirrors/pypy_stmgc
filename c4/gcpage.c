@@ -582,7 +582,7 @@ void update_next_threshold(void)
     countdown_next_major_coll = next;
 }
 
-void stm_major_collect(void)
+static void major_collect(void)
 {
     stmgcpage_acquire_global_lock();
     fprintf(stderr, ",-----\n| running major collection...\n");
@@ -628,7 +628,7 @@ void stmgcpage_possibly_major_collect(int force)
        threads will also acquire the RW lock in exclusive mode, but won't
        do anything. */
     if (countdown_next_major_coll == 0)
-        stm_major_collect();
+        major_collect();
 
     stm_stop_single_thread();
 

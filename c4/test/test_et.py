@@ -407,8 +407,10 @@ def test_stub_for_refs_from_stolen(old=False):
         assert classify(follow_revision(p)) == "stub"
         assert p1.h_revision & 1
         r.set(2)
+        r.wait(3)     # wait until the other thread really started
     def f2(r):
         r.wait(2)
+        r.set(3)
         p2 = lib.stm_read_barrier(p)    # steals
         assert classify(p2) == "public"
         q2 = lib.getptr(p2, 0)
