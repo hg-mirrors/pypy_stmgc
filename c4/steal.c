@@ -11,6 +11,8 @@ struct stub_block_s {
     struct stm_object_s stubs[STUB_NB_OBJS];
 };
 
+inline void copy_to_old_id_copy(gcptr obj, gcptr id);
+
 gcptr stm_stub_malloc(struct tx_public_descriptor *pd)
 {
     assert(pd->collection_lock != 0);
@@ -152,16 +154,16 @@ void stm_steal_stub(gcptr P)
         if (!(L->h_tid & GCFLAG_OLD)) { 
             gcptr O;
             if (L->h_tid & GCFLAG_HAS_ID) {
+                O = (gcptr)L->h_original;
                 L->h_tid &= ~GCFLAG_HAS_ID;
-                L->h_revision = (revision_t)L->h_original;
-                copy_to_old_id_copy(L, L->h_original);
-                O = L->h_original;
+                L->h_revision = (revision_t)O;
+                copy_to_old_id_copy(L, (gcptr)L->h_original);
             } else {
                 /* Copy the object out of the other thread's nursery, 
                    if needed */
                 O = stmgc_duplicate_old(L);
                 L->h_revision = (revision_t)O;
-                L->h_original = O;
+                L->h_original = (revision_t)O;
             }
             L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
             /* subtle: we need to remove L from the fxcache of the target
