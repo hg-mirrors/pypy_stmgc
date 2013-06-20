@@ -10,6 +10,7 @@ typedef intptr_t revision_t;
 typedef struct stm_object_s {
     revision_t h_tid;
     revision_t h_revision;
+    gcptr h_original;
 } *gcptr;
 
 
@@ -27,6 +28,14 @@ typedef struct stm_object_s {
 
 /* allocate an object out of the local nursery */
 gcptr stm_allocate(size_t size, unsigned long tid);
+
+/* returns a never changing hash for the object */
+revision_t stm_hash(gcptr);
+/* returns an for the object which is unique during its lifetime */
+revision_t stm_id(gcptr);
+/* returns nonzero if the two object-copy pointers belong to the
+same original object */
+revision_t stm_pointer_equal(gcptr, gcptr);
 
 /* to push/pop objects into the local shadowstack */
 /* (could be turned into macros or something later) */

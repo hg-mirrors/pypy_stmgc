@@ -149,10 +149,20 @@ void stm_steal_stub(gcptr P)
 
         fprintf(stderr, "stolen: %p -> %p\n", P, L);
 
-        /* Copy the object out of the other thread's nursery, if needed */
-        if (!(L->h_tid & GCFLAG_OLD)) {
-            gcptr O = stmgc_duplicate_old(L);
-            L->h_revision = (revision_t)O;
+        if (!(L->h_tid & GCFLAG_OLD)) { 
+            gcptr O;
+            if (L->h_tid & GCFLAG_HAS_ID) {
+                L->h_tid &= ~GCFLAG_HAS_ID;
+                L->h_revision = (revision_t)L->h_original;
+                copy_to_old_id_copy(L, L->h_original);
+                O = L->h_original;
+            } else {
+                /* Copy the object out of the other thread's nursery, 
+                   if needed */
+                O = stmgc_duplicate_old(L);
+                L->h_revision = (revision_t)O;
+                L->h_original = O;
+            }
             L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
             /* subtle: we need to remove L from the fxcache of the target
                thread, otherwise its read barrier might not trigger on it.

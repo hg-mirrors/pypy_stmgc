@@ -183,12 +183,12 @@ int in_nursery(gcptr obj)
     return result1;
 }
 
-static const revision_t C_PRIVATE_FROM_PROTECTED = 1;
-static const revision_t C_PRIVATE                = 2;
-static const revision_t C_STUB                   = 3;
-static const revision_t C_PUBLIC                 = 4;
-static const revision_t C_BACKUP                 = 5;
-static const revision_t C_PROTECTED              = 6;
+static const int C_PRIVATE_FROM_PROTECTED = 1;
+static const int C_PRIVATE                = 2;
+static const int C_STUB                   = 3;
+static const int C_PUBLIC                 = 4;
+static const int C_BACKUP                 = 5;
+static const int C_PROTECTED              = 6;
 int classify(gcptr p)
 {
     int priv_from_prot = (p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) != 0;
@@ -260,7 +260,7 @@ gcptr do_step(gcptr p)
     num = get_rand(SHARED_ROOTS);
     _sr = shared_roots[num];
 
-    k = get_rand(14);
+    k = get_rand(15);
 
     switch (k) {
     case 0: // remove a root
@@ -316,7 +316,11 @@ gcptr do_step(gcptr p)
         w_sr = (nodeptr)write_barrier(_sr);
         w_sr->next = (nodeptr)shared_roots[get_rand(SHARED_ROOTS)];
         break;
-    default:
+    case 14:
+        push_roots();
+        stmgc_minor_collect();
+        pop_roots();
+        p = NULL;
         break;
     }
     return p;
@@ -344,17 +348,21 @@ void transaction_break()
 int interruptible_callback(gcptr arg1, int retry_counter)
 {
     td.num_roots = td.num_roots_outside_perform;
-    copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
+    // done by the following pop_roots():
+    //copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
 
+    // refresh td.roots:
     arg1 = stm_pop_root();
+    assert(arg1 == NULL);
     pop_roots();
     push_roots();
     stm_push_root(arg1);
 
     int p = run_me();
-    int restart = p == -1 ? get_rand(3) != 1 : 0;
+    if (p == -1) // maybe restart transaction
+        return get_rand(3) != 1;
 
-    return restart;
+    return 0;
 }
 
 int run_me()

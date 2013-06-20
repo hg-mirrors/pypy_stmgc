@@ -59,6 +59,7 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     assert(tid == (tid & STM_USER_TID_MASK));
     P->h_tid = tid;
     P->h_revision = stm_private_rev_num;
+    P->h_original = NULL;
     return P;
 }
 
@@ -71,6 +72,13 @@ gcptr stmgc_duplicate(gcptr P)
 
     memcpy(L, P, size);
     L->h_tid &= ~GCFLAG_OLD;
+    L->h_tid &= ~GCFLAG_HAS_ID;
+
+    if (P->h_original)
+        L->h_original = P->h_original;
+    else
+        L->h_original = P;
+
     return L;
 }
 
@@ -80,7 +88,60 @@ gcptr stmgc_duplicate_old(gcptr P)
     gcptr L = (gcptr)stmgcpage_malloc(size);
     memcpy(L, P, size);
     L->h_tid |= GCFLAG_OLD;
+    L->h_tid &= ~GCFLAG_HAS_ID;
+
+    if (P->h_original)
+        L->h_original = P->h_original;
+    else
+        L->h_original = P;
+
     return L;
+}
+
+/************************************************************/
+
+
+revision_t stm_hash(gcptr p)
+{
+    return stm_id(p);
+}
+
+revision_t stm_id(gcptr p)
+{
+    if (p->h_original) {
+        return p->h_original;
+    }
+    
+    //p->h_original == NULL
+    if (!(p->h_tid & GCFLAG_OLD)) {//(is_in_nursery(p)) {
+        // preallocate old "original" outside
+        // like stealing
+        gcptr O = stmgc_duplicate_old(L);
+        L->h_revision = (revision_t)O;
+        L->h_original = O;
+        L->h_tid |= GCFLAG_HAS_ID;
+        
+        
+        // could be stolen
+        if (p->h_tid & GCFLAG_NURSERY_MOVED) {
+            
+        }
+    }
+    else if (p->h_tid & GCFLAG_NURSERY_MOVED) {
+        if (p->h_tid & GCFLAG_PUBLIC) {
+            // moved by stealing
+            
+        }
+       
+    }
+    else {
+        assert(0);
+    }
+}
+
+revision_t stm_pointer_equal(gcptr p1, gcptr p2)
+{
+    return stm_id(p1) == stm_id(p2);
 }
 
 /************************************************************/
@@ -100,6 +161,13 @@ static inline gcptr create_old_object_copy(gcptr obj)
     return fresh_old_copy;
 }
 
+static inline void copy_to_old_id_copy(gcptr obj, gcptr id)
+{
+    size_t size = stmcb_size(obj);
+    memcpy(id, obj, size);
+    id->h_tid &= ~GCFLAG_HAS_ID;
+}
+
 static void visit_if_young(gcptr *root)
 {
     gcptr obj = *root;
@@ -111,17 +179,25 @@ static void visit_if_young(gcptr *root)
     }
     else {
         /* it's a nursery object.  Was it already moved? */
-
         if (UNLIKELY(obj->h_tid & GCFLAG_NURSERY_MOVED)) {
             /* yes.  Such an object can be a public object in the nursery
                too (such objects are always NURSERY_MOVED).  For all cases,
-               we can just fix the ref. */
+               we can just fix the ref. 
+               Can be stolen objects or those we already moved.
+            */
             *root = (gcptr)obj->h_revision;
             return;
         }
 
-        /* make a copy of it outside */
-        fresh_old_copy = create_old_object_copy(obj);
+        if (obj->h_tid & GCFLAG_HAS_ID) {
+            /* already has a place to go to */
+            fresh_old_copy = copy_to_old_id_copy(obj, obj->h_original);
+        } 
+        else {
+            /* make a copy of it outside */
+            fresh_old_copy = create_old_object_copy(obj);
+        }
+        
         obj->h_tid |= GCFLAG_NURSERY_MOVED;
         obj->h_revision = (revision_t)fresh_old_copy;
 
