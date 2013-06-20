@@ -57,6 +57,9 @@
  * but converted from a protected.  These are precisely the objects
  * that have a backup copy (in h_revision), which gives a copy of the
  * original protected object.
+ * 
+ * GCFLAG_HAS_ID is set on young objects that have an old reserved
+ * memory to be copied to in minor collections (obj->h_original)
  */
 static const revision_t GCFLAG_OLD                    = STM_FIRST_GCFLAG << 0;
 static const revision_t GCFLAG_VISITED                = STM_FIRST_GCFLAG << 1;
@@ -68,6 +71,7 @@ static const revision_t GCFLAG_NURSERY_MOVED          = STM_FIRST_GCFLAG << 6;
 static const revision_t GCFLAG_BACKUP_COPY  /*debug*/ = STM_FIRST_GCFLAG << 7;
 static const revision_t GCFLAG_STUB         /*debug*/ = STM_FIRST_GCFLAG << 8;
 static const revision_t GCFLAG_PRIVATE_FROM_PROTECTED = STM_FIRST_GCFLAG << 9;
+static const revision_t GCFLAG_HAS_ID                 = STM_FIRST_GCFLAG << 10;
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
 #define GCFLAG_PREBUILT  (GCFLAG_VISITED           | \
