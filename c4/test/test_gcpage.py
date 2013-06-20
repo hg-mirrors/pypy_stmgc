@@ -265,3 +265,51 @@ def test_prebuilt_version_2():
     check_prebuilt(p1)
     check_free_old(p2)
     check_not_free(p3)     # XXX replace with p1
+
+def test_prebuilt_version_to_protected():
+    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p2 = lib.stm_write_barrier(p1)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    minor_collect()
+    p2 = lib.stm_read_barrier(p1)
+    assert p2 != p1
+    minor_collect()
+    major_collect()
+    check_prebuilt(p1)
+    check_not_free(p2)     # XXX replace with p1
+
+def test_private():
+    p1 = nalloc(HDR)
+    lib.stm_push_root(p1)
+    minor_collect()
+    major_collect()
+    p1 = lib.stm_pop_root()
+    assert not lib.in_nursery(p1)
+    check_not_free(p1)
+
+def test_major_collect_first_does_minor_collect():
+    p1 = nalloc(HDR)
+    lib.stm_push_root(p1)
+    major_collect()
+    p1 = lib.stm_pop_root()
+    assert not lib.in_nursery(p1)
+    check_not_free(p1)
+
+def test_private_from_protected_young():
+    p1 = nalloc(HDR)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    p1b = lib.stm_write_barrier(p1)
+    assert p1b == p1
+    check_not_free(follow_revision(p1))
+    assert follow_revision(p1).h_tid & GCFLAG_BACKUP_COPY
+    lib.stm_push_root(p1)
+    major_collect()
+    p1 = lib.stm_pop_root()
+    assert not lib.in_nursery(p1)
+    check_not_free(p1)
+    p1b = lib.stm_write_barrier(p1)
+    assert p1b == p1
+    check_not_free(follow_revision(p1))
+    assert follow_revision(p1).h_tid & GCFLAG_BACKUP_COPY

@@ -972,7 +972,7 @@ static void CancelLocks(struct tx_descriptor *d)
     } G2L_LOOP_END;
 }
 
-//static pthread_mutex_t mutex_prebuilt_gcroots = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mutex_prebuilt_gcroots = PTHREAD_MUTEX_INITIALIZER;
 
 static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
                              revision_t localrev)
@@ -1028,16 +1028,13 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
 #endif
       ACCESS_ONCE(R->h_revision) = v;
 
-#if 0
       if (R->h_tid & GCFLAG_PREBUILT_ORIGINAL)
         {
           /* cannot possibly get here more than once for a given value of R */
           pthread_mutex_lock(&mutex_prebuilt_gcroots);
           gcptrlist_insert(&stm_prebuilt_gcroots, R);
           pthread_mutex_unlock(&mutex_prebuilt_gcroots);
-          /*mark*/
         }
-#endif
 
     } G2L_LOOP_END;
 
@@ -1433,6 +1430,8 @@ int DescriptorInit(void)
           /* we are reusing 'pd' */
           descriptor_array_free_list = pd->free_list_next;
           assert(descriptor_array_free_list >= 0);
+          assert(pd->stolen_objects.size == 0);
+          assert(pd->stolen_young_stubs.size == 0);
           assert(pd->collection_lock == 0 || pd->collection_lock == -1);
           pd->collection_lock = 0;
       }
@@ -1483,8 +1482,12 @@ void DescriptorDone(void)
     assert(d->active == 0);
     stmgcpage_acquire_global_lock();
 
-    /* our nursery is empty at this point */
+    /* our nursery is empty at this point.  The list 'stolen_objects'
+       should have been emptied at the previous minor collection and
+       should remain empty because we don't have any young object. */
+    assert(d->public_descriptor->stolen_objects.size == 0);
     assert(d->public_descriptor->stolen_young_stubs.size == 0);
+    gcptrlist_delete(&d->public_descriptor->stolen_objects);
     gcptrlist_delete(&d->public_descriptor->stolen_young_stubs);
 
     stmgcpage_done_tls();

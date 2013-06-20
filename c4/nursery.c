@@ -357,6 +357,11 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
     gcptr *items = d->list_of_read_objects.items;
     assert(d->list_of_read_objects.size >= limit);
 
+    if (d->active == 2) {
+        /* inevitable transaction: clear the list of read objects */
+        gcptrlist_clear(&d->list_of_read_objects);
+    }
+
     for (i = d->list_of_read_objects.size - 1; i >= limit; --i) {
         gcptr obj = items[i];
 
@@ -442,6 +447,12 @@ void stmgc_minor_collect(void)
     assert(d->active >= 1);
     minor_collect(d);
     AbortNowIfDelayed();
+}
+
+void stmgc_minor_collect_no_abort(void)
+{
+    struct tx_descriptor *d = thread_descriptor;
+    minor_collect(d);
 }
 
 int stmgc_minor_collect_anything_to_do(struct tx_descriptor *d)

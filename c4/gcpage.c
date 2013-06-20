@@ -199,20 +199,55 @@ static void visit(gcptr *pobj)
         return;    /* already seen */
 
     if (obj->h_revision & 1) {
+        assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
         obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;  /* see also fix_outdated() */
     }
-    else {
+    else if (obj->h_tid & GCFLAG_PUBLIC) {
         /* h_revision is a ptr: we have a more recent version */
-        assert(!(obj->h_tid & GCFLAG_STUB));
         gcptr prev_obj = obj;
-        obj = (gcptr)obj->h_revision;   /* go visit the more recent version */
 
-        if (!(obj->h_tid & GCFLAG_VISITED) && IS_POINTER(obj->h_revision)) {
+        if (!(obj->h_revision & 2)) {
+            /* go visit the more recent version */
             obj = (gcptr)obj->h_revision;
+        }
+        else {
+            /* it's a stub: keep it if it points to a protected version,
+               because we need to keep the effect of stealing if it is
+               later accessed by the wrong thread.  If it points to a
+               public object (possibly outdated), we can ignore the stub.
+            */
+            assert(obj->h_tid & GCFLAG_STUB);
+            obj = (gcptr)(obj->h_revision - 2);
+            if (!(obj->h_tid & GCFLAG_PUBLIC)) {
+                prev_obj->h_tid |= GCFLAG_VISITED;
+                assert(*pobj == prev_obj);
+                gcptr obj1 = obj;
+                visit(&obj1);       /* recursion, but should be only once */
+                prev_obj->h_revision = ((revision_t)obj1) + 2;
+                return;
+            }
+        }
+
+        if (!(obj->h_revision & 3)) {
+            obj = (gcptr)obj->h_revision;
+            assert(obj->h_tid & GCFLAG_PUBLIC);
             prev_obj->h_revision = (revision_t)obj;
         }
         *pobj = obj;
         goto restart;
+    }
+    else {
+        assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+        gcptr B = (gcptr)obj->h_revision;
+        if (!(B->h_tid & GCFLAG_PUBLIC)) {
+            /* a regular private_from_protected object with a backup copy B */
+            assert(B->h_tid & GCFLAG_BACKUP_COPY);
+            B->h_tid |= GCFLAG_VISITED;
+        }
+        else {
+            assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
+            abort();  // XXX
+        }
     }
     obj->h_tid |= GCFLAG_VISITED;
     gcptrlist_insert(&objects_to_trace, obj);
@@ -304,6 +339,11 @@ static void cleanup_for_thread(struct tx_descriptor *d)
     if (d->active < 0)
         return;       /* already "aborted" during forced minor collection */
 
+    if (d->active == 2) {
+        /* inevitable transaction: clear the list of read objects */
+        gcptrlist_clear(&d->list_of_read_objects);
+    }
+
     for (i = d->list_of_read_objects.size - 1; i >= 0; --i) {
         gcptr obj = items[i];
 
@@ -313,7 +353,8 @@ static void cleanup_for_thread(struct tx_descriptor *d)
            just removing it is very wrong --- we want 'd' to abort.
         */
         revision_t v = obj->h_revision;
-        if (IS_POINTER(v)) {    /* has a more recent revision.  Oups. */
+        if (IS_POINTER(v) && !(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)) {
+            /* has a more recent revision.  Oups. */
             fprintf(stderr,
                     "ABRT_COLLECT_MAJOR: %p was read but modified already\n",
                     obj);
@@ -321,16 +362,13 @@ static void cleanup_for_thread(struct tx_descriptor *d)
             return;
         }
 
-        /* on the other hand, if we see a non-visited object in the read
-           list, then we need to remove it --- it's wrong to just abort.
-           Consider the following case: the transaction is inevitable,
-           and since it started, it popped objects out of its shadow
-           stack.  Some popped objects might become free even if they
-           have been read from.  We must not abort such transactions
-           (and cannot anyway: they are inevitable!). */
-        if (!(obj->h_tid & GCFLAG_VISITED)) {
-            items[i] = items[--d->list_of_read_objects.size];
-        }
+        /* It should not be possible to see a non-visited object in the
+           read list.  I think the only case is: the transaction is
+           inevitable, and since it started, it popped objects out of
+           its shadow stack.  Some popped objects might become free even
+           if they have been read from.  But for inevitable transactions,
+           we clear the 'list_of_read_objects' above anyway. */
+        assert(obj->h_tid & GCFLAG_VISITED);
     }
 
     d->num_read_objects_known_old = d->list_of_read_objects.size;
@@ -483,6 +521,36 @@ static void free_closed_thread_descriptors(void)
 }
 
 
+/***** Major collections: forcing minor collections *****/
+
+void force_minor_collections(void)
+{
+    struct tx_descriptor *d;
+    struct tx_descriptor *saved = thread_descriptor;
+    revision_t saved_private_rev = stm_private_rev_num;
+    assert(saved_private_rev == *saved->private_revision_ref);
+
+    for (d = stm_tx_head; d; d = d->tx_next) {
+        /* Force a minor collection to run in the thread 'd'.
+           Usually not needed, but it may be the case that this major
+           collection was not preceeded by a minor collection if the
+           thread is busy in a system call for example.
+        */
+        if (stmgc_minor_collect_anything_to_do(d)) {
+            /* Hack: temporarily pretend that we "are" the other thread...
+             */
+            thread_descriptor = d;
+            stm_private_rev_num = *d->private_revision_ref;
+            //assert(stmgc_nursery_hiding(d, 0));
+            stmgc_minor_collect_no_abort();
+            //assert(stmgc_nursery_hiding(d, 1));
+            thread_descriptor = saved;
+            stm_private_rev_num = saved_private_rev;
+        }
+    }
+}
+
+
 /***** Major collections: main *****/
 
 void update_next_threshold(void)
@@ -519,11 +587,9 @@ void stm_major_collect(void)
     stmgcpage_acquire_global_lock();
     fprintf(stderr, ",-----\n| running major collection...\n");
 
-#if 0
     force_minor_collections();
 
     assert(gcptrlist_size(&objects_to_trace) == 0);
-#endif
     mark_prebuilt_roots();
     mark_all_stack_roots();
     visit_all_objects();
