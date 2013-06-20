@@ -293,6 +293,17 @@ void stm_possible_safe_point(void)
 
 /************************************************************/
 
+/***** Prebuilt roots, added in the list as the transaction that changed
+       them commits *****/
+
+struct GcPtrList stm_prebuilt_gcroots = {0};
+
+void stm_add_prebuilt_root(gcptr obj)
+{
+    assert(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL);
+    gcptrlist_insert(&stm_prebuilt_gcroots, obj);
+}
+
 void stm_clear_between_tests(void)
 {
     fprintf(stderr, "\n"
@@ -300,5 +311,5 @@ void stm_clear_between_tests(void)
             "========================[  START  ]============================\n"
             "===============================================================\n"
             "\n");
-    //gcptrlist_clear(&stm_prebuilt_gcroots);
+    gcptrlist_clear(&stm_prebuilt_gcroots);
 }

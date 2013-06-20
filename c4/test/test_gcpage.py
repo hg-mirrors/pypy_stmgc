@@ -254,3 +254,14 @@ def test_prebuilt_version_1():
     check_prebuilt(p1)
     major_collect()
     check_prebuilt(p1)
+
+def test_prebuilt_version_2():
+    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p2 = oalloc(HDR); make_public(p2)
+    p3 = oalloc(HDR); make_public(p3)
+    delegate(p1, p2)
+    delegate(p2, p3)
+    major_collect()
+    check_prebuilt(p1)
+    check_free_old(p2)
+    check_not_free(p3)     # XXX replace with p1
