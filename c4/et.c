@@ -972,7 +972,7 @@ static void CancelLocks(struct tx_descriptor *d)
     } G2L_LOOP_END;
 }
 
-//static pthread_mutex_t mutex_prebuilt_gcroots = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mutex_prebuilt_gcroots = PTHREAD_MUTEX_INITIALIZER;
 
 static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
                              revision_t localrev)
@@ -1028,16 +1028,13 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
 #endif
       ACCESS_ONCE(R->h_revision) = v;
 
-#if 0
       if (R->h_tid & GCFLAG_PREBUILT_ORIGINAL)
         {
           /* cannot possibly get here more than once for a given value of R */
           pthread_mutex_lock(&mutex_prebuilt_gcroots);
           gcptrlist_insert(&stm_prebuilt_gcroots, R);
           pthread_mutex_unlock(&mutex_prebuilt_gcroots);
-          /*mark*/
         }
-#endif
 
     } G2L_LOOP_END;
 

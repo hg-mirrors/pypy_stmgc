@@ -265,3 +265,16 @@ def test_prebuilt_version_2():
     check_prebuilt(p1)
     check_free_old(p2)
     check_not_free(p3)     # XXX replace with p1
+
+def test_prebuilt_version_to_protected():
+    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p2 = lib.stm_write_barrier(p1)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    minor_collect()
+    p2 = lib.stm_read_barrier(p1)
+    assert p2 != p1
+    minor_collect()
+    major_collect()
+    check_prebuilt(p1)
+    check_not_free(p2)     # XXX replace with p1
