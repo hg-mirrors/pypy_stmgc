@@ -698,8 +698,12 @@ void AbortTransaction(int num)
   long long elapsed_time;
 
   /* acquire the lock, but don't double-acquire it if already committing */
-  if (d->public_descriptor->collection_lock != 'C')
+  if (d->public_descriptor->collection_lock != 'C') {
     spinlock_acquire(d->public_descriptor->collection_lock, 'C');
+    if (d->public_descriptor->stolen_objects.size != 0)
+      stm_normalize_stolen_objects(d);
+  }
+
 
   assert(d->active != 0);
   assert(!is_inevitable(d));
@@ -870,6 +874,8 @@ static void AcquireLocks(struct tx_descriptor *d)
   revision_t my_lock = d->my_lock;
   wlog_t *item;
 
+  assert(d->public_descriptor->stolen_objects.size == 0);
+
   if (!g2l_any_entry(&d->public_to_private))
     return;
 
@@ -1025,6 +1031,7 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
   gcptr *items = d->private_from_protected.items;
   revision_t new_revision = cur_time + 1;     // make an odd number
   assert(new_revision & 1);
+  assert(d->public_descriptor->stolen_objects.size == 0);
 
   for (i = 0; i < size; i++)
     {
@@ -1125,7 +1132,6 @@ void CommitTransaction(void)
   spinlock_acquire(d->public_descriptor->collection_lock, 'C');  /*committing*/
   if (d->public_descriptor->stolen_objects.size != 0)
     stm_normalize_stolen_objects(d);
-
   AcquireLocks(d);
 
   if (is_inevitable(d))
@@ -1151,6 +1157,9 @@ void CommitTransaction(void)
               inev_mutex_acquire();   // wait until released
               inev_mutex_release();
               spinlock_acquire(d->public_descriptor->collection_lock, 'C');
+              if (d->public_descriptor->stolen_objects.size != 0)
+                stm_normalize_stolen_objects(d);
+
               AcquireLocks(d);
               continue;
             }
@@ -1162,6 +1171,7 @@ void CommitTransaction(void)
         if (!ValidateDuringTransaction(d, 1))
           AbortTransaction(ABRT_VALIDATE_COMMIT);
     }
+
   CommitPrivateFromProtected(d, cur_time);
 
   /* we cannot abort any more from here */
