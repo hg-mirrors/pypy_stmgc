@@ -295,3 +295,21 @@ def test_major_collect_first_does_minor_collect():
     p1 = lib.stm_pop_root()
     assert not lib.in_nursery(p1)
     check_not_free(p1)
+
+def test_private_from_protected_young():
+    p1 = nalloc(HDR)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    p1b = lib.stm_write_barrier(p1)
+    assert p1b == p1
+    check_not_free(follow_revision(p1))
+    assert follow_revision(p1).h_tid & GCFLAG_BACKUP_COPY
+    lib.stm_push_root(p1)
+    major_collect()
+    p1 = lib.stm_pop_root()
+    assert not lib.in_nursery(p1)
+    check_not_free(p1)
+    p1b = lib.stm_write_barrier(p1)
+    assert p1b == p1
+    check_not_free(follow_revision(p1))
+    assert follow_revision(p1).h_tid & GCFLAG_BACKUP_COPY

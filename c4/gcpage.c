@@ -199,12 +199,12 @@ static void visit(gcptr *pobj)
         return;    /* already seen */
 
     if (obj->h_revision & 1) {
+        assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
         obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;  /* see also fix_outdated() */
     }
-    else {
+    else if (obj->h_tid & GCFLAG_PUBLIC) {
         /* h_revision is a ptr: we have a more recent version */
         gcptr prev_obj = obj;
-        assert(obj->h_tid & GCFLAG_PUBLIC);
 
         if (!(obj->h_revision & 2)) {
             /* go visit the more recent version */
@@ -235,6 +235,19 @@ static void visit(gcptr *pobj)
         }
         *pobj = obj;
         goto restart;
+    }
+    else {
+        assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+        gcptr B = (gcptr)obj->h_revision;
+        if (!(B->h_tid & GCFLAG_PUBLIC)) {
+            /* a regular private_from_protected object with a backup copy B */
+            assert(B->h_tid & GCFLAG_BACKUP_COPY);
+            B->h_tid |= GCFLAG_VISITED;
+        }
+        else {
+            assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
+            abort();  // XXX
+        }
     }
     obj->h_tid |= GCFLAG_VISITED;
     gcptrlist_insert(&objects_to_trace, obj);
@@ -335,7 +348,8 @@ static void cleanup_for_thread(struct tx_descriptor *d)
            just removing it is very wrong --- we want 'd' to abort.
         */
         revision_t v = obj->h_revision;
-        if (IS_POINTER(v)) {    /* has a more recent revision.  Oups. */
+        if (IS_POINTER(v) && !(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)) {
+            /* has a more recent revision.  Oups. */
             fprintf(stderr,
                     "ABRT_COLLECT_MAJOR: %p was read but modified already\n",
                     obj);
