@@ -1480,8 +1480,12 @@ void DescriptorDone(void)
     assert(d->active == 0);
     stmgcpage_acquire_global_lock();
 
-    /* our nursery is empty at this point */
+    /* our nursery is empty at this point.  The list 'stolen_objects'
+       should have been emptied at the previous minor collection and
+       should remain empty because we don't have any young object. */
+    assert(d->public_descriptor->stolen_objects.size == 0);
     assert(d->public_descriptor->stolen_young_stubs.size == 0);
+    gcptrlist_delete(&d->public_descriptor->stolen_objects);
     gcptrlist_delete(&d->public_descriptor->stolen_young_stubs);
 
     stmgcpage_done_tls();
