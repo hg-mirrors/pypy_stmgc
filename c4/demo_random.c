@@ -13,7 +13,7 @@ extern revision_t get_private_rev_num(void);
 
 
 #define NUMTHREADS 4
-#define STEPS 100000
+#define STEPS 1000000
 #define NUMROOTS 10 // per thread
 #define PREBUILT 3 // per thread
 #define MAXROOTS 1000
