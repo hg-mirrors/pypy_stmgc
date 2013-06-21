@@ -84,9 +84,11 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
     stub->h_revision = ((revision_t)obj) | 2;
     if (obj->h_original) {
         stub->h_original = obj->h_original;
+        assert(0);
     }
     else if (obj->h_tid & GCFLAG_OLD) {
         stub->h_original = (revision_t)obj;
+        assert(0);
     }
     else {
         obj->h_original = (revision_t)stub;
@@ -122,17 +124,21 @@ void stm_steal_stub(gcptr P)
         gcptr B = (gcptr)L->h_revision;     /* the backup copy */
         
         if (L->h_original) {
-            /* may have HAS_ID */
+            /* L has an original, may be GCFLAG_HAS_ID */
             B->h_original = L->h_original;
         }
         else if (L->h_tid & GCFLAG_OLD) {
+            /* If old, it must be the original */
             assert(!(L->h_tid & GCFLAG_HAS_ID));
             /* original must be L */
             B->h_original = (revision_t)L;
+            assert(0);
         }
         else {
-            /* we can make the backup the "original" */
+            /* we can make the backup the "original"
+             since L hasn't decided yet */
             L->h_original = (revision_t)B;
+            assert(0);
         }
 
         /* B is now a backup copy, i.e. a protected object, and we own
