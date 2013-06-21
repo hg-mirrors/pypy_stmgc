@@ -102,7 +102,8 @@ revision_t stm_id(gcptr p)
 
     
     if (p->h_original) { /* fast path */
-        fprintf(stderr, "stm_id(%p) has orig fst: %p\n", p, p->h_original);
+        fprintf(stderr, "stm_id(%p) has orig fst: %p\n", 
+                p, (gcptr)p->h_original);
         return p->h_original;
     } 
     else if (!(p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
@@ -122,7 +123,8 @@ revision_t stm_id(gcptr p)
     */
     if (p->h_original) { /* maybe now? */
         result = p->h_original;
-        fprintf(stderr, "stm_id(%p) has orig: %p\n", p, p->h_original);
+        fprintf(stderr, "stm_id(%p) has orig: %p\n", 
+                p, (gcptr)p->h_original);
     }
     else if (p->h_tid & GCFLAG_OLD) {
         /* it must be this exact object */
@@ -141,7 +143,7 @@ revision_t stm_id(gcptr p)
             
             result = (revision_t)B;
             fprintf(stderr, "stm_id(%p) young, pfp, use backup %p\n", 
-                    p, p->h_original);
+                    p, (gcptr)p->h_original);
         }
         else {
             gcptr O = stmgc_duplicate_old(p);
