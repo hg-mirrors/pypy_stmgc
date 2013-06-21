@@ -159,7 +159,7 @@ void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int))
         else {
             /* atomic transaction: a common case is that callback() returned
                even though we are atomic because we need a major GC.  For
-               that case, release and require the rw lock here. */
+               that case, release and reaquire the rw lock here. */
             stm_possible_safe_point();
         }
 
@@ -225,10 +225,12 @@ void stm_start_sharedlock(void)
     int err = pthread_rwlock_rdlock(&rwlock_shared);
     assert(err == 0);
     //assert(stmgc_nursery_hiding(thread_descriptor, 0));
+    fprintf(stderr, "stm_start_sharedlock\n");
 }
 
 void stm_stop_sharedlock(void)
 {
+    fprintf(stderr, "stm_stop_sharedlock\n");
     //assert(stmgc_nursery_hiding(thread_descriptor, 1));
     int err = pthread_rwlock_unlock(&rwlock_shared);
     assert(err == 0);
@@ -238,10 +240,12 @@ static void start_exclusivelock(void)
 {
     int err = pthread_rwlock_wrlock(&rwlock_shared);
     assert(err == 0);
+    fprintf(stderr, "start_exclusivelock\n");
 }
 
 static void stop_exclusivelock(void)
 {
+    fprintf(stderr, "stop_exclusivelock\n");
     int err = pthread_rwlock_unlock(&rwlock_shared);
     assert(err == 0);
 }

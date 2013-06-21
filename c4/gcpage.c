@@ -195,8 +195,11 @@ static void visit(gcptr *pobj)
         return;
 
  restart:
-    if (obj->h_tid & GCFLAG_VISITED)
+    if (obj->h_tid & GCFLAG_VISITED) {
+        fprintf(stderr, "[already visited: %p]\n", obj);
+        assert(obj == *pobj);
         return;    /* already seen */
+    }
 
     if (obj->h_revision & 1) {
         assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
@@ -223,7 +226,8 @@ static void visit(gcptr *pobj)
                 assert(*pobj == prev_obj);
                 gcptr obj1 = obj;
                 visit(&obj1);       /* recursion, but should be only once */
-                prev_obj->h_revision = ((revision_t)obj1) + 2;
+                assert(prev_obj->h_tid & GCFLAG_STUB);
+                prev_obj->h_revision = ((revision_t)obj1) | 2;
                 return;
             }
         }
@@ -245,8 +249,11 @@ static void visit(gcptr *pobj)
             B->h_tid |= GCFLAG_VISITED;
         }
         else {
+            /* a private_from_protected with a stolen backup copy B */
             assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
-            abort();  // XXX
+            gcptr obj1 = B;
+            visit(&obj1);     /* xxx recursion? */
+            obj->h_revision = (revision_t)obj1;
         }
     }
     obj->h_tid |= GCFLAG_VISITED;
@@ -286,8 +293,12 @@ static void mark_roots(gcptr *root, gcptr *end)
 {
     //assert(*root == END_MARKER);
     //root++;
-    while (root != end)
-        visit(root++);
+    while (root != end) {
+        gcptr o = *root;
+        visit(root);
+        fprintf(stderr, "visit stack root: %p -> %p\n", o, *root);
+        root++;
+    }
 }
 
 static void mark_all_stack_roots(void)
@@ -346,14 +357,20 @@ static void cleanup_for_thread(struct tx_descriptor *d)
 
     for (i = d->list_of_read_objects.size - 1; i >= 0; --i) {
         gcptr obj = items[i];
+        assert(!(obj->h_tid & GCFLAG_STUB));
 
         /* Warning: in case the object listed is outdated and has been
            replaced with a more recent revision, then it might be the
            case that obj->h_revision doesn't have GCFLAG_VISITED, but
            just removing it is very wrong --- we want 'd' to abort.
         */
+        if (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
+            assert(IS_POINTER(obj->h_revision));
+            obj = (gcptr)obj->h_revision;
+        }
+
         revision_t v = obj->h_revision;
-        if (IS_POINTER(v) && !(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)) {
+        if (IS_POINTER(v)) {
             /* has a more recent revision.  Oups. */
             fprintf(stderr,
                     "ABRT_COLLECT_MAJOR: %p was read but modified already\n",
@@ -528,6 +545,7 @@ void force_minor_collections(void)
     struct tx_descriptor *d;
     struct tx_descriptor *saved = thread_descriptor;
     revision_t saved_private_rev = stm_private_rev_num;
+    char *read_barrier_cache = stm_read_barrier_cache;
     assert(saved_private_rev == *saved->private_revision_ref);
 
     for (d = stm_tx_head; d; d = d->tx_next) {
@@ -536,16 +554,19 @@ void force_minor_collections(void)
            collection was not preceeded by a minor collection if the
            thread is busy in a system call for example.
         */
-        if (stmgc_minor_collect_anything_to_do(d)) {
+        if (stmgc_minor_collect_anything_to_do(d) ||
+            (d->public_descriptor->stolen_objects.size != 0)) {
             /* Hack: temporarily pretend that we "are" the other thread...
              */
             thread_descriptor = d;
             stm_private_rev_num = *d->private_revision_ref;
+            fxcache_install(&d->recent_reads_cache);
             //assert(stmgc_nursery_hiding(d, 0));
             stmgc_minor_collect_no_abort();
             //assert(stmgc_nursery_hiding(d, 1));
             thread_descriptor = saved;
             stm_private_rev_num = saved_private_rev;
+            stm_read_barrier_cache = read_barrier_cache;
         }
     }
 }
@@ -582,7 +603,7 @@ void update_next_threshold(void)
     countdown_next_major_coll = next;
 }
 
-void stm_major_collect(void)
+static void major_collect(void)
 {
     stmgcpage_acquire_global_lock();
     fprintf(stderr, ",-----\n| running major collection...\n");
@@ -628,7 +649,7 @@ void stmgcpage_possibly_major_collect(int force)
        threads will also acquire the RW lock in exclusive mode, but won't
        do anything. */
     if (countdown_next_major_coll == 0)
-        stm_major_collect();
+        major_collect();
 
     stm_stop_single_thread();
 

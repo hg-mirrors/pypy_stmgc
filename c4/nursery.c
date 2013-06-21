@@ -278,6 +278,7 @@ static void trace_stub(struct tx_descriptor *d, gcptr S)
     gcptr L = (gcptr)(w - 2);
     fprintf(stderr, "trace_stub: %p stub -> %p\n", S, L);
     visit_if_young(&L);
+    assert(S->h_tid & GCFLAG_STUB);
     S->h_revision = ((revision_t)L) | 2;
 }
 
@@ -385,6 +386,7 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
         else if (obj->h_tid & GCFLAG_NURSERY_MOVED) {
             /* visited nursery objects are kept and updated */
             items[i] = (gcptr)obj->h_revision;
+            assert(!(items[i]->h_tid & GCFLAG_STUB));
             continue;
         }
         /* The listed object was not visited.  Unlist it. */
@@ -474,6 +476,14 @@ int stmgc_minor_collect_anything_to_do(struct tx_descriptor *d)
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
+        assert(gcptrlist_size(&d->list_of_read_objects) >=
+               d->num_read_objects_known_old);
+        assert(gcptrlist_size(&d->private_from_protected) >=
+               d->num_private_from_protected_known_old);
+        d->num_read_objects_known_old =
+            gcptrlist_size(&d->list_of_read_objects);
+        d->num_private_from_protected_known_old =
+            gcptrlist_size(&d->private_from_protected);
         return 0;
     }
     else {

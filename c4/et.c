@@ -199,6 +199,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
     }
 
   fprintf(stderr, "readobj: %p\n", P);
+  assert(!(P->h_tid & GCFLAG_STUB));
   gcptrlist_insert(&d->list_of_read_objects, P);
 
  add_in_recent_reads_cache:
@@ -492,6 +493,8 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
                 GCFLAG_WRITE_BARRIER     |
                 0);
   L->h_revision = stm_private_rev_num;
+  assert(stm_private_rev_num < 0);
+  assert(stm_private_rev_num & 1);
   g2l_insert(&d->public_to_private, R, L);
   fprintf(stderr, "write_barrier: adding %p -> %p to public_to_private\n",
           R, L);
