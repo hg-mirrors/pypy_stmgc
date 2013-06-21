@@ -262,7 +262,7 @@ gcptr do_step(gcptr p)
     num = get_rand(SHARED_ROOTS);
     _sr = shared_roots[num];
 
-    k = get_rand(16);
+    k = get_rand(17);
 
     switch (k) {
     case 0: // remove a root
@@ -324,7 +324,7 @@ gcptr do_step(gcptr p)
         pop_roots();
         p = NULL;
         break;
-    case 15:
+    case 15: /* test stm_id on non-shared roots */
         w_r = (nodeptr)read_barrier(_r);
         if (w_r->id) {
             assert(w_r->id == stm_id((gcptr)w_r));
@@ -334,6 +334,17 @@ gcptr do_step(gcptr p)
             w_r = (nodeptr)write_barrier(_r);
             w_r->id = stm_id((gcptr)w_r);
             assert(w_r->id == stm_id((gcptr)_r));
+        }
+    case 16: /* test stm_id on shared roots */
+        w_sr = (nodeptr)read_barrier(_sr);
+        if (w_sr->id) {
+            assert(w_sr->id == stm_id((gcptr)w_sr));
+            assert(w_sr->id == stm_id((gcptr)_sr));
+        } 
+        else {
+            w_sr = (nodeptr)write_barrier(_sr);
+            w_sr->id = stm_id((gcptr)w_sr);
+            assert(w_sr->id == stm_id((gcptr)_sr));
         }
     }
     return p;
