@@ -386,8 +386,15 @@ static void cleanup_for_thread(struct tx_descriptor *d)
            inevitable, and since it started, it popped objects out of
            its shadow stack.  Some popped objects might become free even
            if they have been read from.  But for inevitable transactions,
-           we clear the 'list_of_read_objects' above anyway. */
-        assert(obj->h_tid & GCFLAG_VISITED);
+           we clear the 'list_of_read_objects' above anyway.
+           
+           However, some situations can occur (I believe) only in tests.
+           To be on the safe side, do the right thing and unlist the
+           non-visited object.
+           */
+        if (!(obj->h_tid & GCFLAG_VISITED)) {
+            items[i] = items[--d->list_of_read_objects.size];
+        }
     }
 
     d->num_read_objects_known_old = d->list_of_read_objects.size;
