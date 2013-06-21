@@ -355,3 +355,26 @@ def test_backup_stolen():
             assert classify(p2) == "public"
         perform_transaction(cb)
     run_parallel(f1, f2)
+
+def test_private_from_protected_inevitable():
+    p1 = nalloc(HDR)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    p1b = lib.stm_write_barrier(p1)
+    assert p1b == p1
+    major_collect()
+
+def test_private_from_protected_trace_backup():
+    p1 = nalloc_refs(1)
+    p2 = nalloc(HDR)
+    lib.setptr(p1, 0, p2)
+    def cb(c):
+        if c == 0:
+            lib.setptr(p1, 0, ffi.NULL)
+            major_collect()
+            abort_and_retry()
+    lib.stm_push_root(p1)
+    perform_transaction(cb)
+    p1 = lib.stm_pop_root()
+    check_not_free(p1)
+    check_not_free(lib.getptr(p1, 0))
