@@ -223,7 +223,8 @@ static void visit(gcptr *pobj)
                 assert(*pobj == prev_obj);
                 gcptr obj1 = obj;
                 visit(&obj1);       /* recursion, but should be only once */
-                prev_obj->h_revision = ((revision_t)obj1) + 2;
+                assert(prev_obj->h_tid & GCFLAG_STUB);
+                prev_obj->h_revision = ((revision_t)obj1) | 2;
                 return;
             }
         }
@@ -346,6 +347,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
 
     for (i = d->list_of_read_objects.size - 1; i >= 0; --i) {
         gcptr obj = items[i];
+        assert(!(obj->h_tid & GCFLAG_STUB));
 
         /* Warning: in case the object listed is outdated and has been
            replaced with a more recent revision, then it might be the
@@ -528,6 +530,7 @@ void force_minor_collections(void)
     struct tx_descriptor *d;
     struct tx_descriptor *saved = thread_descriptor;
     revision_t saved_private_rev = stm_private_rev_num;
+    char *read_barrier_cache = stm_read_barrier_cache;
     assert(saved_private_rev == *saved->private_revision_ref);
 
     for (d = stm_tx_head; d; d = d->tx_next) {
@@ -541,11 +544,13 @@ void force_minor_collections(void)
              */
             thread_descriptor = d;
             stm_private_rev_num = *d->private_revision_ref;
+            fxcache_install(&d->recent_reads_cache);
             //assert(stmgc_nursery_hiding(d, 0));
             stmgc_minor_collect_no_abort();
             //assert(stmgc_nursery_hiding(d, 1));
             thread_descriptor = saved;
             stm_private_rev_num = saved_private_rev;
+            stm_read_barrier_cache = read_barrier_cache;
         }
     }
 }

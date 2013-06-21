@@ -315,7 +315,7 @@ def test_private_from_protected_young():
     assert follow_revision(p1).h_tid & GCFLAG_BACKUP_COPY
 
 def test_backup_stolen():
-    py.test.skip("unexpected abort")
+    py.test.skip("in-progress")
     p = palloc(HDR)
     def f1(r):
         p1 = lib.stm_write_barrier(p)   # private copy
@@ -342,8 +342,9 @@ def test_backup_stolen():
             r.enter_in_parallel()
             p2 = lib.stm_read_barrier(p)    # steals
             assert classify(p2) == "public"
-            r.leave_in_parallel()
+            print p2
             major_collect()
+            r.leave_in_parallel()
             check_not_free(p2)
             assert classify(p2) == "public"
         perform_transaction(cb)

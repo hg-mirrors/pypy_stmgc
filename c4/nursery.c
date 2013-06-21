@@ -189,6 +189,7 @@ static void trace_stub(struct tx_descriptor *d, gcptr S)
     gcptr L = (gcptr)(w - 2);
     fprintf(stderr, "trace_stub: %p stub -> %p\n", S, L);
     visit_if_young(&L);
+    assert(S->h_tid & GCFLAG_STUB);
     S->h_revision = ((revision_t)L) | 2;
 }
 
@@ -296,6 +297,7 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
         else if (obj->h_tid & GCFLAG_NURSERY_MOVED) {
             /* visited nursery objects are kept and updated */
             items[i] = (gcptr)obj->h_revision;
+            assert(!(items[i]->h_tid & GCFLAG_STUB));
             continue;
         }
         /* The listed object was not visited.  Unlist it. */
