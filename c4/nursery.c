@@ -100,24 +100,34 @@ revision_t stm_id(gcptr p)
     struct tx_descriptor *d = thread_descriptor;
     revision_t result;
 
+    
     if (p->h_original) { /* fast path */
+        fprintf(stderr, "stm_id(%p) has orig fst: %p\n", p, p->h_original);
         return p->h_original;
+    } 
+    else if (!(p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+               && (p->h_tid & GCFLAG_OLD)) {
+        /* we can be sure that p->h_original doesn't
+           get set during the if and the else-if */
+        fprintf(stderr, "stm_id(%p) is old, orig=0 fst: %p\n", p, p);
+        return (revision_t)p;
     }
     
     spinlock_acquire(d->public_descriptor->collection_lock, 'I');
-    if (p->h_original) { /* maybe now? */
-        spinlock_release(d->public_descriptor->collection_lock);
-        return p->h_original;
-    }
-    /* old objects must have an h_original OR be
+    /* old objects must have an h_original xOR be
        the original itself. 
        if some thread stole p when it was still young,
        it must have set h_original. stealing an old obj
        makes the old obj "original".
     */
-    if (p->h_tid & GCFLAG_OLD) {
+    if (p->h_original) { /* maybe now? */
+        result = p->h_original;
+        fprintf(stderr, "stm_id(%p) has orig: %p\n", p, p->h_original);
+    }
+    else if (p->h_tid & GCFLAG_OLD) {
         /* it must be this exact object */
         result = (revision_t)p;
+        fprintf(stderr, "stm_id(%p) is old, orig=0: %p\n", p, p);
     }
     else {
         /* must create shadow original object or use
@@ -130,6 +140,8 @@ revision_t stm_id(gcptr p)
             // B->h_tid |= GCFLAG_PUBLIC; done by CommitPrivateFromProtected
             
             result = (revision_t)B;
+            fprintf(stderr, "stm_id(%p) young, pfp, use backup %p\n", 
+                    p, p->h_original);
         }
         else {
             gcptr O = stmgc_duplicate_old(p);
@@ -138,6 +150,7 @@ revision_t stm_id(gcptr p)
             O->h_tid |= GCFLAG_PUBLIC;
             
             result = (revision_t)O;
+            fprintf(stderr, "stm_id(%p) young, make shadow %p\n", p, O); 
         }
     }
     
@@ -147,7 +160,9 @@ revision_t stm_id(gcptr p)
 
 revision_t stm_pointer_equal(gcptr p1, gcptr p2)
 {
-    /* XXX: */
+    /* types must be the same */
+    if ((p1->h_tid & STM_USER_TID_MASK) != (p2->h_tid & STM_USER_TID_MASK))
+        return 0;
     return stm_id(p1) == stm_id(p2);
 }
 

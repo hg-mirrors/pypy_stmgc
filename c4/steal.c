@@ -195,7 +195,11 @@ void stm_steal_stub(gcptr P)
                    if needed */
                 O = stmgc_duplicate_old(L);
                 L->h_revision = (revision_t)O;
-                L->h_original = (revision_t)O;
+
+                /* young and without original?
+                   we may lose the HAS_ID flag like above */
+                if (!(L->h_original))
+                    L->h_original = (revision_t)O;
             }
 
             L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
