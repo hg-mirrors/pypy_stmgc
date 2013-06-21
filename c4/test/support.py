@@ -402,7 +402,9 @@ class run_parallel(object):
         # parallel_locks[0] is acquired, parallel_locks[1] is acquired
         print 'wait_while_in_parallel enter'
         self.parallel_locks[0].release()
+        lib.stm_stop_sharedlock()
         self.parallel_locks[1].acquire()
+        lib.stm_start_sharedlock()
         print 'wait_while_in_parallel leave'
         # parallel_locks[0] is acquired, parallel_locks[1] is acquired
         self.parallel_locks[1].release()

@@ -199,6 +199,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
     }
 
   fprintf(stderr, "readobj: %p\n", P);
+  assert(!(P->h_tid & GCFLAG_STUB));
   gcptrlist_insert(&d->list_of_read_objects, P);
 
  add_in_recent_reads_cache:
