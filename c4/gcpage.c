@@ -198,6 +198,8 @@ static void visit(gcptr *pobj)
     if (obj->h_tid & GCFLAG_VISITED) {
         fprintf(stderr, "[already visited: %p]\n", obj);
         assert(obj == *pobj);
+        assert((obj->h_revision & 3) ||   /* either odd, or stub */
+               (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
         return;    /* already seen */
     }
 
@@ -248,6 +250,7 @@ static void visit(gcptr *pobj)
         if (!(B->h_tid & GCFLAG_PUBLIC)) {
             /* a regular private_from_protected object with a backup copy B */
             assert(B->h_tid & GCFLAG_BACKUP_COPY);
+            assert(B->h_revision & 1);
             B->h_tid |= GCFLAG_VISITED;
         }
         else {
@@ -285,8 +288,8 @@ static void mark_prebuilt_roots(void)
     for (; pobj != pend; pobj++) {
         obj = *pobj;
         assert(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL);
-        assert(obj->h_tid & GCFLAG_VISITED);
-        assert((obj->h_revision & 1) == 0);   /* "is a pointer" */
+        obj->h_tid &= ~GCFLAG_VISITED;
+        assert(IS_POINTER(obj->h_revision));
         visit((gcptr *)&obj->h_revision);
     }
 }
