@@ -661,11 +661,15 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
                      commit, but if they both enter the SpinLoop()
                      above, then they will livelock.
 
-                     XXX This might lead both threads to cancel by
-                     reaching this point.  It might be possible to be
+                     But this might lead both threads to cancel by
+                     reaching this point.  For now we attempt to be
                      more clever and let one of the threads commit
-                     anyway.
+                     anyway (the choice of which one looks random).
                   */
+                  if (d->my_lock < v) {
+                      SpinLoop(SPLP_LOCKED_VALIDATE);
+                      goto retry;
+                  }
                   fprintf(stderr, "validation failed: "
                           "%p is locked by another thread\n", R);
                   return 0;
