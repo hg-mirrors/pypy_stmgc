@@ -195,8 +195,11 @@ static void visit(gcptr *pobj)
         return;
 
  restart:
-    if (obj->h_tid & GCFLAG_VISITED)
+    if (obj->h_tid & GCFLAG_VISITED) {
+        fprintf(stderr, "[already visited: %p]\n", obj);
+        assert(obj == *pobj);
         return;    /* already seen */
+    }
 
     if (obj->h_revision & 1) {
         assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
@@ -246,8 +249,11 @@ static void visit(gcptr *pobj)
             B->h_tid |= GCFLAG_VISITED;
         }
         else {
+            /* a private_from_protected with a stolen backup copy B */
             assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
-            abort();  // XXX
+            gcptr obj1 = B;
+            visit(&obj1);     /* xxx recursion? */
+            obj->h_revision = (revision_t)obj1;
         }
     }
     obj->h_tid |= GCFLAG_VISITED;
@@ -287,8 +293,12 @@ static void mark_roots(gcptr *root, gcptr *end)
 {
     //assert(*root == END_MARKER);
     //root++;
-    while (root != end)
-        visit(root++);
+    while (root != end) {
+        gcptr o = *root;
+        visit(root);
+        fprintf(stderr, "visit stack root: %p -> %p\n", o, *root);
+        root++;
+    }
 }
 
 static void mark_all_stack_roots(void)
@@ -354,8 +364,13 @@ static void cleanup_for_thread(struct tx_descriptor *d)
            case that obj->h_revision doesn't have GCFLAG_VISITED, but
            just removing it is very wrong --- we want 'd' to abort.
         */
+        if (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
+            assert(IS_POINTER(obj->h_revision));
+            obj = (gcptr)obj->h_revision;
+        }
+
         revision_t v = obj->h_revision;
-        if (IS_POINTER(v) && !(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)) {
+        if (IS_POINTER(v)) {
             /* has a more recent revision.  Oups. */
             fprintf(stderr,
                     "ABRT_COLLECT_MAJOR: %p was read but modified already\n",
@@ -539,7 +554,8 @@ void force_minor_collections(void)
            collection was not preceeded by a minor collection if the
            thread is busy in a system call for example.
         */
-        if (stmgc_minor_collect_anything_to_do(d)) {
+        if (stmgc_minor_collect_anything_to_do(d) ||
+            (d->public_descriptor->stolen_objects.size != 0)) {
             /* Hack: temporarily pretend that we "are" the other thread...
              */
             thread_descriptor = d;

@@ -487,7 +487,9 @@ def is_stub(p):
     return p.h_tid & GCFLAG_STUB
 
 def check_not_free(p):
+    print >> sys.stderr, "[checking %r..." % p,
     assert 42 < (p.h_tid & 0xFFFF) < 521
+    print >> sys.stderr, "ok]"
 
 def check_nursery_free(p):
     #assert p.h_tid == p.h_revision == 0

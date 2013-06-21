@@ -315,10 +315,12 @@ def test_private_from_protected_young():
     assert follow_revision(p1).h_tid & GCFLAG_BACKUP_COPY
 
 def test_backup_stolen():
-    py.test.skip("in-progress")
     p = palloc(HDR)
     def f1(r):
         p1 = lib.stm_write_barrier(p)   # private copy
+        lib.stm_push_root(p1)
+        minor_collect()
+        p1 = lib.stm_pop_root()
         lib.stm_commit_transaction()
         lib.stm_begin_inevitable_transaction()
         assert classify(p) == "public"
@@ -329,9 +331,13 @@ def test_backup_stolen():
             assert c == 0
             p1b = lib.stm_write_barrier(p1)
             assert p1b == p1
+            assert not lib.in_nursery(p1)
             assert classify(p1) == "private_from_protected"
             assert classify(follow_revision(p1)) == "backup"
+            lib.stm_push_root(p1)
             r.wait_while_in_parallel()
+            p1b = lib.stm_pop_root()
+            assert p1b == p1
             check_not_free(p1)
             assert classify(p1) == "private_from_protected"
             assert classify(follow_revision(p1)) == "public"  # has been stolen
