@@ -27,6 +27,7 @@ extern revision_t get_private_rev_num(void);
 struct node {
     struct stm_object_s hdr;
     long value;
+    revision_t id;
     struct node *next;
 };
 typedef struct node * nodeptr;
@@ -82,6 +83,7 @@ gcptr allocate_pseudoprebuilt(size_t size, int tid)
     gcptr x = calloc(1, size);
     x->h_tid = PREBUILT_FLAGS | tid;
     x->h_revision = PREBUILT_REVISION;
+    x->h_original = 0;
     return x;
 }
 
@@ -183,12 +185,12 @@ int in_nursery(gcptr obj)
     return result1;
 }
 
-static const revision_t C_PRIVATE_FROM_PROTECTED = 1;
-static const revision_t C_PRIVATE                = 2;
-static const revision_t C_STUB                   = 3;
-static const revision_t C_PUBLIC                 = 4;
-static const revision_t C_BACKUP                 = 5;
-static const revision_t C_PROTECTED              = 6;
+static const int C_PRIVATE_FROM_PROTECTED = 1;
+static const int C_PRIVATE                = 2;
+static const int C_STUB                   = 3;
+static const int C_PUBLIC                 = 4;
+static const int C_BACKUP                 = 5;
+static const int C_PROTECTED              = 6;
 int classify(gcptr p)
 {
     int priv_from_prot = (p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) != 0;
@@ -260,7 +262,7 @@ gcptr do_step(gcptr p)
     num = get_rand(SHARED_ROOTS);
     _sr = shared_roots[num];
 
-    k = get_rand(14);
+    k = get_rand(16);
 
     switch (k) {
     case 0: // remove a root
@@ -316,8 +318,23 @@ gcptr do_step(gcptr p)
         w_sr = (nodeptr)write_barrier(_sr);
         w_sr->next = (nodeptr)shared_roots[get_rand(SHARED_ROOTS)];
         break;
-    default:
+    case 14:
+        push_roots();
+        stmgc_minor_collect();
+        pop_roots();
+        p = NULL;
         break;
+    case 15:
+        w_r = (nodeptr)read_barrier(_r);
+        if (w_r->id) {
+            assert(w_r->id == stm_id((gcptr)w_r));
+            assert(w_r->id == stm_id((gcptr)_r));
+        } 
+        else {
+            w_r = (nodeptr)write_barrier(_r);
+            w_r->id = stm_id((gcptr)w_r);
+            assert(w_r->id == stm_id((gcptr)_r));
+        }
     }
     return p;
 }
@@ -344,17 +361,21 @@ void transaction_break()
 int interruptible_callback(gcptr arg1, int retry_counter)
 {
     td.num_roots = td.num_roots_outside_perform;
-    copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
+    // done & overwritten by the following pop_roots():
+    // copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
 
+    // refresh td.roots:
     arg1 = stm_pop_root();
+    assert(arg1 == NULL);
     pop_roots();
     push_roots();
     stm_push_root(arg1);
 
     int p = run_me();
-    int restart = p == -1 ? get_rand(3) != 1 : 0;
+    if (p == -1) // maybe restart transaction
+        return get_rand(3) != 1;
 
-    return restart;
+    return 0;
 }
 
 int run_me()
