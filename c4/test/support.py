@@ -32,6 +32,7 @@ ffi.cdef('''
     typedef struct stm_object_s {
         revision_t h_tid;
         revision_t h_revision;
+        revision_t h_original;
     } *gcptr;
 
     int gettid(gcptr);

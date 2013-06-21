@@ -84,15 +84,12 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
     stub->h_revision = ((revision_t)obj) | 2;
     if (obj->h_original) {
         stub->h_original = obj->h_original;
-        assert(0);
     }
     else if (obj->h_tid & GCFLAG_OLD) {
         stub->h_original = (revision_t)obj;
-        assert(0);
     }
     else {
         obj->h_original = (revision_t)stub;
-        assert(0);
     }
 
     g2l_insert(&sd->all_stubs, obj, stub);
