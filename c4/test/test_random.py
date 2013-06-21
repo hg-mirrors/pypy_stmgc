@@ -5,10 +5,7 @@ import model
 # a default seed that changes every day, but that can be easily recovered
 DEFAULT_SEED = int(time.strftime("%y%m%d", time.gmtime()))
 
-# XXXXXXXXXXXXXXXXXXXXXX
-# XXX reintroduce me XXX
-# XXXXXXXXXXXXXXXXXXXXXX
-DO_MAJOR_COLLECTS = False
+DO_MAJOR_COLLECTS = True
 
 
 def setup_function(_):
