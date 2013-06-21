@@ -100,12 +100,15 @@ revision_t stm_id(gcptr p)
     struct tx_descriptor *d = thread_descriptor;
     revision_t result;
 
+    if (p->h_original) { /* fast path */
+        return p->h_original;
+    }
+    
     spinlock_acquire(d->public_descriptor->collection_lock, 'I');
-    if (p->h_original) {
+    if (p->h_original) { /* maybe now? */
         spinlock_release(d->public_descriptor->collection_lock);
         return p->h_original;
     }
-
     /* old objects must have an h_original OR be
        the original itself. 
        if some thread stole p when it was still young,

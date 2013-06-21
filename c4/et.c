@@ -449,7 +449,11 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
   B->h_tid |= GCFLAG_BACKUP_COPY;
   B->h_tid &= ~GCFLAG_HAS_ID;
   if (!(P->h_original) && (P->h_tid & GCFLAG_OLD)) {
-      B->h_original = (revision_t)P;
+    /* if P is old, it must be the original
+       if P is young, it will create a shadow original later
+       or it's getting decided when backup gets stolen.
+    */
+    B->h_original = (revision_t)P;
   }
   
   P->h_tid |= GCFLAG_PRIVATE_FROM_PROTECTED;
@@ -479,6 +483,8 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
      return an old one if the nursery is full at this moment. */
   gcptr L = stmgc_duplicate(R);
   if (!(L->h_original)) {
+    /* if we don't have an original object yet,
+     it must be the old public R */
     assert(R->h_tid & GCFLAG_OLD); // if not, force stm_id??
     L->h_original = (revision_t)R;
   }
@@ -1161,7 +1167,6 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
         B->h_tid |= GCFLAG_PUBLIC;
         B->h_tid &= ~GCFLAG_BACKUP_COPY;
         if (!(P->h_tid & GCFLAG_OLD)) P->h_tid |= GCFLAG_NURSERY_MOVED;
-        fprintf(stderr, "%p made outdated, %p is current\n", P, B);
       }
       else
         {
