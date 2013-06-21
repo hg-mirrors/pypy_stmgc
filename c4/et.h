@@ -153,6 +153,7 @@ struct tx_descriptor {
   long long longest_abort_info_time;
   revision_t *private_revision_ref;
   struct FXCache recent_reads_cache;
+  char **read_barrier_cache_ref;
   struct tx_descriptor *tx_prev, *tx_next;
 };
 

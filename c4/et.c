@@ -1211,7 +1211,8 @@ void CommitTransaction(void)
   assert(newrev & 1);
   ACCESS_ONCE(stm_private_rev_num) = newrev;
   fprintf(stderr, "%p: stm_local_revision = %ld\n", d, (long)newrev);
-  assert(d->private_revision_ref = &stm_private_rev_num);
+  assert(d->private_revision_ref == &stm_private_rev_num);
+  assert(d->read_barrier_cache_ref == &stm_read_barrier_cache);
 
   UpdateChainHeads(d, cur_time, localrev);
 
@@ -1459,6 +1460,7 @@ int DescriptorInit(void)
       assert(d->my_lock >= LOCKED);
       stm_private_rev_num = -d->my_lock;
       d->private_revision_ref = &stm_private_rev_num;
+      d->read_barrier_cache_ref = &stm_read_barrier_cache;
       d->max_aborts = -1;
       d->tx_prev = NULL;
       d->tx_next = stm_tx_head;

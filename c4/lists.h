@@ -192,17 +192,12 @@ extern __thread char *stm_read_barrier_cache;
 
 void _fxcache_reset(struct FXCache *fxcache);
 
-static inline void fxcache_install(struct FXCache *fxcache)
-{
-    stm_read_barrier_cache = (char *)(fxcache->cache + fxcache->shift);
-}
-
 static inline void fxcache_clear(struct FXCache *fxcache)
 {
     fxcache->shift++;
     if (fxcache->shift > FX_TOTAL - FX_ENTRIES)
         _fxcache_reset(fxcache);
-    fxcache_install(fxcache);
+    stm_read_barrier_cache = (char *)(fxcache->cache + fxcache->shift);
 }
 
 #define FXCACHE_AT(obj)  \
