@@ -81,6 +81,10 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
                                                    | GCFLAG_STUB
                                                    | GCFLAG_OLD;
     stub->h_revision = ((revision_t)obj) | 2;
+    if (obj->h_original)
+        stub->h_original = obj->h_original;
+    else
+        obj->h_original = (revision_t)stub;
     g2l_insert(&sd->all_stubs, obj, stub);
 
     if (!(obj->h_tid & GCFLAG_OLD))
@@ -108,6 +112,20 @@ void stm_steal_stub(gcptr P)
     */
     if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
         gcptr B = (gcptr)L->h_revision;     /* the backup copy */
+        
+        if(L->h_tid & GCFLAG_HAS_ID) {
+            /* if L has ID, then the backup is the "original" */
+            assert(L->h_original == (revision_t)B);
+            L->h_tid &= ~GCFLAG_HAS_ID; // now it's simply stolen
+        } 
+        else if (L->h_tid & GCFLAG_OLD) {
+            /* became old after becoming priv_from_protected 
+             make L the original
+             */
+            B->h_original = (revision_t)L;
+        }
+        /* otherwise: L is the original */
+        assert (!(B->h_tid & GCFLAG_HAS_ID));
 
         /* B is now a backup copy, i.e. a protected object, and we own
            the foreign thread's collection_lock, so we can read/write the
@@ -154,6 +172,7 @@ void stm_steal_stub(gcptr P)
         if (!(L->h_tid & GCFLAG_OLD)) { 
             gcptr O;
             if (L->h_tid & GCFLAG_HAS_ID) {
+                /* use id-copy for us */
                 O = (gcptr)L->h_original;
                 L->h_tid &= ~GCFLAG_HAS_ID;
                 L->h_revision = (revision_t)O;

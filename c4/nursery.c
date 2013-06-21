@@ -74,11 +74,6 @@ gcptr stmgc_duplicate(gcptr P)
     L->h_tid &= ~GCFLAG_OLD;
     L->h_tid &= ~GCFLAG_HAS_ID;
 
-    if (P->h_original)
-        L->h_original = P->h_original;
-    else
-        L->h_original = (revision_t)P;
-
     return L;
 }
 
@@ -88,12 +83,7 @@ gcptr stmgc_duplicate_old(gcptr P)
     gcptr L = (gcptr)stmgcpage_malloc(size);
     memcpy(L, P, size);
     L->h_tid |= GCFLAG_OLD;
-    L->h_tid &= ~GCFLAG_HAS_ID;
-
-    if (P->h_original)
-        L->h_original = P->h_original;
-    else
-        L->h_original = (revision_t)P;
+    assert(!(L->h_tid & GCFLAG_HAS_ID));
 
     return L;
 }
@@ -108,28 +98,92 @@ revision_t stm_hash(gcptr p)
 
 revision_t stm_id(gcptr p)
 {
+    struct tx_descriptor *d = thread_descriptor;
+    revision_t result;
+
     if (p->h_original) {
+        fprintf(stderr, "stm_id(%p) has original: %p\n", p, (gcptr)p->h_original);
+        return p->h_original;
+    }
+
+    spinlock_acquire(d->public_descriptor->collection_lock, 'I');
+    if (p->h_tid & GCFLAG_OLD) {
+        /* it must be this exact object */
+        result = (revision_t)p;
+    }
+    else {
+        /* must create shadow original object */
+        gcptr O = stmgc_duplicate_old(p);
+        p->h_original = (revision_t)O;
+        p->h_tid |= GCFLAG_HAS_ID;
+        O->h_tid |= GCFLAG_PUBLIC;
+        
+        result = (revision_t)O;
+        
+        fprintf(stderr, "stm_id(%p): is young, preallocate old id-copy %p\n",
+                p, O);
+    }
+
+
+    if (p->h_original) {
+        // maybe in the meantime?
+        fprintf(stderr, "stm_id(%p) has original NOW: %p\n", p, (gcptr)p->h_original);
+        spinlock_release(d->public_descriptor->collection_lock);
         return p->h_original;
     }
     
     //p->h_original == NULL
-    if (!(p->h_tid & GCFLAG_OLD)) {//(is_in_nursery(p)) {
-        struct tx_descriptor *d = thread_descriptor;
-        spinlock_acquire(d->public_descriptor->collection_lock, 'I');
+
+    if (p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
+        gcptr B = (gcptr)p->h_revision;
+        if (p->h_tid & GCFLAG_OLD) {
+            /* may have become old after becoming priv_from_prot */
+            if (B->h_tid & GCFLAG_BACKUP_COPY) {
+                B->h_original = p;
+                result = (revision_t)p;
+                fprintf(stderr, "stm_id(%p): is priv_from_prot and old. make ");
+            }
+            else {
+                /* someone stole and assumes the backup as the ID */
+                p->h_original = B;
+                result = (revision_t)B;
+            }
+        }
+        else {
+            // use backup copy as ID object
+            p->h_tid |= GCFLAG_HAS_ID; // see AbortPrivateFromProtected
+            p->h_original = (revision_t)B;
+            // B->h_tid |= GCFLAG_PUBLIC; done by CommitPrivateFromProtected
+            
+            result = (revision_t)B;
+            fprintf(stderr,
+                    "stm_id(%p): is private_from_protected, make the backup %p an id-copy\n",
+                    p, B);
+        }
+    } 
+    else if (!(p->h_tid & GCFLAG_OLD)) {//(is_in_nursery(p)) {
         // preallocate old "original" outside;
         // like stealing
         gcptr O = stmgc_duplicate_old(p);
-        p->h_revision = (revision_t)O;
+        //p->h_revision = (revision_t)O;
         p->h_original = (revision_t)O;
         p->h_tid |= GCFLAG_HAS_ID;
+        O->h_tid |= GCFLAG_PUBLIC;
         
-        spinlock_release(d->public_descriptor->collection_lock);
-        return (revision_t)O;
+        result = (revision_t)O;
+        
+        fprintf(stderr, "stm_id(%p): is young, preallocate old id-copy %p\n",
+                p, O);
     }
-    else {
-        // p is the original itself
-        return (revision_t)p;
+    else {// if (p->h_tid & GCFLAG_OLD) {
+        /* obj is old, possibly private or protected */
+        /* last, because there are old private(_from_public) objects */
+        result = (revision_t)p;
+        fprintf(stderr, "stm_id(%p): is itself\n", p);
     }
+
+    spinlock_release(d->public_descriptor->collection_lock);
+    return result;
 }
 
 revision_t stm_pointer_equal(gcptr p1, gcptr p2)
@@ -156,9 +210,14 @@ static inline gcptr create_old_object_copy(gcptr obj)
 
 inline void copy_to_old_id_copy(gcptr obj, gcptr id)
 {
+    assert(!is_in_nursery(thread_descriptor, id));
+    assert(id->h_tid & GCFLAG_OLD);
+
     size_t size = stmcb_size(obj);
     memcpy(id, obj, size);
     id->h_tid &= ~GCFLAG_HAS_ID;
+    id->h_tid |= GCFLAG_OLD;
+    fprintf(stderr, "copy_to_old_id_copy(%p -> %p)\n", obj, id);
 }
 
 static void visit_if_young(gcptr *root)
@@ -184,8 +243,16 @@ static void visit_if_young(gcptr *root)
 
         if (obj->h_tid & GCFLAG_HAS_ID) {
             /* already has a place to go to */
-            copy_to_old_id_copy(obj, (gcptr)obj->h_original);
-            fresh_old_copy = (gcptr)obj->h_original;
+            gcptr id_obj = (gcptr)obj->h_original;
+
+            /* assert(!(id_obj->h_tid & GCFLAG_BACKUP_COPY));
+               well, if it is still a backup, then it wasn't
+               stolen. We can use it for our young obj.
+             */
+
+            copy_to_old_id_copy(obj, id_obj);
+            fresh_old_copy = id_obj;
+            obj->h_tid &= ~GCFLAG_HAS_ID;
         } 
         else {
             /* make a copy of it outside */

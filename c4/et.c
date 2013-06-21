@@ -446,7 +446,9 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 
   B = stmgc_duplicate_old(P);
   B->h_tid |= GCFLAG_BACKUP_COPY;
-
+  if (P->h_tid & GCFLAG_OLD)
+    B->h_original = P;
+  
   P->h_tid |= GCFLAG_PRIVATE_FROM_PROTECTED;
   P->h_revision = (revision_t)B;
 
@@ -473,6 +475,9 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
   /* note that stmgc_duplicate() usually returns a young object, but may
      return an old one if the nursery is full at this moment. */
   gcptr L = stmgc_duplicate(R);
+  if (!(L->h_original))
+    L->h_original = (revision_t)R;
+
   assert(!(L->h_tid & GCFLAG_BACKUP_COPY));
   assert(!(L->h_tid & GCFLAG_STUB));
   assert(!(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
@@ -1003,7 +1008,12 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       stub->h_tid = (L->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
                                                    | GCFLAG_STUB
                                                    | GCFLAG_OLD;
+      assert(!(L->h_tid & GCFLAG_HAS_ID));
       stub->h_revision = ((revision_t)L) | 2;
+      if (L->h_original)
+        stub->h_original = L->h_original;
+      else
+        L->h_original = (revision_t)stub;
       item->val = stub;
 
     } G2L_LOOP_END;
@@ -1069,6 +1079,8 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
 
       if (B->h_tid & GCFLAG_PUBLIC)
         {
+          assert(!(P->h_tid & GCFLAG_HAS_ID));
+
           /* B was stolen */
           while (1)
             {
@@ -1080,6 +1092,13 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
                 break;
             }
         }
+      else if (P->h_tid & GCFLAG_HAS_ID) {
+        /* The backup is the "id object".  */
+        B->h_tid &= ~GCFLAG_BACKUP_COPY;
+        B->h_tid |= GCFLAG_PUBLIC;
+        P->h_tid &= ~GCFLAG_HAS_ID;
+        B->h_revision = (revision_t)P;
+      }
       else
         {
           stmgcpage_free(B);
@@ -1111,6 +1130,7 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
         {
           assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
           P->h_tid |= GCFLAG_PUBLIC;
+          P->h_tid &= ~GCFLAG_HAS_ID; // just in case
           if (!(P->h_tid & GCFLAG_OLD)) P->h_tid |= GCFLAG_NURSERY_MOVED;
           /* P becomes a public outdated object.  It may create an
              exception documented in doc-objects.txt: a public but young
@@ -1119,10 +1139,20 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
              stealing will follow its h_revision (to B).
           */
         }
+      else if (P->h_tid & GCFLAG_HAS_ID) {
+        /* The backup is the "id object".  P becomes outdated. */
+        P->h_tid |= GCFLAG_PUBLIC;
+        P->h_tid &= ~GCFLAG_HAS_ID;
+        B->h_tid |= GCFLAG_PUBLIC;
+        B->h_tid &= ~GCFLAG_BACKUP_COPY;
+        if (!(P->h_tid & GCFLAG_OLD)) P->h_tid |= GCFLAG_NURSERY_MOVED;
+        fprintf(stderr, "%p made outdated, %p is current\n", P, B);
+      }
       else
         {
           /* copy the backup copy B back over the now-protected object P,
              and then free B, which will not be used any more. */
+          assert(B->h_original == P);
           size_t size = stmcb_size(B);
           assert(B->h_tid & GCFLAG_BACKUP_COPY);
           memcpy(((char *)P) + offsetof(struct stm_object_s, h_revision),
