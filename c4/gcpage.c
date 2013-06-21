@@ -243,6 +243,8 @@ static void visit(gcptr *pobj)
     else {
         assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
         gcptr B = (gcptr)obj->h_revision;
+        gcptrlist_insert(&objects_to_trace, B);
+
         if (!(B->h_tid & GCFLAG_PUBLIC)) {
             /* a regular private_from_protected object with a backup copy B */
             assert(B->h_tid & GCFLAG_BACKUP_COPY);
@@ -409,6 +411,21 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         item->addr->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
     } G2L_LOOP_END;
+
+    /* It can occur that 'private_from_protected' contains an object that
+     * has not been visited at all (maybe only in inevitable
+     * transactions). 
+     */
+    items = d->private_from_protected.items;
+    for (i = d->private_from_protected.size - 1; i >= 0; i--) {
+        gcptr obj = items[i];
+        assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+
+        if (!(obj->h_tid & GCFLAG_VISITED)) {
+            /* forget 'obj' */
+            items[i] = items[--d->private_from_protected.size];
+        }
+    }
 }
 
 static void clean_up_lists_of_read_objects_and_fix_outdated_flags(void)
