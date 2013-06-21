@@ -235,12 +235,13 @@ void stm_normalize_stolen_objects(struct tx_descriptor *d)
         if (L == NULL)
             continue;
         assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+        assert(IS_POINTER(L->h_revision));
 
         g2l_insert(&d->public_to_private, B, L);
 
         /* this is definitely needed: all keys in public_to_private
            must appear in list_of_read_objects */
-        fprintf(stderr, "n.readobj: %p\n", B);
+        fprintf(stderr, "n.readobj: %p -> %p\n", B, L);
         assert(!(B->h_tid & GCFLAG_STUB));
         gcptrlist_insert(&d->list_of_read_objects, B);
 
