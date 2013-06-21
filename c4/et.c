@@ -446,6 +446,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 
   B = stmgc_duplicate_old(P);
   B->h_tid |= GCFLAG_BACKUP_COPY;
+  B->h_tid &= ~GCFLAG_HAS_ID;
   if (!(P->h_original) && (P->h_tid & GCFLAG_OLD)) {
       B->h_original = (revision_t)P;
   }
@@ -1021,6 +1022,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       }
       else {
         L->h_original = (revision_t)stub;
+        assert(0);
       }
       
       item->val = stub;

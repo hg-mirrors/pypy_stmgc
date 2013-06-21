@@ -83,7 +83,6 @@ gcptr stmgc_duplicate_old(gcptr P)
     gcptr L = (gcptr)stmgcpage_malloc(size);
     memcpy(L, P, size);
     L->h_tid |= GCFLAG_OLD;
-    assert(!(L->h_tid & GCFLAG_HAS_ID));
 
     return L;
 }
