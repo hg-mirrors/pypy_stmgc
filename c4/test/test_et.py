@@ -198,6 +198,49 @@ def test_read_barrier_handle_private():
     assert p4 == p2
     assert list_of_read_objects() == [p2]
 
+
+def test_id_young_to_old():
+    # move out of nursery with shadow original
+    p = nalloc(HDR)
+    assert p.h_original == 0
+    pid = lib.stm_id(p)
+    assert p.h_tid & GCFLAG_HAS_ID
+    porig = follow_original(p)
+    assert porig.h_tid & GCFLAG_OLD
+    lib.stm_push_root(p)
+    minor_collect()
+    p = lib.stm_pop_root()
+    assert not lib.in_nursery(p)
+    assert pid == lib.stm_id(p)
+
+def test_id_private_from_protected():
+    # read and write from protected
+    p = oalloc(HDR)
+    pid = lib.stm_id(p)
+    porig = follow_original(p)
+    # impl detail {
+    # old objects have id==itself, if not set differently
+    assert porig == ffi.NULL
+    assert ffi.cast("gcptr", pid) == p
+    # }
+
+    p1 = oalloc(HDR)
+    p1id = lib.stm_id(p1)
+    p1r = lib.stm_read_barrier(p1)
+    assert lib.stm_id(p1r) == p1id
+    p1w = lib.stm_write_barrier(p1)
+    assert lib.stm_id(p1w) == p1id
+
+    p2 = oalloc(HDR)
+    p2w = lib.stm_write_barrier(p2)
+    p2id = lib.stm_id(p2)
+    assert p2id == lib.stm_id(p2w)
+    # impl detail {
+    assert p2w.h_original == 0
+    assert follow_revision(p2w).h_original == lib.stm_id(p2w)
+    # }
+    
+
 def test_stealing_old():
     p = palloc(HDR + WORD)
     plist = [p]

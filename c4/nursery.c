@@ -59,6 +59,7 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     assert(tid == (tid & STM_USER_TID_MASK));
     P->h_tid = tid;
     P->h_revision = stm_private_rev_num;
+    P->h_original = 0;
     return P;
 }
 
@@ -71,6 +72,8 @@ gcptr stmgc_duplicate(gcptr P)
 
     memcpy(L, P, size);
     L->h_tid &= ~GCFLAG_OLD;
+    L->h_tid &= ~GCFLAG_HAS_ID;
+
     return L;
 }
 
@@ -80,7 +83,89 @@ gcptr stmgc_duplicate_old(gcptr P)
     gcptr L = (gcptr)stmgcpage_malloc(size);
     memcpy(L, P, size);
     L->h_tid |= GCFLAG_OLD;
+
     return L;
+}
+
+/************************************************************/
+
+
+revision_t stm_hash(gcptr p)
+{
+    return stm_id(p);
+}
+
+revision_t stm_id(gcptr p)
+{
+    struct tx_descriptor *d = thread_descriptor;
+    revision_t result;
+
+    
+    if (p->h_original) { /* fast path */
+        fprintf(stderr, "stm_id(%p) has orig fst: %p\n", 
+                p, (gcptr)p->h_original);
+        return p->h_original;
+    } 
+    else if (!(p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+               && (p->h_tid & GCFLAG_OLD)) {
+        /* we can be sure that p->h_original doesn't
+           get set during the if and the else-if */
+        fprintf(stderr, "stm_id(%p) is old, orig=0 fst: %p\n", p, p);
+        return (revision_t)p;
+    }
+    
+    spinlock_acquire(d->public_descriptor->collection_lock, 'I');
+    /* old objects must have an h_original xOR be
+       the original itself. 
+       if some thread stole p when it was still young,
+       it must have set h_original. stealing an old obj
+       makes the old obj "original".
+    */
+    if (p->h_original) { /* maybe now? */
+        result = p->h_original;
+        fprintf(stderr, "stm_id(%p) has orig: %p\n", 
+                p, (gcptr)p->h_original);
+    }
+    else if (p->h_tid & GCFLAG_OLD) {
+        /* it must be this exact object */
+        result = (revision_t)p;
+        fprintf(stderr, "stm_id(%p) is old, orig=0: %p\n", p, p);
+    }
+    else {
+        /* must create shadow original object or use
+           backup, if exists */
+        if (p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
+            gcptr B = (gcptr)p->h_revision;
+            /* don't set, otherwise nursery will copy over backup */
+            //p->h_tid |= GCFLAG_HAS_ID; // see AbortPrivateFromProtected
+            p->h_original = (revision_t)B;
+            // B->h_tid |= GCFLAG_PUBLIC; done by CommitPrivateFromProtected
+            
+            result = (revision_t)B;
+            fprintf(stderr, "stm_id(%p) young, pfp, use backup %p\n", 
+                    p, (gcptr)p->h_original);
+        }
+        else {
+            gcptr O = stmgc_duplicate_old(p);
+            p->h_original = (revision_t)O;
+            p->h_tid |= GCFLAG_HAS_ID;
+            O->h_tid |= GCFLAG_PUBLIC;
+            
+            result = (revision_t)O;
+            fprintf(stderr, "stm_id(%p) young, make shadow %p\n", p, O); 
+        }
+    }
+    
+    spinlock_release(d->public_descriptor->collection_lock);
+    return result;
+}
+
+revision_t stm_pointer_equal(gcptr p1, gcptr p2)
+{
+    /* types must be the same */
+    if ((p1->h_tid & STM_USER_TID_MASK) != (p2->h_tid & STM_USER_TID_MASK))
+        return 0;
+    return stm_id(p1) == stm_id(p2);
 }
 
 /************************************************************/
@@ -100,6 +185,18 @@ static inline gcptr create_old_object_copy(gcptr obj)
     return fresh_old_copy;
 }
 
+inline void copy_to_old_id_copy(gcptr obj, gcptr id)
+{
+    assert(!is_in_nursery(thread_descriptor, id));
+    assert(id->h_tid & GCFLAG_OLD);
+
+    size_t size = stmcb_size(obj);
+    memcpy(id, obj, size);
+    id->h_tid &= ~GCFLAG_HAS_ID;
+    id->h_tid |= GCFLAG_OLD;
+    fprintf(stderr, "copy_to_old_id_copy(%p -> %p)\n", obj, id);
+}
+
 static void visit_if_young(gcptr *root)
 {
     gcptr obj = *root;
@@ -111,17 +208,29 @@ static void visit_if_young(gcptr *root)
     }
     else {
         /* it's a nursery object.  Was it already moved? */
-
         if (UNLIKELY(obj->h_tid & GCFLAG_NURSERY_MOVED)) {
             /* yes.  Such an object can be a public object in the nursery
                too (such objects are always NURSERY_MOVED).  For all cases,
-               we can just fix the ref. */
+               we can just fix the ref. 
+               Can be stolen objects or those we already moved.
+            */
             *root = (gcptr)obj->h_revision;
             return;
         }
 
-        /* make a copy of it outside */
-        fresh_old_copy = create_old_object_copy(obj);
+        if (obj->h_tid & GCFLAG_HAS_ID) {
+            /* already has a place to go to */
+            gcptr id_obj = (gcptr)obj->h_original;
+
+            copy_to_old_id_copy(obj, id_obj);
+            fresh_old_copy = id_obj;
+            obj->h_tid &= ~GCFLAG_HAS_ID;
+        } 
+        else {
+            /* make a copy of it outside */
+            fresh_old_copy = create_old_object_copy(obj);
+        }
+        
         obj->h_tid |= GCFLAG_NURSERY_MOVED;
         obj->h_revision = (revision_t)fresh_old_copy;
 

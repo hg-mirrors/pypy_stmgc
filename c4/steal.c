@@ -11,6 +11,8 @@ struct stub_block_s {
     struct stm_object_s stubs[STUB_NB_OBJS];
 };
 
+inline void copy_to_old_id_copy(gcptr obj, gcptr id);
+
 gcptr stm_stub_malloc(struct tx_public_descriptor *pd)
 {
     assert(pd->collection_lock != 0);
@@ -80,6 +82,16 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
                                                    | GCFLAG_STUB
                                                    | GCFLAG_OLD;
     stub->h_revision = ((revision_t)obj) | 2;
+    if (obj->h_original) {
+        stub->h_original = obj->h_original;
+    }
+    else if (obj->h_tid & GCFLAG_OLD) {
+        stub->h_original = (revision_t)obj;
+    }
+    else {
+        obj->h_original = (revision_t)stub;
+    }
+
     g2l_insert(&sd->all_stubs, obj, stub);
 
     if (!(obj->h_tid & GCFLAG_OLD))
@@ -107,6 +119,24 @@ void stm_steal_stub(gcptr P)
     */
     if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
         gcptr B = (gcptr)L->h_revision;     /* the backup copy */
+        
+        if (L->h_original) {
+            /* L has an original, may be GCFLAG_HAS_ID */
+            B->h_original = L->h_original;
+        }
+        else if (L->h_tid & GCFLAG_OLD) {
+            /* If old, it must be the original */
+            assert(!(L->h_tid & GCFLAG_HAS_ID));
+            /* original must be L */
+            B->h_original = (revision_t)L;
+            assert(0);
+        }
+        else {
+            /* we can make the backup the "original"
+             since L hasn't decided yet */
+            L->h_original = (revision_t)B;
+            assert(0);
+        }
 
         /* B is now a backup copy, i.e. a protected object, and we own
            the foreign thread's collection_lock, so we can read/write the
@@ -150,10 +180,28 @@ void stm_steal_stub(gcptr P)
 
         fprintf(stderr, "stolen: %p -> %p\n", P, L);
 
-        /* Copy the object out of the other thread's nursery, if needed */
-        if (!(L->h_tid & GCFLAG_OLD)) {
-            gcptr O = stmgc_duplicate_old(L);
-            L->h_revision = (revision_t)O;
+        
+        if (!(L->h_tid & GCFLAG_OLD)) { 
+            gcptr O;
+            
+            if (L->h_tid & GCFLAG_HAS_ID) {
+                /* use id-copy for us */
+                O = (gcptr)L->h_original;
+                L->h_tid &= ~GCFLAG_HAS_ID;
+                L->h_revision = (revision_t)O;
+                copy_to_old_id_copy(L, (gcptr)L->h_original);
+            } else {
+                /* Copy the object out of the other thread's nursery, 
+                   if needed */
+                O = stmgc_duplicate_old(L);
+                L->h_revision = (revision_t)O;
+
+                /* young and without original?
+                   we may lose the HAS_ID flag like above */
+                if (!(L->h_original))
+                    L->h_original = (revision_t)O;
+            }
+
             L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
             /* subtle: we need to remove L from the fxcache of the target
                thread, otherwise its read barrier might not trigger on it.
@@ -165,6 +213,7 @@ void stm_steal_stub(gcptr P)
             L = O;
             fprintf(stderr, "\t---> %p\n", L);
         }
+
         assert(L->h_tid & GCFLAG_OLD);
     }
 

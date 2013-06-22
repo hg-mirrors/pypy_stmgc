@@ -12,7 +12,7 @@ def teardown_function(_):
 
 def test_HDR():
     import struct
-    assert HDR == struct.calcsize("PP")
+    assert HDR == struct.calcsize("PPP")
 
 def test_malloc_simple():
     assert count_pages() == 0

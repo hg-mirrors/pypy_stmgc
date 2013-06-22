@@ -32,6 +32,7 @@ ffi.cdef('''
     typedef struct stm_object_s {
         revision_t h_tid;
         revision_t h_revision;
+        revision_t h_original;
     } *gcptr;
 
     int gettid(gcptr);
@@ -41,6 +42,9 @@ ffi.cdef('''
     #define PREBUILT_REVISION      ...
 
     gcptr stm_allocate(size_t size, unsigned int tid);
+    revision_t stm_hash(gcptr);
+    revision_t stm_id(gcptr);
+    revision_t stm_pointer_equal(gcptr, gcptr);
     void stm_push_root(gcptr);
     gcptr stm_pop_root(void);
     void stm_set_max_aborts(int max_aborts);
@@ -107,6 +111,7 @@ ffi.cdef('''
     #define GCFLAG_NURSERY_MOVED     ...
     #define GCFLAG_STUB              ...
     #define GCFLAG_PRIVATE_FROM_PROTECTED  ...
+    #define GCFLAG_HAS_ID            ...
     #define ABRT_MANUAL              ...
     typedef struct { ...; } page_header_t;
 ''')
@@ -606,4 +611,10 @@ def follow_revision(p):
     assert (r % 4) == 0
     return ffi.cast("gcptr", r)
 
+def follow_original(p):
+    r = p.h_original
+    assert (r % 4) == 0
+    return ffi.cast("gcptr", r)
+
+    
 nrb_protected = ffi.cast("gcptr", -1)
