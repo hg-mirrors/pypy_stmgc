@@ -1184,6 +1184,10 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
         {
           /* copy the backup copy B back over the now-protected object P,
              and then free B, which will not be used any more. */
+
+          if (P->h_original && !B->h_original) // might occur because of
+            B->h_original = P->h_original; //replace_ptr_to_protected_with_stub
+
           assert(!(P->h_original) 
                  || (B->h_original == (revision_t)P->h_original));
           size_t size = stmcb_size(B);
