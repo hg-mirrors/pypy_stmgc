@@ -198,6 +198,8 @@ static void visit(gcptr *pobj)
     if (obj->h_tid & GCFLAG_VISITED) {
         fprintf(stderr, "[already visited: %p]\n", obj);
         assert(obj == *pobj);
+        assert((obj->h_revision & 3) ||   /* either odd, or stub */
+               (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
         return;    /* already seen */
     }
 
@@ -243,9 +245,12 @@ static void visit(gcptr *pobj)
     else {
         assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
         gcptr B = (gcptr)obj->h_revision;
+        gcptrlist_insert(&objects_to_trace, B);
+
         if (!(B->h_tid & GCFLAG_PUBLIC)) {
             /* a regular private_from_protected object with a backup copy B */
             assert(B->h_tid & GCFLAG_BACKUP_COPY);
+            assert(B->h_revision & 1);
             B->h_tid |= GCFLAG_VISITED;
         }
         else {
@@ -283,8 +288,8 @@ static void mark_prebuilt_roots(void)
     for (; pobj != pend; pobj++) {
         obj = *pobj;
         assert(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL);
-        assert(obj->h_tid & GCFLAG_VISITED);
-        assert((obj->h_revision & 1) == 0);   /* "is a pointer" */
+        obj->h_tid &= ~GCFLAG_VISITED;
+        assert(IS_POINTER(obj->h_revision));
         visit((gcptr *)&obj->h_revision);
     }
 }
@@ -384,12 +389,18 @@ static void cleanup_for_thread(struct tx_descriptor *d)
            inevitable, and since it started, it popped objects out of
            its shadow stack.  Some popped objects might become free even
            if they have been read from.  But for inevitable transactions,
-           we clear the 'list_of_read_objects' above anyway. */
-        assert(obj->h_tid & GCFLAG_VISITED);
+           we clear the 'list_of_read_objects' above anyway.
+           
+           However, some situations can occur (I believe) only in tests.
+           To be on the safe side, do the right thing and unlist the
+           non-visited object.
+           */
+        if (!(obj->h_tid & GCFLAG_VISITED)) {
+            items[i] = items[--d->list_of_read_objects.size];
+        }
     }
 
     d->num_read_objects_known_old = d->list_of_read_objects.size;
-    fxcache_clear(&d->recent_reads_cache);
 
     /* We are now after visiting all objects, and we know the
      * transaction isn't aborting because of this collection.  We have
@@ -410,6 +421,21 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         item->addr->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
     } G2L_LOOP_END;
+
+    /* It can occur that 'private_from_protected' contains an object that
+     * has not been visited at all (maybe only in inevitable
+     * transactions). 
+     */
+    items = d->private_from_protected.items;
+    for (i = d->private_from_protected.size - 1; i >= 0; i--) {
+        gcptr obj = items[i];
+        assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+
+        if (!(obj->h_tid & GCFLAG_VISITED)) {
+            /* forget 'obj' */
+            items[i] = items[--d->private_from_protected.size];
+        }
+    }
 }
 
 static void clean_up_lists_of_read_objects_and_fix_outdated_flags(void)
@@ -545,8 +571,10 @@ void force_minor_collections(void)
     struct tx_descriptor *d;
     struct tx_descriptor *saved = thread_descriptor;
     revision_t saved_private_rev = stm_private_rev_num;
-    char *read_barrier_cache = stm_read_barrier_cache;
+    char *saved_read_barrier_cache = stm_read_barrier_cache;
+
     assert(saved_private_rev == *saved->private_revision_ref);
+    assert(saved_read_barrier_cache == *saved->read_barrier_cache_ref);
 
     for (d = stm_tx_head; d; d = d->tx_next) {
         /* Force a minor collection to run in the thread 'd'.
@@ -554,21 +582,24 @@ void force_minor_collections(void)
            collection was not preceeded by a minor collection if the
            thread is busy in a system call for example.
         */
-        if (stmgc_minor_collect_anything_to_do(d) ||
-            (d->public_descriptor->stolen_objects.size != 0)) {
+        if (d != saved) {
             /* Hack: temporarily pretend that we "are" the other thread...
              */
             thread_descriptor = d;
             stm_private_rev_num = *d->private_revision_ref;
-            fxcache_install(&d->recent_reads_cache);
-            //assert(stmgc_nursery_hiding(d, 0));
+            stm_read_barrier_cache = *d->read_barrier_cache_ref;
+
             stmgc_minor_collect_no_abort();
-            //assert(stmgc_nursery_hiding(d, 1));
+
+            assert(stm_private_rev_num == *d->private_revision_ref);
+            *d->read_barrier_cache_ref = stm_read_barrier_cache;
+
             thread_descriptor = saved;
             stm_private_rev_num = saved_private_rev;
-            stm_read_barrier_cache = read_barrier_cache;
+            stm_read_barrier_cache = saved_read_barrier_cache;
         }
     }
+    stmgc_minor_collect_no_abort();
 }
 
 

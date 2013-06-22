@@ -676,11 +676,15 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
                      commit, but if they both enter the SpinLoop()
                      above, then they will livelock.
 
-                     XXX This might lead both threads to cancel by
-                     reaching this point.  It might be possible to be
+                     But this might lead both threads to cancel by
+                     reaching this point.  For now we attempt to be
                      more clever and let one of the threads commit
-                     anyway.
+                     anyway (the choice of which one looks random).
                   */
+                  if (d->my_lock < v) {
+                      SpinLoop(SPLP_LOCKED_VALIDATE);
+                      goto retry;
+                  }
                   fprintf(stderr, "validation failed: "
                           "%p is locked by another thread\n", R);
                   return 0;
@@ -1259,7 +1263,8 @@ void CommitTransaction(void)
   assert(newrev & 1);
   ACCESS_ONCE(stm_private_rev_num) = newrev;
   fprintf(stderr, "%p: stm_local_revision = %ld\n", d, (long)newrev);
-  assert(d->private_revision_ref = &stm_private_rev_num);
+  assert(d->private_revision_ref == &stm_private_rev_num);
+  assert(d->read_barrier_cache_ref == &stm_read_barrier_cache);
 
   UpdateChainHeads(d, cur_time, localrev);
 
@@ -1507,6 +1512,7 @@ int DescriptorInit(void)
       assert(d->my_lock >= LOCKED);
       stm_private_rev_num = -d->my_lock;
       d->private_revision_ref = &stm_private_rev_num;
+      d->read_barrier_cache_ref = &stm_read_barrier_cache;
       d->max_aborts = -1;
       d->tx_prev = NULL;
       d->tx_next = stm_tx_head;
