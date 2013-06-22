@@ -31,7 +31,7 @@ gcptr stm_allocate(size_t size, unsigned long tid);
 
 /* returns a never changing hash for the object */
 revision_t stm_hash(gcptr);
-/* returns an for the object which is unique during its lifetime */
+/* returns a number for the object which is unique during its lifetime */
 revision_t stm_id(gcptr);
 /* returns nonzero if the two object-copy pointers belong to the
 same original object */
