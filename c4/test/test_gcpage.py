@@ -341,6 +341,9 @@ def test_backup_stolen():
             check_not_free(p1)
             assert classify(p1) == "private_from_protected"
             assert classify(follow_revision(p1)) == "public"  # has been stolen
+            # leave time for f2 to finish, before we commit changes to p1
+            # (which has got in its read set)
+            r.wait_while_in_parallel()
         perform_transaction(cb)
     def f2(r):
         def cb(c):
@@ -353,7 +356,9 @@ def test_backup_stolen():
             r.leave_in_parallel()
             check_not_free(p2)
             assert classify(p2) == "public"
+            r.enter_in_parallel()
         perform_transaction(cb)
+        r.leave_in_parallel()
     run_parallel(f1, f2)
 
 def test_private_from_protected_inevitable():

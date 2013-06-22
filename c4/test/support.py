@@ -58,6 +58,7 @@ ffi.cdef('''
     void stm_set_transaction_length(long length_max);
 
     /* extra non-public code */
+    void printfcolor(char *msg);
     void *stm_malloc(size_t size);
     gcptr stmgcpage_malloc(size_t size);
     void stmgcpage_free(gcptr obj);
@@ -121,6 +122,11 @@ lib = ffi.verify(r'''
 
     extern revision_t stm_global_cur_time(void);
     extern revision_t get_private_rev_num(void);
+
+    void printfcolor(char *msg)
+    {
+        fprintf(stderr, "%s\n", msg);
+    }
 
     int gettid(gcptr obj)
     {
@@ -329,6 +335,7 @@ class run_parallel(object):
             raise exc, val, tb
 
     def run(self, fn, lck, i):
+        printf('run: calling %r' % (fn,))
         try:
             try:
                 lib.stm_initialize_and_set_max_abort(self.max_aborts)
@@ -487,6 +494,8 @@ def major_collect():
 def minor_collect():
     lib.stmgc_minor_collect()
 
+printf = lib.printfcolor
+
 def is_stub(p):
     return p.h_tid & GCFLAG_STUB
 
@@ -541,6 +550,8 @@ def perform_transaction(callback):
     def cb(_, retry_counter):
         del fine[:]
         try:
+            printf('perform_transaction: calling %r with retry_counter=%d' %
+                   (callback, retry_counter))
             loopback = callback(retry_counter)
         except Exception:
             if not sys.stdout.isatty():
