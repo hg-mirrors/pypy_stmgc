@@ -59,16 +59,23 @@ static _Bool is_inevitable(struct tx_descriptor *d)
 
 static pthread_mutex_t mutex_inevitable = PTHREAD_MUTEX_INITIALIZER;
 
-static void inev_mutex_acquire(void)
+static void inev_mutex_release(void)
+{
+  pthread_mutex_unlock(&mutex_inevitable);
+}
+
+static void inev_mutex_acquire(struct tx_descriptor *d)
 {   /* must save roots around this call */
   stm_stop_sharedlock();
   pthread_mutex_lock(&mutex_inevitable);
   stm_start_sharedlock();
-}
 
-static void inev_mutex_release(void)
-{
-  pthread_mutex_unlock(&mutex_inevitable);
+  if (d->active < 0)
+    {
+      inev_mutex_release();
+      AbortNowIfDelayed();
+      abort();   /* unreachable */
+    }
 }
 
 /************************************************************/
@@ -882,6 +889,7 @@ static void init_transaction(struct tx_descriptor *d)
 {
   assert(d->active == 0);
   stm_start_sharedlock();
+  assert(d->active == 0);
 
   if (clock_gettime(CLOCK_MONOTONIC, &d->start_real_time) < 0) {
     d->start_real_time.tv_nsec = -1;
@@ -1225,7 +1233,7 @@ void CommitTransaction(void)
             {                    // there is another inevitable transaction
               CancelLocks(d);
               spinlock_release(d->public_descriptor->collection_lock);
-              inev_mutex_acquire();   // wait until released
+              inev_mutex_acquire(d);   // wait until released
               inev_mutex_release();
               spinlock_acquire(d->public_descriptor->collection_lock, 'C');
               if (d->public_descriptor->stolen_objects.size != 0)
@@ -1284,11 +1292,12 @@ static void make_inevitable(struct tx_descriptor *d)
   update_reads_size_limit(d);
 }
 
-static revision_t acquire_inev_mutex_and_mark_global_cur_time(void)
+static revision_t acquire_inev_mutex_and_mark_global_cur_time(
+                      struct tx_descriptor *d)
 {   /* must save roots around this call */
   revision_t cur_time;
 
-  inev_mutex_acquire();
+  inev_mutex_acquire(d);
   while (1)
     {
       cur_time = ACCESS_ONCE(global_cur_time);
@@ -1312,7 +1321,7 @@ void BecomeInevitable(const char *why)
   fprintf(stderr, "[%lx] inevitable: %s\n",
           (long)d->public_descriptor_index, why);
 
-  cur_time = acquire_inev_mutex_and_mark_global_cur_time();
+  cur_time = acquire_inev_mutex_and_mark_global_cur_time(d);
   if (d->start_time != cur_time)
     {
       d->start_time = cur_time;
@@ -1332,7 +1341,7 @@ void BeginInevitableTransaction(void)
   revision_t cur_time;
 
   init_transaction(d);
-  cur_time = acquire_inev_mutex_and_mark_global_cur_time();
+  cur_time = acquire_inev_mutex_and_mark_global_cur_time(d);
   d->start_time = cur_time;
   make_inevitable(d);
 }

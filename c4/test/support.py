@@ -73,6 +73,7 @@ ffi.cdef('''
     void stm_start_sharedlock(void);
     void stm_stop_sharedlock(void);
     void AbortTransaction(int);
+    void AbortNowIfDelayed(void);
     gcptr stm_get_private_from_protected(long index);
     gcptr stm_get_read_obj(long index);
     void *STUB_THREAD(gcptr);
@@ -416,6 +417,7 @@ class run_parallel(object):
         lib.stm_stop_sharedlock()
         self.parallel_locks[1].acquire()
         lib.stm_start_sharedlock()
+        lib.AbortNowIfDelayed()
         print 'wait_while_in_parallel leave'
         # parallel_locks[0] is acquired, parallel_locks[1] is acquired
         self.parallel_locks[1].release()
@@ -500,9 +502,9 @@ def is_stub(p):
     return p.h_tid & GCFLAG_STUB
 
 def check_not_free(p):
-    print >> sys.stderr, "[checking %r..." % p,
+    #print >> sys.stderr, "[checking %r..." % p,
     assert 42 < (p.h_tid & 0xFFFF) < 521
-    print >> sys.stderr, "ok]"
+    #print >> sys.stderr, "ok]"
 
 def check_nursery_free(p):
     #assert p.h_tid == p.h_revision == 0

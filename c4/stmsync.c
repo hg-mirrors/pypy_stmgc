@@ -293,6 +293,8 @@ void stm_possible_safe_point(void)
     /* another thread should be waiting in start_exclusivelock(),
        which takes priority here */
     stm_start_sharedlock();
+
+    AbortNowIfDelayed();   /* if another thread ran a major GC */
 }
 
 /************************************************************/
