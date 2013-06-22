@@ -378,8 +378,8 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         if (IS_POINTER(v)) {
             /* has a more recent revision.  Oups. */
             fprintf(stderr,
-                    "ABRT_COLLECT_MAJOR: %p was read but modified already\n",
-                    obj);
+                    "ABRT_COLLECT_MAJOR %p: %p was read but modified already\n",
+                    d, obj);
             AbortTransactionAfterCollect(d, ABRT_COLLECT_MAJOR);
             return;
         }
@@ -410,6 +410,8 @@ static void cleanup_for_thread(struct tx_descriptor *d)
      */
     wlog_t *item;
 
+    fprintf(stderr, "fix public_to_private on thread %p\n", d);
+
     G2L_LOOP_FORWARD(d->public_to_private, item) {
 
         assert(item->addr->h_tid & GCFLAG_PUBLIC);
@@ -419,6 +421,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
                (item->val->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
 
         item->addr->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
+        fprintf(stderr, "\tpublic_to_private: %p\n", item->addr);
 
     } G2L_LOOP_END;
 

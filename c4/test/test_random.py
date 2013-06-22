@@ -5,7 +5,7 @@ import model
 # a default seed that changes every day, but that can be easily recovered
 DEFAULT_SEED = int(time.strftime("%y%m%d", time.gmtime()))
 
-DO_MAJOR_COLLECTS = False
+DO_MAJOR_COLLECTS = True
 
 
 def setup_function(_):
@@ -452,6 +452,7 @@ class Sync(object):
         self.toggle = not threadid
         self.cond.notify()
         lib.stm_start_sharedlock()
+        lib.AbortNowIfDelayed()
 
     def wait1(self):
         self.wait(False)
