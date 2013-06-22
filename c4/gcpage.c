@@ -558,7 +558,6 @@ static void free_closed_thread_descriptors(void)
         }
         assert(gcp->collection_lock == 0);
         gcp->shutdown = 1;
-        /* XXX ...stub_blocks... */
         assert(gcp->stolen_objects.size == 0);
         assert(gcp->stolen_young_stubs.size == 0);
         gcptrlist_delete(&gcp->stolen_objects);
