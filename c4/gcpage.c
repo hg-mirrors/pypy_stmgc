@@ -549,7 +549,7 @@ static void free_closed_thread_descriptors(void)
     revision_t index = -1;
 
     while ((gcp = stm_get_free_public_descriptor(&index)) != NULL) {
-        if (gcp->collection_lock == -1)
+        if (gcp->shutdown)
             continue;
 
         for (i = 1; i < GC_SMALL_REQUESTS; i++) {
@@ -557,7 +557,7 @@ static void free_closed_thread_descriptors(void)
             sweep_pages(gcp, i, gpage);
         }
         assert(gcp->collection_lock == 0);
-        gcp->collection_lock = -1;
+        gcp->shutdown = 1;
         /* XXX ...stub_blocks... */
         assert(gcp->stolen_objects.size == 0);
         assert(gcp->stolen_young_stubs.size == 0);

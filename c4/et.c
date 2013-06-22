@@ -1501,8 +1501,8 @@ int DescriptorInit(void)
           assert(descriptor_array_free_list >= 0);
           assert(pd->stolen_objects.size == 0);
           assert(pd->stolen_young_stubs.size == 0);
-          assert(pd->collection_lock == 0 || pd->collection_lock == -1);
-          pd->collection_lock = 0;
+          assert(pd->collection_lock == 0);
+          pd->shutdown = 0;
       }
       else {
           /* no item in the free list */
