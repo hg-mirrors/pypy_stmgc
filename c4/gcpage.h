@@ -60,7 +60,12 @@ typedef struct page_header_s {
     gcptr free_loc_for_size[GC_SMALL_REQUESTS];                         \
                                                                         \
     /* For statistics */                                                \
-    size_t count_pages;
+    size_t count_pages;                                                 \
+                                                                        \
+    /* Set to 1 when a major collection shuts down a                    \
+       public_descriptor after the corresponding thread was             \
+       already finished */                                              \
+    int shutdown;
 
 
 #define LOCAL_GCPAGES()  (thread_descriptor->public_descriptor)
