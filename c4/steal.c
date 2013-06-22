@@ -1,50 +1,14 @@
 #include "stmimpl.h"
 
 
-#define STUB_PAGE         (4096 - 2*WORD)
-#define STUB_NB_OBJS      ((STUB_BLOCK_SIZE - 2*WORD) /    \
-                             sizeof(struct stm_object_s))
-
-struct stub_block_s {
-    struct tx_public_descriptor *thread;
-    struct stub_block_s *next;
-    struct stm_object_s stubs[STUB_NB_OBJS];
-};
-
 inline void copy_to_old_id_copy(gcptr obj, gcptr id);
 
 gcptr stm_stub_malloc(struct tx_public_descriptor *pd)
 {
     assert(pd->collection_lock != 0);
 
-    gcptr p = pd->stub_free_list;
-    if (p == NULL) {
-        assert(sizeof(struct stub_block_s) == STUB_BLOCK_SIZE);
-
-        /* XXX free! */
-        char *page = stm_malloc(STUB_PAGE);
-        char *page_end = page + STUB_PAGE;
-        page += (-(revision_t)page) & (STUB_BLOCK_SIZE-1);  /* round up */
-
-        struct stub_block_s *b = (struct stub_block_s *)page;
-        struct stub_block_s *nextb = NULL;
-        gcptr nextp = NULL;
-        int i;
-
-        while (((char *)(b + 1)) <= page_end) {
-            b->thread = pd;
-            b->next = nextb;
-            for (i = 0; i < STUB_NB_OBJS; i++) {
-                b->stubs[i].h_revision = (revision_t)nextp;
-                nextp = &b->stubs[i];
-            }
-            b++;
-        }
-        assert(nextp != NULL);
-        p = nextp;
-    }
-    pd->stub_free_list = (gcptr)p->h_revision;
-    assert(STUB_THREAD(p) == pd);
+    gcptr p = stmgcpage_malloc(sizeof(struct stm_stub_s));
+    STUB_THREAD(p) = pd;
     return p;
 }
 
