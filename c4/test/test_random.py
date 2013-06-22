@@ -149,6 +149,20 @@ class RandomSingleThreadTester(object):
         #
         return x, y
 
+    def do_check_can_still_commit(self):
+        try:
+            self.current_rev.check_can_still_commit()
+        except (model.Deleted, model.Conflict), e:
+            # the model says that we might get an abort
+            self.dump('possible delayed abort!')
+            self.expected_abort()
+            lib.AbortNowIfDelayed()
+            # ok, it's fine if we don't actually get an abort
+            self.cancel_expected_abort()
+        else:
+            # the model says that we must not get an abort
+            lib.AbortNowIfDelayed()
+
     def get_ref(self, r, index):
         self.check(r)
         if r == emptypair:
@@ -356,6 +370,7 @@ class RandomSingleThreadTester(object):
             if do_wait:
                 self.push_roots(extra=p)
                 do_wait()
+                self.do_check_can_still_commit()
                 p = self.pop_roots(extra=p)
 
     def run_single_thread(self):
@@ -452,7 +467,6 @@ class Sync(object):
         self.toggle = not threadid
         self.cond.notify()
         lib.stm_start_sharedlock()
-        lib.AbortNowIfDelayed()
 
     def wait1(self):
         self.wait(False)
@@ -506,6 +520,6 @@ def test_specific_issue_1():
     test_multi_thread(1624)
 
 def test_more_multi_thread():
-    py.test.skip("more random tests")
+    #py.test.skip("more random tests")
     for i in range(200):
         yield test_multi_thread, 1624 + i

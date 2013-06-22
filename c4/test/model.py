@@ -167,6 +167,12 @@ class Revision(object):
             assert self.previous is gs.most_recent_committed_revision
             gs.most_recent_committed_revision = self
 
+    def check_can_still_commit(self):
+        gs = self.globalstate
+        saved = self.previous
+        self._extend_timestamp(gs.most_recent_committed_revision)
+        self.previous = saved
+
 
 class GlobalState(object):
 
