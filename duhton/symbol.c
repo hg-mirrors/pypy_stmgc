@@ -7,18 +7,27 @@ typedef struct _Du_Symbol {
     struct _Du_Symbol *next;
 } DuSymbolObject;
 
-DuSymbolObject *_Du_AllSymbols = NULL;
+static DuSymbolObject _Du_AllSymbols = {
+    DuOBJECT_HEAD_INIT(DUTYPE_SYMBOL),
+    "",
+    NULL};
+
 
 void symbol_print(DuSymbolObject *ob)
 {
+    _du_read1(ob);
     printf("'%s'", ob->name);
 }
 
 DuObject *symbol_eval(DuObject *ob, DuObject *locals)
 {
+    _du_save1(ob);
     DuObject *res = DuFrame_GetSymbol(locals, ob);
+    _du_restore1(ob);
     if (res == NULL) {
+        _du_save1(ob);
         res = DuFrame_GetSymbol(Du_Globals, ob);
+        _du_restore1(ob);
         if (res == NULL)
             Du_FatalError("symbol not defined as a variable: '%s'",
                           DuSymbol_AsString(ob));
@@ -26,36 +35,37 @@ DuObject *symbol_eval(DuObject *ob, DuObject *locals)
     return res;
 }
 
-DuTypeObject DuSymbol_Type = {
-    DuOBJECT_HEAD_INIT(&DuType_Type),
+DuType DuSymbol_Type = {
     "symbol",
+    DUTYPE_SYMBOL,
     sizeof(DuSymbolObject),
-    (destructor_fn)NULL,
     (print_fn)symbol_print,
     (eval_fn)symbol_eval,
 };
 
 DuObject *DuSymbol_FromString(char *name)
 {
-    DuSymbolObject *p;
-    for (p=_Du_AllSymbols; p != NULL; p=p->next) {
+    DuSymbolObject *p, *head = &_Du_AllSymbols;
+    for (p=head; p != NULL; p=p->next) {
+        _du_read1(p);
         if (strcmp(name, p->name) == 0) {
-            Du_INCREF(p);
             return (DuObject *)p;
         }
     }
     p = (DuSymbolObject *)DuObject_New(&DuSymbol_Type);
-    _Du_BecomeImmortal((DuObject *)p);    /* make the symbol object immortal */
     p->name = strdup(name);
-    p->next = _Du_AllSymbols;
-    _Du_AllSymbols = p;
-    Du_INCREF(p);
+
+    _du_write1(head);
+    p->next = head->next;
+    head->next = p;
+
     return (DuObject *)p;
 }
 
 char *DuSymbol_AsString(DuObject *ob)
 {
     DuSymbol_Ensure("DuSymbol_AsString", ob);
+    _du_read1(ob);
     return ((DuSymbolObject *)ob)->name;
 }
 
@@ -63,5 +73,5 @@ void DuSymbol_Ensure(char *where, DuObject *ob)
 {
     if (!DuSymbol_Check(ob))
         Du_FatalError("%s: expected 'symbol' argument, got '%s'",
-                      where, ob->ob_type->dt_name);
+                      where, Du_TYPE(ob)->dt_name);
 }

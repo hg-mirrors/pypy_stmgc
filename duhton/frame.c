@@ -226,10 +226,9 @@ void DuFrame_Ensure(char *where, DuObject *ob)
                       where, ob->ob_type->dt_name);
 }
 
-DuTypeObject DuFrame_Type = {
-    DuOBJECT_HEAD_INIT(&DuType_Type),
+DuType DuFrame_Type = {
     "frame",
+    DUTYPE_FRAME,
     sizeof(DuFrameObject),
-    (destructor_fn)frame_free,
     (print_fn)frame_print,
 };

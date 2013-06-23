@@ -1,43 +1,17 @@
 #ifndef _DUHTON_H_
 #define _DUHTON_H_
 
-
+#include "../c4/stmgc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
 
 
-#define Du_AME     /* must always be on for now */
-
-#if defined(Du_DEBUG) || defined(Du_AME)
-#  define Du_TRACK_REFS
-#endif
-
-#ifdef Du_AME
-typedef long owner_version_t;
-#endif
-
-
-typedef struct _DuObject {
-    int ob_refcnt;
-    struct _DuTypeObject *ob_type;
-#ifdef Du_TRACK_REFS
-    struct _DuObject *ob_debug_prev, *ob_debug_next;
-#endif
-#ifdef Du_AME
-    owner_version_t ob_version;
-#endif
-} DuObject;
-
-#ifdef Du_TRACK_REFS
-#  define _DuObject_HEAD_EXTRA  NULL, NULL
-#else
-#  define _DuObject_HEAD_EXTRA  /* nothing */
-#endif
+typedef struct stm_object_s DuObject;
 
 #define DuOBJECT_HEAD   DuObject ob_base;
 
-#define DuOBJECT_HEAD_INIT(type)   { -1, type, _DuObject_HEAD_EXTRA }
+#define DuOBJECT_HEAD_INIT(type)   { type | PREBUILT_FLAGS, PREBUILT_REVISION }
 
 
 #ifdef __GNUC__
@@ -47,75 +21,59 @@ typedef struct _DuObject {
 #endif
 
 
-typedef void(*destructor_fn)(DuObject *);
 typedef void(*print_fn)(DuObject *);
 typedef DuObject *(*eval_fn)(DuObject *, DuObject *);
 typedef int(*len_fn)(DuObject *);
-typedef void(*ame_copy_fn)(DuObject *);
 
-typedef struct _DuTypeObject {
-    DuOBJECT_HEAD
+typedef struct {
     const char *dt_name;
+    int dt_typeindex;
     int dt_size;
-    destructor_fn dt_destructor;
     print_fn dt_print;
     eval_fn dt_eval;
     len_fn dt_is_true;
     len_fn dt_length;
-    ame_copy_fn dt_ame_copy;
-} DuTypeObject;
+} DuType;
 
-DuObject *DuObject_New(DuTypeObject *tp);
-void _Du_Dealloc(DuObject *ob);
+#define DUTYPE_INVALID       0
+#define DUTYPE_NONE          1
+#define DUTYPE_INT           2
+#define DUTYPE_SYMBOL        3
+#define DUTYPE_CONS          4
+#define DUTYPE_LIST          5
+#define DUTYPE_TUPLE         6
+#define DUTYPE_FRAME         7
+#define DUTYPE_CONTAINER     8
+#define _DUTYPE_TOTAL        9
+
+extern DuType DuNone_Type;
+extern DuType DuInt_Type;
+extern DuType DuSymbol_Type;
+extern DuType DuCons_Type;
+extern DuType DuList_Type;
+extern DuType DuTuple_Type;
+extern DuType DuFrame_Type;
+extern DuType DuContainer_Type;
+
+extern DuType *Du_Types[_DUTYPE_TOTAL];
+
+
+DuObject *DuObject_New(DuType *tp);
 int DuObject_IsTrue(DuObject *ob);
 int DuObject_Length(DuObject *ob);
-
-#ifdef Du_TRACK_REFS
-void _Du_NewReference(DuObject *ob);
-void _Du_ForgetReference(DuObject *ob);
-#else
-#define _Du_NewReference(ob)       /* nothing */
-#define _Du_ForgetReference(ob)    /* nothing */
-#endif
-void _Du_BecomeImmortal(DuObject *ob);
-
-
-#define Du_AME_GLOBAL(ob)                       \
-    (((DuObject*)(ob))->ob_refcnt < 0)
-
-#define Du_INCREF(ob)                           \
-    do {                                        \
-        if (!Du_AME_GLOBAL(ob))                 \
-            ++((DuObject*)(ob))->ob_refcnt;     \
-    } while (0)
-
-#define Du_DECREF(ob)                                   \
-    do {                                                \
-        if (((DuObject*)(ob))->ob_refcnt > 1)           \
-            --((DuObject*)(ob))->ob_refcnt;             \
-        else if (!Du_AME_GLOBAL(ob))                    \
-            _Du_Dealloc((DuObject*)(ob));               \
-    } while (0)
 
 
 extern DuObject _Du_NoneStruct;
 #define Du_None (&_Du_NoneStruct)
 
-extern DuTypeObject DuType_Type;
-extern DuTypeObject DuInt_Type;
-extern DuTypeObject DuList_Type;
-extern DuTypeObject DuContainer_Type;
-extern DuTypeObject DuCons_Type;
-extern DuTypeObject DuSymbol_Type;
-extern DuTypeObject DuFrame_Type;
-
-#define DuType_Check(ob)      (((DuObject*)(ob))->ob_type == &DuType_Type)
-#define DuInt_Check(ob)       (((DuObject*)(ob))->ob_type == &DuInt_Type)
-#define DuList_Check(ob)      (((DuObject*)(ob))->ob_type == &DuList_Type)
-#define DuContainer_Check(ob) (((DuObject*)(ob))->ob_type == &DuContainer_Type)
-#define DuCons_Check(ob)      (((DuObject*)(ob))->ob_type == &DuCons_Type)
-#define DuSymbol_Check(ob)    (((DuObject*)(ob))->ob_type == &DuSymbol_Type)
-#define DuFrame_Check(ob)     (((DuObject*)(ob))->ob_type == &DuFrame_Type)
+#define _DuObject_TypeNum(ob) stm_get_tid((DuObject*)(ob))
+#define Du_TYPE(ob)           (Du_Types[_DuObject_TypeNum(ob)])
+#define DuInt_Check(ob)       (_DuObject_TypeNum(ob) == DUTYPE_INT)
+#define DuSymbol_Check(ob)    (_DuObject_TypeNum(ob) == DUTYPE_SYMBOL)
+#define DuCons_Check(ob)      (_DuObject_TypeNum(ob) == DUTYPE_CONS)
+#define DuList_Check(ob)      (_DuObject_TypeNum(ob) == DUTYPE_LIST)
+#define DuFrame_Check(ob)     (_DuObject_TypeNum(ob) == DUTYPE_FRAME)
+#define DuContainer_Check(ob) (_DuObject_TypeNum(ob) == DUTYPE_CONTAINER)
 
 void DuType_Ensure(char *where, DuObject *ob);
 void DuInt_Ensure(char *where, DuObject *ob);
@@ -168,17 +126,28 @@ DuObject *_DuFrame_EvalCall(DuObject *frame, DuObject *symbol,
 
 void Du_Initialize(void);
 void Du_Finalize(void);
-void _Du_InitializeObjects(void);
-void _Du_FinalizeObjects(void);
-#ifdef Du_TRACK_REFS
-void _Du_MakeImmortal(void);
-#endif
 extern DuObject *Du_Globals;
 
 void Du_TransactionAdd(DuObject *code, DuObject *frame);
 void Du_TransactionRun(void);
 
 
-#include "stm/ame.h"
+#define _du_save1(p1)           (stm_push_root((DuObject *)(p1)))
+#define _du_save2(p1,p2)        (stm_push_root((DuObject *)(p1)),  \
+                                 stm_push_root((DuObject *)(p2)))
+#define _du_save3(p1,p2,p3)     (stm_push_root((DuObject *)(p1)),  \
+                                 stm_push_root((DuObject *)(p2)),  \
+                                 stm_push_root((DuObject *)(p3)))
+
+#define _du_restore1(p1)        (p1 = (typeof(p1))stm_pop_root())
+#define _du_restore2(p1,p2)     (p2 = (typeof(p2))stm_pop_root(),  \
+                                 p1 = (typeof(p1))stm_pop_root())
+#define _du_restore3(p1,p2,p3)  (p3 = (typeof(p3))stm_pop_root(),  \
+                                 p2 = (typeof(p2))stm_pop_root(),  \
+                                 p1 = (typeof(p1))stm_pop_root())
+
+#define _du_read1(p1)    (p1 = (typeof(p1))stm_read_barrier((DuObject *)(p1)))
+#define _du_write1(p1)   (p1 = (typeof(p1))stm_write_barrier((DuObject *)(p1)))
+
 
 #endif  /* _DUHTON_H_ */

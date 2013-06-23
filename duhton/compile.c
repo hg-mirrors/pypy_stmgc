@@ -11,9 +11,12 @@ DuObject *_Du_Parse(FILE *f, int level, int stop_after_newline)
 
     list = DuList_New();
     if (level == 0) {
+        _du_save1(list);
         DuObject *item = DuSymbol_FromString("progn");
+        _du_restore1(list);
+        _du_save1(list);
         DuList_Append(list, item);
-        Du_DECREF(item);
+        _du_restore1(list);
     }
     c = fgetc(f);
     while (1) {
@@ -25,7 +28,6 @@ DuObject *_Du_Parse(FILE *f, int level, int stop_after_newline)
             if (level > 0)
                 Du_FatalError("more '(' than ')'");
             if (stop_after_newline) {
-                Du_DECREF(list);
                 return NULL;
             }
             goto done;
@@ -76,21 +78,19 @@ DuObject *_Du_Parse(FILE *f, int level, int stop_after_newline)
                 break;
             }
         }
+        _du_save1(list);
         DuList_Append(list, item);
-        Du_DECREF(item);
+        _du_restore1(list);
     }
 
  done:
-    Du_INCREF(Du_None);
     cons = Du_None;
     for (i = DuList_Size(list) - 1; i >= 0; i--) {
         DuObject *item = DuList_GetItem(list, i);
-        DuObject *newcons = DuCons_New(item, cons);
-        Du_DECREF(cons);
-        Du_DECREF(item);
-        cons = newcons;
+        _du_save1(list);
+        cons = DuCons_New(item, cons);
+        _du_restore1(list);
     }
-    Du_DECREF(list);
     return cons;
 }
 

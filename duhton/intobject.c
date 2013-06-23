@@ -7,19 +7,20 @@ typedef struct {
 
 void int_print(DuIntObject *ob)
 {
+    _du_read1(ob);
     printf("%d", ob->ob_intval);
 }
 
 int int_is_true(DuIntObject *ob)
 {
+    _du_read1(ob);
     return ob->ob_intval;
 }
 
-DuTypeObject DuInt_Type = {
-    DuOBJECT_HEAD_INIT(&DuType_Type),
+DuType DuInt_Type = {
     "int",
+    DUTYPE_INT,
     sizeof(DuIntObject),
-    (destructor_fn)free,
     (print_fn)int_print,
     (eval_fn)NULL,
     (len_fn)int_is_true,
@@ -36,6 +37,7 @@ DuObject *DuInt_FromInt(int value)
 int DuInt_AsInt(DuObject *ob)
 {
     DuInt_Ensure("DuInt_AsInt", ob);
+    _du_read1(ob);
     return ((DuIntObject *)ob)->ob_intval;
 }
 
@@ -43,5 +45,5 @@ void DuInt_Ensure(char *where, DuObject *ob)
 {
     if (!DuInt_Check(ob))
         Du_FatalError("%s: expected 'int' argument, got '%s'",
-                      where, ob->ob_type->dt_name);
+                      where, Du_TYPE(ob)->dt_name);
 }
