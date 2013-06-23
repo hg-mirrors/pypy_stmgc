@@ -44,11 +44,10 @@ void DuContainer_SetRef(DuObject *ob, DuObject *x)
     Du_DECREF(prev);
 }
 
-DuTypeObject DuContainer_Type = {
-    DuOBJECT_HEAD_INIT(&DuType_Type),
+DuType DuContainer_Type = {
     "container",
+    DUTYPE_CONTAINER,
     sizeof(DuContainerObject),
-    (destructor_fn)container_free,
     (print_fn)container_print,
 };
 
