@@ -32,8 +32,6 @@ int main(int argc, char **argv)
         if (interactive) {
             Du_Print(res, 1);
         }
-        Du_DECREF(res);
-        Du_DECREF(code);
         Du_TransactionRun();
         if (!interactive)
             break;

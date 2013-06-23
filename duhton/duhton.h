@@ -93,7 +93,7 @@ DuObject *DuList_GetItem(DuObject *list, int index);
 void DuList_SetItem(DuObject *list, int index, DuObject *newobj);
 DuObject *DuList_Pop(DuObject *list, int index);
 
-DuObject *DuContainer_New(void);
+DuObject *DuContainer_New(DuObject *obj);
 DuObject *DuContainer_GetRef(DuObject *container);
 void DuContainer_SetRef(DuObject *container, DuObject *newobj);
 

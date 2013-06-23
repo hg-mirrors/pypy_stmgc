@@ -70,14 +70,12 @@ DuObject *DuCons_Cdr(DuObject *cons)
 DuObject *_DuCons_CAR(DuObject *cons)
 {
     assert(DuCons_Check(cons));
-    _du_read1(cons);
     return ((DuConsObject *)cons)->car;
 }
 
 DuObject *_DuCons_NEXT(DuObject *cons)
 {
     assert(DuCons_Check(cons));
-    _du_read1(cons);
     DuObject *result = ((DuConsObject *)cons)->cdr;
     if (result != Du_None && !DuCons_Check(cons))
         Du_FatalError("_DuCons_NEXT: not a well-formed cons list");
