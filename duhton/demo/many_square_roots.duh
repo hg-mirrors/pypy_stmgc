@@ -1,0 +1,17 @@
+
+
+(defun square-root (n)
+  (setq i 0)
+  (while (< (* i i) n)
+    (setq i (+ i 1)))
+  i)
+
+(defun show-square-root (n)
+  (setq s (square-root n))
+  (print (quote square-root-of) n (quote is) s))
+
+
+(setq n 0)
+(while (< n 200)
+  (transaction show-square-root (+ 1000000000 (* n 100000)))
+  (setq n (+ n 1)))

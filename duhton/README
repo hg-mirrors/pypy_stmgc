@@ -1,0 +1,18 @@
+======
+Duhton
+======
+
+A minimalistic Python-like variant.  Written in the same style as
+CPython's C code (with "Du_" instead of "Py_" as a prefix to all names).
+
+Pronounciation: "duh"-ton.
+
+To compile, use "make".  Only tested with gcc on Linux, though it should
+work on other platforms too --- but so far, it requires the gcc-only
+extension "__thread".
+
+To run the tests, you need "py.test": http://pytest.org/
+
+There are demos: try "time duhton demo/many_square_roots.duh".
+
+For more general information see the PAPERS file.

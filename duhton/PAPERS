@@ -1,0 +1,26 @@
+Papers
+======
+
+This is a list of papers I found that describe the general idea.
+
+* "Automatic Mutual Exclusion": the introduction paper at HotOS (may
+  2007) is interesting; the rest is far too much formalism with little
+  interest from my point of view.
+  http://research.microsoft.com/en-us/projects/ame/default.aspx
+
+* "Transactions Everywhere", 2002-2003: an early reference.
+
+* To read about the current status of STM research, which influences
+  the Hardware Transactional Memory on 2013 CPUs: "NOrec: Streamlining
+  STM by Abolishing Ownership Records".
+
+* "Grace": a system using Linux's paging (virtual memory) to emulate
+  an efficient STM.  Interesting idea but with probably a granularity
+  that is completely wrong for us --- one page, i.e. 4KB.  Two versions
+  of the same paper: http://plasma.cs.umass.edu/emery/grace  or
+  http://www.cs.umass.edu/~tingy/publications/grace.ps .
+
+* "OCM": http://ocm.dreamhosters.com/ .  A similar goal to the one here,
+  but modelling cooperative multithreading with an explicit "yield".
+  Also, presents two versions of Lua with different implementations
+  exposing the "yield" primitive.
