@@ -203,6 +203,11 @@ void stm_begin_inevitable_transaction(void)
         BeginInevitableTransaction();
 }
 
+void stm_become_inevitable(const char *reason)
+{
+    BecomeInevitable(reason);
+}
+
 int stm_in_transaction(void)
 {
     struct tx_descriptor *d = thread_descriptor;

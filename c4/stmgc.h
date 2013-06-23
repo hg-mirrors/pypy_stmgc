@@ -56,10 +56,12 @@ gcptr stm_write_barrier(gcptr);
    this call. */
 void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int));
 
-/* finish the current transaction, start a new one.  Must save roots
-   around calls to these two functions. */
+/* finish the current transaction, start a new one, or turn the current
+   transaction inevitable.  Must save roots around calls to these three
+   functions. */
 void stm_commit_transaction(void);
 void stm_begin_inevitable_transaction(void);
+void stm_become_inevitable(const char *reason);
 
 /* debugging: check if we're currently running a transaction or not. */
 int stm_in_transaction(void);

@@ -5,16 +5,6 @@ typedef struct {
     DuObject *ob_reference;
 } DuContainerObject;
 
-void container_free(DuContainerObject *ob)
-{
-    DuObject *x = ob->ob_reference;
-#ifdef Du_DEBUG
-    ob->ob_reference = (DuObject *)0xDD;
-#endif
-    free(ob);
-    Du_DECREF(x);
-}
-
 void container_print(DuContainerObject *ob)
 {
     printf("<container ");
@@ -24,24 +14,18 @@ void container_print(DuContainerObject *ob)
 
 DuObject *DuContainer_GetRef(DuObject *ob)
 {
-    DuObject *result;
     DuContainer_Ensure("DuContainer_GetRef", ob);
 
-    Du_AME_READ(ob, (result = ((DuContainerObject *)ob)->ob_reference));
-
-    Du_INCREF(result);
-    return result;
+    _du_read1(ob);
+    return ((DuContainerObject *)ob)->ob_reference;
 }
 
 void DuContainer_SetRef(DuObject *ob, DuObject *x)
 {
     DuContainer_Ensure("DuContainer_SetRef", ob);
 
-    Du_AME_WRITE(ob);
-    DuObject *prev = ((DuContainerObject *)ob)->ob_reference;
-    Du_INCREF(x);
+    _du_write1(ob);
     ((DuContainerObject *)ob)->ob_reference = x;
-    Du_DECREF(prev);
 }
 
 DuType DuContainer_Type = {
@@ -51,12 +35,14 @@ DuType DuContainer_Type = {
     (print_fn)container_print,
 };
 
-DuObject *DuContainer_New()
+DuObject *DuContainer_New(DuObject *x)
 {
+    _du_save1(x);
     DuContainerObject *ob =                                     \
         (DuContainerObject *)DuObject_New(&DuContainer_Type);
-    Du_INCREF(Du_None);
-    ob->ob_reference = Du_None;
+    _du_restore1(x);
+
+    ob->ob_reference = x;
     return (DuObject *)ob;
 }
 
@@ -64,5 +50,5 @@ void DuContainer_Ensure(char *where, DuObject *ob)
 {
     if (!DuContainer_Check(ob))
         Du_FatalError("%s: expected 'container' argument, got '%s'",
-                      where, ob->ob_type->dt_name);
+                      where, Du_TYPE(ob)->dt_name);
 }
