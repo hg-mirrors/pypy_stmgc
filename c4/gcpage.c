@@ -350,8 +350,26 @@ static void mark_all_stack_roots(void)
 static void cleanup_for_thread(struct tx_descriptor *d)
 {
     long i;
-    gcptr *items = d->list_of_read_objects.items;
+    gcptr *items;
 
+    /* It can occur that 'private_from_protected' contains an object that
+     * has not been visited at all (maybe only in inevitable
+     * transactions). 
+     */
+    items = d->private_from_protected.items;
+    for (i = d->private_from_protected.size - 1; i >= 0; i--) {
+        gcptr obj = items[i];
+        assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+
+        if (!(obj->h_tid & GCFLAG_VISITED)) {
+            /* forget 'obj' */
+            items[i] = items[--d->private_from_protected.size];
+        }
+    }
+
+    /* If we're aborting this transaction anyway, we don't need to do
+     * more here.
+     */
     if (d->active < 0)
         return;       /* already "aborted" during forced minor collection */
 
@@ -360,6 +378,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         gcptrlist_clear(&d->list_of_read_objects);
     }
 
+    items = d->list_of_read_objects.items;
     for (i = d->list_of_read_objects.size - 1; i >= 0; --i) {
         gcptr obj = items[i];
         assert(!(obj->h_tid & GCFLAG_STUB));
@@ -424,21 +443,6 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         fprintf(stderr, "\tpublic_to_private: %p\n", item->addr);
 
     } G2L_LOOP_END;
-
-    /* It can occur that 'private_from_protected' contains an object that
-     * has not been visited at all (maybe only in inevitable
-     * transactions). 
-     */
-    items = d->private_from_protected.items;
-    for (i = d->private_from_protected.size - 1; i >= 0; i--) {
-        gcptr obj = items[i];
-        assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
-
-        if (!(obj->h_tid & GCFLAG_VISITED)) {
-            /* forget 'obj' */
-            items[i] = items[--d->private_from_protected.size];
-        }
-    }
 }
 
 static void clean_up_lists_of_read_objects_and_fix_outdated_flags(void)
