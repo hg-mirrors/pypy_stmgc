@@ -138,7 +138,7 @@ revision_t stm_hash(gcptr p)
             return orig->h_original;
         }
     }
-    return stm_id(p);
+    return mangle_hash(stm_id(p));
 }
 
 
@@ -152,12 +152,12 @@ revision_t stm_id(gcptr p)
             /* h_original may contain a specific hash value,
                but in case of the prebuilt original version, 
                its memory location is the id */
-            return mangle_hash((revision_t)p);
+            return (revision_t)p;
         }
 
         dprintf(("stm_id(%p) has orig fst: %p\n", 
                  p, (gcptr)p->h_original));
-        return mangle_hash(p->h_original);
+        return p->h_original;
     } 
     else if (!(p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
                && (p->h_tid & GCFLAG_OLD)) {
@@ -171,7 +171,7 @@ revision_t stm_id(gcptr p)
            before h_original has been set.
         */
         dprintf(("stm_id(%p) is old, orig=0 fst: %p\n", p, p));
-        return mangle_hash((revision_t)p);
+        return (revision_t)p;
     }
     
 
@@ -218,11 +218,14 @@ revision_t stm_id(gcptr p)
     }
     
     spinlock_release(d->public_descriptor->collection_lock);
-    return mangle_hash(result);
+    return result;
 }
 
 revision_t stm_pointer_equal(gcptr p1, gcptr p2)
 {
+    /* fast path for two equal pointers */
+    if (p1 == p2)
+        return 1;
     /* types must be the same */
     if ((p1->h_tid & STM_USER_TID_MASK) != (p2->h_tid & STM_USER_TID_MASK))
         return 0;
