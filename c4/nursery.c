@@ -207,6 +207,8 @@ revision_t stm_id(gcptr p)
                      p, (gcptr)p->h_original));
         }
         else {
+            /* XXX use stmgcpage_malloc() directly, we don't need to copy
+             * the contents yet */
             gcptr O = stmgc_duplicate_old(p);
             p->h_original = (revision_t)O;
             p->h_tid |= GCFLAG_HAS_ID;
