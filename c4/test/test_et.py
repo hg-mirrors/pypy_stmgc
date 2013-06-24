@@ -216,12 +216,10 @@ def test_id_young_to_old():
 def test_id_private_from_protected():
     # read and write from protected
     p = oalloc(HDR)
-    pid = lib.stm_id(p)
     porig = follow_original(p)
     # impl detail {
     # old objects have id==itself, if not set differently
     assert porig == ffi.NULL
-    assert ffi.cast("gcptr", pid) == p
     # }
 
     p1 = oalloc(HDR)
@@ -237,7 +235,6 @@ def test_id_private_from_protected():
     assert p2id == lib.stm_id(p2w)
     # impl detail {
     assert p2w.h_original == 0
-    assert follow_revision(p2w).h_original == lib.stm_id(p2w)
     # }
     
 
