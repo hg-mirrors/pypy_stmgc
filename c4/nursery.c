@@ -88,11 +88,43 @@ gcptr stmgc_duplicate_old(gcptr P)
 }
 
 /************************************************************/
-
+/* Each object has a h_original pointer to an old copy of 
+   the same object (e.g. an old revision), the "original". 
+   The memory location of this old object is used as the ID 
+   for this object. If h_original is NULL *and* it is an
+   old object copy, it itself is the original. This invariant
+   must be upheld by all code dealing with h_original.
+   The original copy must never be moved again. Also, it may
+   be just a stub-object.
+   
+   If we want the ID of an object which is still young,
+   we must preallocate an old shadow-original that is used
+   as the target of the young object in a minor collection.
+   In this case, we set the HAS_ID flag on the young obj
+   to notify minor_collect.
+   This flag can be lost if the young obj is stolen. Then
+   the stealing thread uses the shadow-original itself and
+   minor_collect must not overwrite it again.
+   Also, if there is already a backup-copy around, we use
+   this instead of allocating another old object to use as 
+   the shadow-original.
+ */
 
 revision_t stm_hash(gcptr p)
 {
     return stm_id(p);
+}
+
+
+static revision_t mangle_hash(revision_t n)
+{
+    /* To hash pointers in dictionaries.  Assumes that i shows some
+       alignment (to 4, 8, maybe 16 bytes), so we use the following
+       formula to avoid the trailing bits being always 0.
+       This formula is reversible: two different values of 'i' will
+       always give two different results.
+    */
+    return n ^ (n >> 4);
 }
 
 revision_t stm_id(gcptr p)
@@ -104,15 +136,23 @@ revision_t stm_id(gcptr p)
     if (p->h_original) { /* fast path */
         fprintf(stderr, "stm_id(%p) has orig fst: %p\n", 
                 p, (gcptr)p->h_original);
-        return p->h_original;
+        return mangle_hash(p->h_original);
     } 
     else if (!(p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
                && (p->h_tid & GCFLAG_OLD)) {
         /* we can be sure that p->h_original doesn't
-           get set during the if and the else-if */
+           get set during the if and the else-if 
+           
+           XXX: check for priv_from_protected may not be 
+           necessary. only if this func may be called on 
+           another thread's young objects that are made 
+           old at the same time, and we see the OLD flag 
+           before h_original has been set.
+        */
         fprintf(stderr, "stm_id(%p) is old, orig=0 fst: %p\n", p, p);
-        return (revision_t)p;
+        return mangle_hash((revision_t)p);
     }
+
     
     spinlock_acquire(d->public_descriptor->collection_lock, 'I');
     /* old objects must have an h_original xOR be
@@ -137,7 +177,6 @@ revision_t stm_id(gcptr p)
         if (p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
             gcptr B = (gcptr)p->h_revision;
             /* don't set, otherwise nursery will copy over backup */
-            //p->h_tid |= GCFLAG_HAS_ID; // see AbortPrivateFromProtected
             p->h_original = (revision_t)B;
             // B->h_tid |= GCFLAG_PUBLIC; done by CommitPrivateFromProtected
             
@@ -157,7 +196,7 @@ revision_t stm_id(gcptr p)
     }
     
     spinlock_release(d->public_descriptor->collection_lock);
-    return result;
+    return mangle_hash(result);
 }
 
 revision_t stm_pointer_equal(gcptr p1, gcptr p2)

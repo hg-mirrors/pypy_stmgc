@@ -93,7 +93,6 @@ void stm_steal_stub(gcptr P)
             assert(!(L->h_tid & GCFLAG_HAS_ID));
             /* original must be L */
             B->h_original = (revision_t)L;
-            assert(0);
         }
         else {
             /* we can make the backup the "original"
