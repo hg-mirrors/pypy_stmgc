@@ -13,7 +13,8 @@ extern revision_t get_private_rev_num(void);
 
 
 #define NUMTHREADS 4
-#define STEPS 1000000
+#define STEPS_PER_THREAD 5000
+#define THREAD_STARTS 100 // how many restarts of threads
 #define NUMROOTS 10 // per thread
 #define PREBUILT 3 // per thread
 #define MAXROOTS 1000
@@ -234,7 +235,7 @@ void setup_thread()
 {
     int i;
     td.thread_seed = default_seed;
-    td.steps_left = STEPS;
+    td.steps_left = STEPS_PER_THREAD;
     td.interruptible = 0;
     
     td.num_roots = PREBUILT + NUMROOTS;
@@ -250,8 +251,6 @@ void setup_thread()
 
 gcptr do_step(gcptr p)
 {
-    fprintf(stdout, "#");
-    
     nodeptr w_r, w_sr;
     gcptr _r, _sr;
     int num, k;
@@ -394,6 +393,10 @@ int run_me()
     gcptr p = NULL;
     while (td.steps_left) {
         td.steps_left--;
+
+        if (td.steps_left % 8 == 0)
+            fprintf(stdout, "#");
+
         p = do_step(p);
 
         if (p == (gcptr)-1)
@@ -453,13 +456,20 @@ int main(void)
     status = sem_init(&done, 0, 0);
     assert(status == 0);
     
-    for (i = 0; i < NUMTHREADS; i++)
+    int thread_starts = NUMTHREADS * THREAD_STARTS;
+    for (i = 0; i < NUMTHREADS; i++) {
         newthread(demo, NULL);
+        thread_starts--;
+    }
     
-    for (i=0; i < NUMTHREADS; i++) {
+    for (i=0; i < NUMTHREADS * THREAD_STARTS; i++) {
         status = sem_wait(&done);
         assert(status == 0);
         printf("thread finished\n");
+        if (thread_starts) {
+            thread_starts--;
+            newthread(demo, NULL);
+        }
     }
     
     return 0;
