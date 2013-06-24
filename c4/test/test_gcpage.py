@@ -383,3 +383,33 @@ def test_private_from_protected_trace_backup():
     p1 = lib.stm_pop_root()
     check_not_free(p1)
     check_not_free(lib.getptr(p1, 0))
+
+def test_prebuilt_modified_during_transaction():
+    p1 = palloc(HDR)
+    p2 = nalloc_refs(1)
+    lib.setptr(p2, 0, p1)
+    lib.stm_push_root(p2)
+    major_collect()
+    major_collect()
+    p1b = lib.stm_write_barrier(p1)
+    assert p1b != p1
+    major_collect()
+    lib.stm_pop_root()
+    p1b = lib.stm_read_barrier(p1)
+    check_not_free(p1b)
+
+def test_prebuilt_modified_later():
+    p1 = palloc(HDR)
+    p2 = nalloc_refs(1)
+    lib.setptr(p2, 0, p1)
+    lib.stm_push_root(p2)
+    major_collect()
+    major_collect()
+    p1b = lib.stm_write_barrier(p1)
+    assert p1b != p1
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    major_collect()
+    lib.stm_pop_root()
+    p1b = lib.stm_read_barrier(p1)
+    check_not_free(p1b)
