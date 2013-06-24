@@ -29,6 +29,7 @@ struct node {
     struct stm_object_s hdr;
     long value;
     revision_t id;
+    revision_t hash;
     struct node *next;
 };
 typedef struct node * nodeptr;
@@ -84,7 +85,14 @@ gcptr allocate_pseudoprebuilt(size_t size, int tid)
     gcptr x = calloc(1, size);
     x->h_tid = PREBUILT_FLAGS | tid;
     x->h_revision = PREBUILT_REVISION;
-    x->h_original = 0;
+    return x;
+}
+
+gcptr allocate_pseudoprebuilt_with_hash(size_t size, int tid,
+                                        revision_t hash)
+{
+    gcptr x = allocate_pseudoprebuilt(size, tid);
+    x->h_original = hash;
     return x;
 }
 
@@ -240,8 +248,17 @@ void setup_thread()
     
     td.num_roots = PREBUILT + NUMROOTS;
     for (i = 0; i < PREBUILT; i++) {
-        td.roots[i] = allocate_pseudoprebuilt(sizeof(struct node), 
-                                              GCTID_STRUCT_NODE);
+        if (i % 3 == 0) {
+            td.roots[i] = allocate_pseudoprebuilt_with_hash(
+                                          sizeof(struct node), 
+                                          GCTID_STRUCT_NODE,
+                                          i);
+            ((nodeptr)td.roots[i])->hash = i;
+        }
+        else {
+            td.roots[i] = allocate_pseudoprebuilt(sizeof(struct node), 
+                                                  GCTID_STRUCT_NODE);
+        }
     }
     for (i = PREBUILT; i < PREBUILT + NUMROOTS; i++) {
         td.roots[i] = (gcptr)allocate_node();
@@ -251,17 +268,19 @@ void setup_thread()
 
 gcptr do_step(gcptr p)
 {
-    nodeptr w_r, w_sr;
-    gcptr _r, _sr;
+    nodeptr w_r, w_sr, w_t;
+    gcptr _r, _sr, _t;
     int num, k;
 
+    _t = NULL;
     num = get_rand(td.num_roots);
     _r = td.roots[num];
-
+    
     num = get_rand(SHARED_ROOTS);
     _sr = shared_roots[num];
 
-    k = get_rand(17);
+    k = get_rand(19);
+    check(p);
 
     switch (k) {
     case 0: // remove a root
@@ -323,28 +342,42 @@ gcptr do_step(gcptr p)
         pop_roots();
         p = NULL;
         break;
-    case 15: /* test stm_id on non-shared roots */
-        w_r = (nodeptr)read_barrier(_r);
-        if (w_r->id) {
-            assert(w_r->id == stm_id((gcptr)w_r));
-            assert(w_r->id == stm_id((gcptr)_r));
+    case 15: /* test stm_id on (non-)shared roots */
+        _t = _r;
+    case 16:
+        if (!_t)
+            _t = _sr;
+        w_t = (nodeptr)read_barrier(_t);
+        if (w_t->id) {
+            assert(w_t->id == stm_id((gcptr)w_t));
+            assert(w_t->id == stm_id((gcptr)_t));
         } 
         else {
-            w_r = (nodeptr)write_barrier(_r);
-            w_r->id = stm_id((gcptr)w_r);
-            assert(w_r->id == stm_id((gcptr)_r));
+            w_t = (nodeptr)write_barrier(_t);
+            w_t->id = stm_id((gcptr)w_t);
+            assert(w_t->id == stm_id((gcptr)_t));
         }
-    case 16: /* test stm_id on shared roots */
-        w_sr = (nodeptr)read_barrier(_sr);
-        if (w_sr->id) {
-            assert(w_sr->id == stm_id((gcptr)w_sr));
-            assert(w_sr->id == stm_id((gcptr)_sr));
-        } 
+        break;
+    case 17: /* test stm_hash on (non-)shared roots */
+        _t = _r;
+    case 18:
+        if (!_t)
+            _t = _sr;
+        w_t = (nodeptr)read_barrier(_t);
+        if (w_t->hash) {
+            assert(w_t->hash == stm_hash((gcptr)w_t));
+            assert(w_t->hash == stm_hash((gcptr)_t));
+        }
         else {
-            w_sr = (nodeptr)write_barrier(_sr);
-            w_sr->id = stm_id((gcptr)w_sr);
-            assert(w_sr->id == stm_id((gcptr)_sr));
+            w_t = (nodeptr)write_barrier(_t);
+            w_t->hash = stm_hash((gcptr)w_t);
+            assert(w_t->hash == stm_hash((gcptr)_t));
         }
+        if (w_t->hash < PREBUILT || w_t->hash < SHARED_ROOTS) {
+            // should be with predefined hash
+            assert (stm_id((gcptr)w_t) != stm_hash((gcptr)w_t));
+        }
+        break;
     }
     return p;
 }
@@ -449,8 +482,17 @@ int main(void)
     default_seed = time(NULL) / 3600 / 24;
     
     for (i = 0; i < SHARED_ROOTS; i++) {
-        shared_roots[i] = allocate_pseudoprebuilt(sizeof(struct node), 
-                                                  GCTID_STRUCT_NODE);
+        if (i % 3 == 0) {
+            shared_roots[i] = allocate_pseudoprebuilt_with_hash(
+                                          sizeof(struct node), 
+                                          GCTID_STRUCT_NODE,
+                                          i);
+            ((nodeptr)shared_roots[i])->hash = i;
+        }
+        else {
+            shared_roots[i] = allocate_pseudoprebuilt(sizeof(struct node), 
+                                                      GCTID_STRUCT_NODE);
+        }
     }    
     
     status = sem_init(&done, 0, 0);
