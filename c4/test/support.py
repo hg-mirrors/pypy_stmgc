@@ -91,6 +91,7 @@ ffi.cdef('''
     void rawsetlong(gcptr, long, long);
 
     gcptr pseudoprebuilt(size_t size, int tid);
+    gcptr pseudoprebuilt_with_hash(size_t size, int tid, revision_t hash);
     revision_t get_private_rev_num(void);
     revision_t get_start_time(void);
     void *my_stub_thread(void);
@@ -214,6 +215,13 @@ lib = ffi.verify(r'''
         gcptr x = calloc(1, size);
         x->h_tid = PREBUILT_FLAGS | tid;
         x->h_revision = PREBUILT_REVISION;
+        return x;
+    }
+
+    gcptr pseudoprebuilt_with_hash(size_t size, int tid, revision_t hash)
+    {
+        gcptr x = pseudoprebuilt(size, tid);
+        x->h_original = hash;
         return x;
     }
 
@@ -473,15 +481,22 @@ def nalloc_refs(nrefs):
         assert rawgetptr(p, i) == ffi.NULL   # must already be zero-filled
     return p
 
-def palloc(size):
+def palloc(size, prehash=None):
     "Get a ``prebuilt'' object."
-    p = lib.pseudoprebuilt(size, 42 + size)
+    if prehash is None:
+        p = lib.pseudoprebuilt(size, 42 + size)
+    else:
+        p = lib.pseudoprebuilt_with_hash(size, 42 + size, prehash)
     assert p.h_revision == 1
     return p
 
-def palloc_refs(nrefs):
+def palloc_refs(nrefs, prehash=None):
     "Get a ``prebuilt'' object with nrefs pointers."
-    p = lib.pseudoprebuilt(HDR + WORD * nrefs, 421 + nrefs)
+    if prehash is None:
+        p = lib.pseudoprebuilt(HDR + WORD * nrefs, 421 + nrefs)
+    else:
+        p = lib.pseudoprebuilt_with_hash(HDR + WORD * nrefs,
+                                         421 + nrefs, prehash)
     return p
 
 gettid = lib.gettid

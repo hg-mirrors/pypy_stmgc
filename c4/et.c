@@ -489,9 +489,13 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
   /* note that stmgc_duplicate() usually returns a young object, but may
      return an old one if the nursery is full at this moment. */
   gcptr L = stmgc_duplicate(R);
-  if (!(L->h_original)) {
-    /* if we don't have an original object yet,
-     it must be the old public R */
+  if (!(L->h_original) || L->h_tid & GCFLAG_PREBUILT_ORIGINAL) {
+    /* if we don't have an original object yet, it must be the 
+       old public R 
+       Also, prebuilt objects may have a predefined hash stored
+       in the h_original. -> point to the original copy on copies
+       of the prebuilt.
+    */
     assert(R->h_tid & GCFLAG_OLD); // if not, force stm_id??
     L->h_original = (revision_t)R;
   }

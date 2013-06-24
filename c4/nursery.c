@@ -110,12 +110,6 @@ gcptr stmgc_duplicate_old(gcptr P)
    the shadow-original.
  */
 
-revision_t stm_hash(gcptr p)
-{
-    return stm_id(p);
-}
-
-
 static revision_t mangle_hash(revision_t n)
 {
     /* To hash pointers in dictionaries.  Assumes that i shows some
@@ -127,13 +121,40 @@ static revision_t mangle_hash(revision_t n)
     return n ^ (n >> 4);
 }
 
+
+revision_t stm_hash(gcptr p)
+{
+    /* Prebuilt objects may have a specific hash stored in an extra 
+       field. For now, we will simply always follow h_original and
+       see, if it is a prebuilt object (XXX: maybe propagate a flag
+       to all copies of a prebuilt to avoid this cache miss).
+     */
+    if (p->h_original) {
+        if (p->h_tid & GCFLAG_PREBUILT_ORIGINAL) {
+            return p->h_original;
+        }
+        gcptr orig = (gcptr)p->h_original;
+        if ((orig->h_tid & GCFLAG_PREBUILT_ORIGINAL) && orig->h_original) {
+            return orig->h_original;
+        }
+    }
+    return stm_id(p);
+}
+
+
 revision_t stm_id(gcptr p)
 {
     struct tx_descriptor *d = thread_descriptor;
     revision_t result;
 
-    
     if (p->h_original) { /* fast path */
+        if (p->h_tid & GCFLAG_PREBUILT_ORIGINAL) {
+            /* h_original may contain a specific hash value,
+               but in case of the prebuilt original version, 
+               its memory location is the id */
+            return mangle_hash((revision_t)p);
+        }
+
         fprintf(stderr, "stm_id(%p) has orig fst: %p\n", 
                 p, (gcptr)p->h_original);
         return mangle_hash(p->h_original);
@@ -152,6 +173,7 @@ revision_t stm_id(gcptr p)
         fprintf(stderr, "stm_id(%p) is old, orig=0 fst: %p\n", p, p);
         return mangle_hash((revision_t)p);
     }
+    
 
     
     spinlock_acquire(d->public_descriptor->collection_lock, 'I');
