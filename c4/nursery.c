@@ -18,8 +18,8 @@ void stmgc_init_nursery(void)
     d->nursery_end = d->nursery_base + GC_NURSERY;
     d->nursery_current = d->nursery_base;
 
-    fprintf(stderr, "minor: nursery is at [%p to %p]\n", d->nursery_base,
-            d->nursery_end);
+    dprintf(("minor: nursery is at [%p to %p]\n", d->nursery_base,
+             d->nursery_end));
 }
 
 void stmgc_done_nursery(void)
@@ -155,8 +155,8 @@ revision_t stm_id(gcptr p)
             return mangle_hash((revision_t)p);
         }
 
-        fprintf(stderr, "stm_id(%p) has orig fst: %p\n", 
-                p, (gcptr)p->h_original);
+        dprintf(("stm_id(%p) has orig fst: %p\n", 
+                 p, (gcptr)p->h_original));
         return mangle_hash(p->h_original);
     } 
     else if (!(p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
@@ -170,7 +170,7 @@ revision_t stm_id(gcptr p)
            old at the same time, and we see the OLD flag 
            before h_original has been set.
         */
-        fprintf(stderr, "stm_id(%p) is old, orig=0 fst: %p\n", p, p);
+        dprintf(("stm_id(%p) is old, orig=0 fst: %p\n", p, p));
         return mangle_hash((revision_t)p);
     }
     
@@ -185,13 +185,13 @@ revision_t stm_id(gcptr p)
     */
     if (p->h_original) { /* maybe now? */
         result = p->h_original;
-        fprintf(stderr, "stm_id(%p) has orig: %p\n", 
-                p, (gcptr)p->h_original);
+        dprintf(("stm_id(%p) has orig: %p\n", 
+                 p, (gcptr)p->h_original));
     }
     else if (p->h_tid & GCFLAG_OLD) {
         /* it must be this exact object */
         result = (revision_t)p;
-        fprintf(stderr, "stm_id(%p) is old, orig=0: %p\n", p, p);
+        dprintf(("stm_id(%p) is old, orig=0: %p\n", p, p));
     }
     else {
         /* must create shadow original object or use
@@ -203,8 +203,8 @@ revision_t stm_id(gcptr p)
             // B->h_tid |= GCFLAG_PUBLIC; done by CommitPrivateFromProtected
             
             result = (revision_t)B;
-            fprintf(stderr, "stm_id(%p) young, pfp, use backup %p\n", 
-                    p, (gcptr)p->h_original);
+            dprintf(("stm_id(%p) young, pfp, use backup %p\n", 
+                     p, (gcptr)p->h_original));
         }
         else {
             gcptr O = stmgc_duplicate_old(p);
@@ -213,7 +213,7 @@ revision_t stm_id(gcptr p)
             O->h_tid |= GCFLAG_PUBLIC;
             
             result = (revision_t)O;
-            fprintf(stderr, "stm_id(%p) young, make shadow %p\n", p, O); 
+            dprintf(("stm_id(%p) young, make shadow %p\n", p, O));
         }
     }
     
@@ -242,7 +242,7 @@ static inline gcptr create_old_object_copy(gcptr obj)
 
     gcptr fresh_old_copy = stmgc_duplicate_old(obj);
 
-    fprintf(stderr, "minor: %p is copied to %p\n", obj, fresh_old_copy);
+    dprintf(("minor: %p is copied to %p\n", obj, fresh_old_copy));
     return fresh_old_copy;
 }
 
@@ -255,7 +255,7 @@ inline void copy_to_old_id_copy(gcptr obj, gcptr id)
     memcpy(id, obj, size);
     id->h_tid &= ~GCFLAG_HAS_ID;
     id->h_tid |= GCFLAG_OLD;
-    fprintf(stderr, "copy_to_old_id_copy(%p -> %p)\n", obj, id);
+    dprintf(("copy_to_old_id_copy(%p -> %p)\n", obj, id));
 }
 
 static void visit_if_young(gcptr *root)
@@ -340,7 +340,7 @@ static void trace_stub(struct tx_descriptor *d, gcptr S)
            in the past, but someone made even more changes.
            Nothing to do now.
         */
-        fprintf(stderr, "trace_stub: %p not a stub, ignored\n", S);
+        dprintf(("trace_stub: %p not a stub, ignored\n", S));
         return;
     }
 
@@ -349,7 +349,7 @@ static void trace_stub(struct tx_descriptor *d, gcptr S)
         /* Bah, it's indeed a stub but for another thread.  Nothing
            to do now.
         */
-        fprintf(stderr, "trace_stub: %p stub wrong thread, ignored\n", S);
+        dprintf(("trace_stub: %p stub wrong thread, ignored\n", S));
         return;
     }
 
@@ -357,7 +357,7 @@ static void trace_stub(struct tx_descriptor *d, gcptr S)
        feet because we hold our own collection_lock.
     */
     gcptr L = (gcptr)(w - 2);
-    fprintf(stderr, "trace_stub: %p stub -> %p\n", S, L);
+    dprintf(("trace_stub: %p stub -> %p\n", S, L));
     visit_if_young(&L);
     assert(S->h_tid & GCFLAG_STUB);
     S->h_revision = ((revision_t)L) | 2;
@@ -404,14 +404,14 @@ static void mark_public_to_young(struct tx_descriptor *d)
                We are in a case where we know the transaction will not
                be able to commit successfully.
             */
-            fprintf(stderr, "public_to_young: %p was modified! abort!\n", P);
+            dprintf(("public_to_young: %p was modified! abort!\n", P));
             item->val = NULL;
             AbortTransactionAfterCollect(d, ABRT_COLLECT_MINOR);
             continue;
         }
 
-        fprintf(stderr, "public_to_young: %p -> %p in public_to_private\n",
-                item->addr, item->val);
+        dprintf(("public_to_young: %p -> %p in public_to_private\n",
+                 item->addr, item->val));
         assert(_stm_is_private(item->val));
         visit_if_young(&item->val);
         continue;
@@ -422,11 +422,11 @@ static void mark_public_to_young(struct tx_descriptor *d)
                It must come from an older transaction that aborted.
                Nothing to do now.
             */
-            fprintf(stderr, "public_to_young: %p ignored\n", P);
+            dprintf(("public_to_young: %p ignored\n", P));
             continue;
         }
 
-        fprintf(stderr, "public_to_young: %p -> ", P);
+        dprintf(("public_to_young: %p -> ", P));
         trace_stub(d, (gcptr)v);
     }
 
@@ -495,8 +495,8 @@ static void teardown_minor_collect(struct tx_descriptor *d)
 
 static void minor_collect(struct tx_descriptor *d)
 {
-    fprintf(stderr, "minor collection [%p to %p]\n",
-            d->nursery_base, d->nursery_end);
+    dprintf(("minor collection [%p to %p]\n",
+             d->nursery_base, d->nursery_end));
 
     /* acquire the "collection lock" first */
     setup_minor_collect(d);
@@ -527,8 +527,8 @@ static void minor_collect(struct tx_descriptor *d)
     d->nursery_base = stm_malloc(GC_NURSERY);
     memset(d->nursery_base, 0, GC_NURSERY);
     d->nursery_end = d->nursery_base + GC_NURSERY;
-    fprintf(stderr, "minor: nursery moved to [%p to %p]\n", d->nursery_base,
-            d->nursery_end);
+    dprintf(("minor: nursery moved to [%p to %p]\n", d->nursery_base,
+             d->nursery_end));
 #else
     memset(d->nursery_base, 0, GC_NURSERY);
 #endif

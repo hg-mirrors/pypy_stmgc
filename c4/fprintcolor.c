@@ -1,10 +1,31 @@
 #include "stmimpl.h"
 
+
+void stm_fatalerror(const char *format, ...)
+{
+    va_list ap;
+
+#ifdef _GC_DEBUG
+    dprintf(("STM Subsystem: Fatal Error\n"));
+#else
+    fprintf(stderr, "STM Subsystem: Fatal Error\n");
+#endif
+
+    va_start(ap, format);
+    vfprintf(stderr, format, ap);
+    va_end(ap);
+
+    abort();
+}
+
+
+#ifdef _GC_DEBUG
+
 static __thread revision_t tcolor = 0;
 static revision_t tnextid = 0;
 
 
-int threadcolor_fprintf(FILE *stream, const char *format, ...)
+int threadcolor_printf(const char *format, ...)
 {
     char buffer[2048];
     va_list ap;
@@ -26,7 +47,9 @@ int threadcolor_fprintf(FILE *stream, const char *format, ...)
     va_end(ap);
 
     strcpy(buffer + size + result, "\033[0m");
-    fputs(buffer, stream);
+    fputs(buffer, stderr);
 
     return result;
 }
+
+#endif

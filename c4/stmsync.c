@@ -31,8 +31,7 @@ static void init_shadowstack(void)
     struct tx_descriptor *d = thread_descriptor;
     d->shadowstack = malloc(sizeof(gcptr) * LENGTH_SHADOW_STACK);
     if (!d->shadowstack) {
-        fprintf(stderr, "out of memory: shadowstack\n");
-        abort();
+        stm_fatalerror("out of memory: shadowstack\n");
     }
     stm_shadowstack = d->shadowstack;
     d->shadowstack_end_ref = &stm_shadowstack;
@@ -78,7 +77,7 @@ void stm_finalize(void)
 gcptr stm_read_barrier(gcptr obj)
 {
     //if (FXCACHE_AT(obj) == obj)
-    //    fprintf(stderr, "read_barrier: in cache: %p\n", obj);
+    //    dprintf(("read_barrier: in cache: %p\n", obj));
 
     /* XXX inline in the caller, optimize to get the smallest code */
     if (UNLIKELY((obj->h_revision != stm_private_rev_num) &&
@@ -230,12 +229,12 @@ void stm_start_sharedlock(void)
     int err = pthread_rwlock_rdlock(&rwlock_shared);
     assert(err == 0);
     //assert(stmgc_nursery_hiding(thread_descriptor, 0));
-    fprintf(stderr, "stm_start_sharedlock\n");
+    dprintf(("stm_start_sharedlock\n"));
 }
 
 void stm_stop_sharedlock(void)
 {
-    fprintf(stderr, "stm_stop_sharedlock\n");
+    dprintf(("stm_stop_sharedlock\n"));
     //assert(stmgc_nursery_hiding(thread_descriptor, 1));
     int err = pthread_rwlock_unlock(&rwlock_shared);
     assert(err == 0);
@@ -245,12 +244,12 @@ static void start_exclusivelock(void)
 {
     int err = pthread_rwlock_wrlock(&rwlock_shared);
     assert(err == 0);
-    fprintf(stderr, "start_exclusivelock\n");
+    dprintf(("start_exclusivelock\n"));
 }
 
 static void stop_exclusivelock(void)
 {
-    fprintf(stderr, "stop_exclusivelock\n");
+    dprintf(("stop_exclusivelock\n"));
     int err = pthread_rwlock_unlock(&rwlock_shared);
     assert(err == 0);
 }
@@ -317,10 +316,10 @@ void stm_add_prebuilt_root(gcptr obj)
 
 void stm_clear_between_tests(void)
 {
-    fprintf(stderr, "\n"
+    dprintf(("\n"
             "===============================================================\n"
             "========================[  START  ]============================\n"
             "===============================================================\n"
-            "\n");
+            "\n"));
     gcptrlist_clear(&stm_prebuilt_gcroots);
 }

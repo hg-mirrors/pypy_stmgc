@@ -101,8 +101,7 @@ static gcptr allocate_new_page(int size_class)
     /* Allocate and return a new page for the given size_class. */
     page_header_t *page = (page_header_t *)stm_malloc(GC_PAGE_SIZE);
     if (!page) {
-        fprintf(stderr, "allocate_new_page: out of memory!\n");
-        abort();
+        stm_fatalerror("allocate_new_page: out of memory!\n");
     }
     struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
     gcp->count_pages++;
@@ -155,8 +154,7 @@ gcptr stmgcpage_malloc(size_t size)
         return result;
     }
     else {
-        fprintf(stderr, "XXX stmgcpage_malloc: too big!\n");
-        abort();
+        stm_fatalerror("XXX stmgcpage_malloc: too big!\n");
     }
 }
 
@@ -178,8 +176,7 @@ void stmgcpage_free(gcptr obj)
         //stm_dbgmem_not_used(obj, size_class * WORD, 0);
     }
     else {
-        fprintf(stderr, "XXX stmgcpage_free: too big!\n");
-        abort();
+        stm_fatalerror("XXX stmgcpage_free: too big!\n");
     }
 }
 
@@ -196,7 +193,7 @@ static void visit(gcptr *pobj)
 
  restart:
     if (obj->h_tid & GCFLAG_VISITED) {
-        fprintf(stderr, "[already visited: %p]\n", obj);
+        dprintf(("[already visited: %p]\n", obj));
         assert(obj == *pobj);
         assert((obj->h_revision & 3) ||   /* either odd, or stub */
                (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
@@ -301,7 +298,8 @@ static void mark_roots(gcptr *root, gcptr *end)
     while (root != end) {
         gcptr o = *root;
         visit(root);
-        fprintf(stderr, "visit stack root: %p -> %p\n", o, *root);
+        dprintf(("visit stack root: %p -> %p\n", o, *root));
+        (void)o;   /* silence "warning: unused variable 'o'" */
         root++;
     }
 }
@@ -396,9 +394,8 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         revision_t v = obj->h_revision;
         if (IS_POINTER(v)) {
             /* has a more recent revision.  Oups. */
-            fprintf(stderr,
-                    "ABRT_COLLECT_MAJOR %p: %p was read but modified already\n",
-                    d, obj);
+            dprintf(("ABRT_COLLECT_MAJOR %p: "
+                     "%p was read but modified already\n", d, obj));
             AbortTransactionAfterCollect(d, ABRT_COLLECT_MAJOR);
             return;
         }
@@ -429,7 +426,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
      */
     wlog_t *item;
 
-    fprintf(stderr, "fix public_to_private on thread %p\n", d);
+    dprintf(("fix public_to_private on thread %p\n", d));
 
     G2L_LOOP_FORWARD(d->public_to_private, item) {
 
@@ -440,7 +437,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
                (item->val->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
 
         item->addr->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
-        fprintf(stderr, "\tpublic_to_private: %p\n", item->addr);
+        dprintf(("\tpublic_to_private: %p\n", item->addr));
 
     } G2L_LOOP_END;
 }
@@ -488,7 +485,7 @@ static void sweep_pages(struct tx_public_descriptor *gcp, int size_class,
                 else {
 #ifdef DUMP_EXTRA
                     if (p->h_tid != DEBUG_WORD(0xDD)) {
-                        fprintf(stderr, "| freeing %p\n", p);
+                        dprintf(("| freeing %p\n", p));
                     }
 #endif
                     /* skip the assignment if compiled without asserts */
@@ -509,7 +506,7 @@ static void sweep_pages(struct tx_public_descriptor *gcp, int size_class,
             for (j = 0; j < objs_per_page; j++) {
                 assert(!(p->h_tid & GCFLAG_VISITED));
                 if (p->h_tid != DEBUG_WORD(0xDD)) {
-                    fprintf(stderr, "| freeing %p (with page %p)\n", p, lpage);
+                    dprintf(("| freeing %p (with page %p)\n", p, lpage));
                 }
                 p = (gcptr)(((char *)p) + obj_size);
             }
@@ -643,7 +640,7 @@ void update_next_threshold(void)
 static void major_collect(void)
 {
     stmgcpage_acquire_global_lock();
-    fprintf(stderr, ",-----\n| running major collection...\n");
+    dprintf((",-----\n| running major collection...\n"));
 
     force_minor_collections();
 
@@ -662,10 +659,10 @@ static void major_collect(void)
     free_closed_thread_descriptors();
     update_next_threshold();
 
-    fprintf(stderr, "| %lu bytes alive, %lu not used, countdown %lu\n`-----\n",
-            (unsigned long)mc_total_in_use,
-            (unsigned long)(mc_total_reserved - mc_total_in_use),
-            (unsigned long)countdown_next_major_coll);
+    dprintf(("| %lu bytes alive, %lu not used, countdown %lu\n`-----\n",
+             (unsigned long)mc_total_in_use,
+             (unsigned long)(mc_total_reserved - mc_total_in_use),
+             (unsigned long)countdown_next_major_coll));
     stmgcpage_release_global_lock();
 }
 

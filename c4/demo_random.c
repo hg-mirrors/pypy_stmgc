@@ -417,7 +417,7 @@ void *demo(void *arg)
     setup_thread();
     
     thr_mynum++;   /* protected by being inevitable here */
-    fprintf(stderr, "THREAD STARTING\n");
+    dprintf(("THREAD STARTING\n"));
 
     run_me();
     

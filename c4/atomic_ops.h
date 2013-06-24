@@ -99,13 +99,13 @@ fetch_and_add(revision_t *ptr, revision_t value)
 #if 0    /* fprinting versions */
 # define spinlock_acquire(lock, targetvalue)                            \
     do { if (bool_cas(&(lock), 0, (targetvalue))) {                     \
-             fprintf(stderr, "<<< locked %d\n", (int)targetvalue);      \
+             dprintf(("<<< locked %d\n", (int)targetvalue));            \
              break;                                                     \
          }                                                              \
          do { smp_spinloop(); } while (ACCESS_ONCE(lock));              \
     } while (1)
 # define spinlock_release(lock)                                         \
-    do { fprintf(stderr, "unlocked >>>\n"); smp_wmb();                  \
+    do { dprintf(("unlocked >>>\n")); smp_wmb();                        \
          assert((lock) != 0); (lock) = 0; } while (0)
 #else
 # define spinlock_acquire(lock, targetvalue)                    \
