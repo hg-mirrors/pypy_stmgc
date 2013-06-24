@@ -160,19 +160,18 @@ void stm_steal_stub(gcptr P)
                 /* use id-copy for us */
                 O = (gcptr)L->h_original;
                 L->h_tid &= ~GCFLAG_HAS_ID;
-                L->h_revision = (revision_t)O;
-                copy_to_old_id_copy(L, (gcptr)L->h_original);
+                copy_to_old_id_copy(L, O);
+                O->h_original = 0;
             } else {
                 /* Copy the object out of the other thread's nursery, 
                    if needed */
                 O = stmgc_duplicate_old(L);
-                L->h_revision = (revision_t)O;
 
-                /* young and without original?
-                   we may lose the HAS_ID flag like above */
+                /* young and without original? */
                 if (!(L->h_original))
                     L->h_original = (revision_t)O;
             }
+            L->h_revision = (revision_t)O;
 
             L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
             /* subtle: we need to remove L from the fxcache of the target

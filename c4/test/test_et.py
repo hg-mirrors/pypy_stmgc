@@ -22,6 +22,7 @@ def test_freshly_created():
     assert p.h_revision == r
     assert p.h_tid == lib.gettid(p) | 0    # no GC flags
     assert classify(p) == "private"
+    assert lib.stm_id(p) != 0
 
 def test_write_barrier_private():
     p = nalloc(HDR)
@@ -84,17 +85,20 @@ def test_prebuilt_is_public():
                                        GCFLAG_PUBLIC |
                                        GCFLAG_PREBUILT_ORIGINAL)
     assert classify(p) == "public"
+    assert lib.stm_id(p) != 0
 
 def test_prebuilt_object_to_private():
     p = palloc(HDR)
     flags = p.h_tid
     assert (flags & GCFLAG_PUBLIC_TO_PRIVATE) == 0
+    pid = lib.stm_id(p)
     assert classify(p) == "public"
     p2 = lib.stm_write_barrier(p)
     assert p2 != p
     assert classify(p) == "public"
     assert classify(p2) == "private"
     assert p.h_tid == flags | GCFLAG_PUBLIC_TO_PRIVATE
+    assert pid == lib.stm_id(p2)
 
 def test_commit_change_to_prebuilt_object():
     p = palloc(HDR + WORD)
@@ -155,6 +159,7 @@ def test_read_barrier_public_shortcut():
 
 def test_read_barrier_public_to_private():
     p = palloc(HDR)
+    pid = lib.stm_id(p)
     p2 = lib.stm_write_barrier(p)
     assert p2 != p
     assert classify(p) == "public"
@@ -165,6 +170,7 @@ def test_read_barrier_public_to_private():
     p3 = lib.stm_read_barrier(p)
     assert p3 == p2
     assert list_of_read_objects() == [p]
+    assert pid == lib.stm_id(p2)
 
 def test_read_barrier_handle_protected():
     p = palloc(HDR)
@@ -231,8 +237,8 @@ def test_id_private_from_protected():
 
     p2 = oalloc(HDR)
     p2w = lib.stm_write_barrier(p2)
-    p2id = lib.stm_id(p2)
-    assert p2id == lib.stm_id(p2w)
+    p2id = lib.stm_id(p2w)
+    assert p2id == lib.stm_id(p2)
     # impl detail {
     assert p2w.h_original == 0
     # }
@@ -255,6 +261,8 @@ def test_stealing_old():
         lib.rawsetlong(p1, 0, 2782172)
         lib.stm_commit_transaction()
         lib.stm_begin_inevitable_transaction()
+        p1id = lib.stm_id(p1)
+        assert p1id == lib.stm_id(p)
         assert classify(p) == "public"
         assert classify(p1) == "protected"
         plist.append(p1)     # now p's most recent revision is protected
@@ -265,9 +273,11 @@ def test_stealing_old():
         assert classify(p1) == "public"
         assert lib.stm_read_barrier(p) == p1
         assert lib.stm_read_barrier(p1) == p1
+        assert lib.stm_id(p1) == p1id
     def f2(r):
         r.wait(2)
         p2 = lib.stm_read_barrier(p)    # steals
+        assert lib.stm_id(p) == lib.stm_id(p2)
         assert classify(p2) == "public"
         assert lib.rawgetlong(p2, 0) == 2782172
         assert p2 == lib.stm_read_barrier(p)    # short-circuit h_revision
@@ -297,8 +307,10 @@ def test_stealing_young():
         plist.append(p1)     # now p's most recent revision is protected
         assert classify(follow_revision(p)) == "stub"
         assert p1.h_revision & 1
+        p1id = lib.stm_id(p1)
         r.set(2)
         r.wait(3)
+        assert p1id == lib.stm_id(p1)
         assert classify(p1) == "public"
         assert (p1.h_revision & 1) == 0    # outdated
         p2 = ffi.cast("gcptr", p1.h_revision)
@@ -310,6 +322,7 @@ def test_stealing_young():
     def f2(r):
         r.wait(2)
         p2 = lib.stm_read_barrier(p)    # steals
+        assert lib.stm_id(p) == lib.stm_id(p2)
         assert classify(p2) == "public"
         assert lib.rawgetlong(p2, 0) == 2782172
         assert p2 == lib.stm_read_barrier(p)    # short-circuit h_revision
@@ -425,6 +438,8 @@ def test_abort_stealing_while_modifying():
 def test_stub_for_refs_from_stolen(old=False):
     p = palloc_refs(1)
     qlist = []
+    qid = []
+    pid = []
     def f1(r):
         q1 = nalloc(HDR + WORD)
         if old:
@@ -446,6 +461,16 @@ def test_stub_for_refs_from_stolen(old=False):
         assert classify(p1) == "protected"
         assert classify(follow_revision(p)) == "stub"
         assert p1.h_revision & 1
+        pid.append(lib.stm_id(p1))
+        assert classify(q1) == "protected"
+        qid.append(lib.stm_id(q1))
+        if old:
+                assert q1.h_tid & GCFLAG_OLD
+                assert not (q1.h_tid & GCFLAG_HAS_ID)
+        else:
+                assert not (q1.h_tid & GCFLAG_OLD)
+                assert q1.h_tid & GCFLAG_HAS_ID
+        
         r.set(2)
         r.wait(3)     # wait until the other thread really started
     def f2(r):
@@ -454,11 +479,14 @@ def test_stub_for_refs_from_stolen(old=False):
         p2 = lib.stm_read_barrier(p)    # steals
         assert classify(p2) == "public"
         q2 = lib.getptr(p2, 0)
+        assert lib.stm_id(p2) == pid[0]
+        assert lib.stm_id(q2) == qid[0]
         assert q2 != ffi.NULL
         assert q2 != qlist[0]
         assert classify(q2) == "stub"
         assert q2.h_revision % 4 == 2
         q3 = lib.stm_read_barrier(q2)
+        assert lib.stm_id(q3) == qid[0]
         assert q3 != q2
         if old:
             assert q3 == qlist[0]
