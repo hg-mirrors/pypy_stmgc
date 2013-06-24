@@ -43,6 +43,7 @@ class RandomSingleThreadTester(object):
         self.dump('run')
         #
         if sync.prebuilt_object is None:
+            lib.stm_clear_between_tests()
             lib.stm_initialize_tests(0)
             self.startrev()
             sync.prebuilt_object = self.alloc(palloc_refs)
