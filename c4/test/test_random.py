@@ -150,19 +150,19 @@ class RandomSingleThreadTester(object):
         #
         return x, y
 
-    def do_check_can_still_commit(self):
+    def do_check_can_still_commit(self, real_operation):
         try:
             self.current_rev.check_can_still_commit()
         except (model.Deleted, model.Conflict), e:
             # the model says that we might get an abort
             self.dump('possible delayed abort!')
             self.expected_abort()
-            lib.AbortNowIfDelayed()
+            real_operation()
             # ok, it's fine if we don't actually get an abort
             self.cancel_expected_abort()
         else:
             # the model says that we must not get an abort
-            lib.AbortNowIfDelayed()
+            real_operation()
 
     def get_ref(self, r, index):
         self.check(r)
@@ -371,7 +371,7 @@ class RandomSingleThreadTester(object):
             if do_wait:
                 self.push_roots(extra=p)
                 do_wait()
-                self.do_check_can_still_commit()
+                self.do_check_can_still_commit(lib.AbortNowIfDelayed)
                 p = self.pop_roots(extra=p)
 
     def run_single_thread(self):
@@ -427,7 +427,7 @@ class RandomSingleThreadTester(object):
                 self.dump('major collect')
                 self.push_roots()
                 if DO_MAJOR_COLLECTS:
-                    major_collect()
+                    self.do_check_can_still_commit(major_collect)
                 self.pop_roots()
                 p = emptypair
             if k1 == 82 and self.interruptible_transaction:
@@ -523,4 +523,4 @@ def test_specific_issue_1():
 def test_more_multi_thread():
     #py.test.skip("more random tests")
     for i in range(200):
-        yield test_multi_thread, 1751 + i
+        yield test_multi_thread, 1858 + i
