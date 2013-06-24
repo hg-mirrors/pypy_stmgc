@@ -569,4 +569,44 @@ def test_id_with_stealing():
     id_with_stealing(0, 1)
     id_with_stealing(0, 0)
 
+
+def test_prehash_simple():
+    p = palloc(HDR, 99)
+    assert lib.stm_hash(p) == 99
+    assert lib.stm_id(p) != lib.stm_hash(p)
+    pr = lib.stm_read_barrier(p)
+    assert lib.stm_hash(pr) == 99
+    assert lib.stm_id(p) == lib.stm_id(pr)
+    pw = lib.stm_write_barrier(p)
+    assert lib.stm_hash(pw) == 99
+    assert lib.stm_id(p) == lib.stm_id(pw)
+    lib.stm_push_root(pw)
+    minor_collect()
+    pw = lib.stm_pop_root()
+    assert lib.stm_hash(pw) == 99
+
+
+def test_prehash_with_stealing():
+    p = palloc(HDR, 99)
+    def f1(r):
+        lib.stm_write_barrier(p)   # private copy
+        lib.stm_commit_transaction()
+        lib.stm_begin_inevitable_transaction()
+        # p old public -> stub -> p1 young prot
+        r.set(2)
+        r.wait(3)     # wait until the other thread really started
+    def f2(r):
+        r.wait(2)
+        r.set(3)
+
+        p2 = lib.stm_read_barrier(p)    # steals
+        assert lib.stm_hash(p) == 99
+        assert lib.stm_hash(p2) == 99
+        assert lib.stm_id(p) == lib.stm_id(p2)
+        assert lib.stm_hash(p) != lib.stm_id(p)
+    run_parallel(f1, f2)
+
+
+
+    
     
