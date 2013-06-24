@@ -496,3 +496,77 @@ def test_stub_for_refs_from_stolen(old=False):
 
 def test_stub_for_refs_from_stolen_old():
     test_stub_for_refs_from_stolen(old=True)
+
+
+def id_with_stealing(a=0, b=0):
+    p = palloc_refs(2)
+    qlist = []
+    rlist = []
+    qid = []
+    pid = []
+    rid = []
+    def f1(r):
+        r1 = nalloc(HDR)
+        q1 = nalloc(HDR)
+        p1 = lib.stm_write_barrier(p)   # private copy
+        qlist.append(q1)
+        rlist.append(r1)
+        if a:
+            # id on young priv
+            qid.append(lib.stm_id(q1))
+            assert q1.h_tid & GCFLAG_HAS_ID
+        if b:
+            # id on pub_to_priv
+            assert follow_original(p1) == p
+            pid.append(lib.stm_id(p1))
+            assert not (p1.h_tid & GCFLAG_HAS_ID)
+        lib.setptr(p1, 0, q1)
+        lib.setptr(p1, 1, r1)
+        lib.stm_commit_transaction()
+        lib.stm_begin_inevitable_transaction()
+        # p old public -> stub -> p1 young prot
+        # q1 young prot, r1 young prot
+        if not a:
+            # id on young prot
+            qid.append(lib.stm_id(q1))
+            assert q1.h_tid & GCFLAG_HAS_ID
+        if not b:
+            # id on young prot
+            assert follow_original(p1) == p
+            pid.append(lib.stm_id(p1))
+            assert not (p1.h_tid & GCFLAG_HAS_ID)
+            
+        r1w = lib.stm_write_barrier(r1) # priv_from_prot
+        assert r1w.h_tid & GCFLAG_PRIVATE_FROM_PROTECTED
+        rid.append(lib.stm_id(r1w))
+        assert not (r1w.h_tid & GCFLAG_HAS_ID) # use backup
+        assert follow_original(r1w) == follow_revision(r1w)
+        
+        r.set(2)
+        r.wait(3)     # wait until the other thread really started
+    def f2(r):
+        r.wait(2)
+        r.set(3)
+
+        p2 = lib.stm_read_barrier(p)    # steals
+        assert pid[-1] == lib.stm_id(p2)
+
+        r2 = lib.getptr(p2, 1)
+        r3 = lib.stm_read_barrier(r2)
+        assert lib.stm_id(r3) == rid[-1]
+        
+        q2 = lib.getptr(p2, 0)
+        assert lib.stm_id(q2) == qid[-1]
+
+        q3 = lib.stm_read_barrier(q2)
+        assert lib.stm_id(q3) == qid[-1]
+
+    run_parallel(f1, f2)
+
+def test_id_with_stealing():
+    id_with_stealing(1, 1)
+    id_with_stealing(1, 0)
+    id_with_stealing(0, 1)
+    id_with_stealing(0, 0)
+
+    

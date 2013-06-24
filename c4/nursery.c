@@ -176,7 +176,7 @@ revision_t stm_id(gcptr p)
            backup, if exists */
         if (p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
             gcptr B = (gcptr)p->h_revision;
-            /* don't set, otherwise nursery will copy over backup */
+            /* don't set HAS_ID, otherwise nursery will copy over backup */
             p->h_original = (revision_t)B;
             // B->h_tid |= GCFLAG_PUBLIC; done by CommitPrivateFromProtected
             
