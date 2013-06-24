@@ -6,6 +6,7 @@
 
 
 typedef intptr_t revision_t;
+typedef uintptr_t urevision_t;
 
 typedef struct stm_object_s {
     revision_t h_tid;

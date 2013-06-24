@@ -373,7 +373,8 @@ gcptr do_step(gcptr p)
             w_t->hash = stm_hash((gcptr)w_t);
             assert(w_t->hash == stm_hash((gcptr)_t));
         }
-        if (w_t->hash < PREBUILT || w_t->hash < SHARED_ROOTS) {
+        if (w_t->hash >= 0 && (w_t->hash < PREBUILT ||
+                               w_t->hash < SHARED_ROOTS)) {
             // should be with predefined hash
             assert (stm_id((gcptr)w_t) != stm_hash((gcptr)w_t));
         }
