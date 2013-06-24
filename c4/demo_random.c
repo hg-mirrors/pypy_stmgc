@@ -242,7 +242,7 @@ void transaction_break();
 void setup_thread()
 {
     int i;
-    td.thread_seed = default_seed;
+    td.thread_seed = default_seed++;
     td.steps_left = STEPS_PER_THREAD;
     td.interruptible = 0;
     
@@ -479,7 +479,8 @@ int main(void)
     
     // seed changes daily
     // a bit pointless for now..
-    default_seed = time(NULL) / 3600 / 24;
+    default_seed = time(NULL);
+    default_seed -= (default_seed % (3600 * 24));
     
     for (i = 0; i < SHARED_ROOTS; i++) {
         if (i % 3 == 0) {
