@@ -69,6 +69,15 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
 void stm_steal_stub(gcptr P)
 {
     struct tx_public_descriptor *foreign_pd = STUB_THREAD(P);
+    /* A note about dead threads: 'foreign_pd' might belong to a thread
+     * that finished and is no longer around.  In this case, note that
+     * this function will not add anything to 'foreign_pd->stolen_objects':
+     * 
+     * 1. the dead thread is not running a transaction, so there are no
+     *    private objects (so no PRIVATE_FROM_PROTECTED)
+     *
+     * 2. the dead thread has no nursery, so all of its objects are old
+     */
 
     spinlock_acquire(foreign_pd->collection_lock, 'S');   /*stealing*/
 
