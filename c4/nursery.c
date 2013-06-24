@@ -118,7 +118,7 @@ static revision_t mangle_hash(revision_t n)
        This formula is reversible: two different values of 'i' will
        always give two different results.
     */
-    return n ^ (n >> 4);
+    return n ^ (((urevision_t)n) >> 4);
 }
 
 
