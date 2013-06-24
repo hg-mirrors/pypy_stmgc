@@ -144,7 +144,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
           */
           if (FXCACHE_AT(P) == P)
             {
-              fprintf(stderr, "read_barrier: %p -> %p fxcache\n", G, P);
+              dprintf(("read_barrier: %p -> %p fxcache\n", G, P));
               return P;
             }
         }
@@ -164,7 +164,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
           P = item->val;
           assert(!(P->h_tid & GCFLAG_PUBLIC));
           assert(is_private(P));
-          fprintf(stderr, "read_barrier: %p -> %p public_to_private\n", G, P);
+          dprintf(("read_barrier: %p -> %p public_to_private\n", G, P));
           return P;
 
         no_private_obj:
@@ -190,13 +190,13 @@ gcptr stm_DirectReadBarrier(gcptr G)
           ValidateNow(d);                  // try to move start_time forward
           goto restart_all_public;         // restart searching from P
         }
-      fprintf(stderr, "read_barrier: %p -> %p public\n", G, P);
+      dprintf(("read_barrier: %p -> %p public\n", G, P));
     }
   else
     {
       /* Not private and not public: it's a protected object
        */
-      fprintf(stderr, "read_barrier: %p -> %p protected\n", G, P);
+      dprintf(("read_barrier: %p -> %p protected\n", G, P));
 
       /* The risks are not high, but in parallel it's possible for the
          object to be stolen by another thread and become public, after
@@ -205,7 +205,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
       /*assert(P->h_revision & 1);*/
     }
 
-  fprintf(stderr, "readobj: %p\n", P);
+  dprintf(("readobj: %p\n", P));
   assert(!(P->h_tid & GCFLAG_STUB));
   gcptrlist_insert(&d->list_of_read_objects, P);
 
@@ -227,7 +227,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
          we reach any kind of object, even a public object, in case it
          was stolen.  So we just repeat the whole procedure. */
       P = (gcptr)(v - 2);
-      fprintf(stderr, "read_barrier: %p -> %p via stub\n  ", G, P);
+      dprintf(("read_barrier: %p -> %p via stub\n  ", G, P));
 
       if (UNLIKELY((P->h_revision != stm_private_rev_num) &&
                    (FXCACHE_AT(P) != P)))
@@ -238,7 +238,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
   else
     {
       /* stealing */
-      fprintf(stderr, "read_barrier: %p -> stealing %p...\n  ", G, P);
+      dprintf(("read_barrier: %p -> stealing %p...\n  ", G, P));
       stm_steal_stub(P);
 
       assert(P->h_tid & GCFLAG_PUBLIC);
@@ -262,12 +262,12 @@ static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj,
       assert(!(privobj->h_tid & GCFLAG_PUBLIC));
       assert(is_private(privobj));
       if (P != org_pubobj)
-        fprintf(stderr, "| actually %p ", org_pubobj);
+        dprintf(("| actually %p ", org_pubobj));
       if (from_stolen)
-        fprintf(stderr, "-stolen");
+        dprintf(("-stolen"));
       else
         assert(org_pubobj->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
-      fprintf(stderr, "-public_to_private-> %p private\n", privobj);
+      dprintf(("-public_to_private-> %p private\n", privobj));
       return privobj;
     }
   return NULL;
@@ -308,19 +308,19 @@ static void _check_flags(gcptr P)
   struct tx_descriptor *d = thread_descriptor;
   if (P->h_tid & GCFLAG_STUB)
     {
-      fprintf(stderr, "S");
+      dprintf(("S"));
     }
   int is_old = (P->h_tid & GCFLAG_OLD) != 0;
   int in_nurs = (d->nursery_base <= (char*)P && ((char*)P) < d->nursery_end);
   if (in_nurs)
     {
       assert(!is_old);
-      fprintf(stderr, "Y ");
+      dprintf(("Y "));
     }
   else
     {
       assert(is_old);
-      fprintf(stderr, "O ");
+      dprintf(("O "));
     }
 }
 
@@ -330,14 +330,14 @@ gcptr _stm_nonrecord_barrier(gcptr P)
   struct tx_descriptor *d = thread_descriptor;
   revision_t v;
 
-  fprintf(stderr, "_stm_nonrecord_barrier: %p ", P);
+  dprintf(("_stm_nonrecord_barrier: %p ", P));
   _check_flags(P);
 
  restart_all:
   if (P->h_revision == stm_private_rev_num)
     {
       /* private */
-      fprintf(stderr, "private\n");
+      dprintf(("private\n"));
       return P;
     }
 
@@ -345,22 +345,22 @@ gcptr _stm_nonrecord_barrier(gcptr P)
     {
       /* private too, with a backup copy */
       assert(IS_POINTER(P->h_revision));
-      fprintf(stderr, "private_from_protected\n");
+      dprintf(("private_from_protected\n"));
       return P;
     }
 
   if (P->h_tid & GCFLAG_PUBLIC)
     {
-      fprintf(stderr, "public ");
+      dprintf(("public "));
 
       while (v = P->h_revision, IS_POINTER(v))
         {
           if (P->h_tid & GCFLAG_NURSERY_MOVED)
-            fprintf(stderr, "nursery_moved ");
+            dprintf(("nursery_moved "));
 
           if (v & 2)
             {
-              fprintf(stderr, "stub ");
+              dprintf(("stub "));
               gcptr L = _find_public_to_private(P);
               if (L != NULL)
                 return L;
@@ -369,7 +369,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
 
           P = (gcptr)v;
           assert(P->h_tid & GCFLAG_PUBLIC);
-          fprintf(stderr, "-> %p public ", P);
+          dprintf(("-> %p public ", P));
           _check_flags(P);
         }
 
@@ -379,14 +379,14 @@ gcptr _stm_nonrecord_barrier(gcptr P)
 
       if (UNLIKELY(v > d->start_time))
         {
-          fprintf(stderr, "too recent!\n");
+          dprintf(("too recent!\n"));
           return NULL;   // object too recent
         }
-      fprintf(stderr, "\n");
+      dprintf(("\n"));
     }
   else
     {
-      fprintf(stderr, "protected\n");
+      dprintf(("protected\n"));
     }
   return P;
 
@@ -394,23 +394,23 @@ gcptr _stm_nonrecord_barrier(gcptr P)
   if (STUB_THREAD(P) == d->public_descriptor)
     {
       P = (gcptr)(v - 2);
-      fprintf(stderr, "-> %p ", P);
+      dprintf(("-> %p ", P));
       _check_flags(P);
     }
   else
     {
       P = (gcptr)(v - 2);
       /* cannot _check_flags(P): foreign! */
-      fprintf(stderr, "-foreign-> %p ", P);
+      dprintf(("-foreign-> %p ", P));
       if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
         {
           P = (gcptr)P->h_revision;     /* the backup copy */
           /* cannot _check_flags(P): foreign! */
-          fprintf(stderr, "-backup-> %p ", P);
+          dprintf(("-backup-> %p ", P));
         }
       if (!(P->h_tid & GCFLAG_PUBLIC))
         {
-          fprintf(stderr, "protected by someone else!\n");
+          dprintf(("protected by someone else!\n"));
           return (gcptr)-1;
         }
     }
@@ -467,7 +467,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
   P->h_revision = (revision_t)B;
 
   gcptrlist_insert(&d->private_from_protected, P);
-  fprintf(stderr, "private_from_protected: insert %p (backup %p)\n", P, B);
+  dprintf(("private_from_protected: insert %p (backup %p)\n", P, B));
 
   return P;   /* always returns its arg: the object is converted in-place */
 }
@@ -480,7 +480,7 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 #ifdef _GC_DEBUG
   wlog_t *entry;
   G2L_FIND(d->public_to_private, R, entry, goto not_found);
-  assert(!"R is already in public_to_private");
+  stm_fatalerror("R is already in public_to_private\n");
  not_found:
 #endif
 
@@ -513,8 +513,8 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
   assert(stm_private_rev_num < 0);
   assert(stm_private_rev_num & 1);
   g2l_insert(&d->public_to_private, R, L);
-  fprintf(stderr, "write_barrier: adding %p -> %p to public_to_private\n",
-          R, L);
+  dprintf(("write_barrier: adding %p -> %p to public_to_private\n",
+           R, L));
 
   /* must remove R from the read_barrier_cache, because returning R is no
      longer a valid result */
@@ -603,7 +603,7 @@ gcptr stm_WriteBarrier(gcptr P)
 
   spinlock_release(d->public_descriptor->collection_lock);
 
-  fprintf(stderr, "write_barrier: %p -> %p -> %p\n", P, R, W);
+  dprintf(("write_barrier: %p -> %p -> %p\n", P, R, W));
 
   return W;
 }
@@ -661,8 +661,8 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
             }
           else
             {
-              fprintf(stderr, "validation failed: "
-                      "%p has a more recent revision\n", R);
+              dprintf(("validation failed: "
+                       "%p has a more recent revision\n", R));
               return 0;
             }
         }
@@ -696,8 +696,8 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
 
                      For now we always abort.
                   */
-                  fprintf(stderr, "validation failed: "
-                          "%p is locked by another thread\n", R);
+                  dprintf(("validation failed: "
+                           "%p is locked by another thread\n", R));
                   return 0;
                 }
             }
@@ -709,7 +709,7 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
 static void ValidateNow(struct tx_descriptor *d)
 {
   d->start_time = GetGlobalCurTime(d);   // copy from the global time
-  fprintf(stderr, "et.c: ValidateNow: %ld\n", (long)d->start_time);
+  dprintf(("et.c: ValidateNow: %ld\n", (long)d->start_time));
 
   /* subtle: we have to normalize stolen objects, because doing so
      might add a few extra objects in the list_of_read_objects */
@@ -792,11 +792,8 @@ void AbortTransaction(int num)
         {
           if (_stm_decode_abort_info(d, elapsed_time,
                                      num, d->longest_abort_info) != size)
-            {
-              fprintf(stderr,
-                      "during stm abort: object mutated unexpectedly\n");
-              abort();
-            }
+            stm_fatalerror("during stm abort: object mutated unexpectedly\n");
+
           d->longest_abort_info_time = elapsed_time;
         }
     }
@@ -836,19 +833,15 @@ void AbortTransaction(int num)
   /* release the lock */
   spinlock_release(d->public_descriptor->collection_lock);
 
-  fprintf(stderr,
-          "\n"
+  dprintf(("\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
           "!!!!!!!!!!!!!!!!!!!!!  [%lx] abort %d\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
-          "\n", (long)d->public_descriptor_index, num);
+          "\n", (long)d->public_descriptor_index, num));
   if (num != ABRT_MANUAL && d->max_aborts >= 0 && !d->max_aborts--)
-    {
-      fprintf(stderr, "unexpected abort!\n");
-      abort();
-    }
+    stm_fatalerror("unexpected abort!\n");
 
   // notifies the CPU that we're potentially in a spin loop
   SpinLoop(SPLP_ABORT);
@@ -862,7 +855,7 @@ void AbortTransactionAfterCollect(struct tx_descriptor *d, int reason)
 {
   if (d->active >= 0)
     {
-      fprintf(stderr, "abort %d after collect!\n", reason);
+      dprintf(("abort %d after collect!\n", reason));
       assert(d->active == 1);   /* not 2, which means inevitable */
       d->active = -reason;
     }
@@ -998,7 +991,7 @@ static void CancelLocks(struct tx_descriptor *d)
       L->h_revision = expected;
 
 #ifdef DUMP_EXTRA
-      fprintf(stderr, "%p->h_revision = %p (CancelLocks)\n", R, (gcptr)v);
+      dprintf(("%p->h_revision = %p (CancelLocks)\n", R, (gcptr)v));
 #endif
       assert(R->h_revision == my_lock);
       ACCESS_ONCE(R->h_revision) = v;
@@ -1028,8 +1021,8 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       assert(L->h_revision != localrev);   /* modified by AcquireLocks() */
 
 #ifdef DUMP_EXTRA
-      fprintf(stderr, "%p->h_revision = %p (UpdateChainHeads)\n",
-              L, (gcptr)new_revision);
+      dprintf(("%p->h_revision = %p (UpdateChainHeads)\n",
+               L, (gcptr)new_revision));
 #endif
       L->h_revision = new_revision;
 
@@ -1068,9 +1061,8 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       assert(R->h_revision != localrev);
 
 #ifdef DUMP_EXTRA
-      fprintf(stderr, "%p->h_revision = %p (stub to %p)\n",
-              R, (gcptr)v, (gcptr)item->val->h_revision);
-      /*mark*/
+      dprintf(("%p->h_revision = %p (stub to %p)\n",
+               R, (gcptr)v, (gcptr)item->val->h_revision));
 #endif
       ACCESS_ONCE(R->h_revision) = v;
 
@@ -1139,13 +1131,13 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
       else
         {
           stmgcpage_free(B);
-          fprintf(stderr, "commit: free backup at %p\n", B);
+          dprintf(("commit: free backup at %p\n", B));
         }
     };
   gcptrlist_clear(&d->private_from_protected);
   d->num_private_from_protected_known_old = 0;
   d->num_read_objects_known_old = 0;
-  fprintf(stderr, "private_from_protected: clear (commit)\n");
+  dprintf(("private_from_protected: clear (commit)\n"));
 }
 
 void AbortPrivateFromProtected(struct tx_descriptor *d)
@@ -1201,13 +1193,13 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
                  size - offsetof(struct stm_object_s, h_revision));
           assert(!(P->h_tid & GCFLAG_BACKUP_COPY));
           stmgcpage_free(B);
-          fprintf(stderr, "abort: free backup at %p\n", B);
+          dprintf(("abort: free backup at %p\n", B));
         }
     };
   gcptrlist_clear(&d->private_from_protected);
   d->num_private_from_protected_known_old = 0;
   d->num_read_objects_known_old = 0;
-  fprintf(stderr, "private_from_protected: clear (abort)\n");
+  dprintf(("private_from_protected: clear (abort)\n"));
 }
 
 void CommitTransaction(void)
@@ -1227,8 +1219,7 @@ void CommitTransaction(void)
       cur_time = d->start_time;
       if (!bool_cas(&global_cur_time, cur_time + 1, cur_time + 2))
         {
-          assert(!"global_cur_time modified even though we are inev.");
-          abort();
+          stm_fatalerror("global_cur_time modified even though we are inev\n");
         }
       inev_mutex_release();
     }
@@ -1265,11 +1256,11 @@ void CommitTransaction(void)
   d->setjmp_buf = NULL;
   gcptrlist_clear(&d->list_of_read_objects);
 
-  fprintf(stderr, "\n"
+  dprintf(("\n"
           "*************************************\n"
           "**************************************  committed %ld\n"
           "*************************************\n",
-          (long)cur_time);
+           (long)cur_time));
 
   revision_t localrev = stm_private_rev_num;
   //UpdateProtectedChainHeads(d, cur_time, localrev);
@@ -1278,7 +1269,7 @@ void CommitTransaction(void)
   revision_t newrev = -(cur_time + 1);
   assert(newrev & 1);
   ACCESS_ONCE(stm_private_rev_num) = newrev;
-  fprintf(stderr, "%p: stm_local_revision = %ld\n", d, (long)newrev);
+  dprintf(("%p: stm_local_revision = %ld\n", d, (long)newrev));
   assert(d->private_revision_ref == &stm_private_rev_num);
   assert(d->read_barrier_cache_ref == &stm_read_barrier_cache);
 
@@ -1326,8 +1317,8 @@ void BecomeInevitable(const char *why)
                 (XXX statically we should know when we're outside
                 a transaction) */
 
-  fprintf(stderr, "[%lx] inevitable: %s\n",
-          (long)d->public_descriptor_index, why);
+  dprintf(("[%lx] inevitable: %s\n",
+           (long)d->public_descriptor_index, why));
 
   cur_time = acquire_inev_mutex_and_mark_global_cur_time(d);
   if (d->start_time != cur_time)
@@ -1458,7 +1449,7 @@ static revision_t descriptor_array_free_list = 0;
 void _stm_test_forget_previous_state(void)
 {
   /* debug: reset all global states, between tests */
-  fprintf(stderr, "=======================================================\n");
+  dprintf(("=======================================================\n"));
   assert(thread_descriptor == NULL);
   memset(stm_descriptor_array, 0, sizeof(stm_descriptor_array));
   descriptor_array_free_list = 0;
@@ -1484,9 +1475,8 @@ int DescriptorInit(void)
 {
   if (GCFLAG_PREBUILT != PREBUILT_FLAGS)
     {
-      fprintf(stderr, "fix PREBUILT_FLAGS in stmgc.h by giving "
-                      "it the same value as GCFLAG_PREBUILT!\n");
-      abort();
+      stm_fatalerror("fix PREBUILT_FLAGS in stmgc.h by giving "
+                     "it the same value as GCFLAG_PREBUILT!\n");
     }
 
   if (thread_descriptor == NULL)
@@ -1515,9 +1505,8 @@ int DescriptorInit(void)
           /* no item in the free list */
           descriptor_array_free_list = i + 1;
           if (descriptor_array_free_list == MAX_THREADS) {
-              fprintf(stderr, "error: too many threads at the same time "
-                              "in this process");
-              abort();
+              stm_fatalerror("error: too many threads at the same time "
+                             "in this process");
           }
           pd = stm_malloc(sizeof(struct tx_public_descriptor));
           memset(pd, 0, sizeof(struct tx_public_descriptor));
@@ -1540,8 +1529,8 @@ int DescriptorInit(void)
       stm_tx_head = d;
       thread_descriptor = d;
 
-      fprintf(stderr, "[%lx] pthread %lx starting\n",
-              (long)d->public_descriptor_index, (long)pthread_self());
+      dprintf(("[%lx] pthread %lx starting\n",
+               (long)d->public_descriptor_index, (long)pthread_self()));
 
       stmgcpage_init_tls();
       stmgcpage_release_global_lock();
@@ -1611,7 +1600,7 @@ void DescriptorDone(void)
                      d->num_spinloops[i]);
 
     p += sprintf(p, "]\n");
-    fprintf(stderr, "%s", line);
+    dprintf(("%s", line));
 
     stm_free(d, sizeof(struct tx_descriptor));
 }

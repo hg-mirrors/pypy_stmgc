@@ -1,8 +1,20 @@
 #include <stdarg.h>
+#include "stmimpl.h"
 
 
-#define fprintf threadcolor_fprintf
+void stm_fatalerror(const char *format, ...)
+     __attribute__((format (printf, 1, 2), noreturn));
 
 
-int threadcolor_fprintf(FILE *stream, const char *format, ...)
-     __attribute__((format (printf, 2, 3)));
+#ifdef _GC_DEBUG
+
+#define dprintf(args)   threadcolor_printf args
+
+int threadcolor_printf(const char *format, ...)
+     __attribute__((format (printf, 1, 2)));
+
+#else
+
+#define dprintf(args)   do { } while(0)
+
+#endif

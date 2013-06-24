@@ -22,7 +22,7 @@ static void _stm_dbgmem(void *p, size_t sz, int prot)
     intptr_t align = ((intptr_t)p) & (PAGE_SIZE-1);
     p = ((char *)p) - align;
     sz += align;
-    fprintf(stderr, "dbgmem: %p, %ld, %d\n", p, (long)sz, prot);
+    dprintf(("dbgmem: %p, %ld, %d\n", p, (long)sz, prot));
     int err = mprotect(p, sz, prot);
     assert(err == 0);
 }
@@ -35,8 +35,7 @@ void *stm_malloc(size_t sz)
         zone_start = mmap(NULL, MMAP_TOTAL, PROT_NONE,
                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (zone_start == NULL || zone_start == MAP_FAILED) {
-            fprintf(stderr, "not enough memory: mmap() failed\n");
-            abort();
+            stm_fatalerror("not enough memory: mmap() failed\n");
         }
         zone_current = zone_start;
         zone_end = zone_start + MMAP_TOTAL;
@@ -48,9 +47,8 @@ void *stm_malloc(size_t sz)
     char *result = zone_current;
     zone_current += nb_pages * PAGE_SIZE;
     if (zone_current > zone_end) {
-        fprintf(stderr, "dbgmem.c: %ld MB of memory have been exausted\n",
-                (long)(MMAP_TOTAL / (1024*1024)));
-        abort();
+        stm_fatalerror("dbgmem.c: %ld MB of memory have been exausted\n",
+                       (long)(MMAP_TOTAL / (1024*1024)));
     }
     pthread_mutex_unlock(&malloc_mutex);
 

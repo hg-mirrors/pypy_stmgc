@@ -2,11 +2,14 @@
 # Makefile for the demos.
 #
 
-build: build-demo1 build-demo2 build-demo_random
-debug: debug-demo1 debug-demo2 debug-demo_random
+BUILD_EXE = build-demo1 build-demo2 build-demo_random
+DEBUG_EXE = debug-demo1 debug-demo2 debug-demo_random
+
+build: $(BUILD_EXE)
+debug: $(DEBUG_EXE)
 
 clean:
-	rm -f debug-demo1
+	rm -f $(BUILD_EXE) $(DEBUG_EXE)
 
 
 H_FILES = atomic_ops.h stmgc.h stmimpl.h \
@@ -16,9 +19,10 @@ H_FILES = atomic_ops.h stmgc.h stmimpl.h \
 C_FILES = et.c lists.c steal.c nursery.c gcpage.c \
           stmsync.c dbgmem.c fprintcolor.c
 
-DEBUG = -g -DGC_NURSERY=0x10000  #-D_GC_DEBUG=1
+DEBUG = -g -DGC_NURSERY=0x10000 -D_GC_DEBUG=1
 
 
+# note that we don't say -DNDEBUG, so that asserts should still be compiled it
 build-%: %.c ${H_FILES} ${C_FILES} stmgc.c
 	gcc -lrt -pthread -O2 -g $< -o build-$* -Wall stmgc.c
 

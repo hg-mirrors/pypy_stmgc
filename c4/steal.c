@@ -63,7 +63,7 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
 
  done:
     *pobj = stub;
-    fprintf(stderr, "  stolen: fixing *%p: %p -> %p\n", pobj, obj, stub);
+    dprintf(("  stolen: fixing *%p: %p -> %p\n", pobj, obj, stub));
 }
 
 void stm_steal_stub(gcptr P)
@@ -120,7 +120,7 @@ void stm_steal_stub(gcptr P)
         if (B->h_tid & GCFLAG_PUBLIC_TO_PRIVATE) {
             /* already stolen */
             assert(B->h_tid & GCFLAG_PUBLIC);
-            fprintf(stderr, "already stolen: %p -> %p <-> %p\n", P, L, B);
+            dprintf(("already stolen: %p -> %p <-> %p\n", P, L, B));
             L = B;
             goto already_stolen;
         }
@@ -130,13 +130,13 @@ void stm_steal_stub(gcptr P)
            don't want to walk over the feet of the foreign thread
         */
         gcptrlist_insert2(&foreign_pd->stolen_objects, B, L);
-        fprintf(stderr, "stolen: %p -> %p <-> %p\n", P, L, B);
+        dprintf(("stolen: %p -> %p <-> %p\n", P, L, B));
         L = B;
     }
     else {
         if (L->h_tid & GCFLAG_PUBLIC) {
             /* already stolen */
-            fprintf(stderr, "already stolen: %p -> %p\n", P, L);
+            dprintf(("already stolen: %p -> %p\n", P, L));
 
             /* note that we should follow h_revision at least one more
                step: it is necessary if L is public but young (and then
@@ -145,12 +145,12 @@ void stm_steal_stub(gcptr P)
             v = ACCESS_ONCE(L->h_revision);
             if (IS_POINTER(v)) {
                 L = (gcptr)v;
-                fprintf(stderr, "\t---> %p\n", L);
+                dprintf(("\t---> %p\n", L));
             }
             goto already_stolen;
         }
 
-        fprintf(stderr, "stolen: %p -> %p\n", P, L);
+        dprintf(("stolen: %p -> %p\n", P, L));
 
         
         if (!(L->h_tid & GCFLAG_OLD)) { 
@@ -182,7 +182,7 @@ void stm_steal_stub(gcptr P)
                L. */
             gcptrlist_insert2(&foreign_pd->stolen_objects, L, NULL);
             L = O;
-            fprintf(stderr, "\t---> %p\n", L);
+            dprintf(("\t---> %p\n", L));
         }
 
         assert(L->h_tid & GCFLAG_OLD);
@@ -261,7 +261,7 @@ void stm_normalize_stolen_objects(struct tx_descriptor *d)
 
         /* this is definitely needed: all keys in public_to_private
            must appear in list_of_read_objects */
-        fprintf(stderr, "n.readobj: %p -> %p\n", B, L);
+        dprintf(("n.readobj: %p -> %p\n", B, L));
         assert(!(B->h_tid & GCFLAG_STUB));
         gcptrlist_insert(&d->list_of_read_objects, B);
 

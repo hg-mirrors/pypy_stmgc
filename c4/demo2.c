@@ -137,7 +137,7 @@ void *demo2(void *arg)
     stm_initialize();
     
     thr_mynum++;   /* protected by being inevitable here */
-    fprintf(stderr, "THREAD STARTING\n");
+    dprintf(("THREAD STARTING\n"));
     
     
     while (check_sorted() == -1) {

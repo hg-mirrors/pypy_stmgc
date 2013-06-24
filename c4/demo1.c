@@ -66,7 +66,7 @@ struct node *do_a_check(int seen[], int stress_gc)
 
       r_n = (struct node *)stm_read_barrier((gcptr)r_n->next);
       long v = r_n->value;
-      fprintf(stderr, "\t\t\t\t{ %ld, %p }\n", v, r_n->next);
+      dprintf(("\t\t\t\t{ %ld, %p }\n", v, r_n->next));
       assert(0 <= v && v < UPPER_BOUND * NUMTHREADS);
       int tn = v / UPPER_BOUND;
       assert(seen[tn] == v % UPPER_BOUND);
@@ -95,10 +95,10 @@ int insert1(gcptr arg1, int retry_counter)
     assert(seen[nvalue / UPPER_BOUND] == nvalue % UPPER_BOUND);
     w_newnode->value = nvalue;
     w_newnode->next = NULL;
-    fprintf(stderr, "DEMO1: %p->value = %ld\n", w_newnode, nvalue);
+    dprintf(("DEMO1: %p->value = %ld\n", w_newnode, nvalue));
 
     struct node *w_last = (struct node *)stm_write_barrier((gcptr)last);
-    fprintf(stderr, "DEMO1:   %p->next = %p\n", w_last, w_newnode);
+    dprintf(("DEMO1:   %p->next = %p\n", w_last, w_newnode));
     w_last->next = w_newnode;
 
     return 0;   /* return from stm_perform_transaction() */
@@ -118,7 +118,7 @@ void *demo1(void *arg)
 
     start = thr_mynum++;   /* protected by being inevitable here */
     start *= UPPER_BOUND;
-    fprintf(stderr, "THREAD STARTING: start = %d\n", start);
+    dprintf(("THREAD STARTING: start = %d\n", start));
 
     w_node = (struct node *)stm_allocate(sizeof(struct node),
                                          GCTID_STRUCT_NODE);
