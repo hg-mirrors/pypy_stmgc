@@ -38,6 +38,7 @@ typedef struct {
     len_fn dt_length;
 } DuType;
 
+/* keep this list in sync with object.c's Du_Types[] */
 #define DUTYPE_INVALID       0
 #define DUTYPE_NONE          1
 #define DUTYPE_INT           2
@@ -57,6 +58,7 @@ extern DuType DuCons_Type;
 extern DuType DuList_Type;
 extern DuType DuTuple_Type;
 extern DuType DuFrame_Type;
+extern DuType DuFrameNode_Type;
 extern DuType DuContainer_Type;
 
 extern DuType *Du_Types[_DUTYPE_TOTAL];
