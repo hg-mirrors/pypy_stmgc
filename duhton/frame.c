@@ -28,6 +28,12 @@ void framenode_trace(DuFrameNodeObject *ob, void visit(gcptr *))
     }
 }
 
+size_t framenode_bytesize(DuFrameNodeObject *ob)
+{
+    return (sizeof(DuFrameNodeObject) +
+            (ob->ob_count - 1) * sizeof(struct dictentry));
+}
+
 
 typedef struct {
     DuOBJECT_HEAD
@@ -100,6 +106,13 @@ find_entry(DuFrameObject *frame, DuObject *symbol, int write_mode)
     struct dictentry *entries = ob->ob_items;
     revision_t search_id = stm_id(symbol);
 
+#ifdef _GC_DEBUG
+    int j;
+    for (j = 0; j < right; j++) {
+        dprintf(("\t%p\n", (gcptr)entries[j].symbol_id));
+    }
+#endif
+
     while (right > left) {
         int middle = (left + right) / 2;
         revision_t found_id = entries[middle].symbol_id;
@@ -137,6 +150,7 @@ find_entry(DuFrameObject *frame, DuObject *symbol, int write_mode)
             newentries[i] = entries[i];
 
         DuSymbol_Ensure("find_entry", symbol);
+        dprintf(("NEW ENTRY ADDED WITH search_id = %p\n", (gcptr)search_id));
         newentries[left].symbol_id = search_id;
         newentries[left].symbol = symbol;
         newentries[left].value = NULL;
@@ -305,8 +319,13 @@ void DuFrame_Ensure(char *where, DuObject *ob)
 DuType DuFrameNode_Type = {    /* internal type */
     "framenode",
     DUTYPE_FRAMENODE,
-    sizeof(DuFrameNodeObject),
+    0,    /* dt_size */
     (trace_fn)framenode_trace,
+    (print_fn)NULL,
+    (eval_fn)NULL,
+    (len_fn)NULL,
+    (len_fn)NULL,
+    (bytesize_fn)framenode_bytesize,
 };
 
 DuType DuFrame_Type = {

@@ -19,10 +19,11 @@ DuType *Du_Types[_DUTYPE_TOTAL] = {
 /* callback: get the size of an object */
 size_t stmcb_size(gcptr obj)
 {
-    if (_DuObject_TypeNum(obj) == DUTYPE_TUPLE)
-        return _DuTuple_ByteSize(obj);
-    else
-        return Du_TYPE(obj)->dt_size;
+    DuType *tp = Du_TYPE(obj);
+    size_t result = tp->dt_size;
+    if (result == 0)
+        result = tp->dt_bytesize(obj);
+    return result;
 }
 
 /* callback: trace the content of an object */
