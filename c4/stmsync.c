@@ -57,7 +57,8 @@ void stm_set_max_aborts(int max_aborts)
 void stm_initialize(void)
 {
     int r = DescriptorInit();
-    assert(r == 1);
+    if (r != 1)
+        stm_fatalerror("stm_initialize: DescriptorInit failure\n");
     stmgc_init_nursery();
     init_shadowstack();
     //stmgcpage_init_tls();
@@ -227,7 +228,9 @@ static struct tx_descriptor *in_single_thread = NULL;  /* for debugging */
 void stm_start_sharedlock(void)
 {
     int err = pthread_rwlock_rdlock(&rwlock_shared);
-    assert(err == 0);
+    if (err != 0)
+        stm_fatalerror("stm_start_sharedlock: "
+                       "pthread_rwlock_rdlock failure\n");
     //assert(stmgc_nursery_hiding(thread_descriptor, 0));
     dprintf(("stm_start_sharedlock\n"));
 }
@@ -237,13 +240,17 @@ void stm_stop_sharedlock(void)
     dprintf(("stm_stop_sharedlock\n"));
     //assert(stmgc_nursery_hiding(thread_descriptor, 1));
     int err = pthread_rwlock_unlock(&rwlock_shared);
-    assert(err == 0);
+    if (err != 0)
+        stm_fatalerror("stm_stop_sharedlock: "
+                       "pthread_rwlock_unlock failure\n");
 }
 
 static void start_exclusivelock(void)
 {
     int err = pthread_rwlock_wrlock(&rwlock_shared);
-    assert(err == 0);
+    if (err != 0)
+        stm_fatalerror("start_exclusivelock: "
+                       "pthread_rwlock_wrlock failure\n");
     dprintf(("start_exclusivelock\n"));
 }
 
@@ -251,7 +258,9 @@ static void stop_exclusivelock(void)
 {
     dprintf(("stop_exclusivelock\n"));
     int err = pthread_rwlock_unlock(&rwlock_shared);
-    assert(err == 0);
+    if (err != 0)
+        stm_fatalerror("stop_exclusivelock: "
+                       "pthread_rwlock_unlock failure\n");
 }
 
 void stm_start_single_thread(void)
@@ -289,9 +298,8 @@ void stm_possible_safe_point(void)
 
     /* Warning, may block waiting for rwlock_in_transaction while another
        thread runs a major GC */
-    struct tx_descriptor *d = thread_descriptor;
-    assert(d->active);
-    assert(in_single_thread != d);
+    assert(thread_descriptor->active);
+    assert(in_single_thread != thread_descriptor);
 
     stm_stop_sharedlock();
     /* another thread should be waiting in start_exclusivelock(),

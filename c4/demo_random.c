@@ -467,7 +467,8 @@ void newthread(void*(*func)(void*), void *arg)
 {
     pthread_t th;
     int status = pthread_create(&th, NULL, func, arg);
-    assert(status == 0);
+    if (status != 0)
+        stm_fatalerror("newthread: pthread_create failure\n");
     pthread_detach(th);
     printf("started new thread\n");
 }
