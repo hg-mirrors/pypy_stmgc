@@ -330,6 +330,14 @@ gcptr do_step(gcptr p)
             p = (gcptr)(((nodeptr)read_barrier(p))->next);
         break;
     case 9: // XXX: rare events
+        k = get_rand(10);
+        if (k == 1) {
+            push_roots();
+            stm_push_root(p);
+            stm_become_inevitable("fun");
+            p = stm_pop_root();
+            pop_roots();
+        }
         break;
     case 10: // only do a stm_read_barrier
         p = read_barrier(p);
