@@ -3,6 +3,7 @@
 
 #ifndef GC_NURSERY
 #define GC_NURSERY        4194304    /* 4 MB */
+//#define GC_NURSERY        (1<<20)    /* 1 MB */
 #endif
 
 
