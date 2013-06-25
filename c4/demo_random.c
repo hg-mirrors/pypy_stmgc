@@ -274,93 +274,97 @@ void setup_thread()
 
 }
 
-gcptr do_step(gcptr p)
+gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
 {
-    nodeptr w_r, w_sr, w_t;
-    gcptr _r, _sr, _t;
-    int num, k;
+    int k = get_rand(10);
+    if (k == 1) {
+        push_roots();
+        stm_push_root(p);
+        stm_become_inevitable("fun");
+        p = stm_pop_root();
+        pop_roots();
+    } 
+    else if (k < 4) {
+        push_roots();
+        stmgc_minor_collect();
+        pop_roots();
+        p = NULL;
+    }
+    return p;
+}
 
-    _t = NULL;
-    num = get_rand(td.num_roots);
-    _r = td.roots[num];
-    
-    num = get_rand(SHARED_ROOTS);
-    _sr = shared_roots[num];
-
-    k = get_rand(19);
-    check(p);
-
+gcptr simple_events(gcptr p, gcptr _r, gcptr _sr)
+{
+    nodeptr w_r;
+    int k = get_rand(8);
+    int num = get_rand(td.num_roots);
     switch (k) {
     case 0: // remove a root
         if (num > 0)
             del_root(num);
         break;
-    case 1: // set 'p' to point to a root
-        if (_r)
-            p = _r;
-        break;
-    case 2: // add 'p' to roots
+    case 1: // add 'p' to roots
         if (p && td.num_roots < MAXROOTS)
             td.roots[td.num_roots++] = p;
+        break;
+    case 2: // set 'p' to point to a root
+        if (_r)
+            p = _r;
         break;
     case 3: // allocate fresh 'p'
         p = (gcptr)allocate_node();
         break;
-    case 4: // set 'p' as *next in one of the roots
+    case 4:  // read and validate 'p'
+        p = read_barrier(p);
+        break;
+    case 5: // only do a stm_write_barrier
+        p = write_barrier(p);
+        break;
+    case 6: // follow p->next
+        if (p)
+            p = (gcptr)(((nodeptr)read_barrier(p))->next);
+        break;
+    case 7: // set 'p' as *next in one of the roots
         check(_r);
         w_r = (nodeptr)write_barrier(_r);
         check((gcptr)w_r);
         check(p);
         w_r->next = (struct node*)p;
         break;
-    case 5:  // read and validate 'p'
-        read_barrier(p);
-        break;
-    case 6: // transaction break
-        if (td.interruptible)
-            return (gcptr)-1; // break current
-        transaction_break();
-        p = NULL;
-        break;
-    case 7: // only do a stm_write_barrier
-        p = write_barrier(p);
-        break;
-    case 8:
-        if (p)
-            p = (gcptr)(((nodeptr)read_barrier(p))->next);
-        break;
-    case 9: // XXX: rare events
-        k = get_rand(10);
-        if (k == 1) {
-            push_roots();
-            stm_push_root(p);
-            stm_become_inevitable("fun");
-            p = stm_pop_root();
-            pop_roots();
-        }
-        break;
-    case 10: // only do a stm_read_barrier
-        p = read_barrier(p);
-        break;
-    case 11:
+    }
+    return p;
+}
+
+gcptr shared_roots_events(gcptr p, gcptr _r, gcptr _sr)
+{
+    nodeptr w_sr;
+
+    int k = get_rand(3);
+    switch (k) {
+    case 0: // read_barrier on shared root
         read_barrier(_sr);
         break;
-    case 12:
+    case 1: // write_barrier on shared root
         write_barrier(_sr);
         break;
-    case 13:
+    case 2:
         w_sr = (nodeptr)write_barrier(_sr);
         w_sr->next = (nodeptr)shared_roots[get_rand(SHARED_ROOTS)];
         break;
-    case 14:
-        push_roots();
-        stmgc_minor_collect();
-        pop_roots();
-        p = NULL;
-        break;
-    case 15: /* test stm_id on (non-)shared roots */
+    }
+    return p;
+}
+
+gcptr id_hash_events(gcptr p, gcptr _r, gcptr _sr)
+{
+    nodeptr w_t;
+    int k = get_rand(4);
+    gcptr _t = NULL;
+
+    switch (k) {
+    case 0: /* test stm_id on (non-)shared roots */
         _t = _r;
-    case 16:
+    case 1:
         if (!_t)
             _t = _sr;
         w_t = (nodeptr)read_barrier(_t);
@@ -374,9 +378,9 @@ gcptr do_step(gcptr p)
             assert(w_t->id == stm_id((gcptr)_t));
         }
         break;
-    case 17: /* test stm_hash on (non-)shared roots */
+    case 2: /* test stm_hash on (non-)shared roots */
         _t = _r;
-    case 18:
+    case 3:
         if (!_t)
             _t = _sr;
         w_t = (nodeptr)read_barrier(_t);
@@ -395,6 +399,40 @@ gcptr do_step(gcptr p)
             assert (stm_id((gcptr)w_t) != stm_hash((gcptr)w_t));
         }
         break;
+    }
+    return p;
+}
+
+
+
+gcptr do_step(gcptr p)
+{
+    gcptr _r, _sr;
+    int num, k;
+
+    num = get_rand(td.num_roots);
+    _r = td.roots[num];
+    
+    num = get_rand(SHARED_ROOTS);
+    _sr = shared_roots[num];
+
+    k = get_rand(9);
+    check(p);
+
+    if (k < 3)
+        p = simple_events(p, _r, _sr);
+    else if (k < 5)
+        p = shared_roots_events(p, _r, _sr);
+    else if (k < 7)
+        p = id_hash_events(p, _r, _sr);
+    else if (k < 8)
+        p = rare_events(p, _r, _sr);
+    else if (get_rand(3) == 1) {
+        // transaction break
+        if (td.interruptible)
+            return (gcptr)-1; // break current
+        transaction_break();
+        p = NULL;
     }
     return p;
 }
