@@ -96,6 +96,7 @@ void stm_steal_stub(gcptr P)
         if (L->h_original) {
             /* L has an original, may be GCFLAG_HAS_ID */
             B->h_original = L->h_original;
+            L->h_tid &= ~GCFLAG_HAS_ID;
         }
         else if (L->h_tid & GCFLAG_OLD) {
             /* If old, it must be the original */
