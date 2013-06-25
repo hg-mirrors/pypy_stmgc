@@ -1120,14 +1120,6 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
                 break;
             }
         }      
-      else if (P->h_original == (revision_t)B) {
-        /* The backup is the "id object" */
-        assert(!(P->h_tid & GCFLAG_HAS_ID));
-
-        B->h_tid &= ~GCFLAG_BACKUP_COPY;
-        B->h_tid |= GCFLAG_PUBLIC;
-        B->h_revision = (revision_t)P;
-      }
       else
         {
           stmgcpage_free(B);
@@ -1159,7 +1151,7 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
         {
           assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
           P->h_tid |= GCFLAG_PUBLIC;
-          P->h_tid &= ~GCFLAG_HAS_ID; // just in case
+          assert(!(P->h_tid & GCFLAG_HAS_ID));
           if (!(P->h_tid & GCFLAG_OLD)) P->h_tid |= GCFLAG_NURSERY_MOVED;
           /* P becomes a public outdated object.  It may create an
              exception documented in doc-objects.txt: a public but young
@@ -1168,24 +1160,16 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
              stealing will follow its h_revision (to B).
           */
         }
-      else if (P->h_original == (revision_t)B) {
-        /* The backup is the "id object".  P becomes outdated. */
-        assert(!(P->h_tid & GCFLAG_HAS_ID));
-        P->h_tid |= GCFLAG_PUBLIC;
-        B->h_tid |= GCFLAG_PUBLIC;
-        B->h_tid &= ~GCFLAG_BACKUP_COPY;
-        if (!(P->h_tid & GCFLAG_OLD)) P->h_tid |= GCFLAG_NURSERY_MOVED;
-      }
       else
         {
           /* copy the backup copy B back over the now-protected object P,
              and then free B, which will not be used any more. */
-
+          assert(!(P->h_original) 
+                 || (B->h_original == (revision_t)P->h_original));
+          assert(!(P->h_original && !B->h_original));
           if (P->h_original && !B->h_original) // might occur because of
             B->h_original = P->h_original; //replace_ptr_to_protected_with_stub
 
-          assert(!(P->h_original) 
-                 || (B->h_original == (revision_t)P->h_original));
           size_t size = stmcb_size(B);
           assert(B->h_tid & GCFLAG_BACKUP_COPY);
           memcpy(((char *)P) + offsetof(struct stm_object_s, h_revision),

@@ -55,7 +55,6 @@ struct thread_data {
     unsigned int thread_seed;
     gcptr roots[MAXROOTS];
     gcptr roots_outside_perform[MAXROOTS];
-    gcptr current_root;
     int num_roots;
     int num_roots_outside_perform;
     int steps_left;
@@ -67,6 +66,12 @@ __thread struct thread_data td;
 // helper functions
 int classify(gcptr p);
 void check(gcptr p);
+
+static int is_private(gcptr P)
+{
+  return (P->h_revision == stm_private_rev_num) ||
+    (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+}
 
 int get_rand(int max)
 {
@@ -101,7 +106,8 @@ void push_roots()
     int i;
     for (i = 0; i < td.num_roots; i++) {
         check(td.roots[i]);
-        stm_push_root(td.roots[i]);
+        if (td.roots[i])
+            stm_push_root(td.roots[i]);
     }
 }
 
@@ -109,7 +115,8 @@ void pop_roots()
 {
     int i;
     for (i = td.num_roots - 1; i >= 0; i--) {
-        td.roots[i] = stm_pop_root();
+        if (td.roots[i])
+            td.roots[i] = stm_pop_root();
         check(td.roots[i]);
     }
 }
@@ -173,6 +180,7 @@ gcptr write_barrier(gcptr p)
         check(p);
         w = stm_write_barrier(p);
         check(w);
+        assert(is_private(w));
     }
     return w;
 }
@@ -351,7 +359,7 @@ gcptr do_step(gcptr p)
         if (w_t->id) {
             assert(w_t->id == stm_id((gcptr)w_t));
             assert(w_t->id == stm_id((gcptr)_t));
-        } 
+        }
         else {
             w_t = (nodeptr)write_barrier(_t);
             w_t->id = stm_id((gcptr)w_t);
@@ -425,9 +433,7 @@ int interruptible_callback(gcptr arg1, int retry_counter)
 int run_me()
 {
     gcptr p = NULL;
-    while (td.steps_left) {
-        td.steps_left--;
-
+    while (td.steps_left-->0) {
         if (td.steps_left % 8 == 0)
             fprintf(stdout, "#");
 

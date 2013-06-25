@@ -159,18 +159,10 @@ revision_t stm_id(gcptr p)
                  p, (gcptr)p->h_original));
         return p->h_original;
     } 
-    else if (!(p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
-               && (p->h_tid & GCFLAG_OLD)) {
-        /* we can be sure that p->h_original doesn't
-           get set during the if and the else-if 
-           
-           XXX: check for priv_from_protected may not be 
-           necessary. only if this func may be called on 
-           another thread's young objects that are made 
-           old at the same time, and we see the OLD flag 
-           before h_original has been set.
-        */
-        dprintf(("stm_id(%p) is old, orig=0 fst: %p\n", p, p));
+    else if (p->h_tid & GCFLAG_OLD) {
+        /* old objects must have an h_original xOR be
+           the original itself. */
+        /* dprintf(("stm_id(%p) is old, orig=0 fst: %p\n", p, p)); */
         return (revision_t)p;
     }
     
@@ -188,35 +180,24 @@ revision_t stm_id(gcptr p)
         dprintf(("stm_id(%p) has orig: %p\n", 
                  p, (gcptr)p->h_original));
     }
-    else if (p->h_tid & GCFLAG_OLD) {
-        /* it must be this exact object */
-        result = (revision_t)p;
-        dprintf(("stm_id(%p) is old, orig=0: %p\n", p, p));
-    }
     else {
-        /* must create shadow original object or use
+        /* must create shadow original object XXX: or use
            backup, if exists */
+        
+        /* XXX use stmgcpage_malloc() directly, we don't need to copy
+         * the contents yet */
+        gcptr O = stmgc_duplicate_old(p);
+        p->h_original = (revision_t)O;
+        p->h_tid |= GCFLAG_HAS_ID;
+        O->h_tid |= GCFLAG_PUBLIC;
+        
         if (p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
             gcptr B = (gcptr)p->h_revision;
-            /* don't set HAS_ID, otherwise nursery will copy over backup */
-            p->h_original = (revision_t)B;
-            // B->h_tid |= GCFLAG_PUBLIC; done by CommitPrivateFromProtected
-            
-            result = (revision_t)B;
-            dprintf(("stm_id(%p) young, pfp, use backup %p\n", 
-                     p, (gcptr)p->h_original));
+            B->h_original = (revision_t)O;
         }
-        else {
-            /* XXX use stmgcpage_malloc() directly, we don't need to copy
-             * the contents yet */
-            gcptr O = stmgc_duplicate_old(p);
-            p->h_original = (revision_t)O;
-            p->h_tid |= GCFLAG_HAS_ID;
-            O->h_tid |= GCFLAG_PUBLIC;
-            
-            result = (revision_t)O;
-            dprintf(("stm_id(%p) young, make shadow %p\n", p, O));
-        }
+        
+        result = (revision_t)O;
+        dprintf(("stm_id(%p) young, make shadow %p\n", p, O));
     }
     
     spinlock_release(d->public_descriptor->collection_lock);
