@@ -21,6 +21,7 @@ DuType DuInt_Type = {
     "int",
     DUTYPE_INT,
     sizeof(DuIntObject),
+    (trace_fn)NULL,
     (print_fn)int_print,
     (eval_fn)NULL,
     (len_fn)int_is_true,

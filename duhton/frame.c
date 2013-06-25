@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 struct dictentry {
+    revision_t symbol_id;
     DuObject *symbol;
     DuObject *value;
     eval_fn builtin_macro;
@@ -11,14 +12,36 @@ struct dictentry {
 
 typedef struct {
     DuOBJECT_HEAD
-    int entry_count;
-    struct dictentry *entries;
+    int ob_count;
+    struct dictentry ob_items[1];
+} DuFrameNodeObject;
+
+void framenode_trace(DuFrameNodeObject *ob, void visit(gcptr *))
+{
+    int i;
+    for (i=ob->ob_count-1; i>=0; i--) {
+        struct dictentry *e = &ob->ob_items[i];
+        visit(&e->symbol);
+        visit(&e->value);
+        visit(&e->func_arglist);
+        visit(&e->func_progn);
+    }
+}
+
+
+typedef struct {
+    DuOBJECT_HEAD
+    DuFrameNodeObject *ob_nodes;
 } DuFrameObject;
+
+static DuFrameNodeObject du_empty_framenode = {
+    DuOBJECT_HEAD_INIT(DUTYPE_FRAMENODE),
+    0,
+};
 
 DuFrameObject Du_GlobalsFrame = {
     DuOBJECT_HEAD_INIT(DUTYPE_FRAME),
-    0,
-    NULL,
+    &du_empty_framenode,
 };
 
 DuObject *_Du_GetGlobals()
@@ -29,11 +52,11 @@ DuObject *_Du_GetGlobals()
 DuObject *DuFrame_New()
 {
     DuFrameObject *ob = (DuFrameObject *)DuObject_New(&DuFrame_Type);
-    ob->entry_count = 0;
-    ob->entries = NULL;
+    ob->ob_nodes = &du_empty_framenode;
     return (DuObject *)ob;
 }
 
+#if 0
 DuObject *DuFrame_Copy(DuObject *frame)
 {
     DuFrame_Ensure("DuFrame_Copy", frame);
@@ -53,19 +76,11 @@ DuObject *DuFrame_Copy(DuObject *frame)
     }
     return (DuObject *)dst;
 }
+#endif
 
-void frame_free(DuFrameObject *ob)
+void frame_trace(DuFrameObject *ob, void visit(gcptr *))
 {
-    int i;
-    for (i=0; i<ob->entry_count; i++) {
-        struct dictentry *e = &ob->entries[i];
-        Du_DECREF(e->symbol);
-        if (e->value        != NULL) Du_DECREF(e->value       );
-        if (e->func_arglist != NULL) Du_DECREF(e->func_arglist);
-        if (e->func_progn   != NULL) Du_DECREF(e->func_progn  );
-    }
-    free(ob->entries);
-    free(ob);
+    visit((gcptr *)&ob->ob_nodes);
 }
 
 void frame_print(DuFrameObject *ob)
@@ -74,52 +89,81 @@ void frame_print(DuFrameObject *ob)
 }
 
 static struct dictentry *
-find_entry(DuFrameObject *frame, DuObject *symbol, int add_if_missing)
+find_entry(DuFrameObject *frame, DuObject *symbol, int write_mode)
 {
+    _du_read1(frame);
+    DuFrameNodeObject *ob = frame->ob_nodes;
+
+    _du_read1(ob);
     int left = 0;
-    int right = frame->entry_count;
-    struct dictentry *entries = frame->entries;
+    int right = ob->ob_count;
+    struct dictentry *entries = ob->ob_items;
+    revision_t search_id = stm_id(symbol);
+
     while (right > left) {
         int middle = (left + right) / 2;
-        DuObject *found = entries[middle].symbol;
-        if ((intptr_t)found < (intptr_t)symbol)
+        revision_t found_id = entries[middle].symbol_id;
+        if (search_id < found_id)
             right = middle;
-        else if (found == symbol)
+        else if (search_id == found_id) {
+            if (write_mode) {
+                _du_write1(ob);
+                entries = ob->ob_items;
+            }
             return entries + middle;
+        }
         else
             left = middle + 1;
     }
-    if (add_if_missing) {
+
+    if (!write_mode) {
+        return NULL;
+    }
+    else {
         int i;
-        int newcount = frame->entry_count + 1;
-        struct dictentry *newentries = malloc(sizeof(struct dictentry) *
-                                              newcount);
+        size_t size = (sizeof(DuFrameNodeObject) +
+                       (ob->ob_count + 1 - 1)*sizeof(struct dictentry));
+        DuFrameNodeObject *newob;
+
+        _du_save3(ob, symbol, frame);
+        newob = (DuFrameNodeObject *)stm_allocate(size, DUTYPE_FRAMENODE);
+        _du_restore3(ob, symbol, frame);
+
+        newob->ob_count = ob->ob_count + 1;
+        struct dictentry *newentries = newob->ob_items;
+        entries = ob->ob_items;
+
         for (i=0; i<left; i++)
             newentries[i] = entries[i];
+
         DuSymbol_Ensure("find_entry", symbol);
-        newentries[left].symbol = symbol; Du_INCREF(symbol);
+        newentries[left].symbol_id = search_id;
+        newentries[left].symbol = symbol;
         newentries[left].value = NULL;
         newentries[left].builtin_macro = NULL;
         newentries[left].func_arglist = NULL;
         newentries[left].func_progn = NULL;
-        for (i=left+1; i<newcount; i++)
+
+        for (i=left+1; i<newob->ob_count; i++)
             newentries[i] = entries[i-1];
-        frame->entries = newentries;
-        frame->entry_count = newcount;
-        free(entries);
+
+        _du_write1(frame);
+        frame->ob_nodes = newob;
+
         return newentries + left;
     }
-    else
-        return NULL;
 }
 
 void DuFrame_SetBuiltinMacro(DuObject *frame, char *name, eval_fn func)
 {
     DuFrame_Ensure("DuFrame_SetBuiltinMacro", frame);
+
+    _du_save1(frame);
     DuObject *sym = DuSymbol_FromString(name);
+    _du_restore1(frame);
+
     struct dictentry *e = find_entry((DuFrameObject *)frame, sym, 1);
     e->builtin_macro = func;
-    Du_DECREF(sym);
 }
 
 static void
@@ -130,12 +174,27 @@ _parse_arguments(DuObject *symbol, DuObject *arguments,
         if (!DuCons_Check(arguments))
             Du_FatalError("call to '%s': not enough arguments",
                           DuSymbol_AsString(symbol));
+
+        _du_read1(arguments);
+        DuObject *arg = _DuCons_CAR(arguments);
+        DuObject *argumentsnext = _DuCons_NEXT(arguments);
+
+        _du_save3(symbol, argumentsnext, caller);
+        _du_save2(formallist, callee);
+        DuObject *obj = Du_Eval(arg, caller);
+        _du_restore2(formallist, callee);
+
+        _du_read1(formallist);
         DuObject *sym = _DuCons_CAR(formallist);
-        DuObject *obj = Du_Eval(_DuCons_CAR(arguments), caller);
+        DuObject *formallistnext = _DuCons_NEXT(formallist);
+
+        _du_save2(formallistnext, callee);
         DuFrame_SetSymbol(callee, sym, obj);
-        Du_DECREF(obj);
-        formallist = _DuCons_NEXT(formallist);
-        arguments = _DuCons_NEXT(arguments);
+        _du_restore2(formallistnext, callee);
+        _du_restore3(symbol, argumentsnext, caller);
+
+        formallist = formallistnext;
+        arguments = argumentsnext;
     }
     if (arguments != Du_None)
         Du_FatalError("call to '%s': too many arguments",
@@ -162,18 +221,24 @@ DuObject *_DuFrame_EvalCall(DuObject *frame, DuObject *symbol,
         }
     }
     if (e->func_progn) {
+        DuObject *func = e->func_progn;
+        _du_save1(func);
+        _du_save3(frame, symbol, rest);
         DuObject *callee_frame = DuFrame_New();
-        DuObject *res;
+        _du_restore3(frame, symbol, rest);
+
+        _du_save1(callee_frame);
         _parse_arguments(symbol, rest, e->func_arglist, frame, callee_frame);
+        _du_restore1(callee_frame);
+        _du_restore1(func);
+
         if (execute_now) {
-            res = Du_Progn(e->func_progn, callee_frame);
+            return Du_Progn(func, callee_frame);
         }
         else {
-            Du_TransactionAdd(e->func_progn, callee_frame);
-            res = NULL;
+            Du_TransactionAdd(func, callee_frame);
+            return NULL;
         }
-        Du_DECREF(callee_frame);
-        return res;
     }
     if (e->builtin_macro) {
         if (!execute_now)
@@ -192,12 +257,7 @@ DuObject *DuFrame_GetSymbol(DuObject *frame, DuObject *symbol)
     DuFrame_Ensure("DuFrame_GetSymbol", frame);
 
     e = find_entry((DuFrameObject *)frame, symbol, 0);
-    if (e && e->value) {
-        Du_INCREF(e->value);
-        return e->value;
-    }
-    else
-        return NULL;
+    return e ? e->value : NULL;
 }
 
 void DuFrame_SetSymbol(DuObject *frame, DuObject *symbol, DuObject *value)
@@ -205,16 +265,20 @@ void DuFrame_SetSymbol(DuObject *frame, DuObject *symbol, DuObject *value)
     struct dictentry *e;
     DuFrame_Ensure("DuFrame_SetSymbol", frame);
 
+    _du_save1(value);
     e = find_entry((DuFrameObject *)frame, symbol, 1);
-    if (e->value) Du_DECREF(e->value);
-    e->value = value; Du_INCREF(value);
+    _du_restore1(value);
+
+    e->value = value;
 }
 
 void DuFrame_SetSymbolStr(DuObject *frame, char *name, DuObject *value)
 {
+    _du_save2(frame, value);
     DuObject *sym = DuSymbol_FromString(name);
+    _du_restore2(frame, value);
+
     DuFrame_SetSymbol(frame, sym, value);
-    Du_DECREF(sym);
 }
 
 void DuFrame_SetUserFunction(DuObject *frame, DuObject *symbol,
@@ -223,23 +287,32 @@ void DuFrame_SetUserFunction(DuObject *frame, DuObject *symbol,
     struct dictentry *e;
     DuFrame_Ensure("DuFrame_SetUserFunction", frame);
 
+    _du_save2(arglist, progn);
     e = find_entry((DuFrameObject *)frame, symbol, 1);
-    if (e->func_arglist) Du_DECREF(e->func_arglist);
-    if (e->func_progn)   Du_DECREF(e->func_progn);
-    e->func_arglist = arglist; Du_INCREF(arglist);
-    e->func_progn   = progn;   Du_INCREF(progn);
+    _du_restore2(arglist, progn);
+
+    e->func_arglist = arglist;
+    e->func_progn = progn;
 }
 
 void DuFrame_Ensure(char *where, DuObject *ob)
 {
     if (!DuFrame_Check(ob))
         Du_FatalError("%s: expected 'frame' argument, got '%s'",
-                      where, ob->ob_type->dt_name);
+                      where, Du_TYPE(ob)->dt_name);
 }
+
+DuType DuFrameNode_Type = {    /* internal type */
+    "framenode",
+    DUTYPE_FRAMENODE,
+    sizeof(DuFrameNodeObject),
+    (trace_fn)framenode_trace,
+};
 
 DuType DuFrame_Type = {
     "frame",
     DUTYPE_FRAME,
     sizeof(DuFrameObject),
+    (trace_fn)frame_trace,
     (print_fn)frame_print,
 };

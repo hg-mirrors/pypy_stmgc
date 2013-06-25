@@ -5,6 +5,12 @@ typedef struct {
     DuObject *ob_reference;
 } DuContainerObject;
 
+
+void container_trace(DuContainerObject *ob, void visit(gcptr *))
+{
+    visit(&ob->ob_reference);
+}
+
 void container_print(DuContainerObject *ob)
 {
     printf("<container ");
@@ -32,6 +38,7 @@ DuType DuContainer_Type = {
     "container",
     DUTYPE_CONTAINER,
     sizeof(DuContainerObject),
+    (trace_fn)container_trace,
     (print_fn)container_print,
 };
 
