@@ -25,6 +25,11 @@ void tuple_trace(DuTupleObject *ob, void visit(gcptr *))
     }
 }
 
+size_t tuple_bytesize(DuTupleObject *ob)
+{
+    return sizeof(DuTupleObject) + (ob->ob_count - 1) * sizeof(DuObject *);
+}
+
 void list_trace(DuListObject *ob, void visit(gcptr *))
 {
     visit((gcptr *)&ob->ob_tuple);
@@ -155,12 +160,6 @@ DuObject *DuList_Pop(DuObject *list, int index)
     return _list_pop((DuListObject *)list, index);
 }
 
-size_t _DuTuple_ByteSize(DuObject *tuple)
-{
-    DuTupleObject *t = (DuTupleObject *)tuple;
-    return sizeof(DuTupleObject) + (t->ob_count - 1) * sizeof(DuObject *);
-}
-
 DuType DuTuple_Type = {    /* "tuple" is mostly an internal type here */
     "tuple",
     DUTYPE_TUPLE,
@@ -170,6 +169,7 @@ DuType DuTuple_Type = {    /* "tuple" is mostly an internal type here */
     (eval_fn)NULL,
     (len_fn)NULL,
     (len_fn)NULL,
+    (bytesize_fn)tuple_bytesize,
 };
 
 DuType DuList_Type = {

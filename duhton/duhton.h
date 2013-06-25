@@ -23,6 +23,7 @@ typedef struct stm_object_s DuObject;
 
 
 typedef void(*trace_fn)(DuObject *, void visit(gcptr *));
+typedef size_t(*bytesize_fn)(DuObject *);
 typedef void(*print_fn)(DuObject *);
 typedef DuObject *(*eval_fn)(DuObject *, DuObject *);
 typedef int(*len_fn)(DuObject *);
@@ -36,6 +37,7 @@ typedef struct {
     eval_fn dt_eval;
     len_fn dt_is_true;
     len_fn dt_length;
+    bytesize_fn dt_bytesize;
 } DuType;
 
 /* keep this list in sync with object.c's Du_Types[] */
@@ -98,7 +100,6 @@ int DuList_Size(DuObject *list);
 DuObject *DuList_GetItem(DuObject *list, int index);
 void DuList_SetItem(DuObject *list, int index, DuObject *newobj);
 DuObject *DuList_Pop(DuObject *list, int index);
-size_t _DuTuple_ByteSize(DuObject *tuple);
 
 DuObject *DuContainer_New(DuObject *obj);
 DuObject *DuContainer_GetRef(DuObject *container);
