@@ -2,12 +2,6 @@
 #include <sys/select.h>
 
 
-static void _du_getargs0(const char *name, DuObject *cons, DuObject *locals)
-{
-    if (cons != Du_None)
-        Du_FatalError("%s: expected no argument", name);
-}
-
 static void _du_getargs1(const char *name, DuObject *cons, DuObject *locals,
                          DuObject **a)
 {
@@ -93,13 +87,14 @@ DuObject *du_setq(DuObject *cons, DuObject *locals)
         DuObject *next = _DuCons_NEXT(cons);
 
         _du_save3(symbol, next, locals);
-        result = Du_Eval(expr, locals);
+        DuObject *obj = Du_Eval(expr, locals);
         _du_restore3(symbol, next, locals);
 
-        _du_save2(next, locals);
+        _du_save3(next, locals, obj);
         DuFrame_SetSymbol(locals, symbol, obj);
-        _du_restore2(next, locals);
+        _du_restore3(next, locals, obj);
 
+        result = obj;
         cons = next;
     }
     return result;
@@ -169,7 +164,7 @@ DuObject *du_sub(DuObject *cons, DuObject *locals)
         DuObject *next = _DuCons_NEXT(cons);
 
         _du_save2(next, locals);
-        DuObject *obj = Du_Eval(next, locals);
+        DuObject *obj = Du_Eval(expr, locals);
         result += sign * DuInt_AsInt(obj);
         _du_restore2(next, locals);
 
@@ -232,7 +227,7 @@ DuObject *du_ge(DuObject *cons, DuObject *locals)
 DuObject *du_type(DuObject *cons, DuObject *locals)
 {
     DuObject *obj;
-    _du_getarg1("type", cons, locals, &obj);
+    _du_getargs1("type", cons, locals, &obj);
 
     return DuSymbol_FromString(Du_TYPE(obj)->dt_name);
 }
@@ -268,13 +263,12 @@ DuObject *du_list(DuObject *cons, DuObject *locals)
 
 DuObject *du_container(DuObject *cons, DuObject *locals)
 {
-    DuObject *container;
     DuObject *obj;
 
     if (cons == Du_None)
         obj = Du_None;
     else
-        _du_getarg1("container", cons, locals, &obj);
+        _du_getargs1("container", cons, locals, &obj);
 
     return DuContainer_New(obj);
 }
@@ -315,45 +309,58 @@ DuObject *du_get(DuObject *cons, DuObject *locals)
 
 DuObject *du_set(DuObject *cons, DuObject *locals)
 {
+    _du_read1(cons);
     if (cons == Du_None || _DuCons_NEXT(cons) == Du_None)
         Du_FatalError("set: expected at least two arguments");
-    DuObject *obj = Du_Eval(_DuCons_CAR(cons), locals);
+
+    DuObject *expr = _DuCons_CAR(cons);
+    DuObject *next = _DuCons_NEXT(cons);
+
+    _du_save2(next, locals);
+    DuObject *obj = Du_Eval(expr, locals);
+    _du_restore2(next, locals);
+
+    _du_read1(next);
+    DuObject *expr2 = _DuCons_CAR(next);
+    DuObject *next2 = _DuCons_NEXT(next);
 
     if (DuList_Check(obj)) {
-        if (_DuCons_NEXT(_DuCons_NEXT(cons)) == Du_None ||
-            _DuCons_NEXT(_DuCons_NEXT(_DuCons_NEXT(cons))) != Du_None)
+        _du_read1(next2);
+        if (next2 == Du_None || _DuCons_NEXT(next2) != Du_None)
             Du_FatalError("set with a list: expected three arguments");
-        DuObject *index = Du_Eval(_DuCons_CAR(_DuCons_NEXT(cons)), locals);
-        DuObject *newobj = Du_Eval(
-                    _DuCons_CAR(_DuCons_NEXT(_DuCons_NEXT(cons))), locals);
+
+        _du_save3(obj, next2, locals);
+        DuObject *index = Du_Eval(expr2, locals);
+        _du_restore3(obj, next2, locals);
+
+        _du_save2(obj, index);
+        DuObject *newobj = Du_Eval(_DuCons_CAR(next2), locals);
+        _du_restore2(obj, index);
+
         DuList_SetItem(obj, DuInt_AsInt(index), newobj);
-        Du_DECREF(index);
-        Du_DECREF(newobj);
     }
     else if (DuContainer_Check(obj)) {
-        if (_DuCons_NEXT(_DuCons_NEXT(cons)) != Du_None)
+        if (next2 != Du_None)
             Du_FatalError("set with a container: expected two arguments");
-        DuObject *newobj = Du_Eval(_DuCons_CAR(_DuCons_NEXT(cons)), locals);
+
+        _du_save1(obj);
+        DuObject *newobj = Du_Eval(expr2, locals);
+        _du_restore1(obj);
+
         DuContainer_SetRef(obj, newobj);
-        Du_DECREF(newobj);
     }
     else
-        Du_FatalError("set: bad argument type '%s'", obj->ob_type->dt_name);
+        Du_FatalError("set: bad argument type '%s'", Du_TYPE(obj)->dt_name);
 
-    Du_DECREF(obj);
-    Du_INCREF(Du_None);
     return Du_None;
 }
 
 DuObject *du_append(DuObject *cons, DuObject *locals)
 {
-    if (cons == Du_None || _DuCons_NEXT(cons) == Du_None ||
-        _DuCons_NEXT(_DuCons_NEXT(cons)) != Du_None)
-        Du_FatalError("append: expected two arguments");
-    DuObject *lst = Du_Eval(_DuCons_CAR(cons), locals);
-    DuObject *newobj = Du_Eval(_DuCons_CAR(_DuCons_NEXT(cons)), locals);
+    DuObject *lst, *newobj;
+    _du_getargs2("append", cons, locals, &lst, &newobj);
+
     DuList_Append(lst, newobj);
-    Du_DECREF(lst);
     return newobj;
 }
 
@@ -361,50 +368,69 @@ DuObject *du_pop(DuObject *cons, DuObject *locals)
 {
     if (cons == Du_None)
         Du_FatalError("pop: expected at least one argument");
-    DuObject *lst = Du_Eval(_DuCons_CAR(cons), locals);
+
+    _du_read1(cons);
+    DuObject *expr = _DuCons_CAR(cons);
+    DuObject *next = _DuCons_NEXT(cons);
+
+    _du_save2(next, locals);
+    DuObject *lst = Du_Eval(expr, locals);
+    _du_restore2(next, locals);
+
     int index;
-    if (_DuCons_NEXT(cons) == Du_None) {
+    if (next == Du_None) {
         index = DuList_Size(lst) - 1;
         if (index < 0)
             Du_FatalError("pop: empty list");
     }
-    else if (_DuCons_NEXT(_DuCons_NEXT(cons)) == Du_None) {
-        DuObject *indexobj = Du_Eval(_DuCons_CAR(_DuCons_NEXT(cons)), locals);
-        index = DuInt_AsInt(indexobj);
-        Du_DECREF(indexobj);
-    }
-    else
-        Du_FatalError("pop: expected at most two arguments");
+    else {
+        _du_read1(next);
+        DuObject *expr2 = _DuCons_CAR(next);
+        DuObject *next2 = _DuCons_NEXT(next);
 
-    DuObject *res = DuList_Pop(lst, index);
-    Du_DECREF(lst);
-    return res;
+        if (next2 != Du_None)
+            Du_FatalError("pop: expected at most two arguments");
+
+        _du_save1(lst);
+        DuObject *indexobj = Du_Eval(expr2, locals);
+        _du_restore1(lst);
+
+        index = DuInt_AsInt(indexobj);
+    }
+
+    return DuList_Pop(lst, index);
 }
 
 DuObject *du_len(DuObject *cons, DuObject *locals)
 {
-    if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
-        Du_FatalError("len: expected one argument");
-    DuObject *obj = Du_Eval(_DuCons_CAR(cons), locals);
+    DuObject *obj;
+    _du_getargs1("len", cons, locals, &obj);
+
     int length = DuObject_Length(obj);
-    Du_DECREF(obj);
     return DuInt_FromInt(length);
 }
 
 DuObject *du_if(DuObject *cons, DuObject *locals)
 {
+    _du_read1(cons);
     if (cons == Du_None || _DuCons_NEXT(cons) == Du_None)
         Du_FatalError("if: expected at least two arguments");
-    DuObject *cond = Du_Eval(_DuCons_CAR(cons), locals);
-    int cond_int = DuObject_IsTrue(cond);
-    Du_DECREF(cond);
-    if (cond_int != 0) {
+
+    DuObject *expr = _DuCons_CAR(cons);
+    DuObject *next = _DuCons_NEXT(cons);
+
+    _du_save2(next, locals);
+    DuObject *cond = Du_Eval(expr, locals);
+    _du_restore2(next, locals);
+
+    _du_read1(next);
+    if (DuObject_IsTrue(cond) != 0) {
         /* true path */
-        return Du_Eval(_DuCons_CAR(_DuCons_NEXT(cons)), locals);
+        return Du_Eval(_DuCons_CAR(next), locals);
     }
     else {
         /* false path */
-        return Du_Progn(_DuCons_NEXT(_DuCons_NEXT(cons)), locals);
+        return Du_Progn(_DuCons_NEXT(next), locals);
     }
 }
 
@@ -412,63 +438,73 @@ DuObject *du_while(DuObject *cons, DuObject *locals)
 {
     if (cons == Du_None)
         Du_FatalError("while: expected at least one argument");
+
+    _du_read1(cons);
+    DuObject *expr = _DuCons_CAR(cons);
+    DuObject *next = _DuCons_NEXT(cons);
+
     while (1) {
-        DuObject *cond = Du_Eval(_DuCons_CAR(cons), locals);
-        int cond_int = DuObject_IsTrue(cond);
-        Du_DECREF(cond);
-        if (cond_int == 0)
+        _du_save3(expr, next, locals);
+        DuObject *cond = Du_Eval(expr, locals);
+        _du_restore3(expr, next, locals);
+
+        if (!DuObject_IsTrue(cond))
             break;
-        DuObject *res = Du_Progn(_DuCons_NEXT(cons), locals);
-        Du_DECREF(res);
+
+        _du_save3(expr, next, locals);
+        Du_Progn(next, locals);
+        _du_restore3(expr, next, locals);
     }
-    Du_INCREF(Du_None);
     return Du_None;
 }
 
 DuObject *du_defun(DuObject *cons, DuObject *locals)
 {
+    _du_read1(cons);
     if (cons == Du_None || _DuCons_NEXT(cons) == Du_None)
         Du_FatalError("defun: expected at least two arguments");
+
     DuObject *name = _DuCons_CAR(cons);
-    DuObject *arglist = _DuCons_CAR(_DuCons_NEXT(cons));
-    DuObject *progn = _DuCons_NEXT(_DuCons_NEXT(cons));
+    DuObject *next = _DuCons_NEXT(cons);
+
+    _du_read1(next);
+    DuObject *arglist = _DuCons_CAR(next);
+    DuObject *progn = _DuCons_NEXT(next);
+
     DuFrame_SetUserFunction(locals, name, arglist, progn);
-    Du_INCREF(Du_None);
+
     return Du_None;
 }
 
 DuObject *du_car(DuObject *cons, DuObject *locals)
 {
-    if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
-        Du_FatalError("car: expected one argument");
-    DuObject *obj = Du_Eval(_DuCons_CAR(cons), locals);
-    DuObject *res = DuCons_Car(obj);
-    Du_DECREF(obj);
-    return res;
+    DuObject *obj;
+    _du_getargs1("car", cons, locals, &obj);
+
+    return DuCons_Car(obj);
 }
 
 DuObject *du_cdr(DuObject *cons, DuObject *locals)
 {
-    if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
-        Du_FatalError("car: expected one argument");
-    DuObject *obj = Du_Eval(_DuCons_CAR(cons), locals);
-    DuObject *res = DuCons_Cdr(obj);
-    Du_DECREF(obj);
-    return res;
+    DuObject *obj;
+    _du_getargs1("cdr", cons, locals, &obj);
+
+    return DuCons_Cdr(obj);
 }
 
 DuObject *du_not(DuObject *cons, DuObject *locals)
 {
-    if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
-        Du_FatalError("not: expected one argument");
-    DuObject *obj = Du_Eval(_DuCons_CAR(cons), locals);
+    DuObject *obj;
+    _du_getargs1("not", cons, locals, &obj);
+
     int res = !DuObject_IsTrue(obj);
-    Du_DECREF(obj);
     return DuInt_FromInt(res);
 }
 
 DuObject *du_transaction(DuObject *cons, DuObject *locals)
 {
+    Du_FatalError("transaction: not implemented");
+#if 0
     if (cons == Du_None)
         Du_FatalError("transaction: expected at least one argument");
     DuObject *sym = _DuCons_CAR(cons);
@@ -476,61 +512,57 @@ DuObject *du_transaction(DuObject *cons, DuObject *locals)
     _DuFrame_EvalCall(locals, sym, rest, 0);
     Du_INCREF(Du_None);
     return Du_None;
+#endif
 }
 
 DuObject *du_sleepms(DuObject *cons, DuObject *locals)
 {
-    if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
-        Du_FatalError("sleepms: expected one argument");
-    DuObject *obj = Du_Eval(_DuCons_CAR(cons), locals);
+    DuObject *obj;
+    _du_getargs1("sleepms", cons, locals, &obj);
+
     int ms = DuInt_AsInt(obj);
-    Du_DECREF(obj);
 
     struct timeval t;
     t.tv_sec = ms / 1000;
     t.tv_usec = (ms % 1000) * 1000;
     select(0, (fd_set *)0, (fd_set *)0, (fd_set *)0, &t);
 
-    Du_INCREF(Du_None);
     return Du_None;
 }
 
 DuObject *du_defined(DuObject *cons, DuObject *locals)
 {
+    _du_read1(cons);
     if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
         Du_FatalError("defined?: expected one argument");
     DuObject *ob = _DuCons_CAR(cons);
+
+    _du_save1(ob);
     DuObject *res = DuFrame_GetSymbol(locals, ob);
+    _du_restore1(ob);
+
     if (res == NULL)
-        DuFrame_GetSymbol(Du_Globals, ob);
-    if (res != NULL)
-        Du_DECREF(res);
+        res = DuFrame_GetSymbol(Du_Globals, ob);
+
     return DuInt_FromInt(res != NULL);
 }
 
 DuObject *du_assert(DuObject *cons, DuObject *locals)
 {
-    if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
-        Du_FatalError("defined?: expected one argument");
-    DuObject *obj = Du_Eval(_DuCons_CAR(cons), locals);
+    DuObject *obj;
+    _du_getargs1("assert", cons, locals, &obj);
+
     if (!DuInt_AsInt(obj)) {
         printf("assert failed: ");
+        _du_read1(cons);
         Du_Print(_DuCons_CAR(cons), 1);
         Du_FatalError("assert failed");
     }
-    Du_DECREF(obj);
-    Du_INCREF(Du_None);
     return Du_None;
 }
 
-DuObject *Du_Globals;
-
 void Du_Initialize(void)
 {
-    _Du_AME_InitThreadDescriptor();
-    _Du_InitializeObjects();
-
-    Du_Globals = DuFrame_New();
     DuFrame_SetBuiltinMacro(Du_Globals, "progn", Du_Progn);
     DuFrame_SetBuiltinMacro(Du_Globals, "setq", du_setq);
     DuFrame_SetBuiltinMacro(Du_Globals, "print", du_print);
@@ -567,9 +599,4 @@ void Du_Initialize(void)
 
 void Du_Finalize(void)
 {
-    Du_DECREF(Du_Globals);
-    Du_Globals = NULL;
-
-    _Du_FinalizeObjects();
-    _Du_AME_FiniThreadDescriptor();
 }

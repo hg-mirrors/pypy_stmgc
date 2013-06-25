@@ -97,7 +97,7 @@ DuObject *DuContainer_New(DuObject *obj);
 DuObject *DuContainer_GetRef(DuObject *container);
 void DuContainer_SetRef(DuObject *container, DuObject *newobj);
 
-DuObject *DuSymbol_FromString(char *name);
+DuObject *DuSymbol_FromString(const char *name);
 char *DuSymbol_AsString(DuObject *ob);
 
 DuObject *DuCons_New(DuObject *car, DuObject *cdr);
@@ -123,10 +123,11 @@ void DuFrame_SetUserFunction(DuObject *frame, DuObject *symbol,
                              DuObject *arglist, DuObject *progn);
 DuObject *_DuFrame_EvalCall(DuObject *frame, DuObject *symbol,
                             DuObject *rest, int execute_now);
+DuObject *_Du_GetGlobals(void);
 
 void Du_Initialize(void);
 void Du_Finalize(void);
-extern DuObject *Du_Globals;
+#define Du_Globals        (_Du_GetGlobals())
 
 void Du_TransactionAdd(DuObject *code, DuObject *frame);
 void Du_TransactionRun(void);
