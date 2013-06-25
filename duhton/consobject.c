@@ -5,6 +5,13 @@ typedef struct {
     DuObject *car, *cdr;
 } DuConsObject;
 
+
+void cons_trace(DuConsObject *ob, void visit(gcptr *))
+{
+    visit(&ob->car);
+    visit(&ob->cdr);
+}
+
 void cons_print(DuConsObject *ob)
 {
     DuObject *p;
@@ -39,6 +46,7 @@ DuType DuCons_Type = {
     "cons",
     DUTYPE_CONS,
     sizeof(DuConsObject),
+    (trace_fn)cons_trace,
     (print_fn)cons_print,
     (eval_fn)cons_eval,
 };
