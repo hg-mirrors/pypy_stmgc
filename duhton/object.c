@@ -71,7 +71,7 @@ void Du_FatalError(char *msg, ...)
     vfprintf(stderr, msg, ap);
     fprintf(stderr, "\n");
     va_end(ap);
-    exit(1);
+    abort();
 }
 
 void Du_Print(DuObject *ob, int newline)

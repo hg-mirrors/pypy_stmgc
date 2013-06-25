@@ -34,9 +34,14 @@ typedef struct {
     DuFrameNodeObject *ob_nodes;
 } DuFrameObject;
 
+static DuFrameNodeObject du_empty_framenode = {
+    DuOBJECT_HEAD_INIT(DUTYPE_FRAMENODE),
+    0,
+};
+
 DuFrameObject Du_GlobalsFrame = {
     DuOBJECT_HEAD_INIT(DUTYPE_FRAME),
-    NULL,
+    &du_empty_framenode,
 };
 
 DuObject *_Du_GetGlobals()
@@ -47,7 +52,7 @@ DuObject *_Du_GetGlobals()
 DuObject *DuFrame_New()
 {
     DuFrameObject *ob = (DuFrameObject *)DuObject_New(&DuFrame_Type);
-    ob->ob_nodes = NULL;
+    ob->ob_nodes = &du_empty_framenode;
     return (DuObject *)ob;
 }
 
@@ -132,6 +137,7 @@ find_entry(DuFrameObject *frame, DuObject *symbol, int write_mode)
             newentries[i] = entries[i];
 
         DuSymbol_Ensure("find_entry", symbol);
+        newentries[left].symbol_id = search_id;
         newentries[left].symbol = symbol;
         newentries[left].value = NULL;
         newentries[left].builtin_macro = NULL;
@@ -164,30 +170,40 @@ static void
 _parse_arguments(DuObject *symbol, DuObject *arguments,
                  DuObject *formallist, DuObject *caller, DuObject *callee)
 {
-    abort();
-#if 0
     while (DuCons_Check(formallist)) {
         if (!DuCons_Check(arguments))
             Du_FatalError("call to '%s': not enough arguments",
                           DuSymbol_AsString(symbol));
+
+        _du_read1(arguments);
+        DuObject *arg = _DuCons_CAR(arguments);
+        DuObject *argumentsnext = _DuCons_NEXT(arguments);
+
+        _du_save3(symbol, argumentsnext, caller);
+        _du_save2(formallist, callee);
+        DuObject *obj = Du_Eval(arg, caller);
+        _du_restore2(formallist, callee);
+
+        _du_read1(formallist);
         DuObject *sym = _DuCons_CAR(formallist);
-        DuObject *obj = Du_Eval(_DuCons_CAR(arguments), caller);
+        DuObject *formallistnext = _DuCons_NEXT(formallist);
+
+        _du_save2(formallistnext, callee);
         DuFrame_SetSymbol(callee, sym, obj);
-        Du_DECREF(obj);
-        formallist = _DuCons_NEXT(formallist);
-        arguments = _DuCons_NEXT(arguments);
+        _du_restore2(formallistnext, callee);
+        _du_restore3(symbol, argumentsnext, caller);
+
+        formallist = formallistnext;
+        arguments = argumentsnext;
     }
     if (arguments != Du_None)
         Du_FatalError("call to '%s': too many arguments",
                       DuSymbol_AsString(symbol));
-#endif
 }
 
 DuObject *_DuFrame_EvalCall(DuObject *frame, DuObject *symbol,
                             DuObject *rest, int execute_now)
 {
-    stm_fatalerror("_DuFrame_EvalCall\n");
-#if 0
     struct dictentry *e;
     DuFrame_Ensure("_DuFrame_EvalCall", frame);
 
@@ -205,18 +221,24 @@ DuObject *_DuFrame_EvalCall(DuObject *frame, DuObject *symbol,
         }
     }
     if (e->func_progn) {
+        DuObject *func = e->func_progn;
+        _du_save1(func);
+        _du_save3(frame, symbol, rest);
         DuObject *callee_frame = DuFrame_New();
-        DuObject *res;
+        _du_restore3(frame, symbol, rest);
+
+        _du_save1(callee_frame);
         _parse_arguments(symbol, rest, e->func_arglist, frame, callee_frame);
+        _du_restore1(callee_frame);
+        _du_restore1(func);
+
         if (execute_now) {
-            res = Du_Progn(e->func_progn, callee_frame);
+            return Du_Progn(func, callee_frame);
         }
         else {
-            Du_TransactionAdd(e->func_progn, callee_frame);
-            res = NULL;
+            Du_TransactionAdd(func, callee_frame);
+            return NULL;
         }
-        Du_DECREF(callee_frame);
-        return res;
     }
     if (e->builtin_macro) {
         if (!execute_now)
@@ -227,63 +249,50 @@ DuObject *_DuFrame_EvalCall(DuObject *frame, DuObject *symbol,
  not_defined:
     Du_FatalError("symbol not defined as a function: '%s'",
                   DuSymbol_AsString(symbol));
-#endif
 }
 
 DuObject *DuFrame_GetSymbol(DuObject *frame, DuObject *symbol)
 {
-    stm_fatalerror("DuFrame_GetSymbol\n");
-#if 0
     struct dictentry *e;
     DuFrame_Ensure("DuFrame_GetSymbol", frame);
 
     e = find_entry((DuFrameObject *)frame, symbol, 0);
-    if (e && e->value) {
-        Du_INCREF(e->value);
-        return e->value;
-    }
-    else
-        return NULL;
-#endif
+    return e ? e->value : NULL;
 }
 
 void DuFrame_SetSymbol(DuObject *frame, DuObject *symbol, DuObject *value)
 {
-    stm_fatalerror("DuFrame_SetSymbol\n");
-#if 0
     struct dictentry *e;
     DuFrame_Ensure("DuFrame_SetSymbol", frame);
 
+    _du_save1(value);
     e = find_entry((DuFrameObject *)frame, symbol, 1);
-    if (e->value) Du_DECREF(e->value);
-    e->value = value; Du_INCREF(value);
-#endif
+    _du_restore1(value);
+
+    e->value = value;
 }
 
 void DuFrame_SetSymbolStr(DuObject *frame, char *name, DuObject *value)
 {
-    stm_fatalerror("DuFrame_SetSymbolStr\n");
-#if 0
+    _du_save2(frame, value);
     DuObject *sym = DuSymbol_FromString(name);
+    _du_restore2(frame, value);
+
     DuFrame_SetSymbol(frame, sym, value);
-    Du_DECREF(sym);
-#endif
 }
 
 void DuFrame_SetUserFunction(DuObject *frame, DuObject *symbol,
                              DuObject *arglist, DuObject *progn)
 {
-    stm_fatalerror("DuFrame_SetUserFunction\n");
-#if 0
     struct dictentry *e;
     DuFrame_Ensure("DuFrame_SetUserFunction", frame);
 
+    _du_save2(arglist, progn);
     e = find_entry((DuFrameObject *)frame, symbol, 1);
-    if (e->func_arglist) Du_DECREF(e->func_arglist);
-    if (e->func_progn)   Du_DECREF(e->func_progn);
-    e->func_arglist = arglist; Du_INCREF(arglist);
-    e->func_progn   = progn;   Du_INCREF(progn);
-#endif
+    _du_restore2(arglist, progn);
+
+    e->func_arglist = arglist;
+    e->func_progn = progn;
 }
 
 void DuFrame_Ensure(char *where, DuObject *ob)
