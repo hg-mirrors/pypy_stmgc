@@ -305,6 +305,7 @@ static gcptr _find_public_to_private(gcptr P)
 
 static void _check_flags(gcptr P)
 {
+#ifndef NDEBUG
   struct tx_descriptor *d = thread_descriptor;
   if (P->h_tid & GCFLAG_STUB)
     {
@@ -322,6 +323,7 @@ static void _check_flags(gcptr P)
       assert(is_old);
       dprintf(("O "));
     }
+#endif
 }
 
 gcptr _stm_nonrecord_barrier(gcptr P)
@@ -962,7 +964,6 @@ static void AcquireLocks(struct tx_descriptor *d)
 
 static void CancelLocks(struct tx_descriptor *d)
 {
-  revision_t my_lock = d->my_lock;
   wlog_t *item;
 
   if (!g2l_any_entry(&d->public_to_private))
@@ -984,7 +985,7 @@ static void CancelLocks(struct tx_descriptor *d)
 
       if (v == expected)
         {
-          assert(R->h_revision != my_lock);
+          assert(R->h_revision != d->my_lock);
           break;    /* done */
         }
 
@@ -993,7 +994,7 @@ static void CancelLocks(struct tx_descriptor *d)
 #ifdef DUMP_EXTRA
       dprintf(("%p->h_revision = %p (CancelLocks)\n", R, (gcptr)v));
 #endif
-      assert(R->h_revision == my_lock);
+      assert(R->h_revision == d->my_lock);
       ACCESS_ONCE(R->h_revision) = v;
 
     } G2L_LOOP_END;
