@@ -539,6 +539,7 @@ def id_with_stealing(a, b, c):
             assert not (p1.h_tid & GCFLAG_HAS_ID)
             
         r1w = lib.stm_write_barrier(r1)
+        lib.setptr(p1, 1, r1w)
         assert classify(r1w) == "private_from_protected"
         assert not (r1w.h_tid & GCFLAG_OLD)
         if c:

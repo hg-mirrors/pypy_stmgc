@@ -162,7 +162,7 @@ revision_t stm_id(gcptr p)
     else if (p->h_tid & GCFLAG_OLD) {
         /* old objects must have an h_original xOR be
            the original itself. */
-        /* dprintf(("stm_id(%p) is old, orig=0 fst: %p\n", p, p)); */
+        dprintf(("stm_id(%p) is old, orig=0 fst: %p\n", p, p));
         return (revision_t)p;
     }
     

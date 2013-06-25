@@ -2,7 +2,7 @@
 #define _SRCSTM_ATOMIC_OPS_
 
 #include <assert.h>
-
+#define IMPLIES(a, b)   (!(a) || (b))
 
 /* Ask the compiler to really reload the revision_t argument from memory.
    That's all that this macro does; it does not imply any type of barrier.
