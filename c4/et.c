@@ -1031,8 +1031,9 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       stub->h_tid = (L->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
                                                    | GCFLAG_STUB
                                                    | GCFLAG_OLD;
-      assert(!(L->h_tid & GCFLAG_HAS_ID));
       stub->h_revision = ((revision_t)L) | 2;
+
+      assert(!(L->h_tid & GCFLAG_HAS_ID));
       if (L->h_original) {
         stub->h_original = L->h_original;
       }
@@ -1040,8 +1041,14 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
         stub->h_original = (revision_t)L;
       }
       else {
-        L->h_original = (revision_t)stub;
+        /* There shouldn't be a public, young object without
+           a h_original. They only come from stealing which
+           always sets h_original */
         assert(0);
+        /* L->h_original = (revision_t)stub; */
+        /* if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) { */
+        /*   ((gcptr)L->h_revision)->h_original = (revision_t)stub; */
+        /* } */
       }
       
       item->val = stub;
@@ -1165,12 +1172,6 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
         {
           /* copy the backup copy B back over the now-protected object P,
              and then free B, which will not be used any more. */
-          assert(!(P->h_original) 
-                 || (B->h_original == (revision_t)P->h_original));
-          assert(!(P->h_original && !B->h_original));
-          if (P->h_original && !B->h_original) // might occur because of
-            B->h_original = P->h_original; //replace_ptr_to_protected_with_stub
-
           size_t size = stmcb_size(B);
           assert(B->h_tid & GCFLAG_BACKUP_COPY);
           memcpy(((char *)P) + offsetof(struct stm_object_s, h_revision),

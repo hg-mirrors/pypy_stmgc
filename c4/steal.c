@@ -53,7 +53,13 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
         stub->h_original = (revision_t)obj;
     }
     else {
-        obj->h_original = (revision_t)stub;
+        /* There shouldn't be a public, young object without
+           a h_original. But there can be protected ones. */
+        assert(!(obj->h_tid & GCFLAG_PUBLIC));
+        obj->h_original = (revision_t)stub;        
+        if (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
+            ((gcptr)obj->h_revision)->h_original = (revision_t)stub;
+        }
     }
 
     g2l_insert(&sd->all_stubs, obj, stub);
@@ -93,22 +99,22 @@ void stm_steal_stub(gcptr P)
     if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
         gcptr B = (gcptr)L->h_revision;     /* the backup copy */
         
-        if (L->h_original) {
-            /* L has an original, may be GCFLAG_HAS_ID */
-            B->h_original = L->h_original;
-            L->h_tid &= ~GCFLAG_HAS_ID;
-        }
-        else if (L->h_tid & GCFLAG_OLD) {
-            /* If old, it must be the original */
-            assert(!(L->h_tid & GCFLAG_HAS_ID));
-            /* original must be L */
+        /* On young objects here, h_original is always set
+         and never GCFLAG_HAS_ID. This is because a stealing
+         thread can only reach a priv_from_prot object through
+         public old stubs/objects that serve as originals if
+         needed.
+         If h_original is set, then it is already set in the
+         backup, too.
+        */
+        assert(!(L->h_tid & GCFLAG_HAS_ID));
+        assert(IMPLIES(!(L->h_tid & GCFLAG_OLD), L->h_original));
+        assert(IMPLIES(L->h_tid & GCFLAG_OLD,
+                       (B->h_original == (revision_t)L) 
+                       || (B->h_original == L->h_original)));
+        if (!L->h_original && L->h_tid & GCFLAG_OLD) {
+            /* If old, L must be the original */
             B->h_original = (revision_t)L;
-        }
-        else {
-            /* we can make the backup the "original"
-             since L hasn't decided yet */
-            L->h_original = (revision_t)B;
-            assert(0);
         }
 
         /* B is now a backup copy, i.e. a protected object, and we own
