@@ -14,6 +14,24 @@ DuType *Du_Types[_DUTYPE_TOTAL] = {
 };
 
 
+/* callback: get the size of an object */
+size_t stmcb_size(gcptr obj)
+{
+    if (_DuObject_TypeNum(obj) == DUTYPE_TUPLE)
+        return _DuTuple_ByteSize(obj);
+    else
+        return Du_TYPE(obj)->dt_size;
+}
+
+/* callback: trace the content of an object */
+void stmcb_trace(gcptr obj, void visit(gcptr *))
+{
+    trace_fn trace = Du_TYPE(obj)->dt_trace;
+    if (trace)
+        trace(obj, visit);
+}
+
+
 DuObject *DuObject_New(DuType *tp)
 {
     assert(tp->dt_size >= sizeof(DuObject));
@@ -36,6 +54,7 @@ DuType DuNone_Type = {
     "NoneType",
     DUTYPE_NONE,
     sizeof(DuObject),
+    (trace_fn)NULL,
     none_print,
     (eval_fn)NULL,
     none_is_true,

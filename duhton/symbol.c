@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdlib.h>
 #include "duhton.h"
 
 typedef struct _Du_Symbol {
@@ -12,6 +13,11 @@ static DuSymbolObject _Du_AllSymbols = {
     "",
     NULL};
 
+
+void symbol_trace(DuSymbolObject *ob, void visit(gcptr *))
+{
+    visit((gcptr *)&ob->next);
+}
 
 void symbol_print(DuSymbolObject *ob)
 {
@@ -39,6 +45,7 @@ DuType DuSymbol_Type = {
     "symbol",
     DUTYPE_SYMBOL,
     sizeof(DuSymbolObject),
+    (trace_fn)symbol_trace,
     (print_fn)symbol_print,
     (eval_fn)symbol_eval,
 };

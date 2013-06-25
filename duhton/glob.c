@@ -563,6 +563,8 @@ DuObject *du_assert(DuObject *cons, DuObject *locals)
 
 void Du_Initialize(void)
 {
+    stm_initialize();
+
     DuFrame_SetBuiltinMacro(Du_Globals, "progn", Du_Progn);
     DuFrame_SetBuiltinMacro(Du_Globals, "setq", du_setq);
     DuFrame_SetBuiltinMacro(Du_Globals, "print", du_print);
@@ -599,4 +601,5 @@ void Du_Initialize(void)
 
 void Du_Finalize(void)
 {
+    stm_finalize();
 }

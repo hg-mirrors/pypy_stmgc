@@ -17,6 +17,19 @@ typedef struct {
 } DuListObject;
 
 
+void tuple_trace(DuTupleObject *ob, void visit(gcptr *))
+{
+    int i;
+    for (i=ob->ob_count-1; i>=0; i--) {
+        visit(&ob->ob_items[i]);
+    }
+}
+
+void list_trace(DuListObject *ob, void visit(gcptr *))
+{
+    visit((gcptr *)&ob->ob_tuple);
+}
+
 void list_print(DuListObject *ob)
 {
     int i;
@@ -139,10 +152,28 @@ DuObject *DuList_Pop(DuObject *list, int index)
     return _list_pop((DuListObject *)list, index);
 }
 
+size_t _DuTuple_ByteSize(DuObject *tuple)
+{
+    DuTupleObject *t = (DuTupleObject *)tuple;
+    return sizeof(DuTupleObject) + (t->ob_count - 1) * sizeof(DuObject *);
+}
+
+DuType DuTuple_Type = {    /* "tuple" is mostly an internal type here */
+    "tuple",
+    DUTYPE_TUPLE,
+    0,    /* dt_size */
+    (trace_fn)tuple_trace,
+    (print_fn)NULL,
+    (eval_fn)NULL,
+    (len_fn)NULL,
+    (len_fn)NULL,
+};
+
 DuType DuList_Type = {
     "list",
     DUTYPE_LIST,
     sizeof(DuListObject),
+    (trace_fn)list_trace,
     (print_fn)list_print,
     (eval_fn)NULL,
     (len_fn)NULL,

@@ -2,6 +2,7 @@
 #define _DUHTON_H_
 
 #include "../c4/stmgc.h"
+#include "../c4/fprintcolor.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -21,6 +22,7 @@ typedef struct stm_object_s DuObject;
 #endif
 
 
+typedef void(*trace_fn)(DuObject *, void visit(gcptr *));
 typedef void(*print_fn)(DuObject *);
 typedef DuObject *(*eval_fn)(DuObject *, DuObject *);
 typedef int(*len_fn)(DuObject *);
@@ -29,6 +31,7 @@ typedef struct {
     const char *dt_name;
     int dt_typeindex;
     int dt_size;
+    trace_fn dt_trace;
     print_fn dt_print;
     eval_fn dt_eval;
     len_fn dt_is_true;
@@ -43,8 +46,9 @@ typedef struct {
 #define DUTYPE_LIST          5
 #define DUTYPE_TUPLE         6
 #define DUTYPE_FRAME         7
-#define DUTYPE_CONTAINER     8
-#define _DUTYPE_TOTAL        9
+#define DUTYPE_FRAMENODE     8
+#define DUTYPE_CONTAINER     9
+#define _DUTYPE_TOTAL       10
 
 extern DuType DuNone_Type;
 extern DuType DuInt_Type;
@@ -92,6 +96,7 @@ int DuList_Size(DuObject *list);
 DuObject *DuList_GetItem(DuObject *list, int index);
 void DuList_SetItem(DuObject *list, int index, DuObject *newobj);
 DuObject *DuList_Pop(DuObject *list, int index);
+size_t _DuTuple_ByteSize(DuObject *tuple);
 
 DuObject *DuContainer_New(DuObject *obj);
 DuObject *DuContainer_GetRef(DuObject *container);
