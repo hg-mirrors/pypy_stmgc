@@ -516,7 +516,8 @@ static void minor_collect(struct tx_descriptor *d)
     dprintf(("minor: nursery moved to [%p to %p]\n", d->nursery_base,
              d->nursery_end));
 #else
-    memset(d->nursery_base, 0, GC_NURSERY);
+    memset(d->nursery_base, 0,
+           d->nursery_current - d->nursery_base);
 #endif
     d->nursery_current = d->nursery_base;
 
