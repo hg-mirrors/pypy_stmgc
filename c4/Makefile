@@ -2,14 +2,16 @@
 # Makefile for the demos.
 #
 
-BUILD_EXE = build-demo1 build-demo2 build-demo_random
 DEBUG_EXE = debug-demo1 debug-demo2 debug-demo_random
+BUILD_EXE = build-demo1 build-demo2 build-demo_random
+RELEASE_EXE = release-demo1 release-demo2 release-demo_random
 
-build: $(BUILD_EXE)
-debug: $(DEBUG_EXE)
+debug: $(DEBUG_EXE)       # with prints and asserts
+build: $(BUILD_EXE)       # without prints, but with asserts
+release: $(RELEASE_EXE)   # without prints nor asserts
 
 clean:
-	rm -f $(BUILD_EXE) $(DEBUG_EXE)
+	rm -f $(BUILD_EXE) $(DEBUG_EXE) $(RELEASE_EXE)
 
 
 H_FILES = atomic_ops.h stmgc.h stmimpl.h \
@@ -28,6 +30,9 @@ build-%: %.c ${H_FILES} ${C_FILES} stmgc.c
 
 debug-%: %.c ${H_FILES} ${C_FILES}
 	gcc -lrt -pthread ${DEBUG} $< -o debug-$* -Wall ${C_FILES}
+
+release-%: %.c ${H_FILES} ${C_FILES} stmgc.c
+	gcc -lrt -pthread -DNDEBUG -O2 -g $< -o release-$* -Wall stmgc.c
 
 test-%:
 	./$* 2>/dev/null | grep "check ok"

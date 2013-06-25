@@ -21,12 +21,14 @@ void list_print(DuListObject *ob)
 {
     int i;
     _du_read1(ob);
-    if (ob->ob_count == 0) {
+
+    DuTupleObject *p = ob->ob_tuple;
+    _du_read1(p);
+
+    if (p->ob_count == 0) {
         printf("[]");
     }
     else {
-        DuTupleObject *p = ob->ob_tuple;
-        _du_read1(p);
         printf("[ ");
         for (i=0; i<p->ob_count; i++) {
             Du_Print(p->ob_items[i], 0);
@@ -63,8 +65,8 @@ void _list_append(DuListObject *ob, DuObject *x)
     DuTupleObject *newitems = DuTuple_New(newcount);
 
     for (i=0; i<newcount-1; i++)
-        newitems[i] = olditems[i];
-    newitems[newcount-1] = x;
+        newitems->ob_items[i] = olditems->ob_items[i];
+    newitems->ob_items[newcount-1] = x;
 
     ob->ob_tuple = newitems;
 }
@@ -124,6 +126,7 @@ DuObject *_list_pop(DuListObject *ob, int index)
     if (index < 0 || index >= p->ob_count)
         Du_FatalError("list_pop: index out of range");
     DuObject *result = p->ob_items[index];
+    int i;
     p->ob_count--;
     for (i=index; i<p->ob_count; i++)
         p->ob_items[i] = p->ob_items[i+1];
@@ -149,7 +152,7 @@ DuType DuList_Type = {
 static DuTupleObject du_empty_tuple = {
     DuOBJECT_HEAD_INIT(DUTYPE_TUPLE),
     0,
-}
+};
 
 DuObject *DuList_New()
 {

@@ -39,13 +39,17 @@ long stmgcpage_count(int quantity)
 void stmgcpage_acquire_global_lock(void)
 {
     int err = pthread_mutex_lock(&mutex_gc_lock);
-    assert(err == 0);
+    if (err != 0)
+        stm_fatalerror("stmgcpage_acquire_global_lock: "
+                       "pthread_mutex_lock() failure\n");
 }
 
 void stmgcpage_release_global_lock(void)
 {
     int err = pthread_mutex_unlock(&mutex_gc_lock);
-    assert(err == 0);
+    if (err != 0)
+        stm_fatalerror("stmgcpage_release_global_lock: "
+                       "pthread_mutex_unlock() failure\n");
 }
 
 
@@ -158,7 +162,9 @@ gcptr stmgcpage_malloc(size_t size)
     }
 }
 
+#ifndef NDEBUG
 static unsigned char random_char = 0x55;
+#endif
 
 void stmgcpage_free(gcptr obj)
 {
