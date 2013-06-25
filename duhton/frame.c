@@ -15,6 +15,17 @@ typedef struct {
     struct dictentry *entries;
 } DuFrameObject;
 
+DuFrameObject Du_GlobalsFrame = {
+    DuOBJECT_HEAD_INIT(DUTYPE_FRAME),
+    0,
+    NULL,
+};
+
+DuObject *_Du_GetGlobals()
+{
+    return (DuObject *)&Du_GlobalsFrame;
+}
+
 DuObject *DuFrame_New()
 {
     DuFrameObject *ob = (DuFrameObject *)DuObject_New(&DuFrame_Type);

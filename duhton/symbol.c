@@ -43,7 +43,7 @@ DuType DuSymbol_Type = {
     (eval_fn)symbol_eval,
 };
 
-DuObject *DuSymbol_FromString(char *name)
+DuObject *DuSymbol_FromString(const char *name)
 {
     DuSymbolObject *p, *head = &_Du_AllSymbols;
     for (p=head; p != NULL; p=p->next) {

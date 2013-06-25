@@ -1,7 +1,7 @@
 #include "duhton.h"
 
 
-void Du_TransactionAdd(DuObject *frame)
+void Du_TransactionAdd(DuObject *code, DuObject *frame)
 {
     /* XXX */
 }
