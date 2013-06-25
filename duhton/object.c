@@ -3,14 +3,16 @@
 
 
 DuType *Du_Types[_DUTYPE_TOTAL] = {
-    NULL,
-    &DuNone_Type,
-    &DuInt_Type,
-    &DuSymbol_Type,
-    &DuCons_Type,
-    &DuList_Type,
-    &DuFrame_Type,
-    &DuContainer_Type,
+    NULL,                  // DUTYPE_INVALID       0
+    &DuNone_Type,          // DUTYPE_NONE          1
+    &DuInt_Type,           // DUTYPE_INT           2
+    &DuSymbol_Type,        // DUTYPE_SYMBOL        3
+    &DuCons_Type,          // DUTYPE_CONS          4
+    &DuList_Type,          // DUTYPE_LIST          5
+    &DuTuple_Type,         // DUTYPE_TUPLE         6
+    &DuFrame_Type,         // DUTYPE_FRAME         7
+    &DuFrameNode_Type,     // DUTYPE_FRAMENODE     8
+    &DuContainer_Type,     // DUTYPE_CONTAINER     9
 };
 
 
