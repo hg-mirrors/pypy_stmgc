@@ -33,7 +33,9 @@ DuObject *_Du_Parse(FILE *f, int level, int stop_after_newline)
             goto done;
 
         case '(':
+            _du_save1(list);
             item = _Du_Parse(f, level + 1, 0);
+            _du_restore1(list);
             c = fgetc(f);
             break;
 
@@ -69,12 +71,14 @@ DuObject *_Du_Parse(FILE *f, int level, int stop_after_newline)
                 } while (!(isspace(c) || c == '(' || c == ')' || c == EOF));
                 *p = '\0';
                 number = strtol(token, &end, 0);
+                _du_save1(list);
                 if (*end == '\0') {
                     item = DuInt_FromInt(number);
                 }
                 else {
                     item = DuSymbol_FromString(token);
                 }
+                _du_restore1(list);
                 break;
             }
         }
