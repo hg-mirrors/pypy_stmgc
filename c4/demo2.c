@@ -97,23 +97,9 @@ int bubble_run(gcptr arg1, int retry_counter)
             r_current = (struct node*)stm_read_barrier((gcptr)r_next);
             r_next = (struct node*)stm_read_barrier((gcptr)tmp);
         }
-        // results from consecutive read_barriers can differ. needs Ptr_Eq()
-        int i = 0;
-        while (!(stm_read_barrier((gcptr)r_prev->next) ==
-                 stm_read_barrier((gcptr)r_current) &&
-                 stm_read_barrier((gcptr)r_current->next) ==
-                 stm_read_barrier((gcptr)r_next))) {
-            asm volatile ("pause":::"memory");  /* smp_spinloop() */
-            i++;
-            assert(i < 1000000);
-        }
-        // for now:
-        assert(((nodeptr)stm_read_barrier((gcptr)r_prev->next))->value 
-               == r_current->value
-               && 
-               ((nodeptr)stm_read_barrier((gcptr)r_current->next))->value
-               == r_next->value);
-        
+        assert(stm_pointer_equal((gcptr)r_prev->next, (gcptr)r_current));
+        assert(stm_pointer_equal((gcptr)r_current->next, (gcptr)r_next));
+
         r_prev = r_current;
         r_current = r_next;
         r_next = r_next->next;
