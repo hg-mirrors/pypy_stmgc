@@ -11,7 +11,11 @@
 #include "fprintcolor.h"
 
 
-#define UPPER_BOUND 100
+#ifdef _GC_DEBUG
+# define UPPER_BOUND 100
+#else
+# define UPPER_BOUND 5000
+#endif
 #define NUMTHREADS  4
 
 
@@ -134,7 +138,8 @@ void *demo1(void *arg)
     stm_finalize();
 
     status = sem_post(&done);
-    assert(status == 0);
+    if (status != 0)
+        stm_fatalerror("status != 0\n");
     return NULL;
 }
 
@@ -158,7 +163,8 @@ void newthread(void*(*func)(void*), void *arg)
 {
   pthread_t th;
   int status = pthread_create(&th, NULL, func, arg);
-  assert(status == 0);
+  if (status != 0)
+      stm_fatalerror("status != 0\n");
   pthread_detach(th);
   printf("started new thread\n");
 }
@@ -168,7 +174,8 @@ int main(void)
   int i, status;
 
   status = sem_init(&done, 0, 0);
-  assert(status == 0);
+  if (status != 0)
+      stm_fatalerror("status != 0\n");
 
   for (i = 0; i < NUMTHREADS; i++)
     newthread(demo1, NULL);
@@ -176,7 +183,8 @@ int main(void)
   for (i=0; i < NUMTHREADS; i++)
     {
       status = sem_wait(&done);
-      assert(status == 0);
+      if (status != 0)
+          stm_fatalerror("status != 0\n");
       printf("thread finished\n");
     }
 
