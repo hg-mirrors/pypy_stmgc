@@ -133,7 +133,8 @@ lib = ffi.verify(r'''
     int gettid(gcptr obj)
     {
         int result = stm_get_tid(obj);
-        assert(0 <= result && result < 521);
+        assert((0 <= result && result < 2000) ||
+               (42142 <= result && result < 42142 + 2000));
         return result;
     }
 
@@ -144,14 +145,14 @@ lib = ffi.verify(r'''
 
     gcptr rawgetptr(gcptr obj, long index)
     {
-        assert(gettid(obj) > 421 + index);
+        assert(gettid(obj) > 42142 + index);
         return ((gcptr *)(obj + 1))[index];
     }
 
     void rawsetptr(gcptr obj, long index, gcptr newvalue)
     {
         fprintf(stderr, "%p->[%ld] = %p\n", obj, index, newvalue);
-        assert(gettid(obj) > 421 + index);
+        assert(gettid(obj) > 42142 + index);
         ((gcptr *)(obj + 1))[index] = newvalue;
     }
 
@@ -249,13 +250,13 @@ lib = ffi.verify(r'''
 
     size_t stmcb_size(gcptr obj)
     {
-        if (gettid(obj) < 421) {
+        if (gettid(obj) < 42142) {
             /* basic case: tid equals 42 plus the size of the object */
             assert(gettid(obj) >= 42 + sizeof(struct stm_object_s));
             return gettid(obj) - 42;
         }
         else {
-            int nrefs = gettid(obj) - 421;
+            int nrefs = gettid(obj) - 42142;
             assert(nrefs < 100);
             return sizeof(*obj) + nrefs * sizeof(gcptr);
         }
@@ -264,11 +265,11 @@ lib = ffi.verify(r'''
     void stmcb_trace(gcptr obj, void visit(gcptr *))
     {
         int i;
-        if (gettid(obj) < 421) {
+        if (gettid(obj) < 42142) {
             /* basic case: no references */
             return;
         }
-        for (i=0; i < gettid(obj) - 421; i++) {
+        for (i=0; i < gettid(obj) - 42142; i++) {
             gcptr *ref = ((gcptr *)(obj + 1)) + i;
             visit(ref);
         }
@@ -459,7 +460,7 @@ def oalloc_refs(nrefs):
     p = lib.stmgcpage_malloc(HDR + WORD * nrefs)
     p.h_tid = GCFLAG_OLD | GCFLAG_WRITE_BARRIER
     p.h_revision = -sys.maxint
-    lib.settid(p, 421 + nrefs)
+    lib.settid(p, 42142 + nrefs)
     for i in range(nrefs):
         rawsetptr(p, i, ffi.NULL)
     return p
@@ -475,7 +476,7 @@ def nalloc(size):
 
 def nalloc_refs(nrefs):
     "Allocate a fresh object from the nursery, with nrefs pointers"
-    p = lib.stm_allocate(HDR + WORD * nrefs, 421 + nrefs)
+    p = lib.stm_allocate(HDR + WORD * nrefs, 42142 + nrefs)
     assert p.h_revision == lib.get_private_rev_num()
     for i in range(nrefs):
         assert rawgetptr(p, i) == ffi.NULL   # must already be zero-filled
@@ -493,10 +494,10 @@ def palloc(size, prehash=None):
 def palloc_refs(nrefs, prehash=None):
     "Get a ``prebuilt'' object with nrefs pointers."
     if prehash is None:
-        p = lib.pseudoprebuilt(HDR + WORD * nrefs, 421 + nrefs)
+        p = lib.pseudoprebuilt(HDR + WORD * nrefs, 42142 + nrefs)
     else:
         p = lib.pseudoprebuilt_with_hash(HDR + WORD * nrefs,
-                                         421 + nrefs, prehash)
+                                         42142 + nrefs, prehash)
     return p
 
 gettid = lib.gettid
@@ -518,7 +519,8 @@ def is_stub(p):
 
 def check_not_free(p):
     #print >> sys.stderr, "[checking %r..." % p,
-    assert 42 < (p.h_tid & 0xFFFF) < 521
+    assert ((42 < (p.h_tid & 0xFFFF) < 2000) or
+            (42142 <= (p.h_tid & 0xFFFF) < 42142 + 2000))
     #print >> sys.stderr, "ok]"
 
 def check_nursery_free(p):
@@ -539,7 +541,7 @@ def check_free_explicitly(p):
         DEBUG_WORD(0x55), DEBUG_WORD(0xAA))
 
 def check_prebuilt(p):
-    assert 42 < (p.h_tid & 0xFFFF) < 521
+    check_not_free(p)
     assert p.h_tid & GCFLAG_PREBUILT_ORIGINAL
 
 def delegate(p1, p2):
