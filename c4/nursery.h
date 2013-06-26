@@ -45,5 +45,7 @@ void stmgc_minor_collect_no_abort(void);
 int stmgc_minor_collect_anything_to_do(struct tx_descriptor *);
 gcptr stmgc_duplicate(gcptr);
 gcptr stmgc_duplicate_old(gcptr);
+size_t stmgc_size(gcptr);
+void stmgc_trace(gcptr, void visit(gcptr *));
 
 #endif

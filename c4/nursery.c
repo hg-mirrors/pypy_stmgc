@@ -6,6 +6,18 @@ static int is_in_nursery(struct tx_descriptor *d, gcptr obj)
     return (d->nursery_base <= (char*)obj && ((char*)obj) < d->nursery_end);
 }
 
+size_t stmgc_size(gcptr obj)
+{
+    assert(!(obj->h_tid & GCFLAG_STUB));
+    return stmcb_size(obj);
+}
+
+void stmgc_trace(gcptr obj, void visit(gcptr *))
+{
+    assert(!(obj->h_tid & GCFLAG_STUB));
+    stmcb_trace(obj, visit);
+}
+
 /************************************************************/
 
 void stmgc_init_nursery(void)
@@ -65,7 +77,7 @@ gcptr stm_allocate(size_t size, unsigned long tid)
 
 gcptr stmgc_duplicate(gcptr P)
 {
-    size_t size = stmcb_size(P);
+    size_t size = stmgc_size(P);
     gcptr L = (gcptr)allocate_nursery(size, 0);
     if (L == NULL)
         return stmgc_duplicate_old(P);
@@ -79,7 +91,7 @@ gcptr stmgc_duplicate(gcptr P)
 
 gcptr stmgc_duplicate_old(gcptr P)
 {
-    size_t size = stmcb_size(P);
+    size_t size = stmgc_size(P);
     gcptr L = (gcptr)stmgcpage_malloc(size);
     memcpy(L, P, size);
     L->h_tid |= GCFLAG_OLD;
@@ -237,7 +249,7 @@ inline void copy_to_old_id_copy(gcptr obj, gcptr id)
     assert(!is_in_nursery(thread_descriptor, id));
     assert(id->h_tid & GCFLAG_OLD);
 
-    size_t size = stmcb_size(obj);
+    size_t size = stmgc_size(obj);
     memcpy(id, obj, size);
     id->h_tid &= ~GCFLAG_HAS_ID;
     id->h_tid |= GCFLAG_OLD;
@@ -311,7 +323,7 @@ static void mark_private_from_protected(struct tx_descriptor *d)
 
         visit_if_young(&items[i]);
 
-        stmcb_trace((gcptr)items[i]->h_revision, &visit_if_young);
+        stmgc_trace((gcptr)items[i]->h_revision, &visit_if_young);
     }
 
     d->num_private_from_protected_known_old = size;
@@ -428,7 +440,7 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
         assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
         obj->h_tid |= GCFLAG_WRITE_BARRIER;
 
-        stmcb_trace(obj, &visit_if_young);
+        stmgc_trace(obj, &visit_if_young);
     }
 }
 

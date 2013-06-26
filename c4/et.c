@@ -1177,7 +1177,7 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
         {
           /* copy the backup copy B back over the now-protected object P,
              and then free B, which will not be used any more. */
-          size_t size = stmcb_size(B);
+          size_t size = stmgc_size(B);
           assert(B->h_tid & GCFLAG_BACKUP_COPY);
           memcpy(((char *)P) + offsetof(struct stm_object_s, h_revision),
                  ((char *)B) + offsetof(struct stm_object_s, h_revision),

@@ -224,7 +224,7 @@ void stm_steal_stub(gcptr P)
     sd.foreign_pd = foreign_pd;
     memset(&sd.all_stubs, 0, sizeof(sd.all_stubs));
     steal_data = &sd;
-    stmcb_trace(L, &replace_ptr_to_protected_with_stub);
+    stmgc_trace(L, &replace_ptr_to_protected_with_stub);
     g2l_delete_not_used_any_more(&sd.all_stubs);
 
     /* If another thread (the foreign or a 3rd party) does a read
