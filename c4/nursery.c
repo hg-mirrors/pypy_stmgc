@@ -24,8 +24,6 @@ void stmgc_init_nursery(void)
 {
     struct tx_descriptor *d = thread_descriptor;
 
-    assert(GC_NURSERY % GC_NURSERY_SECTION == 0);
-
     assert(d->nursery_base == NULL);
     d->nursery_base = stm_malloc(GC_NURSERY);       /* start of nursery */
     d->nursery_end = d->nursery_base + GC_NURSERY;  /* end of nursery */
