@@ -62,10 +62,10 @@ typedef struct page_header_s {
     /* For statistics */                                                \
     size_t count_pages;                                                 \
                                                                         \
-    /* Set to 1 when a major collection shuts down a                    \
-       public_descriptor after the corresponding thread was             \
-       already finished */                                              \
-    int shutdown;
+    /* A set of all non-small objects (outside the nursery).            \
+       We could also have a single global set, but this avoids          \
+       locking in stmgcpage_malloc/free. */                             \
+    struct G2L nonsmall_objects;
 
 
 #define LOCAL_GCPAGES()  (thread_descriptor->public_descriptor)

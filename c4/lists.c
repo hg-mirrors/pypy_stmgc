@@ -116,6 +116,17 @@ void g2l_insert(struct G2L *g2l, gcptr addr, gcptr val)
   *(char **)p = (char *)wlog;
 }
 
+void g2l_delete_item(struct G2L *g2l, gcptr addr)
+{
+    wlog_t *entry;
+    G2L_FIND(*g2l, addr, entry, goto missing);
+    g2l_mark_as_deleted(entry);
+    return;
+
+ missing:
+    stm_fatalerror("g2l_delete_item: item %p not in dict", addr);
+}
+
 /************************************************************/
 
 void gcptrlist_delete(struct GcPtrList *gcptrlist)

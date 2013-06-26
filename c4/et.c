@@ -1494,7 +1494,6 @@ int DescriptorInit(void)
           assert(descriptor_array_free_list >= 0);
           assert(pd->stolen_objects.size == 0);
           assert(pd->stolen_young_stubs.size == 0);
-          pd->shutdown = 0;
           /* there may be a thread holding the collection lock
              because it steals a stub belonging to the thread
              that previously owned this descriptor.

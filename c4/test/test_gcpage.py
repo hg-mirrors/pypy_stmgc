@@ -424,3 +424,17 @@ def test_big_old_object_free():
     assert p1b == p1
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
+
+def test_big_old_object_collect():
+    p1 = oalloc(HDR + 50 * WORD)
+    lib.stm_push_root(p1)
+    major_collect()
+    p1b = lib.stm_pop_root()
+    assert p1b == p1
+    check_not_free(p1)
+    #
+    major_collect()
+    check_free_old(p1)
+    #
+    major_collect()
+    check_free_old(p1)

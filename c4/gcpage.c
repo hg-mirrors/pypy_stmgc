@@ -156,9 +156,10 @@ gcptr stmgcpage_malloc(size_t size)
     /* Allocates an object of the given 'size'.  This will never run
        a collection: you need to call stmgcpage_possibly_major_collect(0)
        when you know you're at a safe point. */
+    struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
+
     if (size <= GC_SMALL_REQUEST_THRESHOLD) {
         gcptr result;
-        struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
         int size_class = (size + WORD - 1) / WORD;
         assert(0 < size_class && size_class < GC_SMALL_REQUESTS);
 
@@ -175,6 +176,7 @@ gcptr stmgcpage_malloc(size_t size)
     else {
         gcptr result = (gcptr)alloc_tracked_memory(size);
         dprintf(("stmgcpage_malloc(BIG %zu): %p\n", size, result));
+        g2l_insert(&gcp->nonsmall_objects, result, result);
         return result;
     }
 }
@@ -186,8 +188,9 @@ static unsigned char random_char = 0x55;
 void stmgcpage_free(gcptr obj)
 {
     size_t size = stmgc_size(obj);
+    struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
+
     if (size <= GC_SMALL_REQUEST_THRESHOLD) {
-        struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
         int size_class = (size + WORD - 1) / WORD;
         assert(0 < size_class && size_class < GC_SMALL_REQUESTS);
 
@@ -199,7 +202,8 @@ void stmgcpage_free(gcptr obj)
         //stm_dbgmem_not_used(obj, size_class * WORD, 0);
     }
     else {
-        stm_free(obj, stmgc_size(obj));
+        g2l_delete_item(&gcp->nonsmall_objects, obj);
+        stm_free(obj, size);
     }
 }
 
@@ -475,17 +479,17 @@ static void clean_up_lists_of_read_objects_and_fix_outdated_flags(void)
 
 /***** Major collections: sweeping *****/
 
-static void sweep_pages(struct tx_public_descriptor *gcp, int size_class,
-                        page_header_t *lpage)
+static void sweep_pages(struct tx_public_descriptor *gcp, int size_class)
 {
     int objs_per_page = nblocks_for_size[size_class];
     revision_t obj_size = size_class * WORD;
-    gcptr freelist = gcp->free_loc_for_size[size_class];
-    page_header_t *lpagenext;
+    gcptr freelist = NULL;
+    page_header_t *lpage, *lpagenext;
+    page_header_t *surviving_pages = NULL;
     int j;
     gcptr p;
 
-    for (; lpage; lpage = lpagenext) {
+    for (lpage = gcp->pages_for_size[size_class]; lpage; lpage = lpagenext) {
         lpagenext = lpage->next_page;
         /* sweep 'page': any object with GCFLAG_VISITED stays alive
            and the flag is removed; other locations are marked as free. */
@@ -497,8 +501,8 @@ static void sweep_pages(struct tx_public_descriptor *gcp, int size_class,
         }
         if (j < objs_per_page) {
             /* the page contains at least one object that stays alive */
-            lpage->next_page = gcp->pages_for_size[size_class];
-            gcp->pages_for_size[size_class] = lpage;
+            lpage->next_page = surviving_pages;
+            surviving_pages = lpage;
             p = (gcptr)(lpage + 1);
             for (j = 0; j < objs_per_page; j++) {
                 if (p->h_tid & GCFLAG_VISITED) {
@@ -541,19 +545,15 @@ static void sweep_pages(struct tx_public_descriptor *gcp, int size_class,
             count_global_pages--;
         }
     }
+    gcp->pages_for_size[size_class] = surviving_pages;
     gcp->free_loc_for_size[size_class] = freelist;
 }
 
 static void free_unused_local_pages(struct tx_public_descriptor *gcp)
 {
     int i;
-    page_header_t *lpage;
-
     for (i = 1; i < GC_SMALL_REQUESTS; i++) {
-        lpage = gcp->pages_for_size[i];
-        gcp->pages_for_size[i] = NULL;
-        gcp->free_loc_for_size[i] = NULL;
-        sweep_pages(gcp, i, lpage);
+        sweep_pages(gcp, i);
     }
 }
 
@@ -568,20 +568,14 @@ static void free_all_unused_local_pages(void)
 static void free_closed_thread_descriptors(void)
 {
     int i;
-    page_header_t *gpage;
     struct tx_public_descriptor *gcp;
     revision_t index = -1;
 
     while ((gcp = stm_get_free_public_descriptor(&index)) != NULL) {
-        if (gcp->shutdown)
-            continue;
 
-        for (i = 1; i < GC_SMALL_REQUESTS; i++) {
-            gpage = gcp->pages_for_size[i];
-            sweep_pages(gcp, i, gpage);
-        }
+        free_unused_local_pages(gcp);
+
         assert(gcp->collection_lock == 0);
-        gcp->shutdown = 1;
         assert(gcp->stolen_objects.size == 0);
         assert(gcp->stolen_young_stubs.size == 0);
         gcptrlist_delete(&gcp->stolen_objects);
