@@ -129,6 +129,20 @@ void gcptrlist_delete(struct GcPtrList *gcptrlist)
   gcptrlist->alloc = 0;
 }
 
+void gcptrlist_compress(struct GcPtrList *gcptrlist)
+{
+  if (gcptrlist->alloc <= gcptrlist->size + 64)
+    return;
+
+  size_t nsize = gcptrlist->size * sizeof(gcptr);
+  gcptr *newitems = realloc(gcptrlist->items, nsize);
+  if (newitems != NULL || nsize == 0)
+    {
+      gcptrlist->items = newitems;
+      gcptrlist->alloc = gcptrlist->size;
+    }
+}
+
 void _gcptrlist_grow(struct GcPtrList *gcptrlist)
 {
   long newalloc = gcptrlist->alloc + (gcptrlist->alloc >> 1) + 64;

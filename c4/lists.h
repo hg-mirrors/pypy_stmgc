@@ -130,6 +130,7 @@ static inline void gcptrlist_clear(struct GcPtrList *gcptrlist) {
 }
 
 void gcptrlist_delete(struct GcPtrList *gcptrlist);
+void gcptrlist_compress(struct GcPtrList *gcptrlist);
 void _gcptrlist_grow(struct GcPtrList *gcptrlist);
 void gcptrlist_insert2(struct GcPtrList *gcptrlist, gcptr newitem1,
                        gcptr newitem2);
