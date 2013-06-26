@@ -456,6 +456,12 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
             assert(!(items[i]->h_tid & GCFLAG_STUB));
             continue;
         }
+        /* Sanity check: a nursery object without the NURSERY_MOVED flag
+           is necessarily a private-without-backup object, or a protected
+           object; it cannot be a public object. */
+        assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+        assert(!(obj->h_tid & GCFLAG_PUBLIC));
+        assert(!IS_POINTER(obj->h_revision));
         /* The listed object was not visited.  Unlist it. */
         items[i] = items[--d->list_of_read_objects.size];
     }
