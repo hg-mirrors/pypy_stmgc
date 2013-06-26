@@ -1,4 +1,4 @@
-import py
+import py, re
 import os, subprocess
 from cStringIO import StringIO
 
@@ -18,9 +18,12 @@ def _do(cmdargs, stdin=''):
     if exitcode:
         raise OSError("%r failed (exit code %r)\n" % (cmdargs[0], exitcode) +
                       error.rstrip())
-    if error:
+    if filter_out_colored_output(error):
         raise OSError("%r got on stderr:\n" % (cmdargs[0],) + error.rstrip())
     return result
+
+def filter_out_colored_output(text):
+    return re.sub('\x1b\\[3.m[\w\W]*?\x1b\\[0m', '', text)
 
 
 def execute(argv, stdin=''):

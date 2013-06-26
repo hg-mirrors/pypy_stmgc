@@ -106,11 +106,13 @@ find_entry(DuFrameObject *frame, DuObject *symbol, int write_mode)
     struct dictentry *entries = ob->ob_items;
     revision_t search_id = stm_id(symbol);
 
+#if 0
 #ifdef _GC_DEBUG
     int j;
     for (j = 0; j < right; j++) {
         dprintf(("\t%p\n", (gcptr)entries[j].symbol_id));
     }
+#endif
 #endif
 
     while (right > left) {
