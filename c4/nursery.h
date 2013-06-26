@@ -2,7 +2,7 @@
 #define _SRCSTM_NURSERY_H
 
 #ifndef GC_NURSERY
-#define GC_NURSERY        4194304    /* 4 MB */
+#define GC_NURSERY        4190208    /* 4 MB - 4 kb */
 //#define GC_NURSERY        (1<<20)    /* 1 MB */
 #endif
 
@@ -12,6 +12,10 @@
 # else
 #  define GC_NURSERY_SECTION    (GC_NURSERY / 2)
 # endif
+#endif
+
+#if GC_NURSERY % GC_NURSERY_SECTION != 0
+# error "GC_NURSERY must be a multiple of GC_NURSERY_SECTION"
 #endif
 
 
