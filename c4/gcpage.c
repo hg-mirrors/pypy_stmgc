@@ -552,9 +552,24 @@ static void sweep_pages(struct tx_public_descriptor *gcp, int size_class)
 static void free_unused_local_pages(struct tx_public_descriptor *gcp)
 {
     int i;
+    wlog_t *item;
+
     for (i = 1; i < GC_SMALL_REQUESTS; i++) {
         sweep_pages(gcp, i);
     }
+
+    G2L_LOOP_FORWARD(gcp->nonsmall_objects, item) {
+
+        gcptr p = item->addr;
+        if (p->h_tid & GCFLAG_VISITED) {
+            p->h_tid &= ~GCFLAG_VISITED;
+        }
+        else {
+            g2l_mark_as_deleted(item);
+            stm_free(p, stmgc_size(p));
+        }
+
+    } G2L_LOOP_END;
 }
 
 static void free_all_unused_local_pages(void)
@@ -567,7 +582,6 @@ static void free_all_unused_local_pages(void)
 
 static void free_closed_thread_descriptors(void)
 {
-    int i;
     struct tx_public_descriptor *gcp;
     revision_t index = -1;
 
