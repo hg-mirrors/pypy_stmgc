@@ -586,10 +586,7 @@ gcptr stm_WriteBarrier(gcptr P)
       assert(is_private(W));
 
       if (W->h_tid & GCFLAG_OLD)
-        {
-          W->h_tid |= GCFLAG_WRITE_BARRIER;
-          record_write_barrier(W);
-        }
+        gcptrlist_insert(&d->old_objects_to_trace, W);
       else
         gcptrlist_insert(&d->public_with_young_copy, R);
     }

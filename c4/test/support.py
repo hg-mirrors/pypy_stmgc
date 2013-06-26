@@ -1,5 +1,10 @@
 import os, cffi, thread, sys
 
+if sys.maxint > 2**32:
+    WORD = 8
+else:
+    WORD = 4
+
 # ----------
 
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -103,6 +108,7 @@ ffi.cdef('''
     /* some constants normally private that are useful in the tests */
     #define WORD                     ...
     #define GC_PAGE_SIZE             ...
+    #define GC_NURSERY_SECTION       ...
     #define GCFLAG_OLD               ...
     #define GCFLAG_VISITED           ...
     #define GCFLAG_PUBLIC            ...
@@ -276,7 +282,7 @@ lib = ffi.verify(r'''
     }
 '''.lstrip(),    include_dirs=[parent_dir],
                  undef_macros=['NDEBUG'],
-                 define_macros=[('GC_NURSERY', '(16 * sizeof(void *))'),
+                 define_macros=[('GC_NURSERY', str(16 * WORD)),
                                 ('_GC_DEBUG', '2'),
                                 ('GC_PAGE_SIZE', '1000'),
                                 ('GC_MIN', '200000'),
@@ -288,7 +294,7 @@ lib = ffi.verify(r'''
                  extra_compile_args=['-g', '-O0'])
 
 HDR = ffi.sizeof("struct stm_object_s")
-WORD = lib.WORD
+assert WORD == lib.WORD
 PAGE_ROOM = lib.GC_PAGE_SIZE - ffi.sizeof("page_header_t")
 for name in lib.__dict__:
     if name.startswith('GCFLAG_') or name.startswith('PREBUILT_'):
@@ -470,7 +476,10 @@ ofree = lib.stmgcpage_free
 def nalloc(size):
     "Allocate a fresh object from the nursery"
     p = lib.stm_allocate(size, 42 + size)
-    assert p.h_tid == 42 + size     # no GC flags
+    if size <= lib.GC_NURSERY_SECTION:
+        assert p.h_tid == 42 + size     # no GC flags
+    else:
+        assert p.h_tid == 42 + size + GCFLAG_OLD
     assert p.h_revision == lib.get_private_rev_num()
     return p
 
