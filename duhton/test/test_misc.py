@@ -2,12 +2,12 @@ from support import run, evaluate
 
 
 def test_type():
-    assert run("(print (type 42))") == "<type 'int'>\n"
-    assert run("(print (type (+ 40 2)))") == "<type 'int'>\n"
+    assert run("(print (type 42))") == "'int'\n"
+    assert run("(print (type (+ 40 2)))") == "'int'\n"
 
 def test_quote():
     assert run("(print (quote (+ 40 2)))") == "( '+' 40 2 )\n"
-    assert run("(print (type (quote (+ 40 2))))") == "<type 'cons'>\n"
+    assert run("(print (type (quote (+ 40 2))))") == "'cons'\n"
 
 def test_if():
     assert evaluate("(if 5 6 7)") == 6
