@@ -6,10 +6,19 @@
 //#define GC_NURSERY        (1<<20)    /* 1 MB */
 #endif
 
+#ifndef GC_NURSERY_SECTION
+# if GC_NURSERY >= 2 * 135168
+#  define GC_NURSERY_SECTION    135168
+# else
+#  define GC_NURSERY_SECTION    (GC_NURSERY / 2)
+# endif
+#endif
+
 
 #define NURSERY_FIELDS_DECL                                             \
     /* the nursery */                                                   \
     char *nursery_current;                                              \
+    char *nursery_nextlimit;                                            \
     char *nursery_end;                                                  \
     char *nursery_base;                                                 \
                                                                         \

@@ -296,3 +296,8 @@ def test_backup_ptr_update():
     assert not lib.in_nursery(p1)
     p2 = lib.getptr(p1, 0)
     assert lib.getlong(p2, 0) == 389719
+
+def test_nalloc_large_object():
+    for words in range(80):
+        p1 = nalloc(HDR + words * WORD)
+    # assert did not crash
