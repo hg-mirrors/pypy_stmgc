@@ -413,3 +413,14 @@ def test_prebuilt_modified_later():
     lib.stm_pop_root()
     p1b = lib.stm_read_barrier(p1)
     check_not_free(p1b)
+
+def test_big_old_object():
+    p1 = oalloc(HDR + 50 * WORD)
+    # assert did not crash
+
+def test_big_old_object_free():
+    p1 = oalloc(HDR + 50 * WORD)
+    p1b = lib.stm_write_barrier(p1)
+    assert p1b == p1
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
