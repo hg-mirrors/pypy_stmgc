@@ -88,25 +88,39 @@ void stmgcpage_reduce_threshold(size_t size)
     revision_t next, target;
  restart:
     next = ACCESS_ONCE(countdown_next_major_coll);
-    if (next >= size)
+    if (next >= size) {
         target = next - size;
-    else
+    }
+    else {
+        /* we cannot do right now a major collection, but we can speed up
+           the time of the next minor collection (which will be followed
+           by a major collection) */
         target = 0;
+        stmgc_minor_collect_soon();
+    }
     if (!bool_cas(&countdown_next_major_coll, next, target))
         goto restart;
 }
 
-static gcptr allocate_new_page(int size_class)
+static char *alloc_tracked_memory(size_t size)
 {
     /* Adjust the threshold; the caller is responsible for detecting the
        condition that the threshold reached 0. */
-    stmgcpage_reduce_threshold(GC_PAGE_SIZE);
+    stmgcpage_reduce_threshold(size);
 
-    /* Allocate and return a new page for the given size_class. */
-    page_header_t *page = (page_header_t *)stm_malloc(GC_PAGE_SIZE);
-    if (!page) {
-        stm_fatalerror("allocate_new_page: out of memory!\n");
+    char *result = stm_malloc(size);
+    if (!result) {
+        stm_fatalerror("alloc_tracked_memory: out of memory "
+                       "allocating %zu bytes\n", size);
     }
+    return result;
+}
+
+static gcptr allocate_new_page(int size_class)
+{
+    /* Allocate and return a new page for the given size_class. */
+    page_header_t *page = (page_header_t *)alloc_tracked_memory(GC_PAGE_SIZE);
+
     struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
     gcp->count_pages++;
     count_global_pages++;
@@ -155,11 +169,13 @@ gcptr stmgcpage_malloc(size_t size)
         }
         gcp->free_loc_for_size[size_class] = (gcptr)result->h_revision;
         //stm_dbgmem_used_again(result, size_class * WORD, 0);
-        dprintf(("stmgcpage_malloc(%ld): %p\n", (long)size, result));
+        dprintf(("stmgcpage_malloc(%zu): %p\n", size, result));
         return result;
     }
     else {
-        stm_fatalerror("XXX stmgcpage_malloc: too big!\n");
+        gcptr result = (gcptr)alloc_tracked_memory(size);
+        dprintf(("stmgcpage_malloc(BIG %zu): %p\n", size, result));
+        return result;
     }
 }
 
@@ -183,7 +199,7 @@ void stmgcpage_free(gcptr obj)
         //stm_dbgmem_not_used(obj, size_class * WORD, 0);
     }
     else {
-        stm_fatalerror("XXX stmgcpage_free: too big!\n");
+        stm_free(obj, stmgc_size(obj));
     }
 }
 

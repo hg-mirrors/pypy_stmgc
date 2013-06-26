@@ -44,6 +44,12 @@ void stmgc_done_nursery(void)
     gcptrlist_delete(&d->public_with_young_copy);
 }
 
+void stmgc_minor_collect_soon(void)
+{
+    struct tx_descriptor *d = thread_descriptor;
+    d->nursery_current = d->nursery_end;
+}
+
 static char *collect_and_allocate_size(size_t size);  /* forward */
 
 inline static char *allocate_nursery(size_t size, int can_collect)

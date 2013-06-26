@@ -60,7 +60,8 @@ void *stm_malloc(size_t sz)
     for (i = 0; i < nb_pages; i++)
         accessible_pages[base + i] = 42;
 
-    dprintf(("stm_malloc(%ld): %p\n", (long)sz, result));
+    dprintf(("stm_malloc(%zu): %p\n", sz, result));
+    assert(((intptr_t)(result + sz) & (PAGE_SIZE-1)) == 0);
     return result;
 }
 
