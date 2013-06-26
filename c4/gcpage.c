@@ -155,6 +155,7 @@ gcptr stmgcpage_malloc(size_t size)
         }
         gcp->free_loc_for_size[size_class] = (gcptr)result->h_revision;
         //stm_dbgmem_used_again(result, size_class * WORD, 0);
+        dprintf(("stmgcpage_malloc(%ld): %p\n", (long)size, result));
         return result;
     }
     else {
@@ -168,7 +169,7 @@ static unsigned char random_char = 0x55;
 
 void stmgcpage_free(gcptr obj)
 {
-    size_t size = stmcb_size(obj);
+    size_t size = stmgc_size(obj);
     if (size <= GC_SMALL_REQUEST_THRESHOLD) {
         struct tx_public_descriptor *gcp = LOCAL_GCPAGES();
         int size_class = (size + WORD - 1) / WORD;
@@ -272,7 +273,7 @@ static void visit_all_objects(void)
 {
     while (gcptrlist_size(&objects_to_trace) > 0) {
         gcptr obj = gcptrlist_pop(&objects_to_trace);
-        stmcb_trace(obj, &visit);
+        stmgc_trace(obj, &visit);
     }
 }
 
