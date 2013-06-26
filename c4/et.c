@@ -652,10 +652,18 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
             {
               /* such an object R might be listed in list_of_read_objects
                  before it was turned from protected to private */
-              if(((gcptr)v)->h_tid & GCFLAG_BACKUP_COPY)
-                continue;
-              /* the backup was stolen */
-              return 0; 
+              if (((gcptr)v)->h_tid & GCFLAG_PUBLIC)
+                {
+                  /* The backup was stolen, but maybe not modified
+                     afterwards.  Check it. */
+                  R = (gcptr)v;
+                  goto retry;
+                }
+              else
+                {
+                  /* The backup was not stolen, everything's fine */
+                  continue;
+                }
             }
           else if ((R->h_tid & (GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED))
                             == (GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED))
