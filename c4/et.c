@@ -842,6 +842,13 @@ void AbortTransaction(int num)
   gcptrlist_clear(&d->list_of_read_objects);
   g2l_clear(&d->public_to_private);
 
+  /* 'old_thread_local_obj' contains the old value from stm_thread_local_obj,
+     but only when the transaction can be aborted; when it is inevitable
+     old_thread_local_obj will be reset to NULL. */
+  assert(d->thread_local_obj_ref = &stm_thread_local_obj);
+  stm_thread_local_obj = d->old_thread_local_obj;
+  d->old_thread_local_obj = NULL;
+
   /* release the lock */
   spinlock_release(d->public_descriptor->collection_lock);
 
@@ -908,6 +915,7 @@ static void init_transaction(struct tx_descriptor *d)
   assert(d->num_private_from_protected_known_old == 0);
   assert(d->num_read_objects_known_old == 0);
   assert(!g2l_any_entry(&d->public_to_private));
+  assert(d->old_thread_local_obj == NULL);
 
   d->count_reads = 1;
   fxcache_clear(&d->recent_reads_cache);
@@ -923,6 +931,7 @@ void BeginTransaction(jmp_buf* buf)
   init_transaction(d);
   d->active = 1;
   d->setjmp_buf = buf;
+  d->old_thread_local_obj = stm_thread_local_obj;
   d->start_time = GetGlobalCurTime(d);
   update_reads_size_limit(d);
 }
@@ -1250,6 +1259,7 @@ void CommitTransaction(void)
 
   /* we cannot abort any more from here */
   d->setjmp_buf = NULL;
+  d->old_thread_local_obj = NULL;
   gcptrlist_clear(&d->list_of_read_objects);
 
   dprintf(("\n"
@@ -1282,6 +1292,7 @@ void CommitTransaction(void)
 static void make_inevitable(struct tx_descriptor *d)
 {
   d->setjmp_buf = NULL;
+  d->old_thread_local_obj = NULL;
   d->active = 2;
   d->reads_size_limit_nonatomic = 0;
   update_reads_size_limit(d);

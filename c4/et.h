@@ -136,6 +136,7 @@ struct tx_descriptor {
   gcptr *shadowstack;
   gcptr **shadowstack_end_ref;
   gcptr *thread_local_obj_ref;
+  gcptr old_thread_local_obj;
 
   NURSERY_FIELDS_DECL
 
