@@ -339,10 +339,8 @@ static void mark_all_stack_roots(void)
         /* the roots pushed on the shadowstack */
         mark_roots(d->shadowstack, *d->shadowstack_end_ref);
 
-#if 0
         /* the thread-local object */
         visit(d->thread_local_obj_ref);
-#endif
 
         /* the current transaction's private copies of public objects */
         wlog_t *item;

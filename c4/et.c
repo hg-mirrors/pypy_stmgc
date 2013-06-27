@@ -1467,6 +1467,8 @@ struct tx_public_descriptor *stm_get_free_public_descriptor(revision_t *pindex)
   return pd;
 }
 
+__thread gcptr stm_thread_local_obj;
+
 int DescriptorInit(void)
 {
   if (GCFLAG_PREBUILT != PREBUILT_FLAGS)
@@ -1517,6 +1519,8 @@ int DescriptorInit(void)
       stm_private_rev_num = -d->my_lock;
       d->private_revision_ref = &stm_private_rev_num;
       d->read_barrier_cache_ref = &stm_read_barrier_cache;
+      stm_thread_local_obj = NULL;
+      d->thread_local_obj_ref = &stm_thread_local_obj;
       d->max_aborts = -1;
       d->tx_prev = NULL;
       d->tx_next = stm_tx_head;
@@ -1562,6 +1566,8 @@ void DescriptorDone(void)
     stmgcpage_release_global_lock();
 
     thread_descriptor = NULL;
+
+    stm_thread_local_obj = (gcptr)0xBB;   /* to detect misuses */
 
     g2l_delete(&d->public_to_private);
     assert(d->private_from_protected.size == 0);
