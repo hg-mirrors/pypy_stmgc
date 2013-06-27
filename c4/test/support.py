@@ -49,7 +49,7 @@ ffi.cdef('''
     gcptr stm_allocate(size_t size, unsigned int tid);
     revision_t stm_hash(gcptr);
     revision_t stm_id(gcptr);
-    revision_t stm_pointer_equal(gcptr, gcptr);
+    _Bool stm_pointer_equal(gcptr, gcptr);
     void stm_push_root(gcptr);
     gcptr stm_pop_root(void);
     void stm_set_max_aborts(int max_aborts);

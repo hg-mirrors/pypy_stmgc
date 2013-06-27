@@ -36,7 +36,7 @@ revision_t stm_hash(gcptr);
 revision_t stm_id(gcptr);
 /* returns nonzero if the two object-copy pointers belong to the
 same original object */
-revision_t stm_pointer_equal(gcptr, gcptr);
+_Bool stm_pointer_equal(gcptr, gcptr);
 
 /* to push/pop objects into the local shadowstack */
 /* (could be turned into macros or something later) */
