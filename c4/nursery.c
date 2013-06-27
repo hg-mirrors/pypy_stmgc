@@ -19,7 +19,9 @@ void stmgc_trace(gcptr obj, void visit(gcptr *))
 }
 
 /* forward declarations */
+#ifndef NDEBUG
 static int minor_collect_anything_to_do(struct tx_descriptor *);
+#endif
 static gcptr allocate_next_section(size_t size, revision_t tid);
 
 /************************************************************/
