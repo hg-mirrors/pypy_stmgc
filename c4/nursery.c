@@ -226,7 +226,7 @@ revision_t stm_id(gcptr p)
     return result;
 }
 
-revision_t stm_pointer_equal(gcptr p1, gcptr p2)
+_Bool stm_pointer_equal(gcptr p1, gcptr p2)
 {
     /* fast path for two equal pointers */
     if (p1 == p2)
