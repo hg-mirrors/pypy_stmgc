@@ -565,11 +565,11 @@ static void free_unused_local_pages(struct tx_public_descriptor *gcp)
             p->h_tid &= ~GCFLAG_VISITED;
         }
         else {
-            g2l_mark_as_deleted(item);
+            G2L_LOOP_DELETE(item);
             stm_free(p, stmgc_size(p));
         }
 
-    } G2L_LOOP_END;
+    } G2L_LOOP_END_AND_COMPRESS;
 }
 
 static void free_all_unused_local_pages(void)
