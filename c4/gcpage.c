@@ -341,6 +341,7 @@ static void mark_all_stack_roots(void)
 
         /* the thread-local object */
         visit(d->thread_local_obj_ref);
+        visit(&d->old_thread_local_obj);
 
         /* the current transaction's private copies of public objects */
         wlog_t *item;

@@ -33,3 +33,46 @@ def test_reset():
     lib.stm_finalize()
     lib.stm_initialize_tests(0)
     assert lib.addr_of_thread_local()[0] == ffi.NULL
+
+def test_threadlocal_commit():
+    p1 = oalloc(HDR)
+    lib.addr_of_thread_local()[0] = p1
+    #
+    @perform_transaction
+    def run(retry_counter):
+        assert retry_counter == 0
+        p2 = nalloc(HDR + 5 * WORD)
+        lib.setlong(p2, 4, -2891922)
+        lib.addr_of_thread_local()[0] = p2
+    #
+    p2b = lib.addr_of_thread_local()[0]
+    assert p2b != p1
+    assert lib.getlong(p2b, 4) == -2891922
+
+def test_threadlocal_abort(case=0):
+    p1 = oalloc(HDR + 5 * WORD)
+    lib.rawsetlong(p1, 4, 38972389)
+    lib.addr_of_thread_local()[0] = p1
+    #
+    @perform_transaction
+    def run(retry_counter):
+        if retry_counter == 0:
+            p2 = nalloc(HDR)
+            lib.addr_of_thread_local()[0] = p2
+            if case == 1:
+                minor_collect()
+            if case == 2:
+                major_collect()
+            abort_and_retry()
+        else:
+            check_not_free(p1)
+            assert lib.addr_of_thread_local()[0] == p1
+    #
+    assert lib.addr_of_thread_local()[0] == p1
+    assert lib.getlong(p1, 4) == 38972389
+
+def test_threadlocal_abort_minor():
+    test_threadlocal_abort(case=1)
+
+def test_threadlocal_abort_major():
+    test_threadlocal_abort(case=2)
