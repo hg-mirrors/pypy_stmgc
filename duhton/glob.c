@@ -503,16 +503,14 @@ DuObject *du_not(DuObject *cons, DuObject *locals)
 
 DuObject *du_transaction(DuObject *cons, DuObject *locals)
 {
-    Du_FatalError("transaction: not implemented");
-#if 0
     if (cons == Du_None)
         Du_FatalError("transaction: expected at least one argument");
+
+    _du_read1(cons);
     DuObject *sym = _DuCons_CAR(cons);
     DuObject *rest = _DuCons_NEXT(cons);
     _DuFrame_EvalCall(locals, sym, rest, 0);
-    Du_INCREF(Du_None);
     return Du_None;
-#endif
 }
 
 DuObject *du_sleepms(DuObject *cons, DuObject *locals)
