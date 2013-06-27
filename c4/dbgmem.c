@@ -2,10 +2,12 @@
 #include <sys/mman.h>
 
 
+#define PAGE_SIZE  4096
+
+
 #ifdef _GC_DEBUG
 /************************************************************/
 
-#define PAGE_SIZE  4096
 #define MMAP_TOTAL  671088640   /* 640MB */
 
 static pthread_mutex_t malloc_mutex = PTHREAD_MUTEX_INITIALIZER;
