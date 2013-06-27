@@ -102,6 +102,8 @@ static DuObject *next_cell(void)
     }
 
     /* we have at least one thread-local transaction pending */
+    stm_thread_local_obj = NULL;
+
     _du_read1(pending);
     DuObject *result = _DuCons_CAR(pending);
     DuObject *next = _DuCons_NEXT(pending);
