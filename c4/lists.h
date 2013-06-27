@@ -47,9 +47,11 @@ static inline int g2l_any_entry(struct G2L *g2l) {
 {                                                                       \
   struct { char **next; char **end; } _stack[TREE_DEPTH_MAX], *_stackp; \
   char **_next, **_end, *_entry;                                        \
+  long _deleted_factor = 0;                                             \
+  struct G2L *_g2l = &(g2l);                                            \
   /* initialization */                                                  \
   _stackp = _stack;      /* empty stack */                              \
-  _next = (g2l).toplevel.items + INITIAL;                               \
+  _next = _g2l->toplevel.items + INITIAL;                               \
   _end = _next _PLUS_ TREE_ARITY;                                       \
   /* loop */                                                            \
   while (1)                                                             \
@@ -78,8 +80,11 @@ static inline int g2l_any_entry(struct G2L *g2l) {
           continue;                                                     \
         }                                                               \
       /* points to a wlog_t item */                                     \
-      if (((wlog_t *)_entry)->addr == NULL)   /* deleted entry */       \
+      if (((wlog_t *)_entry)->addr == NULL) {   /* deleted entry */     \
+          _deleted_factor += 3;                                         \
           continue;                                                     \
+      }                                                                 \
+      _deleted_factor -= 4;                                             \
       item = (wlog_t *)_entry;
 
 #define G2L_LOOP_FORWARD(g2l, item)                             \
@@ -87,6 +92,9 @@ static inline int g2l_any_entry(struct G2L *g2l) {
 #define G2L_LOOP_BACKWARD(g2l, item)                            \
                        _G2L_LOOP(g2l, item, (TREE_ARITY-1), -)
 #define G2L_LOOP_END     } }
+#define G2L_LOOP_END_AND_COMPRESS                                       \
+                         } if (_deleted_factor > 9) _g2l_compress(_g2l); }
+#define G2L_LOOP_DELETE(item)  { (item)->addr = NULL; _deleted_factor += 6; }
 
 #define G2L_FIND(g2l, addr1, result, goto_not_found)            \
 {                                                               \
@@ -101,6 +109,7 @@ static inline int g2l_any_entry(struct G2L *g2l) {
 }
 
 wlog_t *_g2l_find(char *entry, gcptr addr);
+void _g2l_compress(struct G2L *g2l);
 void g2l_insert(struct G2L *g2l, gcptr addr, gcptr val);
 void g2l_delete_item(struct G2L *g2l, gcptr addr);
 
@@ -109,11 +118,6 @@ static inline int g2l_contains(struct G2L *g2l, gcptr addr)
     wlog_t *result;
     G2L_FIND(*g2l, addr, result, return 0);
     return 1;
-}
-
-static inline void g2l_mark_as_deleted(wlog_t *entry)
-{
-    entry->addr = NULL;
 }
 
 /************************************************************/

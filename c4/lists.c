@@ -22,6 +22,22 @@ void g2l_delete(struct G2L *g2l)
   memset(g2l, 0, sizeof(struct G2L));
 }
 
+void _g2l_compress(struct G2L *g2l)
+{
+  wlog_t *item;
+  struct G2L g2l_copy;
+  memset(&g2l_copy, 0, sizeof(struct G2L));
+
+  G2L_LOOP_FORWARD(*g2l, item)
+    {
+      g2l_insert(&g2l_copy, item->addr, item->val);
+
+    } G2L_LOOP_END;
+
+  g2l_delete_not_used_any_more(g2l);
+  *g2l = g2l_copy;
+}
+
 wlog_t *_g2l_find(char *entry, gcptr addr)
 {
   revision_t key = (revision_t)addr;
@@ -120,7 +136,7 @@ void g2l_delete_item(struct G2L *g2l, gcptr addr)
 {
     wlog_t *entry;
     G2L_FIND(*g2l, addr, entry, goto missing);
-    g2l_mark_as_deleted(entry);
+    entry->addr = NULL;
     return;
 
  missing:
