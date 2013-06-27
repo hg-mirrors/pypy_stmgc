@@ -25,7 +25,7 @@
     char *nursery_nextlimit;                                            \
     char *nursery_end;                                                  \
     char *nursery_base;                                                 \
-    char *nursery_base_for_next_collect;                                \
+    enum { NC_REGULAR, NC_ALREADY_CLEARED } nursery_cleared;            \
                                                                         \
     /* Between collections, we add to 'old_objects_to_trace' the        \
        private objects that are old but may contain pointers to         \
@@ -56,7 +56,6 @@ void stmgc_init_nursery(void);
 void stmgc_done_nursery(void);
 void stmgc_minor_collect(void);
 void stmgc_minor_collect_no_abort(void);
-int stmgc_minor_collect_anything_to_do(struct tx_descriptor *);
 gcptr stmgc_duplicate(gcptr);
 gcptr stmgc_duplicate_old(gcptr);
 size_t stmgc_size(gcptr);

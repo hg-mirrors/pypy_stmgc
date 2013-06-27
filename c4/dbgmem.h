@@ -15,5 +15,7 @@ int _stm_can_access_memory(char *);
 
 #endif
 
+void stm_clear_large_memory_chunk(void *, size_t, size_t);
+
 
 #endif
