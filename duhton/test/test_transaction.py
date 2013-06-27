@@ -8,6 +8,20 @@ def test_simple():
     assert run("(defun f(x) (if (< x 20) (transaction f (+ x 1)) (print x))) "
                "(print (f 0))") == "None\n20\n"
 
+def test_multiple_starts():
+    got = run("""
+        (defun g (n)
+         (if (>= n 12)
+             (print n)
+           (g (+ n 1))
+           (g (+ n 2))))
+        (transaction g 0)
+    """)
+    pieces = got.splitlines()
+    assert len(pieces) == 377
+    assert pieces.count('12') == 233
+    assert pieces.count('13') == 144
+
 def test_conflict_container():
     for i in range(20):
         res = run("""
