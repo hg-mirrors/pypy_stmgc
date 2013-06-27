@@ -2,7 +2,9 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#ifndef NUM_THREADS
 #define NUM_THREADS  4
+#endif
 
 
 static DuConsObject du_pending_transactions = {
@@ -110,8 +112,21 @@ static DuObject *next_cell(void)
 
     if (next != Du_None) {
         /* we have more than one: add the others to the global list */
-        assert(!"XXX");
-        abort();
+        DuObject *tail = next;
+
+        while (1) {
+            _du_read1(tail);
+            DuObject *tailnext = ((DuConsObject *)tail)->cdr;
+            if (tailnext == Du_None)
+                break;
+            tail = tailnext;
+        }
+
+        DuConsObject * root = &du_pending_transactions;
+        _du_write1(tail);
+        _du_write1(root);
+        ((DuConsObject *)tail)->cdr = root->cdr;
+        root->cdr = next;
     }
 
     return result;
