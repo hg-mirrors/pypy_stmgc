@@ -1,4 +1,4 @@
-import py, re
+import py, re, select
 import os, subprocess
 from cStringIO import StringIO
 
@@ -12,8 +12,21 @@ def _do(cmdargs, stdin=''):
                              stderr = subprocess.PIPE)
     popen.stdin.write(stdin)
     popen.stdin.close()
-    result = popen.stdout.read()
-    error = popen.stderr.read()
+    #
+    result = []
+    error = []
+    owait = {popen.stdout: result, popen.stderr: error}
+    while owait:
+        iwtd, _, _ = select.select(owait.keys(), [], [])
+        for o in iwtd:
+            data = os.read(o.fileno(), 4096)
+            if data:
+                owait[o].append(data)
+            else:
+                del owait[o]
+    #
+    result = ''.join(result)
+    error = ''.join(error)
     exitcode = popen.wait()
     if exitcode:
         raise OSError("%r failed (exit code %r)\n" % (cmdargs[0], exitcode) +

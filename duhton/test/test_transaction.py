@@ -16,11 +16,11 @@ def test_conflict_container():
 
             (defun g (thread n)
                 (set c (+ (get c) 1))
-                (if (> (get c) 2000)
+                (if (> (get c) 200)
                     (print (quote overflow) (get c))
-                  (if (< n 1000)
+                  (if (< n 100)
                       (transaction f thread (+ n 1))
-                    (if (< (get c) 2000)
+                    (if (< (get c) 200)
                         (print (quote not-enough))
                       (print (quote ok))))))
 
@@ -35,17 +35,18 @@ def test_conflict_container():
 
 def test_conflict_list():
     for i in range(20):
+        print 'test_conflict_list', i
         res = run("""
 
             (setq lst (list 0))
 
             (defun g (thread n)
                 (set lst 0 (+ (get lst 0) 1))
-                (if (> (get lst 0) 2000)
+                (if (> (get lst 0) 200)
                     (print (quote overflow) (get lst 0))
-                  (if (< n 1000)
+                  (if (< n 100)
                       (transaction f thread (+ n 1))
-                    (if (< (get lst 0) 2000)
+                    (if (< (get lst 0) 200)
                         (print (quote not-enough))
                       (print (quote ok))))))
 
@@ -63,11 +64,12 @@ def test_conflict_list():
 
 def test_list_length():
     for i in range(20):
+        print 'test_list_length', i
         res = run("""
             (setq lst (list))
             (defun f ()
                 (setq n (len lst))
-                (if (< n 1000)
+                (if (< n 100)
                     (transaction f)
                   (print (quote done)))
                 (append lst n)
@@ -79,9 +81,10 @@ def test_list_length():
 
 def test_list_pop():
     for i in range(20):
+        print 'test_list_pop', i
         res = run("""
             (setq lst (list))
-            (while (< (len lst) 1000)
+            (while (< (len lst) 100)
                 (append lst (len lst)))
             (defun f ()
                 (if (== (len lst) 0)
