@@ -108,6 +108,11 @@ void DuContainer_SetRef(DuObject *container, DuObject *newobj);
 DuObject *DuSymbol_FromString(const char *name);
 char *DuSymbol_AsString(DuObject *ob);
 
+typedef struct {
+    DuOBJECT_HEAD
+    DuObject *car, *cdr;
+} DuConsObject;
+
 DuObject *DuCons_New(DuObject *car, DuObject *cdr);
 DuObject *DuCons_Car(DuObject *cons);
 DuObject *DuCons_Cdr(DuObject *cons);

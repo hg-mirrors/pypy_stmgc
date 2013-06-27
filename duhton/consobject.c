@@ -1,10 +1,5 @@
 #include "duhton.h"
 
-typedef struct {
-    DuOBJECT_HEAD
-    DuObject *car, *cdr;
-} DuConsObject;
-
 
 void cons_trace(DuConsObject *ob, void visit(gcptr *))
 {
