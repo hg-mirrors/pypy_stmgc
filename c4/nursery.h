@@ -25,6 +25,7 @@
     char *nursery_nextlimit;                                            \
     char *nursery_end;                                                  \
     char *nursery_base;                                                 \
+    char *nursery_base_for_next_collect;                                \
                                                                         \
     /* Between collections, we add to 'old_objects_to_trace' the        \
        private objects that are old but may contain pointers to         \
