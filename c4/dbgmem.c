@@ -1,9 +1,9 @@
 #include "stmimpl.h"
+#include <sys/mman.h>
+
 
 #ifdef _GC_DEBUG
 /************************************************************/
-
-#include <sys/mman.h>
 
 #define PAGE_SIZE  4096
 #define MMAP_TOTAL  671088640   /* 640MB */
@@ -89,3 +89,40 @@ int _stm_can_access_memory(char *p)
 
 /************************************************************/
 #endif
+
+
+void stm_clear_large_memory_chunk(void *base, size_t size,
+                                  size_t already_cleared)
+{
+    char *baseaddr = base;
+
+    if (size > 2 * PAGE_SIZE) {
+        int lowbits = ((intptr_t)baseaddr) & (PAGE_SIZE-1);
+        if (lowbits) {   /*  clear the initial misaligned part, if any */
+            int partpage = PAGE_SIZE - lowbits;
+            memset(baseaddr, 0, partpage);
+            baseaddr += partpage;
+            size -= partpage;
+        }
+        /* 'already_cleared' bytes at the end are assumed to be already
+           cleared.  Reduce 'size' accordingly, but avoid getting a
+           misaligned 'size'. */
+        size_t length = size & (-PAGE_SIZE);
+        if (already_cleared > (size - length)) {
+            already_cleared -= (size - length);
+            already_cleared &= -PAGE_SIZE;
+            length -= already_cleared;
+            size = length;
+            already_cleared = 0;
+        }
+
+        int err = madvise(baseaddr, length, MADV_DONTNEED);
+        if (err == 0) {   /*  madvise() worked */
+            baseaddr += length;
+            size -= length;
+        }
+    }
+    if (size > already_cleared) { /* clear the final misaligned part, if any */
+        memset(baseaddr, 0, size - already_cleared);
+    }
+}

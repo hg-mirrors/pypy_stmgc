@@ -84,6 +84,7 @@ ffi.cdef('''
     void *STUB_THREAD(gcptr);
     void stm_clear_read_cache(void);
     int in_nursery(gcptr);
+    void stm_clear_large_memory_chunk(void *, size_t, size_t);
 
     gcptr getptr(gcptr, long);
     void setptr(gcptr, long, gcptr);
@@ -94,6 +95,8 @@ ffi.cdef('''
     void setlong(gcptr, long, long);
     long rawgetlong(gcptr, long);
     void rawsetlong(gcptr, long, long);
+
+    void *memset(void *s, int c, size_t n);
 
     gcptr pseudoprebuilt(size_t size, int tid);
     gcptr pseudoprebuilt_with_hash(size_t size, int tid, revision_t hash);
