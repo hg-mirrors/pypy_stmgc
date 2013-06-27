@@ -4,7 +4,7 @@
 #define LENGTH_SHADOW_STACK   163840
 
 
-static __thread gcptr *stm_shadowstack;
+__thread gcptr *stm_shadowstack;
 static unsigned long stm_regular_length_limit = 10000;
 
 void stm_set_transaction_length(long length_max)
@@ -14,16 +14,6 @@ void stm_set_transaction_length(long length_max)
         length_max = 1;
     }
     stm_regular_length_limit = length_max;
-}
-
-void stm_push_root(gcptr obj)
-{
-    *stm_shadowstack++ = obj;
-}
-
-gcptr stm_pop_root(void)
-{
-    return *--stm_shadowstack;
 }
 
 static void init_shadowstack(void)
@@ -73,27 +63,6 @@ void stm_finalize(void)
     done_shadowstack();
     stmgc_done_nursery();
     DescriptorDone();
-}
-
-gcptr stm_read_barrier(gcptr obj)
-{
-    //if (FXCACHE_AT(obj) == obj)
-    //    dprintf(("read_barrier: in cache: %p\n", obj));
-
-    /* XXX inline in the caller, optimize to get the smallest code */
-    if (UNLIKELY((obj->h_revision != stm_private_rev_num) &&
-                 (FXCACHE_AT(obj) != obj)))
-        obj = stm_DirectReadBarrier(obj);
-    return obj;
-}
-
-gcptr stm_write_barrier(gcptr obj)
-{
-    /* XXX inline in the caller */
-    if (UNLIKELY((obj->h_revision != stm_private_rev_num) |
-                 ((obj->h_tid & GCFLAG_WRITE_BARRIER) != 0)))
-        obj = stm_WriteBarrier(obj);
-    return obj;
 }
 
 /************************************************************/

@@ -39,17 +39,20 @@ same original object */
 _Bool stm_pointer_equal(gcptr, gcptr);
 
 /* to push/pop objects into the local shadowstack */
-/* (could be turned into macros or something later) */
+#if 0     // (optimized version below)
 void stm_push_root(gcptr);
 gcptr stm_pop_root(void);
+#endif
 
 /* initialize/deinitialize the stm framework in the current thread */
 void stm_initialize(void);
 void stm_finalize(void);
 
 /* read/write barriers (the most general versions only for now) */
+#if 0     // (optimized version below)
 gcptr stm_read_barrier(gcptr);
 gcptr stm_write_barrier(gcptr);
+#endif
 
 /* start a new transaction, calls callback(), and when it returns
    finish that transaction.  callback() is called with the 'arg'
@@ -80,5 +83,45 @@ extern void stmcb_trace(gcptr, void visit(gcptr *));
    (Obviously it can be a container type containing more GC objects.)
    It is set to NULL by stm_initialize(). */
 extern __thread gcptr stm_thread_local_obj;
+
+
+
+/* macro-like functionality */
+
+extern __thread gcptr *stm_shadowstack;
+
+static inline void stm_push_root(gcptr obj) {
+    *stm_shadowstack++ = obj;
+}
+static inline gcptr stm_pop_root(void) {
+    return *--stm_shadowstack;
+}
+
+extern __thread revision_t stm_private_rev_num;
+gcptr stm_DirectReadBarrier(gcptr);
+gcptr stm_WriteBarrier(gcptr);
+static const revision_t GCFLAG_WRITE_BARRIER = STM_FIRST_GCFLAG << 5;
+extern __thread char *stm_read_barrier_cache;
+#define FX_MASK 65535
+#define FXCACHE_AT(obj)  \
+    (*(gcptr *)(stm_read_barrier_cache + ((revision_t)(obj) & FX_MASK)))
+
+#define UNLIKELY(test)  __builtin_expect(test, 0)
+static inline gcptr stm_read_barrier(gcptr obj) {
+    /* XXX optimize to get the smallest code */
+    if (UNLIKELY((obj->h_revision != stm_private_rev_num) &&
+                 (FXCACHE_AT(obj) != obj)))
+        obj = stm_DirectReadBarrier(obj);
+    return obj;
+}
+
+static inline gcptr stm_write_barrier(gcptr obj) {
+    if (UNLIKELY((obj->h_revision != stm_private_rev_num) |
+                 ((obj->h_tid & GCFLAG_WRITE_BARRIER) != 0)))
+        obj = stm_WriteBarrier(obj);
+    return obj;
+}
+#undef UNLIKELY
+
 
 #endif

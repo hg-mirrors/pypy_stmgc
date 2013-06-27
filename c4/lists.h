@@ -185,7 +185,7 @@ void gcptrlist_move(struct GcPtrList *, struct GcPtrList *gcptrlist_source);
    more.
 */
 
-#define FX_MASK      65535
+//#define FX_MASK      65535    in stmgc.h
 #define FX_ENTRIES   ((FX_MASK + 1) / sizeof(char *))
 #define FX_TOTAL     (FX_ENTRIES * 4 / 3)
 
@@ -206,8 +206,9 @@ static inline void fxcache_clear(struct FXCache *fxcache)
     stm_read_barrier_cache = (char *)(fxcache->cache + fxcache->shift);
 }
 
-#define FXCACHE_AT(obj)  \
-    (*(gcptr *)(stm_read_barrier_cache + ((revision_t)(obj) & FX_MASK)))
+// moved to stmgc.h:
+//#define FXCACHE_AT(obj)
+//    (*(gcptr *)(stm_read_barrier_cache + ((revision_t)(obj) & FX_MASK)))
 
 static inline void fxcache_add(struct FXCache *fxcache, gcptr newobj)
 {
