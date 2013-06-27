@@ -3,6 +3,8 @@
 
 static int is_in_nursery(struct tx_descriptor *d, gcptr obj)
 {
+    assert(!(d->nursery_base_for_next_collect <= (char*)obj &&
+             ((char*)obj) < d->nursery_base));
     return (d->nursery_base <= (char*)obj && ((char*)obj) < d->nursery_end);
 }
 
@@ -29,6 +31,7 @@ void stmgc_init_nursery(void)
     d->nursery_end = d->nursery_base + GC_NURSERY;  /* end of nursery */
     d->nursery_current = d->nursery_base;           /* current position */
     d->nursery_nextlimit = d->nursery_base;         /* next section limit */
+    d->nursery_base_for_next_collect = d->nursery_base;
 
     dprintf(("minor: nursery is at [%p to %p]\n", d->nursery_base,
              d->nursery_end));
@@ -537,12 +540,27 @@ static void minor_collect(struct tx_descriptor *d)
     stm_free(d->nursery_base, GC_NURSERY);
     d->nursery_base = stm_malloc(GC_NURSERY);
     d->nursery_end = d->nursery_base + GC_NURSERY;
+    d->nursery_current = d->nursery_base;
+    d->nursery_nextlimit = d->nursery_base;
     dprintf(("minor: nursery moved to [%p to %p]\n", d->nursery_base,
              d->nursery_end));
 #endif
 
-    d->nursery_current = d->nursery_base;
-    d->nursery_nextlimit = d->nursery_base;
+    /* when doing minor collections with the nursery "mostly empty",
+       as occurs when other threads force major collections but this
+       thread didn't do much at all, then we don't actually reset
+       'nursery_current' to 'nursery_base'.  Instead we keep it
+       unmodified.  It will continue to use the already-partially-
+       cleared section.
+    */
+    if ((d->nursery_nextlimit - d->nursery_base) < GC_NURSERY / 8 &&
+        (d->nursery_nextlimit - d->nursery_current) > GC_NURSERY_SECTION / 4) {
+    }
+    else {
+        d->nursery_current = d->nursery_base;
+        d->nursery_nextlimit = d->nursery_base;
+    }
+    d->nursery_base_for_next_collect = d->nursery_current;
 
     assert(!stmgc_minor_collect_anything_to_do(d));
 }
@@ -563,7 +581,7 @@ void stmgc_minor_collect_no_abort(void)
 
 int stmgc_minor_collect_anything_to_do(struct tx_descriptor *d)
 {
-    if (d->nursery_current == d->nursery_base /*&&
+    if (d->nursery_current == d->nursery_base_for_next_collect /*&&
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
@@ -612,8 +630,6 @@ static gcptr allocate_next_section(size_t allocate_size, revision_t tid)
         return P;
     }
 
-    revision_t clear_section_count = GC_NURSERY_SECTION;
-
     /* Are we at the end of the nursery? */
     if (d->nursery_nextlimit == d->nursery_end) {
         /* Yes */
@@ -622,20 +638,16 @@ static gcptr allocate_next_section(size_t allocate_size, revision_t tid)
 
         /* Start a minor collection
          */
-        if (d->nursery_current - d->nursery_base < clear_section_count) {
-            /* help cases where we do a large amount of minor collections */
-            clear_section_count = d->nursery_current - d->nursery_base;
-        }
-
         stmgc_minor_collect();
         stmgcpage_possibly_major_collect(0);
 
+        assert(d->nursery_base_for_next_collect == d->nursery_base);
         assert(d->nursery_current == d->nursery_base);
         assert(d->nursery_nextlimit == d->nursery_base);
     }
 
     /* Clear the next section */
-    memset(d->nursery_nextlimit, 0, clear_section_count);
+    memset(d->nursery_nextlimit, 0, GC_NURSERY_SECTION);
     d->nursery_nextlimit += GC_NURSERY_SECTION;
 
     /* Return the object from there */
