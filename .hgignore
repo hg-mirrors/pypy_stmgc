@@ -3,3 +3,6 @@ syntax: glob
 *~
 c4/build-demo*
 c4/debug-demo*
+c4/release-demo*
+*.orig
+c4/test/__pycache__
