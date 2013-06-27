@@ -13,14 +13,26 @@ def test_multiple_starts():
         (defun g (n)
          (if (>= n 12)
              (print n)
-           (g (+ n 1))
-           (g (+ n 2))))
-        (transaction g 0)
+           (transaction g (+ n 1))
+           (transaction g (+ n 2))))
+        (g 0)
     """)
     pieces = got.splitlines()
     assert len(pieces) == 377
     assert pieces.count('12') == 233
     assert pieces.count('13') == 144
+
+def test_multiple_starts_conflicts():
+    got = run("""
+        (setq c (list))
+        (defun g (n)
+         (if (>= n 12)
+             (append c n)
+           (transaction g (+ n 1))
+           (transaction g (+ n 2))))
+        (g 0)
+    """)
+    assert got == ''    # how to print the final c ??  at least check no crash
 
 def test_conflict_container():
     for i in range(20):
