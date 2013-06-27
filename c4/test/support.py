@@ -103,6 +103,7 @@ ffi.cdef('''
     revision_t get_private_rev_num(void);
     revision_t get_start_time(void);
     void *my_stub_thread(void);
+    gcptr *addr_of_thread_local(void);
 
     int _stm_can_access_memory(char *);
     void stm_initialize_and_set_max_abort(int max_aborts);
@@ -243,6 +244,11 @@ lib = ffi.verify(r'''
     void *my_stub_thread(void)
     {
         return (void *)thread_descriptor->public_descriptor;
+    }
+
+    gcptr *addr_of_thread_local(void)
+    {
+        return &stm_thread_local_obj;
     }
 
     void stm_initialize_and_set_max_abort(int max_aborts)

@@ -521,6 +521,8 @@ static void minor_collect(struct tx_descriptor *d)
 
     mark_young_roots(d);
 
+    visit_if_young(d->thread_local_obj_ref);
+
     mark_stolen_young_stubs(d);
 
     mark_private_from_protected(d);
