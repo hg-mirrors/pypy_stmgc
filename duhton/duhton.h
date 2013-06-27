@@ -146,22 +146,41 @@ void Du_TransactionAdd(DuObject *code, DuObject *frame);
 void Du_TransactionRun(void);
 
 
-#define _du_save1(p1)           (stm_push_root((DuObject *)(p1)))
-#define _du_save2(p1,p2)        (stm_push_root((DuObject *)(p1)),  \
-                                 stm_push_root((DuObject *)(p2)))
-#define _du_save3(p1,p2,p3)     (stm_push_root((DuObject *)(p1)),  \
-                                 stm_push_root((DuObject *)(p2)),  \
-                                 stm_push_root((DuObject *)(p3)))
+#define _du_save1(p1)           (_push_root((DuObject *)(p1)))
+#define _du_save2(p1,p2)        (_push_root((DuObject *)(p1)),  \
+                                 _push_root((DuObject *)(p2)))
+#define _du_save3(p1,p2,p3)     (_push_root((DuObject *)(p1)),  \
+                                 _push_root((DuObject *)(p2)),  \
+                                 _push_root((DuObject *)(p3)))
 
-#define _du_restore1(p1)        (p1 = (typeof(p1))stm_pop_root())
-#define _du_restore2(p1,p2)     (p2 = (typeof(p2))stm_pop_root(),  \
-                                 p1 = (typeof(p1))stm_pop_root())
-#define _du_restore3(p1,p2,p3)  (p3 = (typeof(p3))stm_pop_root(),  \
-                                 p2 = (typeof(p2))stm_pop_root(),  \
-                                 p1 = (typeof(p1))stm_pop_root())
+#define _du_restore1(p1)        (p1 = (typeof(p1))_pop_root())
+#define _du_restore2(p1,p2)     (p2 = (typeof(p2))_pop_root(),  \
+                                 p1 = (typeof(p1))_pop_root())
+#define _du_restore3(p1,p2,p3)  (p3 = (typeof(p3))_pop_root(),  \
+                                 p2 = (typeof(p2))_pop_root(),  \
+                                 p1 = (typeof(p1))_pop_root())
 
 #define _du_read1(p1)    (p1 = (typeof(p1))stm_read_barrier((DuObject *)(p1)))
 #define _du_write1(p1)   (p1 = (typeof(p1))stm_write_barrier((DuObject *)(p1)))
+
+
+#ifdef NDEBUG
+# define _push_root(ob)     stm_push_root(ob)
+# define _pop_root()        stm_pop_root()
+#else
+# define _check_not_free(ob)                                    \
+    assert(stm_get_tid((DuObject *)(ob)) > DUTYPE_INVALID &&    \
+           stm_get_tid((DuObject *)(ob)) < _DUTYPE_TOTAL)
+static inline void _push_root(gcptr ob) {
+    if (ob) _check_not_free(ob);
+    stm_push_root(ob);
+}
+static inline gcptr _pop_root(void) {
+    gcptr ob = stm_pop_root();
+    if (ob) _check_not_free(ob);
+    return ob;
+}
+#endif
 
 
 #endif  /* _DUHTON_H_ */

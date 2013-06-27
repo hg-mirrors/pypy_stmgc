@@ -102,7 +102,9 @@ DuObject *du_setq(DuObject *cons, DuObject *locals)
 
 DuObject *du_print(DuObject *cons, DuObject *locals)
 {
+    _du_save2(cons, locals);
     DuObject *lst = DuList_New();
+    _du_restore2(cons, locals);
 
     while (cons != Du_None) {
         _du_read1(cons);
