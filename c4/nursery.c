@@ -646,7 +646,8 @@ static gcptr allocate_next_section(size_t allocate_size, revision_t tid)
     }
 
     /* Are we at the end of the nursery? */
-    if (d->nursery_nextlimit == d->nursery_end) {
+    if (d->nursery_nextlimit == d->nursery_end ||
+        d->nursery_current == d->nursery_end) {   // stmgc_minor_collect_soon()
         /* Yes */
         if (tid == -1)
             return NULL;    /* cannot collect */

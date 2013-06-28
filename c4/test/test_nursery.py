@@ -301,3 +301,7 @@ def test_nalloc_large_object():
     for words in range(80):
         p1 = nalloc(HDR + words * WORD)
     # assert did not crash
+
+def test_collect_soon():
+    lib.stmgc_minor_collect_soon()
+    nalloc(HDR)
