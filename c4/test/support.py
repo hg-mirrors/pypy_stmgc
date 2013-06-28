@@ -73,6 +73,7 @@ ffi.cdef('''
     void stm_add_prebuilt_root(gcptr);
     void stm_clear_between_tests(void);
     void stmgc_minor_collect(void);
+    void stmgc_minor_collect_soon(void);
     gcptr _stm_nonrecord_barrier(gcptr);
     int _stm_is_private(gcptr);
     void stm_start_sharedlock(void);
