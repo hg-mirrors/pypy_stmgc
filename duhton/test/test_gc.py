@@ -23,3 +23,14 @@ def test_long1(limit=12):
 
 def test_verylong1():
     test_long1(limit=16)
+
+
+def test_long_lists():
+    run("""
+        (defun g (lst n)
+          (while (> n 30000)
+            (append lst n)
+            (setq n (- n 1))))
+        (g (list) 34000)
+    """)
+    assert 1  # did not crash
