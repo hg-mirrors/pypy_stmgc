@@ -131,3 +131,28 @@ def test_list_print():
         (transaction f)
         """)
     assert res == "[ 20 30 ]\n"
+
+def test_long_lists_no_conflict():
+    res = run("""
+        (defun g (lst n)
+          (while (> n 30000)
+            (append lst n)
+            (setq n (- n 1)))
+          (print (len lst)))
+        (transaction g (list) 34000)
+        (transaction g (list) 34000)
+    """)
+    assert res == "4000\n4000\n"
+
+def test_long_lists_with_conflict():
+    res = run("""
+        (defun g (lst n)
+          (while (> n 30000)
+            (append lst n)
+            (setq n (- n 1)))
+          (print (len lst)))
+        (setq L (list))
+        (transaction g L 34000)
+        (transaction g L 34000)
+    """)
+    assert res == "4000\n8000\n"
