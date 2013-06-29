@@ -7,11 +7,13 @@
 void *stm_malloc(size_t);
 void stm_free(void *, size_t);
 int _stm_can_access_memory(char *);
+void assert_cleared(char *, size_t);
 
 #else
 
 #define stm_malloc(sz)    malloc(sz)
 #define stm_free(p,sz)    free(p)
+#define assert_cleared(p,sz)     do { } while(0)
 
 #endif
 

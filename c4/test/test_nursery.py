@@ -298,19 +298,23 @@ def test_backup_ptr_update():
     assert lib.getlong(p2, 0) == 389719
 
 def test_nalloc_large_object():
-    for words in range(40, 81):
-        p1 = nalloc_refs(words)
-        lib.rawsetptr(p1, 0, p1)
-    p2 = nalloc(HDR)   # this alone should not collect
-    check_not_free(p1)
-    lib.rawsetptr(p1, 79, p2)
-    lib.stm_push_root(p1)
-    minor_collect()
-    p1b = lib.stm_pop_root()
-    assert p1b == p1
-    check_not_free(p1)
-    assert lib.rawgetptr(p1, 0) == p1
-    check_not_free(lib.rawgetptr(p1, 79))
+    for repeat in range(3):
+        for words in range(40, 81):
+            p1 = nalloc_refs(words)
+            for c in range(words):
+                assert lib.rawgetlong(p1, c) == 0     # null-initialized
+                lib.rawsetptr(p1, c, p1)
+        p2 = nalloc(HDR)   # this alone should not collect
+        check_not_free(p1)
+        lib.rawsetptr(p1, 79, p2)
+        lib.stm_push_root(p1)
+        minor_collect()
+        p1b = lib.stm_pop_root()
+        assert p1b == p1
+        check_not_free(p1)
+        assert lib.rawgetptr(p1, 0) == p1
+        check_not_free(lib.rawgetptr(p1, 79))
+        major_collect()
 
 def test_collect_soon():
     lib.stmgc_minor_collect_soon()

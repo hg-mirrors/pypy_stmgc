@@ -465,6 +465,7 @@ class run_parallel(object):
 def oalloc(size):
     "Allocate an 'old' protected object, outside any nursery"
     p = lib.stmgcpage_malloc(size)
+    lib.memset(p, 0, size)
     p.h_tid = GCFLAG_OLD | GCFLAG_WRITE_BARRIER
     p.h_revision = -sys.maxint
     lib.settid(p, 42 + size)
@@ -473,12 +474,12 @@ def oalloc(size):
 def oalloc_refs(nrefs):
     """Allocate an 'old' protected object, outside any nursery,
     with nrefs pointers"""
-    p = lib.stmgcpage_malloc(HDR + WORD * nrefs)
+    size = HDR + WORD * nrefs
+    p = lib.stmgcpage_malloc(size)
+    lib.memset(p, 0, size)
     p.h_tid = GCFLAG_OLD | GCFLAG_WRITE_BARRIER
     p.h_revision = -sys.maxint
     lib.settid(p, 42142 + nrefs)
-    for i in range(nrefs):
-        rawsetptr(p, i, ffi.NULL)
     return p
 
 ofree = lib.stmgcpage_free

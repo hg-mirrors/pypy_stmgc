@@ -64,6 +64,7 @@ void *stm_malloc(size_t sz)
 
     dprintf(("stm_malloc(%zu): %p\n", sz, result));
     assert(((intptr_t)(result + sz) & (PAGE_SIZE-1)) == 0);
+    memset(result, 0xBB, sz);
     return result;
 }
 
@@ -89,6 +90,13 @@ int _stm_can_access_memory(char *p)
     return accessible_pages[base] == 42;
 }
 
+void assert_cleared(char *p, size_t size)
+{
+    size_t i;
+    for (i = 0; i < size; i++)
+        assert(p[i] == 0);
+}
+
 /************************************************************/
 #endif
 
@@ -97,6 +105,7 @@ void stm_clear_large_memory_chunk(void *base, size_t size,
                                   size_t already_cleared)
 {
     char *baseaddr = base;
+    assert(already_cleared <= size);
 
     if (size > 2 * PAGE_SIZE) {
         int lowbits = ((intptr_t)baseaddr) & (PAGE_SIZE-1);
@@ -127,4 +136,5 @@ void stm_clear_large_memory_chunk(void *base, size_t size,
     if (size > already_cleared) { /* clear the final misaligned part, if any */
         memset(baseaddr, 0, size - already_cleared);
     }
+    assert_cleared(base, size);
 }
