@@ -31,3 +31,28 @@ def test_set_transaction_length():
             should_br[i + 1] = should_break_transaction()
     #
     assert should_br == [False, False, False, False, True, True, True]
+
+def test_stm_atomic():
+    assert lib.stm_atomic(0) == 0
+    x = lib.stm_atomic(+1)
+    assert x == 1
+    x = lib.stm_atomic(+1)
+    assert x == 2
+    x = lib.stm_atomic(-1)
+    assert x == 1
+    x = lib.stm_atomic(0)
+    assert x == 1
+    x = lib.stm_atomic(-1)
+    assert x == 0
+
+def test_transaction_atomic_mode():
+    assert lib.stm_in_transaction()
+    lib.stm_commit_transaction()
+    assert not lib.stm_in_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert lib.stm_in_transaction()
+    lib.stm_atomic(+1)
+    lib.stm_commit_transaction()
+    assert lib.stm_in_transaction()
+    lib.stm_begin_inevitable_transaction()
+    lib.stm_atomic(-1)

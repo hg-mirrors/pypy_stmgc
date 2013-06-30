@@ -77,6 +77,13 @@ int stm_in_transaction(void);
 void stm_set_transaction_length(long length_max);
 _Bool stm_should_break_transaction(void);
 
+/* change the atomic counter by 'delta' and return the new value.  Used
+   with +1 to enter or with -1 to leave atomic mode, or with 0 to just
+   know the current value of the counter.  The current transaction is
+   *never* interrupted as long as this counter is positive. */
+long stm_atomic(long delta);
+
+
 /* callback: get the size of an object */
 extern size_t stmcb_size(gcptr);
 

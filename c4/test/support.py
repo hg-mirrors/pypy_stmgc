@@ -62,6 +62,7 @@ ffi.cdef('''
     void stm_begin_inevitable_transaction(void);
     void stm_set_transaction_length(long length_max);
     _Bool stm_should_break_transaction(void);
+    long stm_atomic(long delta);
 
     /* extra non-public code */
     void printfcolor(char *msg);
