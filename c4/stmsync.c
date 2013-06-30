@@ -25,14 +25,14 @@ static void init_shadowstack(void)
     }
     stm_shadowstack = d->shadowstack;
     d->shadowstack_end_ref = &stm_shadowstack;
-    //stm_push_root(END_MARKER);
+    stm_push_root(END_MARKER_ON);
 }
 
 static void done_shadowstack(void)
 {
     struct tx_descriptor *d = thread_descriptor;
-    //gcptr x = stm_pop_root();
-    //assert(x == END_MARKER);
+    gcptr x = stm_pop_root();
+    assert(x == END_MARKER_ON);
     assert(stm_shadowstack == d->shadowstack);
     stm_shadowstack = NULL;
     free(d->shadowstack);
@@ -77,6 +77,7 @@ void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int))
     long volatile v_atomic;
 
     stm_push_root(arg);
+    stm_push_root(END_MARKER_OFF);
 
     if (!(v_atomic = thread_descriptor->atomic))
         CommitTransaction();
@@ -98,14 +99,7 @@ void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int))
     long counter, result;
     counter = v_counter;
     d->atomic = v_atomic;
-    stm_shadowstack = v_saved_value + 1;    /* skip the 'arg', pushed above */
-    //    if (!d->atomic) {
-    //        /* In non-atomic mode, we are now between two transactions.
-    //           It means that in the next transaction's collections we know
-    //           that we won't need to access the shadow stack beyond its
-    //           current position.  So we add an end marker. */
-    //        stm_push_root(END_MARKER);
-    //    }
+    stm_shadowstack = v_saved_value + 2;   /*skip the two values pushed above*/
 
     do {
         v_counter = counter + 1;
@@ -135,7 +129,7 @@ void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int))
         /* invoke the callback in the new transaction */
         arg = v_saved_value[0];
         result = callback(arg, counter);
-        assert(stm_shadowstack == v_saved_value + 1);
+        assert(stm_shadowstack == v_saved_value + 2);
 
         v_atomic = d->atomic;
         if (!d->atomic)
@@ -154,7 +148,9 @@ void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int))
         BeginInevitableTransaction();
     }
 
-    stm_pop_root();      /* pop the 'arg' */
+    gcptr x = stm_pop_root();   /* pop the END_MARKER */
+    assert(x == END_MARKER_OFF || x == END_MARKER_ON);
+    stm_pop_root();             /* pop the 'arg' */
     assert(stm_shadowstack == v_saved_value);
 }
 
