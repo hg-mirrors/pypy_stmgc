@@ -463,11 +463,14 @@ int interruptible_callback(gcptr arg1, int retry_counter)
     // copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
 
     // refresh td.roots:
+    gcptr end_marker = stm_pop_root();
+    assert(end_marker == END_MARKER_ON || end_marker == END_MARKER_OFF);
     arg1 = stm_pop_root();
     assert(arg1 == NULL);
     pop_roots();
     push_roots();
     stm_push_root(arg1);
+    stm_push_root(end_marker);
 
     int p = run_me();
     if (p == -1) // maybe restart transaction
