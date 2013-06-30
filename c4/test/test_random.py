@@ -305,12 +305,16 @@ class RandomSingleThreadTester(object):
         #
         self.roots = self.roots_outside_perform[:]
         self.startrev()
-        # XXX stm_perform_transaction() adds one root for the unused arg
+        # XXX stm_perform_transaction() adds one root for the unused arg,
+        # and one for an END_MARKER
+        end_marker = lib.stm_pop_root()
+        assert int(ffi.cast("revision_t", end_marker)) in [16, 24]
         arg = lib.stm_pop_root()
         assert arg == ffi.NULL
         self.pop_roots()
         self.push_roots()
         lib.stm_push_root(arg)
+        lib.stm_push_root(end_marker)
         self.check_valid(self.roots)
         #
         try:
