@@ -213,6 +213,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
   /* The risks are that the following assert fails, because the flag was
      added just now by a parallel thread during stealing... */
   /*assert(!(P->h_tid & GCFLAG_NURSERY_MOVED));*/
+  d->count_reads++;
   fxcache_add(&d->recent_reads_cache, P);
   return P;
 
@@ -600,6 +601,7 @@ gcptr stm_WriteBarrier(gcptr P)
       record_write_barrier(W);
     }
 
+  d->count_reads++;
   spinlock_release(d->public_descriptor->collection_lock);
 
   dprintf(("write_barrier: %p -> %p -> %p\n", P, R, W));
