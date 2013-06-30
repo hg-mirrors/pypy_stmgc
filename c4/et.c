@@ -903,6 +903,15 @@ static void update_reads_size_limit(struct tx_descriptor *d)
   d->reads_size_limit = d->atomic ? ULONG_MAX : d->reads_size_limit_nonatomic;
 }
 
+long stm_atomic(long delta)
+{
+  struct tx_descriptor *d = thread_descriptor;
+  d->atomic += delta;
+  assert(d->atomic >= 0);
+  update_reads_size_limit(d);
+  return d->atomic;
+}
+
 static void init_transaction(struct tx_descriptor *d)
 {
   assert(d->active == 0);
