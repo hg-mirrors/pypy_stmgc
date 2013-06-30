@@ -61,6 +61,7 @@ ffi.cdef('''
     void stm_commit_transaction(void);
     void stm_begin_inevitable_transaction(void);
     void stm_set_transaction_length(long length_max);
+    _Bool stm_should_break_transaction(void);
 
     /* extra non-public code */
     void printfcolor(char *msg);
@@ -664,6 +665,8 @@ def follow_original(p):
     r = p.h_original
     assert (r % 4) == 0
     return ffi.cast("gcptr", r)
+
+should_break_transaction = lib.stm_should_break_transaction
 
     
 nrb_protected = ffi.cast("gcptr", -1)
