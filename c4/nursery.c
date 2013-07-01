@@ -198,7 +198,8 @@ revision_t stm_id(gcptr p)
         return (revision_t)p;
     }
     
-
+    /* XXX: think about if p->h_original needs a volatile read
+       and if we need a memory fence (smp_wmb())... */
     
     spinlock_acquire(d->public_descriptor->collection_lock, 'I');
     /* old objects must have an h_original xOR be
