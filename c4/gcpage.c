@@ -346,6 +346,7 @@ static void mark_all_stack_roots(void)
 {
     struct tx_descriptor *d;
     for (d = stm_tx_head; d; d = d->tx_next) {
+        assert(!stm_has_got_any_lock(d));
 
         /* the roots pushed on the shadowstack */
         mark_roots(d->shadowstack, *d->shadowstack_end_ref);
@@ -356,14 +357,23 @@ static void mark_all_stack_roots(void)
 
         /* the current transaction's private copies of public objects */
         wlog_t *item;
+        struct G2L new_public_to_private;
+        memset(&new_public_to_private, 0, sizeof(new_public_to_private));
+
         G2L_LOOP_FORWARD(d->public_to_private, item) {
 
             /* note that 'item->addr' is also in the read set, so if it was
                outdated, it will be found at that time */
-            visit(&item->addr);
-            visit(&item->val);
+            gcptr key = item->addr;
+            gcptr val = item->val;
+            visit(&key);
+            visit(&val);
+            g2l_insert(&new_public_to_private, key, val);
 
         } G2L_LOOP_END;
+
+        g2l_delete_not_used_any_more(&d->public_to_private);
+        d->public_to_private = new_public_to_private;
 
         /* make sure that the other lists are empty */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
@@ -587,6 +597,7 @@ static void free_all_unused_local_pages(void)
     struct tx_descriptor *d;
     for (d = stm_tx_head; d; d = d->tx_next) {
         free_unused_local_pages(d->public_descriptor);
+        assert(!stm_has_got_any_lock(d));
     }
 }
 

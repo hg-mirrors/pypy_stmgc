@@ -764,19 +764,23 @@ void AbortTransaction(int num)
   long long elapsed_time;
 
   /* acquire the lock, but don't double-acquire it if already committing */
-  if (d->public_descriptor->collection_lock != 'C') {
-    spinlock_acquire(d->public_descriptor->collection_lock, 'C');
-    if (d->public_descriptor->stolen_objects.size != 0)
-      stm_normalize_stolen_objects(d);
-  }
-
+  if (d->public_descriptor->collection_lock != 'C')
+    {
+      spinlock_acquire(d->public_descriptor->collection_lock, 'C');
+      if (d->public_descriptor->stolen_objects.size != 0)
+        stm_normalize_stolen_objects(d);
+      assert(!stm_has_got_any_lock(d));
+    }
+  else
+    {
+      CancelLocks(d);
+      assert(!stm_has_got_any_lock(d));
+    }
 
   assert(d->active != 0);
   assert(!is_inevitable(d));
   assert(num < ABORT_REASONS);
   d->num_aborts[num]++;
-
-  CancelLocks(d);
 
   /* compute the elapsed time */
   if (d->start_real_time.tv_nsec != -1 &&
@@ -954,6 +958,7 @@ static void AcquireLocks(struct tx_descriptor *d)
   revision_t my_lock = d->my_lock;
   wlog_t *item;
 
+  assert(!stm_has_got_any_lock(d));
   assert(d->public_descriptor->stolen_objects.size == 0);
 
   if (!g2l_any_entry(&d->public_to_private))
@@ -1030,6 +1035,46 @@ static void CancelLocks(struct tx_descriptor *d)
       ACCESS_ONCE(R->h_revision) = v;
 
     } G2L_LOOP_END;
+}
+
+_Bool stm_has_got_any_lock(struct tx_descriptor *d)
+{
+  wlog_t *item;
+  int found_locked, found_unlocked;
+
+  if (!g2l_any_entry(&d->public_to_private))
+    return 0;
+
+  found_locked = 0;
+  found_unlocked = 0;
+
+  G2L_LOOP_FORWARD(d->public_to_private, item)
+    {
+      gcptr R = item->addr;
+      gcptr L = item->val;
+      if (L == NULL)
+        continue;
+
+      revision_t expected, v = L->h_revision;
+
+      if (L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
+        expected = (revision_t)R;
+      else
+        expected = *d->private_revision_ref;
+
+      if (v == expected)
+        {
+          assert(R->h_revision != d->my_lock);
+          found_unlocked = 1;
+          continue;
+        }
+
+      found_locked = 1;
+      assert(found_unlocked == 0);  /* an unlocked followed by a locked: no */
+
+    } G2L_LOOP_END;
+
+  return found_locked;
 }
 
 static pthread_mutex_t mutex_prebuilt_gcroots = PTHREAD_MUTEX_INITIALIZER;
