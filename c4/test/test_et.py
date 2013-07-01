@@ -630,7 +630,15 @@ def test_prehash_with_stealing():
         assert lib.stm_hash(p) != lib.stm_id(p)
     run_parallel(f1, f2)
 
-
-
-    
-    
+def test_enter_callback_call():
+    lib.stm_commit_transaction()
+    x = lib.stm_enter_callback_call()
+    assert x == 0
+    lib.stm_leave_callback_call(x)
+    lib.stm_begin_inevitable_transaction()
+    #
+    lib.stm_finalize()
+    x = lib.stm_enter_callback_call()
+    assert x == 1
+    lib.stm_leave_callback_call(x)
+    lib.stm_initialize_tests(0)
