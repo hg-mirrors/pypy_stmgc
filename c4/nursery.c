@@ -91,7 +91,7 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     assert(tid == (tid & STM_USER_TID_MASK));
     gcptr P = allocate_nursery(size, tid);
     P->h_revision = stm_private_rev_num;
-    /*P->h_original = 0; --- the object is null-initialized already */
+    assert(P->h_original == 0);  /* null-initialized already */
     return P;
 }
 
