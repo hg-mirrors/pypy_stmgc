@@ -198,9 +198,6 @@ revision_t stm_id(gcptr p)
         return (revision_t)p;
     }
     
-    /* XXX: think about if p->h_original needs a volatile read
-       and if we need a memory fence (smp_wmb())... */
-    
     spinlock_acquire(d->public_descriptor->collection_lock, 'I');
     /* old objects must have an h_original xOR be
        the original itself. 
@@ -222,7 +219,6 @@ revision_t stm_id(gcptr p)
         gcptr O = stmgc_duplicate_old(p);
         p->h_original = (revision_t)O;
         p->h_tid |= GCFLAG_HAS_ID;
-        O->h_tid |= GCFLAG_PUBLIC;
         
         if (p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
             gcptr B = (gcptr)p->h_revision;

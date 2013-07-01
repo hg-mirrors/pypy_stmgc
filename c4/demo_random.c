@@ -60,6 +60,7 @@ struct thread_data {
     int num_roots_outside_perform;
     int steps_left;
     int interruptible;
+    int atomic;
 };
 __thread struct thread_data td;
 
@@ -72,6 +73,24 @@ static int is_private(gcptr P)
 {
   return (P->h_revision == stm_private_rev_num) ||
     (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+}
+
+static void inc_atomic()
+{
+    assert(td.interruptible);
+    assert(stm_atomic(0) == td.atomic);
+    td.atomic++;
+    stm_atomic(1);
+    assert(stm_atomic(0) == td.atomic);
+}
+
+static void dec_atomic()
+{
+    assert(td.interruptible);
+    assert(stm_atomic(0) == td.atomic);
+    td.atomic--;
+    stm_atomic(-1);
+    assert(stm_atomic(0) == td.atomic);
 }
 
 int get_rand(int max)
@@ -254,7 +273,8 @@ void setup_thread()
     td.thread_seed = default_seed++;
     td.steps_left = STEPS_PER_THREAD;
     td.interruptible = 0;
-    
+    td.atomic = 0;
+
     td.num_roots = PREBUILT + NUMROOTS;
     for (i = 0; i < PREBUILT; i++) {
         if (i % 3 == 0) {
@@ -303,7 +323,7 @@ gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
 gcptr simple_events(gcptr p, gcptr _r, gcptr _sr)
 {
     nodeptr w_r;
-    int k = get_rand(8);
+    int k = get_rand(11);
     int num = get_rand(td.num_roots);
     switch (k) {
     case 0: // remove a root
@@ -337,6 +357,18 @@ gcptr simple_events(gcptr p, gcptr _r, gcptr _sr)
         check((gcptr)w_r);
         check(p);
         w_r->next = (struct node*)p;
+        break;
+    case 8:
+        if (td.interruptible) {
+            inc_atomic();
+        }
+        break;
+    case 9:
+    case 10:
+        /* more likely to be less atomic */
+        if (td.atomic) {
+            dec_atomic();
+        }
         break;
     }
     return p;
@@ -469,7 +501,7 @@ int interruptible_callback(gcptr arg1, int retry_counter)
     td.num_roots = td.num_roots_outside_perform;
     // done & overwritten by the following pop_roots():
     // copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
-
+    td.atomic = 0; // may be set differently on abort
     // refresh td.roots:
     gcptr end_marker = stm_pop_root();
     assert(end_marker == END_MARKER_ON || end_marker == END_MARKER_OFF);
@@ -490,14 +522,26 @@ int interruptible_callback(gcptr arg1, int retry_counter)
 int run_me()
 {
     gcptr p = NULL;
-    while (td.steps_left-->0) {
+    while (td.steps_left-->0 || td.atomic) {
         if (td.steps_left % 8 == 0)
             fprintf(stdout, "#");
 
         p = do_step(p);
 
-        if (p == (gcptr)-1)
-            return -1;
+        if (p == (gcptr)-1) {
+            if (td.atomic) {
+                // can't break, well, we could return to perform_transaction
+                // while being atomic. (TODO)
+                // may be true when major gc requested:
+                // assert(stm_should_break_transaction() == 0);
+                assert(stm_atomic(0) == td.atomic);
+                p = NULL;
+            }
+            else {
+                assert(stm_atomic(0) == 0);
+                return -1;
+            }
+        }
     }
     return 0;
 }
