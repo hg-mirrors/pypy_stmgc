@@ -230,6 +230,10 @@ static void visit(gcptr *pobj)
     if (obj->h_revision & 1) {
         assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
         obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;  /* see also fix_outdated() */
+
+        obj->h_tid |= GCFLAG_VISITED;
+        assert(!(obj->h_tid & GCFLAG_STUB));
+        gcptrlist_insert(&objects_to_trace, obj);
     }
     else if (obj->h_tid & GCFLAG_PUBLIC) {
         /* h_revision is a ptr: we have a more recent version */
@@ -269,26 +273,24 @@ static void visit(gcptr *pobj)
     else {
         assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
         gcptr B = (gcptr)obj->h_revision;
-        assert(!(B->h_tid & GCFLAG_STUB));
-        gcptrlist_insert(&objects_to_trace, B);
+        assert(B->h_tid & (GCFLAG_PUBLIC | GCFLAG_BACKUP_COPY));
 
-        if (!(B->h_tid & GCFLAG_PUBLIC)) {
-            /* a regular private_from_protected object with a backup copy B */
-            assert(B->h_tid & GCFLAG_BACKUP_COPY);
-            assert(B->h_revision & 1);
-            B->h_tid |= GCFLAG_VISITED;
-        }
-        else {
-            /* a private_from_protected with a stolen backup copy B */
+        obj->h_tid |= GCFLAG_VISITED;
+        B->h_tid |= GCFLAG_VISITED;
+        assert(!(obj->h_tid & GCFLAG_STUB));
+        assert(!(B->h_tid & GCFLAG_STUB));
+        gcptrlist_insert2(&objects_to_trace, obj, B);
+
+        if (IS_POINTER(B->h_revision)) {
+            assert(B->h_tid & GCFLAG_PUBLIC);
             assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
-            gcptr obj1 = B;
-            visit(&obj1);     /* xxx recursion? */
-            obj->h_revision = (revision_t)obj1;
+            assert(!(B->h_revision & 2));
+
+            pobj = (gcptr *)&B->h_revision;
+            obj = *pobj;
+            goto restart;
         }
     }
-    obj->h_tid |= GCFLAG_VISITED;
-    assert(!(obj->h_tid & GCFLAG_STUB));
-    gcptrlist_insert(&objects_to_trace, obj);
 }
 
 static void visit_all_objects(void)
