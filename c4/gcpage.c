@@ -625,6 +625,7 @@ void force_minor_collections(void)
         if (d != saved) {
             /* Hack: temporarily pretend that we "are" the other thread...
              */
+            assert(d->shadowstack_end_ref && *d->shadowstack_end_ref);
             thread_descriptor = d;
             stm_private_rev_num = *d->private_revision_ref;
             stm_read_barrier_cache = *d->read_barrier_cache_ref;

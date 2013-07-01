@@ -1504,7 +1504,6 @@ int DescriptorInit(void)
       revision_t i;
       struct tx_descriptor *d = stm_malloc(sizeof(struct tx_descriptor));
       memset(d, 0, sizeof(struct tx_descriptor));
-      stmgcpage_acquire_global_lock();
 
       struct tx_public_descriptor *pd;
       i = descriptor_array_free_list;
@@ -1554,7 +1553,6 @@ int DescriptorInit(void)
                (long)d->public_descriptor_index, (long)pthread_self()));
 
       stmgcpage_init_tls();
-      stmgcpage_release_global_lock();
       return 1;
     }
   else
@@ -1567,7 +1565,6 @@ void DescriptorDone(void)
     struct tx_descriptor *d = thread_descriptor;
     assert(d != NULL);
     assert(d->active == 0);
-    stmgcpage_acquire_global_lock();
 
     /* our nursery is empty at this point.  The list 'stolen_objects'
        should have been emptied at the previous minor collection and
@@ -1585,7 +1582,6 @@ void DescriptorDone(void)
     if (d->tx_prev != NULL) d->tx_prev->tx_next = d->tx_next;
     if (d->tx_next != NULL) d->tx_next->tx_prev = d->tx_prev;
     if (d == stm_tx_head) stm_tx_head = d->tx_next;
-    stmgcpage_release_global_lock();
 
     thread_descriptor = NULL;
 
