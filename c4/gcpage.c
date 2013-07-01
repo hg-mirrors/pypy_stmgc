@@ -269,6 +269,7 @@ static void visit(gcptr *pobj)
     else {
         assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
         gcptr B = (gcptr)obj->h_revision;
+        assert(!(B->h_tid & GCFLAG_STUB));
         gcptrlist_insert(&objects_to_trace, B);
 
         if (!(B->h_tid & GCFLAG_PUBLIC)) {
@@ -286,6 +287,7 @@ static void visit(gcptr *pobj)
         }
     }
     obj->h_tid |= GCFLAG_VISITED;
+    assert(!(obj->h_tid & GCFLAG_STUB));
     gcptrlist_insert(&objects_to_trace, obj);
 }
 
