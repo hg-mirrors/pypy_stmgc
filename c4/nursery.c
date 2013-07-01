@@ -536,6 +536,7 @@ static void minor_collect(struct tx_descriptor *d)
 {
     dprintf(("minor collection [%p to %p]\n",
              d->nursery_base, d->nursery_end));
+    assert(!stm_has_got_any_lock(d));
 
     /* acquire the "collection lock" first */
     setup_minor_collect(d);
@@ -562,6 +563,7 @@ static void minor_collect(struct tx_descriptor *d)
        with GCFLAG_OLD
     */
     teardown_minor_collect(d);
+    assert(!stm_has_got_any_lock(d));
 
     /* When doing minor collections with the nursery "mostly empty",
        as occurs when other threads force major collections but this
