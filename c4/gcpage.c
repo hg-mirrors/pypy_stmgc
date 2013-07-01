@@ -373,9 +373,20 @@ static void mark_all_stack_roots(void)
         G2L_LOOP_FORWARD(d->public_to_private, item) {
             /* note that 'item->addr' is also in the read set, so if it was
                outdated, it will be found at that time */
-            visit_keep(item->addr);
-            if (item->val != NULL)
-                visit_keep(item->val);
+            gcptr R = item->addr;
+            gcptr L = item->val;
+            visit_keep(R);
+            if (L != NULL) {
+                revision_t v = L->h_revision;
+                visit_keep(L);
+                /* a bit of custom logic here: if L->h_revision used to
+                   point exactly to R, as set by stealing, then we must
+                   keep this property, even though visit_keep(L) might
+                   decide it would be better to make it point to a more
+                   recent copy. */
+                if (v == (revision_t)R)
+                    L->h_revision = v;   /* restore */
+            }
         } G2L_LOOP_END;
 
         /* make sure that the other lists are empty */
