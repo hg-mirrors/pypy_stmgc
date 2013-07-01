@@ -906,6 +906,8 @@ static void update_reads_size_limit(struct tx_descriptor *d)
 long stm_atomic(long delta)
 {
   struct tx_descriptor *d = thread_descriptor;
+  if (delta) // no atomic-checks
+    dprintf(("stm_atomic(%lu)\n", delta));
   d->atomic += delta;
   assert(d->atomic >= 0);
   update_reads_size_limit(d);
