@@ -219,21 +219,14 @@ static void visit(gcptr *pobj)
         return;
 
  restart:
-    if (obj->h_tid & GCFLAG_VISITED) {
-        dprintf(("[already visited: %p]\n", obj));
-        assert(obj == *pobj);
-        assert((obj->h_revision & 3) ||   /* either odd, or stub */
-               (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
-        return;    /* already seen */
-    }
-
     if (obj->h_revision & 1) {
         assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
-        obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;  /* see also fix_outdated() */
-
-        obj->h_tid |= GCFLAG_VISITED;
         assert(!(obj->h_tid & GCFLAG_STUB));
-        gcptrlist_insert(&objects_to_trace, obj);
+        if (!(obj->h_tid & GCFLAG_VISITED)) {
+            obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;  /* see fix_outdated() */
+            obj->h_tid |= GCFLAG_VISITED;
+            gcptrlist_insert(&objects_to_trace, obj);
+        }
     }
     else if (obj->h_tid & GCFLAG_PUBLIC) {
         /* h_revision is a ptr: we have a more recent version */
@@ -269,6 +262,13 @@ static void visit(gcptr *pobj)
         }
         *pobj = obj;
         goto restart;
+    }
+    else if (obj->h_tid & GCFLAG_VISITED) {
+        dprintf(("[already visited: %p]\n", obj));
+        assert(obj == *pobj);
+        assert((obj->h_revision & 3) ||   /* either odd, or stub */
+               (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+        return;    /* already seen */
     }
     else {
         assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
