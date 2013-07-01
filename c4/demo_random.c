@@ -19,6 +19,7 @@ extern revision_t get_private_rev_num(void);
 #define PREBUILT 3 // per thread
 #define MAXROOTS 1000
 #define SHARED_ROOTS 5 // shared by threads
+#define DO_MAJOR_COLLECTS 1
 
 
 
@@ -276,17 +277,23 @@ void setup_thread()
 
 gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
 {
-    int k = get_rand(10);
-    if (k == 1) {
+    int k = get_rand(100);
+    if (k < 10) {
         push_roots();
         stm_push_root(p);
         stm_become_inevitable("fun");
         p = stm_pop_root();
         pop_roots();
     } 
-    else if (k < 4) {
+    else if (k < 40) {
         push_roots();
         stmgc_minor_collect();
+        pop_roots();
+        p = NULL;
+    } else if (k < 41 && DO_MAJOR_COLLECTS) {
+        fprintf(stdout, "major collect\n");
+        push_roots();
+        stmgcpage_possibly_major_collect(1);
         pop_roots();
         p = NULL;
     }
@@ -418,6 +425,7 @@ gcptr do_step(gcptr p)
 
     k = get_rand(9);
     check(p);
+    assert(thread_descriptor->active);
 
     if (k < 3)
         p = simple_events(p, _r, _sr);
