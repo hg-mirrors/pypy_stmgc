@@ -293,6 +293,20 @@ static void visit(gcptr *pobj)
     }
 }
 
+static void visit_keep(gcptr obj)
+{
+    if (!(obj->h_tid & GCFLAG_VISITED)) {
+        obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;  /* see fix_outdated() */
+        obj->h_tid |= GCFLAG_VISITED;
+        gcptrlist_insert(&objects_to_trace, obj);
+
+        if (IS_POINTER(obj->h_revision)) {
+            assert(!(obj->h_revision & 2));
+            visit((gcptr *)&obj->h_revision);
+        }
+    }
+}
+
 static void visit_all_objects(void)
 {
     while (gcptrlist_size(&objects_to_trace) > 0) {
@@ -316,7 +330,6 @@ static void mark_prebuilt_roots(void)
     for (; pobj != pend; pobj++) {
         obj = *pobj;
         assert(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL);
-        obj->h_tid &= ~GCFLAG_VISITED;
         assert(IS_POINTER(obj->h_revision));
         visit((gcptr *)&obj->h_revision);
     }
@@ -357,23 +370,13 @@ static void mark_all_stack_roots(void)
 
         /* the current transaction's private copies of public objects */
         wlog_t *item;
-        struct G2L new_public_to_private;
-        memset(&new_public_to_private, 0, sizeof(new_public_to_private));
-
         G2L_LOOP_FORWARD(d->public_to_private, item) {
-
             /* note that 'item->addr' is also in the read set, so if it was
                outdated, it will be found at that time */
-            gcptr key = item->addr;
-            gcptr val = item->val;
-            visit(&key);
-            visit(&val);
-            g2l_insert(&new_public_to_private, key, val);
-
+            visit_keep(item->addr);
+            if (item->val != NULL)
+                visit_keep(item->val);
         } G2L_LOOP_END;
-
-        g2l_delete_not_used_any_more(&d->public_to_private);
-        d->public_to_private = new_public_to_private;
 
         /* make sure that the other lists are empty */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
