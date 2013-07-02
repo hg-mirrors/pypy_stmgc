@@ -44,7 +44,11 @@ void stmgc_init_nursery(void)
 void stmgc_done_nursery(void)
 {
     struct tx_descriptor *d = thread_descriptor;
-    assert(!minor_collect_anything_to_do(d));
+    /* someone may have called minor_collect_soon()
+       inbetween the preceeding minor_collect() and 
+       this assert (committransaction() -> 
+       updatechainheads() -> stub_malloc() -> ...): */
+    /* assert(!minor_collect_anything_to_do(d)); */
     stm_free(d->nursery_base, GC_NURSERY);
 
     gcptrlist_delete(&d->old_objects_to_trace);
