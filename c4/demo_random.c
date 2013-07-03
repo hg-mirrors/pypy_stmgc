@@ -293,6 +293,20 @@ void setup_thread()
         td.roots[i] = (gcptr)allocate_node();
     }
 
+    if (td.thread_seed % 3 == 0) {
+        stm_thread_local_obj = (gcptr)allocate_node();
+    }
+    else if (td.thread_seed % 3 == 1) {
+        stm_thread_local_obj = allocate_pseudoprebuilt_with_hash
+            (
+             sizeof(struct node), GCTID_STRUCT_NODE, PREBUILT);
+        ((nodeptr)stm_thread_local_obj)->hash = PREBUILT;
+    } 
+    else {
+        stm_thread_local_obj = allocate_pseudoprebuilt
+            (sizeof(struct node), GCTID_STRUCT_NODE);
+    }
+
 }
 
 gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
@@ -432,7 +446,7 @@ gcptr id_hash_events(gcptr p, gcptr _r, gcptr _sr)
             w_t->hash = stm_hash((gcptr)w_t);
             assert(w_t->hash == stm_hash((gcptr)_t));
         }
-        if (w_t->hash >= 0 && (w_t->hash < PREBUILT ||
+        if (w_t->hash >= 0 && (w_t->hash <= PREBUILT ||
                                w_t->hash < SHARED_ROOTS)) {
             // should be with predefined hash
             assert (stm_id((gcptr)w_t) != stm_hash((gcptr)w_t));
@@ -449,8 +463,11 @@ gcptr do_step(gcptr p)
     gcptr _r, _sr;
     int num, k;
 
-    num = get_rand(td.num_roots);
-    _r = td.roots[num];
+    num = get_rand(td.num_roots+1);
+    if (num == 0)
+        _r = stm_thread_local_obj;
+    else
+        _r = td.roots[num - 1];
     
     num = get_rand(SHARED_ROOTS);
     _sr = shared_roots[num];
