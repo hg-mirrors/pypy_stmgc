@@ -253,6 +253,7 @@ void stm_normalize_stolen_objects(struct tx_descriptor *d)
     for (i = 0; i < size; i += 2) {
         gcptr B = items[i];
         assert(!(B->h_tid & GCFLAG_BACKUP_COPY));  /* already removed */
+        assert(B->h_tid & GCFLAG_PUBLIC);
 
         /* to be on the safe side --- but actually needed, see the
            gcptrlist_insert2(L, NULL) above */
@@ -264,6 +265,7 @@ void stm_normalize_stolen_objects(struct tx_descriptor *d)
         assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
         assert(IS_POINTER(L->h_revision));
 
+        assert(B->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
         g2l_insert(&d->public_to_private, B, L);
 
         /* this is definitely needed: all keys in public_to_private
