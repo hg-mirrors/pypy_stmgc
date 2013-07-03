@@ -318,6 +318,7 @@ static void visit_if_young(gcptr *root)
         *root = fresh_old_copy;
 
         /* add 'fresh_old_copy' to the list of objects to trace */
+        assert(!(fresh_old_copy->h_tid & GCFLAG_PUBLIC));
         gcptrlist_insert(&d->old_objects_to_trace, fresh_old_copy);
     }
 }
@@ -477,7 +478,18 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
 
         assert(obj->h_tid & GCFLAG_OLD);
         assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
-        obj->h_tid |= GCFLAG_WRITE_BARRIER;
+
+        /* We add the WRITE_BARRIER flag to objects here, but warning:
+           we may occasionally see a PUBLIC object --- one that was
+           a private/protected object when it was added to
+           old_objects_to_trace, and has been stolen.  So we have to
+           check and not do any change the obj->h_tid in that case.
+           Otherwise this conflicts with the rule that we may only
+           modify obj->h_tid of a public object in order to add
+           PUBLIC_TO_PRIVATE.
+        */
+        if (!(obj->h_tid & GCFLAG_PUBLIC))
+            obj->h_tid |= GCFLAG_WRITE_BARRIER;
 
         stmgc_trace(obj, &visit_if_young);
     }
@@ -675,6 +687,7 @@ static gcptr allocate_next_section(size_t allocate_size, revision_t tid)
         gcptr P = stmgcpage_malloc(allocate_size);
         memset(P, 0, allocate_size);
         P->h_tid = tid | GCFLAG_OLD;
+        assert(!(P->h_tid & GCFLAG_PUBLIC));
         gcptrlist_insert(&d->old_objects_to_trace, P);
         return P;
     }
