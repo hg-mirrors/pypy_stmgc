@@ -105,6 +105,15 @@ void copy_roots(gcptr *from, gcptr *to, int num)
         *(to++) = *(from++);
 }
 
+gcptr allocate_old(size_t size, int tid)
+{
+    gcptr p = stmgcpage_malloc(size);
+    memset(p, 0, size);
+    p->h_tid = GCFLAG_OLD | GCFLAG_WRITE_BARRIER | tid;
+    p->h_revision = -INT_MAX;
+    return p;
+}
+
 gcptr allocate_pseudoprebuilt(size_t size, int tid)
 {
     gcptr x = calloc(1, size);
@@ -166,6 +175,15 @@ int is_shared_prebuilt(gcptr p)
     return 0;
 }
 
+#ifdef _GC_DEBUG
+int is_free_old(gcptr p)
+{
+    fprintf(stdout, "\n=== check ===\n");
+    return (!_stm_can_access_memory((char*)p))
+        || (p->h_tid == DEBUG_WORD(0xDD));
+}
+#endif
+
 void check_not_free(gcptr p)
 {
     assert(p != NULL);
@@ -179,6 +197,16 @@ void check(gcptr p)
     if (p != NULL) {
         check_not_free(p);
         classify(p); // additional asserts
+        if (p->h_original && !(p->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
+            // must point to valid old object
+            gcptr id = (gcptr)p->h_original;
+            assert(id->h_tid & GCFLAG_OLD);
+            check_not_free(id);
+#ifdef _GC_DEBUG
+            if (!is_shared_prebuilt(id) && !(id->h_tid & GCFLAG_PREBUILT))
+                assert(!is_free_old(id));
+#endif
+        }
     }
 }
 
