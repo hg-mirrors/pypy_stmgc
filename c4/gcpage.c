@@ -235,6 +235,15 @@ static void visit(gcptr *pobj)
         if (!(obj->h_revision & 2)) {
             /* go visit the more recent version */
             obj = (gcptr)obj->h_revision;
+            if ((gcptr)obj->h_original == prev_obj
+                && !(prev_obj->h_tid & GCFLAG_VISITED)) {
+                assert(0); // why never hit?
+                // prev_obj is the ID copy
+                prev_obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;
+                /* see fix_outdated() */
+                prev_obj->h_tid |= GCFLAG_VISITED;
+                gcptrlist_insert(&objects_to_trace, prev_obj);
+            }
         }
         else {
             /* it's a stub: keep it if it points to a protected version,
@@ -244,7 +253,11 @@ static void visit(gcptr *pobj)
             */
             assert(obj->h_tid & GCFLAG_STUB);
             obj = (gcptr)(obj->h_revision - 2);
-            if (!(obj->h_tid & GCFLAG_PUBLIC)) {
+            if (!(obj->h_tid & GCFLAG_PUBLIC) || !(prev_obj->h_original)) {
+                assert(prev_obj->h_original); // why never hit?
+                assert(!(obj->h_tid & GCFLAG_PUBLIC));
+                /* never?: stub->public where stub is id copy? */
+
                 prev_obj->h_tid |= GCFLAG_VISITED;
                 assert(*pobj == prev_obj);
                 gcptr obj1 = obj;
@@ -256,6 +269,9 @@ static void visit(gcptr *pobj)
         }
 
         if (!(obj->h_revision & 3)) {
+            /* obj is neither a stub nor a most recent revision:
+               completely ignore obj->h_revision */
+
             obj = (gcptr)obj->h_revision;
             assert(obj->h_tid & GCFLAG_PUBLIC);
             prev_obj->h_revision = (revision_t)obj;
@@ -274,7 +290,21 @@ static void visit(gcptr *pobj)
         assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
         gcptr B = (gcptr)obj->h_revision;
         assert(B->h_tid & (GCFLAG_PUBLIC | GCFLAG_BACKUP_COPY));
-
+        
+        gcptr id_copy = (gcptr)obj->h_original;
+        if (id_copy && id_copy != B) {
+            assert(id_copy == (gcptr)B->h_original);
+            assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
+            if (!(id_copy->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
+                gcptrlist_insert(&objects_to_trace, id_copy);
+            } 
+            else {
+                /* prebuilt originals won't get collected anyway
+                 and if they are not reachable in any other way,
+                 we only ever need their location, not their content */
+            }
+        }
+        
         obj->h_tid |= GCFLAG_VISITED;
         B->h_tid |= GCFLAG_VISITED;
         assert(!(obj->h_tid & GCFLAG_STUB));
@@ -375,8 +405,24 @@ static void mark_all_stack_roots(void)
                outdated, it will be found at that time */
             gcptr R = item->addr;
             gcptr L = item->val;
+
+            /* Objects that were not visited yet must have the PUB_TO_PRIV
+             flag. Except if that transaction will abort anyway, then it
+             may be removed from a previous major collection that didn't
+             fix the PUB_TO_PRIV because the transaction was going to
+             abort anyway:
+             1. minor_collect before major collect (R->L, R is outdated, abort)
+             2. major collect removes flag
+             3. major collect again, same thread, no time to abort
+             4. flag still removed
+            */
+            assert(IMPLIES(!(R->h_tid & GCFLAG_VISITED) && d->active > 0,
+                           R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
             visit_keep(R);
             if (L != NULL) {
+                /* minor collection found R->L in public_to_young
+                 and R was modified. It then sets item->val to NULL and wants 
+                 to abort later. */
                 revision_t v = L->h_revision;
                 visit_keep(L);
                 /* a bit of custom logic here: if L->h_revision used to
@@ -384,8 +430,10 @@ static void mark_all_stack_roots(void)
                    keep this property, even though visit_keep(L) might
                    decide it would be better to make it point to a more
                    recent copy. */
-                if (v == (revision_t)R)
+                if (v == (revision_t)R) {
+                    assert(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
                     L->h_revision = v;   /* restore */
+                }
             }
         } G2L_LOOP_END;
 
@@ -448,6 +496,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
            just removing it is very wrong --- we want 'd' to abort.
         */
         if (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
+            /* follow obj to its backup */
             assert(IS_POINTER(obj->h_revision));
             obj = (gcptr)obj->h_revision;
         }
@@ -482,14 +531,16 @@ static void cleanup_for_thread(struct tx_descriptor *d)
     /* We are now after visiting all objects, and we know the
      * transaction isn't aborting because of this collection.  We have
      * cleared GCFLAG_PUBLIC_TO_PRIVATE from public objects at the end
-     * of the chain.  Now we have to set it again on public objects that
-     * have a private copy.
+     * of the chain (head revisions). Now we have to set it again on 
+     * public objects that have a private copy.
      */
     wlog_t *item;
 
     dprintf(("fix public_to_private on thread %p\n", d));
 
     G2L_LOOP_FORWARD(d->public_to_private, item) {
+        assert(item->addr->h_tid & GCFLAG_VISITED);
+        assert(item->val->h_tid & GCFLAG_VISITED);
 
         assert(item->addr->h_tid & GCFLAG_PUBLIC);
         /* assert(is_private(item->val)); but in the other thread,

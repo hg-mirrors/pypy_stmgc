@@ -48,7 +48,8 @@ void stmgc_done_nursery(void)
        inbetween the preceeding minor_collect() and 
        this assert (committransaction() -> 
        updatechainheads() -> stub_malloc() -> ...): */
-    /* assert(!minor_collect_anything_to_do(d)); */
+    assert(!minor_collect_anything_to_do(d)
+           || d->nursery_current == d->nursery_end);
     stm_free(d->nursery_base, GC_NURSERY);
 
     gcptrlist_delete(&d->old_objects_to_trace);
@@ -430,6 +431,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
         gcptr P = items[i];
         assert(P->h_tid & GCFLAG_PUBLIC);
         assert(P->h_tid & GCFLAG_OLD);
+        assert(P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
 
         revision_t v = ACCESS_ONCE(P->h_revision);
         wlog_t *item;
