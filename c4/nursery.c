@@ -266,7 +266,7 @@ static inline gcptr create_old_object_copy(gcptr obj)
     return fresh_old_copy;
 }
 
-inline void copy_to_old_id_copy(gcptr obj, gcptr id)
+void copy_to_old_id_copy(gcptr obj, gcptr id)
 {
     assert(!is_in_nursery(thread_descriptor, id));
     assert(id->h_tid & GCFLAG_OLD);

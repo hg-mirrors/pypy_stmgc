@@ -1,7 +1,7 @@
 #include "stmimpl.h"
 
 
-inline void copy_to_old_id_copy(gcptr obj, gcptr id);
+void copy_to_old_id_copy(gcptr obj, gcptr id);
 
 gcptr stm_stub_malloc(struct tx_public_descriptor *pd)
 {

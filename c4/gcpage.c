@@ -212,6 +212,24 @@ void stmgcpage_free(gcptr obj)
 
 static struct GcPtrList objects_to_trace;
 
+static void keep_original_alive(gcptr obj)
+{
+    /* keep alive the original of a visited object */
+    gcptr id_copy = (gcptr)obj->h_original;
+    /* prebuilt original objects may have a predifined
+       hash in h_original */
+    if (id_copy && !(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
+        if (!(id_copy->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
+            gcptrlist_insert(&objects_to_trace, id_copy);
+        } 
+        else {
+            /* prebuilt originals won't get collected anyway
+               and if they are not reachable in any other way,
+               we only ever need their location, not their content */
+        }
+    }
+}
+
 static void visit(gcptr *pobj)
 {
     gcptr obj = *pobj;
@@ -226,6 +244,8 @@ static void visit(gcptr *pobj)
             obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;  /* see fix_outdated() */
             obj->h_tid |= GCFLAG_VISITED;
             gcptrlist_insert(&objects_to_trace, obj);
+
+            keep_original_alive(obj);
         }
     }
     else if (obj->h_tid & GCFLAG_PUBLIC) {
@@ -235,15 +255,6 @@ static void visit(gcptr *pobj)
         if (!(obj->h_revision & 2)) {
             /* go visit the more recent version */
             obj = (gcptr)obj->h_revision;
-            if ((gcptr)obj->h_original == prev_obj
-                && !(prev_obj->h_tid & GCFLAG_VISITED)) {
-                assert(0); // why never hit?
-                // prev_obj is the ID copy
-                prev_obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;
-                /* see fix_outdated() */
-                prev_obj->h_tid |= GCFLAG_VISITED;
-                gcptrlist_insert(&objects_to_trace, prev_obj);
-            }
         }
         else {
             /* it's a stub: keep it if it points to a protected version,
@@ -253,12 +264,10 @@ static void visit(gcptr *pobj)
             */
             assert(obj->h_tid & GCFLAG_STUB);
             obj = (gcptr)(obj->h_revision - 2);
-            if (!(obj->h_tid & GCFLAG_PUBLIC) || !(prev_obj->h_original)) {
-                assert(prev_obj->h_original); // why never hit?
-                assert(!(obj->h_tid & GCFLAG_PUBLIC));
-                /* never?: stub->public where stub is id copy? */
-
+            if (!(obj->h_tid & GCFLAG_PUBLIC)) {
                 prev_obj->h_tid |= GCFLAG_VISITED;
+                keep_original_alive(prev_obj);
+
                 assert(*pobj == prev_obj);
                 gcptr obj1 = obj;
                 visit(&obj1);       /* recursion, but should be only once */
@@ -291,18 +300,11 @@ static void visit(gcptr *pobj)
         gcptr B = (gcptr)obj->h_revision;
         assert(B->h_tid & (GCFLAG_PUBLIC | GCFLAG_BACKUP_COPY));
         
-        gcptr id_copy = (gcptr)obj->h_original;
-        if (id_copy && id_copy != B) {
-            assert(id_copy == (gcptr)B->h_original);
+        if (obj->h_original && (gcptr)obj->h_original != B) {
+            /* if B is original, it will be visited anyway */
+            assert(obj->h_original == B->h_original);
             assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
-            if (!(id_copy->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
-                gcptrlist_insert(&objects_to_trace, id_copy);
-            } 
-            else {
-                /* prebuilt originals won't get collected anyway
-                 and if they are not reachable in any other way,
-                 we only ever need their location, not their content */
-            }
+            keep_original_alive(obj);
         }
         
         obj->h_tid |= GCFLAG_VISITED;
@@ -323,6 +325,7 @@ static void visit(gcptr *pobj)
     }
 }
 
+
 static void visit_keep(gcptr obj)
 {
     if (!(obj->h_tid & GCFLAG_VISITED)) {
@@ -334,6 +337,7 @@ static void visit_keep(gcptr obj)
             assert(!(obj->h_revision & 2));
             visit((gcptr *)&obj->h_revision);
         }
+        keep_original_alive(obj);
     }
 }
 
