@@ -298,6 +298,8 @@ lib = ffi.verify(r'''
                  undef_macros=['NDEBUG'],
                  define_macros=[('GC_NURSERY', str(16 * WORD)),
                                 ('_GC_DEBUG', '2'),
+                                ('_GC_DEBUGPRINTS', '1'),
+                                ('DUMP_EXTRA', '1'),
                                 ('GC_PAGE_SIZE', '1000'),
                                 ('GC_MIN', '200000'),
                                 ('GC_EXPAND', '90000'),
@@ -575,6 +577,13 @@ def delegate(p1, p2):
     p1.h_tid |= GCFLAG_PUBLIC_TO_PRIVATE
     if p1.h_tid & GCFLAG_PREBUILT_ORIGINAL:
         lib.stm_add_prebuilt_root(p1)
+
+def delegate_original(p1, p2):
+    assert p1.h_original == 0
+    assert p2.h_original == 0
+    assert p1 != p2
+    p2.h_original = ffi.cast("revision_t", p1)
+
 
 def make_public(p1):
     """Hack at an object returned by oalloc() to force it public."""

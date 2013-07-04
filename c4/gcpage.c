@@ -220,6 +220,11 @@ static void keep_original_alive(gcptr obj)
        hash in h_original */
     if (id_copy && !(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
         if (!(id_copy->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
+            id_copy->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;
+            /* see fix_outdated() */
+            id_copy->h_tid |= GCFLAG_VISITED;
+
+            /* XXX: may not always need tracing? */
             gcptrlist_insert(&objects_to_trace, id_copy);
         } 
         else {
