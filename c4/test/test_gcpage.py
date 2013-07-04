@@ -200,6 +200,20 @@ def test_new_version():
     assert p3 != p2
     assert p3 == lib.stm_write_barrier(p2)
 
+def test_new_version_id_alive():
+    p1 = oalloc(HDR); make_public(p1)
+    p2 = oalloc(HDR); make_public(p2)
+    delegate(p1, p2)
+    delegate_original(p1, p2)
+    p2.h_original = ffi.cast("revision_t", p1)
+    lib.stm_push_root(p1)
+    major_collect()
+    major_collect()
+    p1b = lib.stm_pop_root()
+    check_not_free(p1) # id copy
+    check_not_free(p2)
+
+    
 def test_new_version_kill_intermediate():
     p1 = oalloc(HDR); make_public(p1)
     p2 = oalloc(HDR); make_public(p2)
@@ -249,6 +263,34 @@ def test_new_version_kill_intermediate_non_root():
     print 'p5:', p5
     assert rawgetptr(p1, 0) == p5
 
+def test_new_version_not_kill_intermediate_original():
+    p1 = oalloc_refs(1); make_public(p1)
+    p2 = oalloc(HDR);    make_public(p2)
+    p3 = oalloc(HDR);    make_public(p3)
+    p4 = oalloc(HDR);    make_public(p4)
+    p5 = oalloc(HDR);    make_public(p5)
+    delegate(p2, p3)
+    delegate(p3, p4)
+    delegate(p4, p5)
+    rawsetptr(p1, 0, p3)
+    delegate_original(p3, p1)
+    delegate_original(p3, p2)
+    delegate_original(p3, p4)
+    delegate_original(p3, p5)
+
+    lib.stm_push_root(p1)
+    major_collect()
+    lib.stm_pop_root()
+    check_not_free(p1)
+    check_free_old(p2)
+    check_not_free(p3) # original
+    check_free_old(p4)
+    check_not_free(p5)
+    assert rawgetptr(p1, 0) == p5
+    assert follow_original(p1) == p3
+    assert follow_original(p5) == p3
+
+    
 def test_prebuilt_version_1():
     p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
     check_prebuilt(p1)
