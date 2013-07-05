@@ -2,10 +2,6 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#ifndef NUM_THREADS
-#define NUM_THREADS  4
-#endif
-
 
 static DuConsObject du_pending_transactions = {
     DuOBJECT_HEAD_INIT(DUTYPE_CONS),
@@ -21,15 +17,13 @@ static void *run_thread(void *);   /* forward */
 static void run_all_threads(void)
 {
     int i;
-    pthread_t th[NUM_THREADS];
-
-    for (i = 0; i < NUM_THREADS; i++) {
-        int status = pthread_create(&th[i], NULL, run_thread, NULL);
+    for (i = 0; i < all_threads_count; i++) {
+        int status = pthread_create(&all_threads[i], NULL, run_thread, NULL);
         if (status != 0)
             stm_fatalerror("status != 0\n");
     }
-    for (i = 0; i < NUM_THREADS; i++) {
-        pthread_join(th[i], NULL);
+    for (i = 0; i < all_threads_count; i++) {
+        pthread_join(all_threads[i], NULL);
     }
 }
 
@@ -88,13 +82,13 @@ static DuObject *next_cell(void)
         else {
             /* nothing to do, wait */
             thread_sleeping++;
-            if (thread_sleeping == NUM_THREADS) {
+            if (thread_sleeping == all_threads_count) {
                 pthread_mutex_unlock(&mutex_sleep);
             }
             stm_commit_transaction();
             pthread_mutex_lock(&mutex_sleep);
             stm_begin_inevitable_transaction();
-            if (thread_sleeping == NUM_THREADS) {
+            if (thread_sleeping == all_threads_count) {
                 pthread_mutex_unlock(&mutex_sleep);
                 return NULL;
             }

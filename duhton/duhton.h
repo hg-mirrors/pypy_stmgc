@@ -138,7 +138,7 @@ DuObject *_DuFrame_EvalCall(DuObject *frame, DuObject *symbol,
                             DuObject *rest, int execute_now);
 DuObject *_Du_GetGlobals(void);
 
-void Du_Initialize(void);
+void Du_Initialize(int);
 void Du_Finalize(void);
 #define Du_Globals        (_Du_GetGlobals())
 
@@ -182,5 +182,7 @@ static inline gcptr _pop_root(void) {
 }
 #endif
 
+extern pthread_t *all_threads;
+extern int all_threads_count;
 
 #endif  /* _DUHTON_H_ */
