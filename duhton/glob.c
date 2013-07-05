@@ -1,6 +1,8 @@
 #include "duhton.h"
 #include <sys/select.h>
 
+pthread_t *all_threads;
+int all_threads_count;
 
 static void _du_getargs1(const char *name, DuObject *cons, DuObject *locals,
                          DuObject **a)
@@ -561,9 +563,11 @@ DuObject *du_assert(DuObject *cons, DuObject *locals)
     return Du_None;
 }
 
-void Du_Initialize(void)
+void Du_Initialize(int num_threads)
 {
     stm_initialize();
+	all_threads_count = num_threads;
+	all_threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);
 
     DuFrame_SetBuiltinMacro(Du_Globals, "progn", Du_Progn);
     DuFrame_SetBuiltinMacro(Du_Globals, "setq", du_setq);
