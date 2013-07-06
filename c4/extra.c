@@ -153,10 +153,12 @@ void stm_abort_info_pop(long count)
     gcptrlist_reduce_size(&d->abortinfo, newsize < 0 ? 0 : newsize);
 }
 
-#if 0
 size_t stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
                              int abort_reason, char *output)
 {
+    return 1;
+}
+#if 0
     /* re-encodes the abort info as a single string.
        For convenience (no escaping needed, no limit on integer
        sizes, etc.) we follow the bittorrent format. */
@@ -233,14 +235,14 @@ size_t stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
                 }
                 break;
             default:
-                fprintf(stderr, "Fatal RPython error: corrupted abort log\n");
-                abort();
+                stm_fatalerror("corrupted abort log\n");
             }
         }
     }
     WRITE('e');
     WRITE('\0');   /* final null character */
 #undef WRITE
+#undef WRITE_BUF
     return totalsize;
 }
 #endif

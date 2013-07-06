@@ -422,29 +422,6 @@ gcptr _stm_nonrecord_barrier(gcptr P)
   goto restart_all;
 }
 
-#if 0
-void *stm_DirectReadBarrierFromR(void *G1, void *R_Container1, size_t offset)
-{
-  return _direct_read_barrier((gcptr)G1, (gcptr)R_Container1, offset);
-}
-#endif
-
-gcptr stm_RepeatReadBarrier(gcptr O)
-{
-  abort();//XXX
-#if 0
-  // LatestGlobalRevision(O) would either return O or abort
-  // the whole transaction, so omitting it is not wrong
-  struct tx_descriptor *d = thread_descriptor;
-  gcptr L;
-  wlog_t *entry;
-  G2L_FIND(d->global_to_local, O, entry, return O);
-  L = entry->val;
-  assert(L->h_revision == stm_local_revision);
-  return L;
-#endif
-}
-
 static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 {
   gcptr B;
@@ -749,11 +726,6 @@ void SpinLoop(int num)
   smp_spinloop();
 }
 
-#if 0
-size_t _stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
-                              int abort_reason, char *output);
-#endif
-
 void AbortPrivateFromProtected(struct tx_descriptor *d);
 
 void AbortTransaction(int num)
@@ -795,27 +767,24 @@ void AbortTransaction(int num)
     elapsed_time = 1;
   }
 
-#if 0
-  size_t size;
   if (elapsed_time >= d->longest_abort_info_time)
     {
       /* decode the 'abortinfo' and produce a human-readable summary in
          the string 'longest_abort_info' */
-      size = _stm_decode_abort_info(d, elapsed_time, num, NULL);
+      size_t size = stm_decode_abort_info(d, elapsed_time, num, NULL);
       free(d->longest_abort_info);
       d->longest_abort_info = malloc(size);
       if (d->longest_abort_info == NULL)
         d->longest_abort_info_time = 0;   /* out of memory! */
       else
         {
-          if (_stm_decode_abort_info(d, elapsed_time,
+          if (stm_decode_abort_info(d, elapsed_time,
                                      num, d->longest_abort_info) != size)
             stm_fatalerror("during stm abort: object mutated unexpectedly\n");
 
           d->longest_abort_info_time = elapsed_time;
         }
     }
-#endif
 
   /* upon abort, set the reads size limit to 94% of how much was read
      so far.  This should ensure that, assuming the retry does the same

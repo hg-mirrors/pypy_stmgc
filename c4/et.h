@@ -181,7 +181,6 @@ void AbortNowIfDelayed(void);
 void SpinLoop(int);
 
 gcptr stm_DirectReadBarrier(gcptr);
-gcptr stm_RepeatReadBarrier(gcptr);
 gcptr stm_WriteBarrier(gcptr);
 gcptr _stm_nonrecord_barrier(gcptr);  /* debugging: read barrier, but
                                          not recording anything */
