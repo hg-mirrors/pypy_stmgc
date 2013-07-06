@@ -1,8 +1,6 @@
 #include "stmimpl.h"
 
 
-void copy_to_old_id_copy(gcptr obj, gcptr id);
-
 gcptr stm_stub_malloc(struct tx_public_descriptor *pd)
 {
     assert(pd->collection_lock != 0);
@@ -167,7 +165,7 @@ void stm_steal_stub(gcptr P)
                 /* use id-copy for us */
                 O = (gcptr)L->h_original;
                 L->h_tid &= ~GCFLAG_HAS_ID;
-                copy_to_old_id_copy(L, O);
+                stm_copy_to_old_id_copy(L, O);
                 O->h_original = 0;
             } else {
                 /* Copy the object out of the other thread's nursery, 
