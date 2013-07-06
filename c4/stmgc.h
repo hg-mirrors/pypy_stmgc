@@ -109,6 +109,7 @@ void stm_abort_info_push(gcptr obj, long fieldoffsets[]);
 void stm_abort_info_pop(long count);
 char *stm_inspect_abort_info(void);
 
+void stm_abort_and_retry(void);
 
 
 /****************  END OF PUBLIC INTERFACE  *****************/

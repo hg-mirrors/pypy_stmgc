@@ -756,6 +756,11 @@ void SpinLoop(int num)
   smp_spinloop();
 }
 
+void stm_abort_and_retry(void)
+{
+    AbortTransaction(ABRT_MANUAL);
+}
+
 void AbortPrivateFromProtected(struct tx_descriptor *d);
 
 void AbortTransaction(int num)
