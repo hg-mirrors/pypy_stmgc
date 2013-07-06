@@ -72,3 +72,18 @@ def test_inspect_abort_info_string():
             expected = struct.pack("ll", -937251491, -389541051)
             assert ffi.string(c).endswith("e%d:%se" % (
                 len(expected) - 1, expected[1:]))
+
+def test_inspect_null():
+    fo1 = ffi.new("long[]", [3, HDR, HDR + 1, 0])
+    #
+    @perform_transaction
+    def run(retry_counter):
+        if retry_counter == 0:
+            p = nalloc_refs(1)
+            lib.setptr(p, 0, ffi.NULL)    # default
+            lib.stm_abort_info_push(p, fo1)
+            abort_and_retry()
+        else:
+            c = lib.stm_inspect_abort_info()
+            assert c
+            assert ffi.string(c).endswith("e0:e")
