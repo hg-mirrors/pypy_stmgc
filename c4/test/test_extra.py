@@ -87,3 +87,19 @@ def test_inspect_null():
             c = lib.stm_inspect_abort_info()
             assert c
             assert ffi.string(c).endswith("e0:e")
+
+def test_latest_version():
+    fo1 = ffi.new("long[]", [1, HDR, 0])
+    p = palloc(HDR + WORD)
+    lib.rawsetlong(p, 0, -9827892)
+    #
+    @perform_transaction
+    def run(retry_counter):
+        if retry_counter == 0:
+            lib.stm_abort_info_push(p, fo1)
+            lib.setlong(p, 0, 424242)
+            abort_and_retry()
+        else:
+            c = lib.stm_inspect_abort_info()
+            assert c
+            assert ffi.string(c).endswith("ei424242ee")
