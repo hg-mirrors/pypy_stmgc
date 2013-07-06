@@ -817,20 +817,6 @@ void AbortTransaction(int num)
     }
 #endif
 
-#if 0
-  /* run the undo log in reverse order, cancelling the values set by
-     stm_ThreadLocalRef_LLSet(). */
-  if (d->undolog.size > 0) {
-      gcptr *item = d->undolog.items;
-      long i;
-      for (i=d->undolog.size; i>=0; i-=2) {
-          void **addr = (void **)(item[i-2]);
-          void *oldvalue = (void *)(item[i-1]);
-          *addr = oldvalue;
-      }
-  }
-#endif
-
   /* upon abort, set the reads size limit to 94% of how much was read
      so far.  This should ensure that, assuming the retry does the same
      thing, it will commit just before it reaches the conflicting point.
@@ -937,7 +923,6 @@ static void init_transaction(struct tx_descriptor *d)
   d->count_reads = 1;
   fxcache_clear(&d->recent_reads_cache);
 #if 0
-  gcptrlist_clear(&d->undolog);
   gcptrlist_clear(&d->abortinfo);
 #endif
 }
@@ -1496,17 +1481,6 @@ _Bool stm_PtrEq(gcptr P1, gcptr P2)
 
 /************************************************************/
 
-#if 0
-void stm_ThreadLocalRef_LLSet(void **addr, void *newvalue)
-{
-  struct tx_descriptor *d = thread_descriptor;
-  gcptrlist_insert2(&d->undolog, (gcptr)addr, (gcptr)*addr);
-  *addr = newvalue;
-}
-#endif
-
-/************************************************************/
-
 struct tx_descriptor *stm_tx_head = NULL;
 struct tx_public_descriptor *stm_descriptor_array[MAX_THREADS] = {0};
 static revision_t descriptor_array_free_list = 0;
@@ -1638,7 +1612,6 @@ void DescriptorDone(void)
 #if 0
     gcptrlist_delete(&d->abortinfo);
     free(d->longest_abort_info);
-    gcptrlist_delete(&d->undolog);
 #endif
 
     int num_aborts = 0, num_spinloops = 0;
