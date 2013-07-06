@@ -65,6 +65,9 @@ ffi.cdef('''
     long stm_atomic(long delta);
     int stm_enter_callback_call(void);
     void stm_leave_callback_call(int);
+    void stm_abort_info_push(void *obj, void *fieldoffsets);
+    void stm_abort_info_pop(long count);
+    char *stm_inspect_abort_info(void);
 
     /* extra non-public code */
     void printfcolor(char *msg);

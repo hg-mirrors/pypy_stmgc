@@ -922,9 +922,7 @@ static void init_transaction(struct tx_descriptor *d)
 
   d->count_reads = 1;
   fxcache_clear(&d->recent_reads_cache);
-#if 0
   gcptrlist_clear(&d->abortinfo);
-#endif
 }
 
 void BeginTransaction(jmp_buf* buf)
@@ -1609,10 +1607,8 @@ void DescriptorDone(void)
     assert(d->private_from_protected.size == 0);
     gcptrlist_delete(&d->private_from_protected);
     gcptrlist_delete(&d->list_of_read_objects);
-#if 0
     gcptrlist_delete(&d->abortinfo);
     free(d->longest_abort_info);
-#endif
 
     int num_aborts = 0, num_spinloops = 0;
     char line[256], *p = line;

@@ -137,3 +137,119 @@ _Bool stm_pointer_equal(gcptr p1, gcptr p2)
         return 0;
     return stm_id(p1) == stm_id(p2);
 }
+
+/************************************************************/
+
+void stm_abort_info_push(gcptr obj, long fieldoffsets[])
+{
+    struct tx_descriptor *d = thread_descriptor;
+    gcptrlist_insert2(&d->abortinfo, obj, (gcptr)fieldoffsets);
+}
+
+void stm_abort_info_pop(long count)
+{
+    struct tx_descriptor *d = thread_descriptor;
+    long newsize = d->abortinfo.size - 2 * count;
+    gcptrlist_reduce_size(&d->abortinfo, newsize < 0 ? 0 : newsize);
+}
+
+#if 0
+size_t stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
+                             int abort_reason, char *output)
+{
+    /* re-encodes the abort info as a single string.
+       For convenience (no escaping needed, no limit on integer
+       sizes, etc.) we follow the bittorrent format. */
+    size_t totalsize = 0;
+    long i;
+    char buffer[32];
+    size_t res_size;
+#define WRITE(c)   { totalsize++; if (output) *output++=(c); }
+#define WRITE_BUF(p, sz)  { totalsize += (sz);                          \
+                            if (output) {                               \
+                                 memcpy(output, (p), (sz)); output += (sz); \
+                             }                                          \
+                           }
+    WRITE('l');
+    WRITE('l');
+    res_size = sprintf(buffer, "i%llde", (long long)elapsed_time);
+    WRITE_BUF(buffer, res_size);
+    res_size = sprintf(buffer, "i%de", (int)abort_reason);
+    WRITE_BUF(buffer, res_size);
+    res_size = sprintf(buffer, "i%lde", (long)d->public_descriptor_index);
+    WRITE_BUF(buffer, res_size);
+    res_size = sprintf(buffer, "i%lde", (long)d->atomic);
+    WRITE_BUF(buffer, res_size);
+    res_size = sprintf(buffer, "i%de", (int)d->active);
+    WRITE_BUF(buffer, res_size);
+    res_size = sprintf(buffer, "i%lue", (unsigned long)d->count_reads);
+    WRITE_BUF(buffer, res_size);
+    res_size = sprintf(buffer, "i%lue",
+                       (unsigned long)d->reads_size_limit_nonatomic);
+    WRITE_BUF(buffer, res_size);
+    WRITE('e');
+    for (i=0; i<d->abortinfo.size; i+=2) {
+        char *object = (char *)stm_RepeatReadBarrier(d->abortinfo.items[i+0]);
+        long *fieldoffsets = (long*)d->abortinfo.items[i+1];
+        long kind, offset;
+        size_t rps_size;
+        RPyString *rps;
+
+        while (1) {
+            kind = *fieldoffsets++;
+            if (kind <= 0) {
+                if (kind == -2) {
+                    WRITE('l');    /* '[', start of sublist */
+                    continue;
+                }
+                if (kind == -1) {
+                    WRITE('e');    /* ']', end of sublist */
+                    continue;
+                }
+                break;   /* 0, terminator */
+            }
+            offset = *fieldoffsets++;
+            switch(kind) {
+            case 1:    /* signed */
+                res_size = sprintf(buffer, "i%lde",
+                                   *(long*)(object + offset));
+                WRITE_BUF(buffer, res_size);
+                break;
+            case 2:    /* unsigned */
+                res_size = sprintf(buffer, "i%lue",
+                                   *(unsigned long*)(object + offset));
+                WRITE_BUF(buffer, res_size);
+                break;
+            case 3:    /* pointer to STR */
+                rps = *(RPyString **)(object + offset);
+                if (rps) {
+                    rps_size = RPyString_Size(rps);
+                    res_size = sprintf(buffer, "%zu:", rps_size);
+                    WRITE_BUF(buffer, res_size);
+                    WRITE_BUF(_RPyString_AsString(rps), rps_size);
+                }
+                else {
+                    WRITE_BUF("0:", 2);
+                }
+                break;
+            default:
+                fprintf(stderr, "Fatal RPython error: corrupted abort log\n");
+                abort();
+            }
+        }
+    }
+    WRITE('e');
+    WRITE('\0');   /* final null character */
+#undef WRITE
+    return totalsize;
+}
+#endif
+
+char *stm_inspect_abort_info(void)
+{
+    struct tx_descriptor *d = thread_descriptor;
+    if (d->longest_abort_info_time <= 0)
+        return NULL;
+    d->longest_abort_info_time = 0;
+    return d->longest_abort_info;
+}
