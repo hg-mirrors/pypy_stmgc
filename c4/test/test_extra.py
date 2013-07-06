@@ -1,4 +1,4 @@
-import py
+import py, sys
 from support import *
 
 
@@ -32,3 +32,23 @@ def test_inspect_abort_info_signed():
             c = lib.stm_inspect_abort_info()
             assert c
             assert ffi.string(c).endswith("eli-421289712eee")
+
+def test_inspect_abort_info_nested_unsigned():
+    fo1 = ffi.new("long[]", [-2, 2, HDR, 0])
+    fo2 = ffi.new("long[]", [2, HDR + WORD, -1, 0])
+    #
+    @perform_transaction
+    def run(retry_counter):
+        if retry_counter == 0:
+            p = nalloc(HDR + WORD)
+            q = nalloc(HDR + 2 * WORD)
+            lib.setlong(p, 0, sys.maxint)
+            lib.setlong(q, 1, -1)
+            lib.stm_abort_info_push(p, fo1)
+            lib.stm_abort_info_push(q, fo2)
+            abort_and_retry()
+        else:
+            c = lib.stm_inspect_abort_info()
+            assert c
+            assert ffi.string(c).endswith("eli%dei%deee" % (
+                sys.maxint, sys.maxint * 2 + 1))
