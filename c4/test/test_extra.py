@@ -19,7 +19,6 @@ def test_abort_info_stack():
     # no real test here
 
 def test_inspect_abort_info_signed():
-    py.test.skip("in-progress")
     fo1 = ffi.new("long[]", [-2, 1, HDR, -1, 0])
     #
     @perform_transaction
@@ -32,4 +31,4 @@ def test_inspect_abort_info_signed():
         else:
             c = lib.stm_inspect_abort_info()
             assert c
-            assert ffi.string(c) == "???"
+            assert ffi.string(c).endswith("eli-421289712eee")
