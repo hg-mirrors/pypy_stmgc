@@ -156,9 +156,6 @@ void stm_abort_info_pop(long count)
 size_t stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
                              int abort_reason, char *output)
 {
-    return 1;
-}
-#if 0
     /* re-encodes the abort info as a single string.
        For convenience (no escaping needed, no limit on integer
        sizes, etc.) we follow the bittorrent format. */
@@ -191,11 +188,11 @@ size_t stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
     WRITE_BUF(buffer, res_size);
     WRITE('e');
     for (i=0; i<d->abortinfo.size; i+=2) {
-        char *object = (char *)stm_RepeatReadBarrier(d->abortinfo.items[i+0]);
+        char *object = (char *)d->abortinfo.items[i+0];
         long *fieldoffsets = (long*)d->abortinfo.items[i+1];
         long kind, offset;
         size_t rps_size;
-        RPyString *rps;
+        char *rps;
 
         while (1) {
             kind = *fieldoffsets++;
@@ -222,13 +219,14 @@ size_t stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
                                    *(unsigned long*)(object + offset));
                 WRITE_BUF(buffer, res_size);
                 break;
-            case 3:    /* pointer to STR */
-                rps = *(RPyString **)(object + offset);
+            case 3:    /* a string of bytes from the target object */
+                rps = *(char **)(object + offset);
+                offset = *fieldoffsets++;
                 if (rps) {
-                    rps_size = RPyString_Size(rps);
+                    rps_size = stmcb_size((gcptr)rps) - offset;
                     res_size = sprintf(buffer, "%zu:", rps_size);
                     WRITE_BUF(buffer, res_size);
-                    WRITE_BUF(_RPyString_AsString(rps), rps_size);
+                    WRITE_BUF(rps + offset, rps_size);
                 }
                 else {
                     WRITE_BUF("0:", 2);
@@ -245,7 +243,6 @@ size_t stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
 #undef WRITE_BUF
     return totalsize;
 }
-#endif
 
 char *stm_inspect_abort_info(void)
 {
