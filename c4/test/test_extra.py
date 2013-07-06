@@ -102,3 +102,15 @@ def test_latest_version():
             c = lib.stm_inspect_abort_info()
             assert c
             assert ffi.string(c).endswith("ei424242ee")
+
+def test_pointer_equal():
+    p = palloc(HDR)
+    assert lib.stm_pointer_equal(p, p)
+    assert not lib.stm_pointer_equal(p, ffi.NULL)
+    assert not lib.stm_pointer_equal(ffi.NULL, p)
+    assert lib.stm_pointer_equal(ffi.NULL, ffi.NULL)
+    q = lib.stm_write_barrier(p)
+    assert q != p
+    assert lib.stm_pointer_equal(p, q)
+    assert lib.stm_pointer_equal(q, q)
+    assert lib.stm_pointer_equal(q, p)
