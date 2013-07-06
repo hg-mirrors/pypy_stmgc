@@ -485,7 +485,7 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
            we may occasionally see a PUBLIC object --- one that was
            a private/protected object when it was added to
            old_objects_to_trace, and has been stolen.  So we have to
-           check and not do any change the obj->h_tid in that case.
+           check and not do any change to the obj->h_tid in that case.
            Otherwise this conflicts with the rule that we may only
            modify obj->h_tid of a public object in order to add
            PUBLIC_TO_PRIVATE.
