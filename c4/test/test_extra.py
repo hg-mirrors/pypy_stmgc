@@ -1,4 +1,4 @@
-import py, sys
+import py, sys, struct
 from support import *
 
 
@@ -52,3 +52,23 @@ def test_inspect_abort_info_nested_unsigned():
             assert c
             assert ffi.string(c).endswith("eli%dei%deee" % (
                 sys.maxint, sys.maxint * 2 + 1))
+
+def test_inspect_abort_info_string():
+    fo1 = ffi.new("long[]", [3, HDR, HDR + 1, 0])
+    #
+    @perform_transaction
+    def run(retry_counter):
+        if retry_counter == 0:
+            p = nalloc_refs(1)
+            q = nalloc(HDR + 2 * WORD)
+            lib.setptr(p, 0, q)
+            lib.setlong(q, 0, -937251491)
+            lib.setlong(q, 1, -389541051)
+            lib.stm_abort_info_push(p, fo1)
+            abort_and_retry()
+        else:
+            c = lib.stm_inspect_abort_info()
+            assert c
+            expected = struct.pack("ll", -937251491, -389541051)
+            assert ffi.string(c).endswith("e%d:%se" % (
+                len(expected) - 1, expected[1:]))

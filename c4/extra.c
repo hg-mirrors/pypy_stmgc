@@ -224,6 +224,7 @@ size_t stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
                 offset = *fieldoffsets++;
                 if (rps) {
                     rps_size = stmcb_size((gcptr)rps) - offset;
+                    assert(rps_size >= 0);
                     res_size = sprintf(buffer, "%zu:", rps_size);
                     WRITE_BUF(buffer, res_size);
                     WRITE_BUF(rps + offset, rps_size);
