@@ -68,6 +68,7 @@ ffi.cdef('''
     void stm_abort_info_push(gcptr obj, long fieldoffsets[]);
     void stm_abort_info_pop(long count);
     char *stm_inspect_abort_info(void);
+    void stm_abort_and_retry(void);
 
     /* extra non-public code */
     void printfcolor(char *msg);
@@ -622,7 +623,7 @@ def perform_transaction(callback):
     assert fine == [True]
 
 def abort_and_retry():
-    lib.AbortTransaction(lib.ABRT_MANUAL)
+    lib.stm_abort_and_retry()
 
 def classify(p):
     private_from_protected = (p.h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) != 0
