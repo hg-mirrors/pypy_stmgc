@@ -248,6 +248,36 @@ gcptr stm_DirectReadBarrier(gcptr G)
     }
 }
 
+gcptr stm_RepeatReadBarrier(gcptr P)
+{
+  /* Version of stm_DirectReadBarrier() that doesn't abort and assumes
+   * that 'P' was already an up-to-date result of a previous
+   * stm_DirectReadBarrier().  We only have to check if we did in the
+   * meantime a stm_write_barrier().
+   */
+  if (P->h_tid & GCFLAG_PUBLIC)
+    {
+      if (P->h_tid & GCFLAG_NURSERY_MOVED)
+        {
+          P = (gcptr)P->h_revision;
+          assert(P->h_tid & GCFLAG_PUBLIC);
+        }
+      if (P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
+        {
+          struct tx_descriptor *d = thread_descriptor;
+          wlog_t *item;
+          G2L_FIND(d->public_to_private, P, item, goto no_private_obj);
+
+          P = item->val;
+          assert(!(P->h_tid & GCFLAG_PUBLIC));
+        no_private_obj:
+          ;
+        }
+    }
+  assert(!(P->h_tid & GCFLAG_STUB));
+  return P;
+}
+
 static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj,
                                       int from_stolen)
 {
