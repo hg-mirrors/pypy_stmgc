@@ -11,11 +11,11 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 header_files = [os.path.join(parent_dir, _n) for _n in
                 "et.h lists.h steal.h nursery.h gcpage.h "
-                "stmsync.h dbgmem.h fprintcolor.h "
+                "stmsync.h extra.h dbgmem.h fprintcolor.h "
                 "stmgc.h stmimpl.h atomic_ops.h".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
                 "et.c lists.c steal.c nursery.c gcpage.c "
-                "stmsync.c dbgmem.c fprintcolor.c".split()]
+                "stmsync.c extra.c dbgmem.c fprintcolor.c".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):
