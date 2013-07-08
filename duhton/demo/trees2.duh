@@ -1,0 +1,19 @@
+
+(defun create-tree (n)
+   (if (< n 1) (list 1) (list (create-tree (/ n 2)) (create-tree (/ n 2))))
+)
+
+(defun walk-tree (tree)
+   (if (== (len tree) 1) (get tree 0)
+      (+ (walk-tree (get tree 0)) (walk-tree (get tree 1)))
+   )
+)
+
+(defun lookup-tree ()
+   (walk-tree (create-tree 1024))
+)
+
+(setq n 0)
+(while (< n 1000)
+   (transaction lookup-tree)
+   (setq n (+ n 1)))
