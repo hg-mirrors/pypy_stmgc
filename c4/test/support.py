@@ -11,11 +11,11 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 header_files = [os.path.join(parent_dir, _n) for _n in
                 "et.h lists.h steal.h nursery.h gcpage.h "
-                "stmsync.h dbgmem.h fprintcolor.h "
+                "stmsync.h extra.h dbgmem.h fprintcolor.h "
                 "stmgc.h stmimpl.h atomic_ops.h".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
                 "et.c lists.c steal.c nursery.c gcpage.c "
-                "stmsync.c dbgmem.c fprintcolor.c".split()]
+                "stmsync.c extra.c dbgmem.c fprintcolor.c".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):
@@ -65,6 +65,10 @@ ffi.cdef('''
     long stm_atomic(long delta);
     int stm_enter_callback_call(void);
     void stm_leave_callback_call(int);
+    void stm_abort_info_push(gcptr obj, long fieldoffsets[]);
+    void stm_abort_info_pop(long count);
+    char *stm_inspect_abort_info(void);
+    void stm_abort_and_retry(void);
 
     /* extra non-public code */
     void printfcolor(char *msg);
@@ -619,7 +623,7 @@ def perform_transaction(callback):
     assert fine == [True]
 
 def abort_and_retry():
-    lib.AbortTransaction(lib.ABRT_MANUAL)
+    lib.stm_abort_and_retry()
 
 def classify(p):
     private_from_protected = (p.h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) != 0

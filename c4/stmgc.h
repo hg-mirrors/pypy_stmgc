@@ -101,6 +101,22 @@ extern void stmcb_trace(gcptr, void visit(gcptr *));
    It is set to NULL by stm_initialize(). */
 extern __thread gcptr stm_thread_local_obj;
 
+/* For tracking where aborts occurs, you can push/pop information
+   into this stack.  When an abort occurs this information is encoded
+   and flattened into a buffer which can later be retrieved with
+   stm_inspect_abort_info().  (XXX details not documented yet) */
+void stm_abort_info_push(gcptr obj, long fieldoffsets[]);
+void stm_abort_info_pop(long count);
+char *stm_inspect_abort_info(void);
+
+/* mostly for debugging support */
+void stm_abort_and_retry(void);
+void stm_minor_collect(void);
+void stm_major_collect(void);
+
+
+/****************  END OF PUBLIC INTERFACE  *****************/
+/************************************************************/
 
 
 /* macro-like functionality */
