@@ -271,7 +271,9 @@ DuObject *du_quote(DuObject *cons, DuObject *locals)
 
 DuObject *du_list(DuObject *cons, DuObject *locals)
 {
+    _du_save2(cons, locals);
     DuObject *list = DuList_New();
+    _du_restore2(cons, locals);
     while (cons != Du_None) {
         _du_read1(cons);
         DuObject *expr = _DuCons_CAR(cons);
@@ -299,7 +301,11 @@ DuObject *du_container(DuObject *cons, DuObject *locals)
     else
         _du_getargs1("container", cons, locals, &obj);
 
-    return DuContainer_New(obj);
+    _du_save2(cons, locals);
+    DuObject *container = DuContainer_New(obj);
+    _du_restore2(cons, locals);
+
+    return container;
 }
 
 DuObject *du_get(DuObject *cons, DuObject *locals)
