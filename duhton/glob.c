@@ -198,7 +198,9 @@ DuObject *du_mul(DuObject *cons, DuObject *locals)
 
 DuObject *du_div(DuObject *cons, DuObject *locals)
 {
-    int result = 1;
+    int result = 0;
+	int first = 1;
+
     while (cons != Du_None) {
         _du_read1(cons);
         DuObject *expr = _DuCons_CAR(cons);
@@ -206,7 +208,12 @@ DuObject *du_div(DuObject *cons, DuObject *locals)
 
         _du_save2(next, locals);
         DuObject *obj = Du_Eval(expr, locals);
-        result /= DuInt_AsInt(obj);
+		if (first) {
+			result = DuInt_AsInt(obj);
+			first = 0;
+		} else {
+			result /= DuInt_AsInt(obj);
+		}
         _du_restore2(next, locals);
 
         cons = next;
