@@ -196,6 +196,24 @@ DuObject *du_mul(DuObject *cons, DuObject *locals)
     return DuInt_FromInt(result);
 }
 
+DuObject *du_div(DuObject *cons, DuObject *locals)
+{
+    int result = 1;
+    while (cons != Du_None) {
+        _du_read1(cons);
+        DuObject *expr = _DuCons_CAR(cons);
+        DuObject *next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        DuObject *obj = Du_Eval(expr, locals);
+        result /= DuInt_AsInt(obj);
+        _du_restore2(next, locals);
+
+        cons = next;
+    }
+    return DuInt_FromInt(result);
+}
+
 static DuObject *_du_intcmp(DuObject *cons, DuObject *locals, int mode)
 {
     DuObject *obj_a, *obj_b;
@@ -575,6 +593,7 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "+", du_add);
     DuFrame_SetBuiltinMacro(Du_Globals, "-", du_sub);
     DuFrame_SetBuiltinMacro(Du_Globals, "*", du_mul);
+	DuFrame_SetBuiltinMacro(Du_Globals, "/", du_div);
     DuFrame_SetBuiltinMacro(Du_Globals, "<", du_lt);
     DuFrame_SetBuiltinMacro(Du_Globals, "<=", du_le);
     DuFrame_SetBuiltinMacro(Du_Globals, "==", du_eq);
