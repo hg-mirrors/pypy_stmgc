@@ -5,6 +5,7 @@ def test_print_cons():
     assert run("(print ())") == "None\n"
     assert run("(print None)") == "None\n"
     assert run("(print (quote (1 2 3)))") == "( 1 2 3 )\n"
+    assert run("(print (cons 1 2))") == "( 1 . 2 )\n"
 
 def test_car_cdr():
     assert run("(print (car (quote (2 3))))") == "2\n"
