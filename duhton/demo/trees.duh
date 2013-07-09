@@ -1,6 +1,6 @@
 
 (defun create-tree (n)
-   (if (< n 1) (list 1) (list (create-tree (/ n 2)) (create-tree (/ n 2))))
+   (if (== n 0) (cons 1) (cons (create-tree (- n 1)) (create-tree (- n 1))))
 )
 
 (defun walk-tree (tree)
@@ -9,7 +9,7 @@
    )
 )
 
-(setq tree (create-tree 1024))
+(setq tree (create-tree 10))
 (print (walk-tree tree))
 (setq n 0)
 (while (< n 1000)
