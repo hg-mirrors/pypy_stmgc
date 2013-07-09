@@ -1,11 +1,13 @@
 
+
 (defun create-tree (n)
-   (if (== n 0) (list 1) (list (create-tree (- n 1)) (create-tree (- n 1))))
+   (if (== n 0) 1 (cons (create-tree (- n 1)) (create-tree (- n 1))))
 )
 
 (defun walk-tree (tree)
-   (if (== (len tree) 1) (get tree 0)
-      (+ (walk-tree (get tree 0)) (walk-tree (get tree 1)))
+   (if (pair? tree)
+      (+ (walk-tree (car tree)) (walk-tree (cdr tree)))
+	  1
    )
 )
 

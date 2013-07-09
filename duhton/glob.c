@@ -590,12 +590,9 @@ DuObject *du_defined(DuObject *cons, DuObject *locals)
 
 DuObject *du_pair(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
-    if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
-        Du_FatalError("pair?: expected one argument");
-
-    DuObject *ob = _DuCons_CAR(cons);
-	return DuInt_FromInt(DuCons_Check(ob));
+    DuObject *obj;
+    _du_getargs1("pair?", cons, locals, &obj);
+    return DuInt_FromInt(DuCons_Check(obj));
 }
 
 DuObject *du_assert(DuObject *cons, DuObject *locals)

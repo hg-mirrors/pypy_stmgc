@@ -4,8 +4,9 @@
 )
 
 (defun walk-tree (tree)
-   (if (== (len tree) 1) (get tree 0)
-      (+ (walk-tree (get tree 0)) (walk-tree (get tree 1)))
+   (if (pair? tree)
+      (+ (walk-tree (car tree)) (walk-tree (cdr tree)))
+	  1
    )
 )
 
