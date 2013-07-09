@@ -1,6 +1,6 @@
 
 (defun create-tree (n)
-   (if (== n 0) (cons 1) (cons (create-tree (- n 1)) (create-tree (- n 1))))
+   (if (== n 0) 1 (cons (create-tree (- n 1)) (create-tree (- n 1))))
 )
 
 (defun walk-tree (tree)

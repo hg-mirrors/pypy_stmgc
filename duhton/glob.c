@@ -588,6 +588,16 @@ DuObject *du_defined(DuObject *cons, DuObject *locals)
     return DuInt_FromInt(res != NULL);
 }
 
+DuObject *du_pair(DuObject *cons, DuObject *locals)
+{
+    _du_read1(cons);
+    if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
+        Du_FatalError("pair?: expected one argument");
+
+    DuObject *ob = _DuCons_CAR(cons);
+	return DuInt_FromInt(DuCons_Check(ob));
+}
+
 DuObject *du_assert(DuObject *cons, DuObject *locals)
 {
     DuObject *obj;
@@ -640,6 +650,7 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "transaction", du_transaction);
     DuFrame_SetBuiltinMacro(Du_Globals, "sleepms", du_sleepms);
     DuFrame_SetBuiltinMacro(Du_Globals, "defined?", du_defined);
+	DuFrame_SetBuiltinMacro(Du_Globals, "pair?", du_pair);
     DuFrame_SetBuiltinMacro(Du_Globals, "assert", du_assert);
     DuFrame_SetSymbolStr(Du_Globals, "None", Du_None);
 }
