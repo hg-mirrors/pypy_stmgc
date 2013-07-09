@@ -364,6 +364,10 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
 {
     long i, limit = d->num_read_objects_known_old;
     gcptr *items = d->list_of_read_objects.items;
+
+    if (d->active < 0)
+        return; // aborts anyway
+
     assert(d->list_of_read_objects.size >= limit);
 
     if (d->active == 2) {
@@ -509,8 +513,9 @@ int minor_collect_anything_to_do(struct tx_descriptor *d)
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
-        assert(gcptrlist_size(&d->list_of_read_objects) >=
-               d->num_read_objects_known_old);
+        assert(IMPLIES(d->active > 0,
+                       gcptrlist_size(&d->list_of_read_objects) >=
+                       d->num_read_objects_known_old));
         assert(gcptrlist_size(&d->private_from_protected) >=
                d->num_private_from_protected_known_old);
         d->num_read_objects_known_old =
