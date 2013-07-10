@@ -309,20 +309,23 @@ def test_prebuilt_version_2():
     check_not_free(p3)     # XXX replace with p1
 
 def test_prebuilt_version_2_copy_over_prebuilt():
-    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p1 = lib.pseudoprebuilt_with_hash(HDR, 42 + HDR, 99)
     p2 = oalloc(HDR); make_public(p2)
     p3 = oalloc(HDR); make_public(p3)
     delegate(p1, p2)
     delegate_original(p1, p2)
     delegate(p2, p3)
     delegate_original(p1, p3)
-    major_collect()
-    # XXX: current approach requires 2 major collections.
-    # the first to compress the path
-    # the second to do the copy
+    # added by delegate, remove, otherwise
+    # major_collect will not copy over prebuilt p1:
+    p1.h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE
     major_collect()
     check_prebuilt(p1)
+    assert lib.stm_hash(p1) == 99
     check_free_old(p2)
+    check_not_free(p3)
+    # XXX: takes another major collection to free p3
+    major_collect()
     check_free_old(p3)
 
 def test_prebuilt_version_to_protected():
@@ -340,7 +343,7 @@ def test_prebuilt_version_to_protected():
 
 def test_prebuilt_version_to_protected_copy_over_prebuilt():
     py.test.skip("""current copy-over-prebuilt-original approach
-    does not work with public_prebuilt->protected""")
+    does not work with public_prebuilt->stub->protected""")
     p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
     p2 = lib.stm_write_barrier(p1)
     lib.stm_commit_transaction()

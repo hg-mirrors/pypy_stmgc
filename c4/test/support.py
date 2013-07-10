@@ -583,7 +583,9 @@ def delegate(p1, p2):
         lib.stm_add_prebuilt_root(p1)
 
 def delegate_original(p1, p2):
-    assert p1.h_original == 0
+    # no h_original or it is a prebuilt with a specified hash in h_original
+    assert (p1.h_original == 0) or (p1.h_tid & GCFLAG_PREBUILT_ORIGINAL)
+    assert p1.h_tid & GCFLAG_OLD
     assert p2.h_original == 0
     assert p1 != p2
     p2.h_original = ffi.cast("revision_t", p1)
