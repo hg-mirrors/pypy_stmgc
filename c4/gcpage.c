@@ -367,68 +367,70 @@ static void mark_prebuilt_roots(void)
     gcptr *pobj = stm_prebuilt_gcroots.items;
     gcptr *pend = stm_prebuilt_gcroots.items + stm_prebuilt_gcroots.size;
     gcptr obj;
+
     for (; pobj != pend; pobj++) {
         obj = *pobj;
         assert(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL);
-        //assert(IS_POINTER(obj->h_revision));
-
-        gcptr next = (gcptr)obj->h_revision;
-        /* XXX: do better. visit obj first and then
-           copy over if possible: */
-        if (!(obj->h_revision & 1)
-            && (next->h_revision & 1)
-            && !(next->h_tid & GCFLAG_VISITED)
-            && (next->h_tid & GCFLAG_OLD)
-            && !(next->h_tid & GCFLAG_PUBLIC_TO_PRIVATE) /* XXX */
-            && !(obj->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)) {
-
-            assert(next->h_original == (revision_t)obj);
-            assert(next->h_tid & GCFLAG_PUBLIC);
-            assert(!(next->h_tid & GCFLAG_STUB));
-            assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
-            assert(!(next->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
-            assert(!(obj->h_tid & GCFLAG_BACKUP_COPY));
-            assert(!(next->h_tid & GCFLAG_BACKUP_COPY));
-
-            
-            revision_t pre_hash = obj->h_original;
-            revision_t old_tid = obj->h_tid;
-            memcpy(obj, next, stmgc_size(next));
-            assert(!((obj->h_tid ^ old_tid)
-                     & (GCFLAG_BACKUP_COPY | GCFLAG_STUB
-                        | GCFLAG_PUBLIC | GCFLAG_HAS_ID
-                        | GCFLAG_PRIVATE_FROM_PROTECTED)));
-            obj->h_original = pre_hash;
-            obj->h_tid = old_tid;
-
-            fprintf(stdout, "copy %p over prebuilt %p\n", next, obj);
-
-            /* will not be freed anyway and visit() only traces
-               head revision if not visited already */
-            obj->h_tid &= ~GCFLAG_VISITED;
-            /* For those visiting later:
-               XXX: don't: they will think that they are outdated*/
-            next->h_revision = (revision_t)obj;            
-            //if (next->h_tid & GCFLAG_PUBLIC_TO_PRIVATE) {
-            // may have already lost it
-                /* mark somehow so that we can update pub_to_priv
-                 for inevitable transactions and others ignore
-                 it during tracing. Otherwise, inev transactions
-                 will think 'next' is outdated. */
-                next->h_tid &= ~GCFLAG_OLD;
-                //}
-        }
-        else if (IS_POINTER(obj->h_revision)) {
+                
+        if (IS_POINTER(obj->h_revision)) {
             visit((gcptr *)&obj->h_revision);
-        }
+            gcptr next = (gcptr)obj->h_revision;
         
-        // prebuilt originals will always be traced
-        // in visit_keep. And otherwise, they may
-        // not lose their pub_to_priv flag
-        // I think because transactions abort
-        // without clearing the flags.
-        obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;
+            if (IS_POINTER((revision_t)next) /* needs to be an object */
+                && (next->h_revision & 1) /* needs to be a head rev */
+                && !(obj->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)) {
+                
+                /* XXX: WHY? */
+                assert(!(next->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
+                
+                assert(next->h_tid & GCFLAG_OLD); /* not moved already */
+                assert(next->h_original == (revision_t)obj);
+                assert(next->h_tid & GCFLAG_PUBLIC);
+                assert(!(next->h_tid & GCFLAG_STUB));
+                assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+                assert(!(next->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+                assert(!(obj->h_tid & GCFLAG_BACKUP_COPY));
+                assert(!(next->h_tid & GCFLAG_BACKUP_COPY));
+                
+                /* copy next over obj but preserve possibly existing
+                   pre-hash value and tid (prebuilt-flag) */
+                revision_t pre_hash = obj->h_original;
+                revision_t old_tid = obj->h_tid;
+                memcpy(obj, next, stmgc_size(next));
+                assert(!((obj->h_tid ^ old_tid)
+                         & (GCFLAG_BACKUP_COPY | GCFLAG_STUB
+                            | GCFLAG_PUBLIC | GCFLAG_HAS_ID
+                            | GCFLAG_PRIVATE_FROM_PROTECTED)));
+                obj->h_original = pre_hash;
+                obj->h_tid = old_tid;
+                
+                fprintf(stdout, "copy %p over prebuilt %p\n", next, obj);
+                
+                /* Add this copied-over head revision to objects_to_trace
+                   because it (next) was added by the preceeding visit() 
+                   but not at its new location (obj): */
+                gcptrlist_insert(&objects_to_trace, obj);
+
+                /* For those visiting later: */
+                next->h_revision = (revision_t)obj;            
+
+                /* mark somehow so that we can update pub_to_priv
+                   for inevitable transactions and others ignore
+                   it during tracing. Otherwise, inev transactions
+                   will think 'next' is outdated. */
+                next->h_tid &= ~GCFLAG_OLD;
+
+            }
+            /* obj does not need tracing if it can't
+               be reached from somewhere else*/
+        }
+        else {
             gcptrlist_insert(&objects_to_trace, obj);
+        }
+
+        /* prebuilt objects need to lose this flag.
+           aborted transactions do not clear it themselves */
+        obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;
     }
 }
 
