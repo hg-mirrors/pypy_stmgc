@@ -308,6 +308,23 @@ def test_prebuilt_version_2():
     check_free_old(p2)
     check_not_free(p3)     # XXX replace with p1
 
+def test_prebuilt_version_2_copy_over_prebuilt():
+    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p2 = oalloc(HDR); make_public(p2)
+    p3 = oalloc(HDR); make_public(p3)
+    delegate(p1, p2)
+    delegate_original(p1, p2)
+    delegate(p2, p3)
+    delegate_original(p1, p3)
+    major_collect()
+    # XXX: current approach requires 2 major collections.
+    # the first to compress the path
+    # the second to do the copy
+    major_collect()
+    check_prebuilt(p1)
+    check_free_old(p2)
+    check_free_old(p3)
+
 def test_prebuilt_version_to_protected():
     p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
     p2 = lib.stm_write_barrier(p1)
@@ -320,6 +337,24 @@ def test_prebuilt_version_to_protected():
     major_collect()
     check_prebuilt(p1)
     check_not_free(p2)     # XXX replace with p1
+
+def test_prebuilt_version_to_protected_copy_over_prebuilt():
+    py.test.skip("""current copy-over-prebuilt-original approach
+    does not work with public_prebuilt->protected""")
+    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p2 = lib.stm_write_barrier(p1)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    minor_collect()
+    p2 = lib.stm_read_barrier(p1)
+    assert p2 != p1
+    minor_collect()
+    major_collect()
+    major_collect()
+    print classify(p2)
+    check_prebuilt(p1)
+    check_free_old(p2)
+
 
 def test_private():
     p1 = nalloc(HDR)
