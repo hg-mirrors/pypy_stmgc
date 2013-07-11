@@ -10,6 +10,8 @@ def test_print_cons():
 def test_pair():
     assert run("(print (pair? 1))") == "0\n"
     assert run("(print (pair? (cons 1 2)))") == "1\n"
+    assert run("(setq x (cons 1 2)) (print (pair? x))") == "1\n"
+    assert run("(setq x 42) (print (pair? x))") == "0\n"
 
 def test_car_cdr():
     assert run("(print (car (quote (2 3))))") == "2\n"
