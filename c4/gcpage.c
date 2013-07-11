@@ -589,7 +589,8 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         assert(!(obj->h_tid & GCFLAG_STUB));
 
         if (!(obj->h_tid & GCFLAG_OLD)) {
-            items[i] = (gcptr)obj->h_revision;
+            obj = (gcptr)obj->h_revision;
+            items[i] = obj;
         }
         else if (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
             /* Warning: in case the object listed is outdated and has been
