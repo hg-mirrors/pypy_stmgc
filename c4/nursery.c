@@ -207,8 +207,8 @@ static void mark_young_roots(struct tx_descriptor *d)
                                    (revision_t)END_MARKER_ON)) {
             /* 'item' is a regular, non-null pointer */
             visit_if_young(end);
-            
-            /* if old, private or protected, this object needs to be
+            item = *end;
+            /* if private or protected, this object needs to be
                traced again in the next minor_collect if it is
                currently in old_objects_to_trace. Because then
                it may be seen as write-ready in the view of
@@ -216,7 +216,7 @@ static void mark_young_roots(struct tx_descriptor *d)
                pw = write_barrier(); push_root(pw);
                minor_collect(); pw = pop_root(); // pw still write-ready
             */
-            if (item && item->h_tid & GCFLAG_OLD
+            if (item
                 && !(item->h_tid & GCFLAG_WRITE_BARRIER) /* not set in
                                                           obj_to_trace*/
                 && (item->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED

@@ -52,6 +52,12 @@ void stmcb_trace(gcptr ob, void visit(gcptr *))
 // global and per-thread-data
 time_t default_seed;
 gcptr shared_roots[SHARED_ROOTS];
+
+#define CACHE_MASK 65535
+#define CACHE_ENTRIES ((CACHE_MASK + 1) / sizeof(char *))
+#define CACHE_AT(cache, obj) (*(gcptr *)((char *)(cache)               \
+                                         + ((revision_t)(obj) & CACHE_MASK)))
+
 struct thread_data {
     unsigned int thread_seed;
     gcptr roots[MAXROOTS];
@@ -61,6 +67,7 @@ struct thread_data {
     int steps_left;
     int interruptible;
     int atomic;
+    revision_t writeable[CACHE_ENTRIES];
 };
 __thread struct thread_data td;
 
@@ -140,6 +147,7 @@ void push_roots()
     }
 }
 
+__thread revision_t temp_cache[CACHE_ENTRIES];
 void pop_roots()
 {
     int i;
@@ -148,6 +156,8 @@ void pop_roots()
             td.roots[i] = stm_pop_root();
         check(td.roots[i]);
     }
+    /* some objects may have changed positions */
+    memset(td.writeable, 0, sizeof(td.writeable));
 }
 
 void del_root(int idx)
@@ -227,6 +237,7 @@ gcptr write_barrier(gcptr p)
     if (p != NULL) {
         check(p);
         w = stm_write_barrier(p);
+        CACHE_AT(td.writeable, w) = w;
         check(w);
         assert(is_private(w));
     }
@@ -298,6 +309,8 @@ void transaction_break();
 void setup_thread()
 {
     int i;
+    memset(&td, 0, sizeof(struct thread_data));
+
     td.thread_seed = default_seed++;
     td.steps_left = STEPS_PER_THREAD;
     td.interruptible = 0;
@@ -395,7 +408,10 @@ gcptr simple_events(gcptr p, gcptr _r, gcptr _sr)
         break;
     case 7: // set 'p' as *next in one of the roots
         check(_r);
-        w_r = (nodeptr)write_barrier(_r);
+        if (CACHE_AT(td.writeable, _r) == _r)
+            w_r = (nodeptr)_r;
+        else
+            w_r = (nodeptr)write_barrier(_r);
         check((gcptr)w_r);
         check(p);
         w_r->next = (struct node*)p;
@@ -454,7 +470,10 @@ gcptr id_hash_events(gcptr p, gcptr _r, gcptr _sr)
             assert(w_t->id == stm_id((gcptr)_t));
         }
         else {
-            w_t = (nodeptr)write_barrier(_t);
+            if (CACHE_AT(td.writeable, _t) == _t)
+                w_t = (nodeptr)_t;
+            else
+                w_t = (nodeptr)write_barrier(_t);
             w_t->id = stm_id((gcptr)w_t);
             assert(w_t->id == stm_id((gcptr)_t));
         }
@@ -470,7 +489,10 @@ gcptr id_hash_events(gcptr p, gcptr _r, gcptr _sr)
             assert(w_t->hash == stm_hash((gcptr)_t));
         }
         else {
-            w_t = (nodeptr)write_barrier(_t);
+            if (CACHE_AT(td.writeable, _t) == _t)
+                w_t = (nodeptr)_t;
+            else
+                w_t = (nodeptr)write_barrier(_t);
             w_t->hash = stm_hash((gcptr)w_t);
             assert(w_t->hash == stm_hash((gcptr)_t));
         }
@@ -538,6 +560,8 @@ void transaction_break()
     
     td.interruptible = 0;
     pop_roots();
+
+    memset(&td.writeable, 0, sizeof(td.writeable));
 }
 
 
@@ -558,6 +582,7 @@ int interruptible_callback(gcptr arg1, int retry_counter)
     stm_push_root(end_marker);
 
     int p = run_me();
+
     if (p == -1) // maybe restart transaction
         return get_rand(3) != 1;
 
@@ -567,6 +592,10 @@ int interruptible_callback(gcptr arg1, int retry_counter)
 int run_me()
 {
     gcptr p = NULL;
+
+    // clear cache of writeables:
+    memset(&td.writeable, 0, sizeof(td.writeable));
+
     while (td.steps_left-->0 || td.atomic) {
         if (td.steps_left % 8 == 0)
             fprintf(stdout, "#");

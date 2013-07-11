@@ -250,6 +250,25 @@ def test_write_barrier_after_minor_collect():
     assert getptr(pr, 0) == q
     assert getptr(pr, 0) != q2
 
+def test_write_barrier_after_minor_collect_young_to_old():
+    p = nalloc_refs(1)
+    pw = lib.stm_write_barrier(p)
+
+    lib.stm_push_root(pw)
+    minor_collect()
+    r = nalloc(HDR)
+    pw = lib.stm_pop_root()
+
+    check_nursery_free(p)
+    assert pw.h_tid & GCFLAG_OLD
+    rawsetptr(pw, 0, r)
+    
+    lib.stm_push_root(pw)
+    minor_collect()
+    pw = lib.stm_pop_root()
+    check_nursery_free(r)
+
+    assert getptr(pw, 0) != r
 
 def test_id_young_to_old():
     # move out of nursery with shadow original
