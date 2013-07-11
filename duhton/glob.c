@@ -527,6 +527,14 @@ DuObject *du_cdr(DuObject *cons, DuObject *locals)
     return DuCons_Cdr(obj);
 }
 
+DuObject *du_cons(DuObject *cons, DuObject *locals)
+{
+    DuObject *obj1, *obj2;
+    _du_getargs2("cons", cons, locals, &obj1, &obj2);
+
+    return DuCons_New(obj1, obj2);
+}
+
 DuObject *du_not(DuObject *cons, DuObject *locals)
 {
     DuObject *obj;
@@ -580,6 +588,13 @@ DuObject *du_defined(DuObject *cons, DuObject *locals)
     return DuInt_FromInt(res != NULL);
 }
 
+DuObject *du_pair(DuObject *cons, DuObject *locals)
+{
+    DuObject *obj;
+    _du_getargs1("pair?", cons, locals, &obj);
+    return DuInt_FromInt(DuCons_Check(obj));
+}
+
 DuObject *du_assert(DuObject *cons, DuObject *locals)
 {
     DuObject *obj;
@@ -627,10 +642,12 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "defun", du_defun);
     DuFrame_SetBuiltinMacro(Du_Globals, "car", du_car);
     DuFrame_SetBuiltinMacro(Du_Globals, "cdr", du_cdr);
+	DuFrame_SetBuiltinMacro(Du_Globals, "cons", du_cons);
     DuFrame_SetBuiltinMacro(Du_Globals, "not", du_not);
     DuFrame_SetBuiltinMacro(Du_Globals, "transaction", du_transaction);
     DuFrame_SetBuiltinMacro(Du_Globals, "sleepms", du_sleepms);
     DuFrame_SetBuiltinMacro(Du_Globals, "defined?", du_defined);
+	DuFrame_SetBuiltinMacro(Du_Globals, "pair?", du_pair);
     DuFrame_SetBuiltinMacro(Du_Globals, "assert", du_assert);
     DuFrame_SetSymbolStr(Du_Globals, "None", Du_None);
 }
