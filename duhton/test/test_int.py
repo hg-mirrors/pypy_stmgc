@@ -20,6 +20,10 @@ def test_mul():
     assert evaluate("(* 2 3 7)") == 42
     assert evaluate("(* (+ 5 1) (+ 6 1))") == 42
 
+def test_div():
+    assert evaluate("(/ 11 2)") == 5
+    assert evaluate("(/ 29 2 3)") == 4
+
 def test_cmp():
     assert evaluate("(<  6 6)") == 0
     assert evaluate("(<= 6 6)") == 1
