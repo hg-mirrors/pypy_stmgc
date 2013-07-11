@@ -205,11 +205,14 @@ def test_read_barrier_handle_private():
     assert list_of_read_objects() == [p2]
 
 def test_write_barrier_after_minor_collect():
-    # maybe should fail. not sure.
     p = oalloc_refs(1)
     pw = lib.stm_write_barrier(p)
 
     lib.stm_push_root(pw)
+    minor_collect()
+    lib.stm_push_root(ffi.NULL)
+    minor_collect()
+    lib.stm_pop_root()
     minor_collect()
     r = nalloc(HDR)
     pw = lib.stm_pop_root()
@@ -217,23 +220,36 @@ def test_write_barrier_after_minor_collect():
     assert pw.h_tid & GCFLAG_OLD
     rawsetptr(pw, 0, r)
 
-    # pw not in old_objects_to_trace. A
-    # repeated write_barrier before
-    # rawsetptr() would fix that
-    
+    # pw needs to be readded to old_objects_to_trace
+    # before the next minor gc in order for this test to pass
     lib.stm_push_root(r)
     minor_collect()
+    minor_collect()
+    minor_collect()
+    q = nalloc(HDR)
     r2 = lib.stm_pop_root()
     check_nursery_free(r)
     
     pr = lib.stm_read_barrier(p)
     assert r != r2
-    # these will fail because pw/pr was
-    # not traced in the last minor_collect,
-    # because they were not registered in
-    # old_objects_to_trace.
     assert getptr(pr, 0) != r
     assert getptr(pr, 0) == r2
+
+    # the following shouldn't be done
+    # because pw was not saved. Just
+    # here to check that pw gets removed
+    # from old_objects_to_trace when not found
+    # on the root stack anymore
+    rawsetptr(pw, 0, q)
+    lib.stm_push_root(q)
+    minor_collect()
+    q2 = lib.stm_pop_root()
+    check_nursery_free(q)
+    pr = lib.stm_read_barrier(p)
+    assert q != q2
+    assert getptr(pr, 0) == q
+    assert getptr(pr, 0) != q2
+
 
 def test_id_young_to_old():
     # move out of nursery with shadow original
