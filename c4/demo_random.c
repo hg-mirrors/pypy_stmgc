@@ -137,7 +137,7 @@ gcptr allocate_pseudoprebuilt_with_hash(size_t size, int tid,
     return x;
 }
 
-void push_roots()
+void push_roots(int with_cache)
 {
     int i;
     for (i = 0; i < td.num_roots; i++) {
@@ -145,19 +145,35 @@ void push_roots()
         if (td.roots[i])
             stm_push_root(td.roots[i]);
     }
+
+    if (with_cache) {
+        stm_push_root(NULL);
+        for (i = 0; i < CACHE_ENTRIES; i++) {
+            if (td.writeable[i])
+                stm_push_root((gcptr)td.writeable[i]);
+        }
+    }
 }
 
-__thread revision_t temp_cache[CACHE_ENTRIES];
-void pop_roots()
+void pop_roots(int with_cache)
 {
     int i;
+    /* some objects may have changed positions */
+    memset(td.writeable, 0, sizeof(td.writeable));
+
+    if (with_cache) {
+        gcptr obj = stm_pop_root();
+        while (obj) {
+            CACHE_AT(td.writeable, obj) = obj;
+            obj = stm_pop_root();
+        }
+    }
+
     for (i = td.num_roots - 1; i >= 0; i--) {
         if (td.roots[i])
             td.roots[i] = stm_pop_root();
         check(td.roots[i]);
     }
-    /* some objects may have changed positions */
-    memset(td.writeable, 0, sizeof(td.writeable));
 }
 
 void del_root(int idx)
@@ -170,9 +186,9 @@ void del_root(int idx)
 nodeptr allocate_node()
 {
     nodeptr r;
-    push_roots();
+    push_roots(1);
     r = (nodeptr)stm_allocate(sizeof(struct node), GCTID_STRUCT_NODE);
-    pop_roots();
+    pop_roots(1);
     return r;
 }
 
@@ -354,22 +370,22 @@ gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
 {
     int k = get_rand(100);
     if (k < 10) {
-        push_roots();
+        push_roots(1);
         stm_push_root(p);
         stm_become_inevitable("fun");
         p = stm_pop_root();
-        pop_roots();
+        pop_roots(1);
     } 
     else if (k < 40) {
-        push_roots();
+        push_roots(1);
         stmgc_minor_collect();
-        pop_roots();
+        pop_roots(1);
         p = NULL;
     } else if (k < 41 && DO_MAJOR_COLLECTS) {
         fprintf(stdout, "major collect\n");
-        push_roots();
+        push_roots(1);
         stmgcpage_possibly_major_collect(1);
-        pop_roots();
+        pop_roots(1);
         p = NULL;
     }
     return p;
@@ -534,8 +550,9 @@ gcptr do_step(gcptr p)
         p = id_hash_events(p, _r, _sr);
     else if (k < 8)
         p = rare_events(p, _r, _sr);
-    else if (get_rand(3) == 1) {
+    else if (get_rand(20) == 1) {
         // transaction break
+        fprintf(stdout, "|");
         if (td.interruptible)
             return (gcptr)-1; // break current
         transaction_break();
@@ -547,7 +564,7 @@ gcptr do_step(gcptr p)
 
 void transaction_break()
 {
-    push_roots();
+    push_roots(0);
     td.interruptible = 1;
     
     copy_roots(td.roots, td.roots_outside_perform, td.num_roots);
@@ -559,9 +576,9 @@ void transaction_break()
     copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
     
     td.interruptible = 0;
-    pop_roots();
+    pop_roots(0);
 
-    memset(&td.writeable, 0, sizeof(td.writeable));
+    /* done by pop_roots() memset(&td.writeable, 0, sizeof(td.writeable)); */
 }
 
 
@@ -576,8 +593,8 @@ int interruptible_callback(gcptr arg1, int retry_counter)
     assert(end_marker == END_MARKER_ON || end_marker == END_MARKER_OFF);
     arg1 = stm_pop_root();
     assert(arg1 == NULL);
-    pop_roots();
-    push_roots();
+    pop_roots(0);
+    push_roots(0);
     stm_push_root(arg1);
     stm_push_root(end_marker);
 
