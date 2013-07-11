@@ -406,7 +406,7 @@ static void mark_prebuilt_roots(void)
                 obj->h_original = pre_hash;
                 obj->h_tid = old_tid;
                 
-                dprintf(stdout, "copy %p over prebuilt %p\n", next, obj);
+                dprintf(("copy %p over prebuilt %p\n", next, obj));
                 
                 /* Add this copied-over head revision to objects_to_trace
                    because it (next) was added by the preceeding visit() 
