@@ -223,6 +223,7 @@ static void keep_original_alive(gcptr obj)
             id_copy->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;
             /* see fix_outdated() */
             id_copy->h_tid |= GCFLAG_VISITED;
+            assert(id_copy->h_tid & GCFLAG_OLD);
 
             /* XXX: may not always need tracing? */
             if (!(id_copy->h_tid & GCFLAG_STUB))
@@ -249,6 +250,7 @@ static void visit(gcptr *pobj)
         if (!(obj->h_tid & GCFLAG_VISITED)) {
             obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;  /* see fix_outdated() */
             obj->h_tid |= GCFLAG_VISITED;
+            assert(obj->h_tid & GCFLAG_OLD);
             gcptrlist_insert(&objects_to_trace, obj);
 
             keep_original_alive(obj);
@@ -272,6 +274,7 @@ static void visit(gcptr *pobj)
             obj = (gcptr)(obj->h_revision - 2);
             if (!(obj->h_tid & GCFLAG_PUBLIC)) {
                 prev_obj->h_tid |= GCFLAG_VISITED;
+                assert(prev_obj->h_tid & GCFLAG_OLD);
                 keep_original_alive(prev_obj);
 
                 assert(*pobj == prev_obj);
@@ -315,6 +318,9 @@ static void visit(gcptr *pobj)
         
         obj->h_tid |= GCFLAG_VISITED;
         B->h_tid |= GCFLAG_VISITED;
+        assert(obj->h_tid & GCFLAG_OLD);
+        assert(B->h_tid & GCFLAG_OLD);
+
         assert(!(obj->h_tid & GCFLAG_STUB));
         assert(!(B->h_tid & GCFLAG_STUB));
         gcptrlist_insert2(&objects_to_trace, obj, B);
@@ -337,6 +343,7 @@ static void visit_keep(gcptr obj)
     if (!(obj->h_tid & GCFLAG_VISITED)) {
         obj->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;  /* see fix_outdated() */
         obj->h_tid |= GCFLAG_VISITED;
+        assert(obj->h_tid & GCFLAG_OLD);
         gcptrlist_insert(&objects_to_trace, obj);
 
         if (IS_POINTER(obj->h_revision)) {
@@ -379,20 +386,14 @@ static void mark_prebuilt_roots(void)
             if (IS_POINTER((revision_t)next) /* needs to be an object */
                 && (next->h_revision & 1) /* needs to be a head rev */
                 && !(obj->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)) {
-                
-                /* XXX: WHY never hit? */
-                assert(!(next->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
-                
+
+                /* next may have had PUBLIC_TO_PRIVATE, but that was
+                   cleared in the preceeding visit() */
                 assert(next->h_tid & GCFLAG_OLD); /* not moved already */
                 assert(next->h_original == (revision_t)obj);
                 assert(next->h_tid & GCFLAG_PUBLIC); /* no priv/prot!
                                 otherwise we'd need to fix more lists
                                 like old_objects_to_trace */
-                assert(!(next->h_tid & GCFLAG_STUB));
-                assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
-                assert(!(next->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
-                assert(!(obj->h_tid & GCFLAG_BACKUP_COPY));
-                assert(!(next->h_tid & GCFLAG_BACKUP_COPY));
                 
                 /* copy next over obj but preserve possibly existing
                    pre-hash value and tid (prebuilt-flag) */
@@ -420,8 +421,7 @@ static void mark_prebuilt_roots(void)
                    for inevitable transactions and others ignore
                    it during tracing. Otherwise, inev transactions
                    will think 'next' is outdated. */
-                next->h_tid &= ~GCFLAG_OLD;
-
+                next->h_tid &= ~(GCFLAG_OLD | GCFLAG_VISITED);
             }
             /* obj does not need tracing if it can't
                be reached from somewhere else */
@@ -571,6 +571,11 @@ static void cleanup_for_thread(struct tx_descriptor *d)
             items[i] = items[--d->private_from_protected.size];
         }
     }
+    
+    /* In old_objects_to_trace there can be a now invalid object 
+       NO: never happens because only priv/prot objects can still
+       be in old_objects_to_trace after the forced minor_collection.
+       And we do not copy such objects over prebuilts. */
 
     /* If we're aborting this transaction anyway, we don't need to do
      * more here.
@@ -756,6 +761,7 @@ static void free_unused_local_pages(struct tx_public_descriptor *gcp)
         gcptr p = item->addr;
         if (p->h_tid & GCFLAG_VISITED) {
             p->h_tid &= ~GCFLAG_VISITED;
+            assert(p->h_tid & GCFLAG_OLD);
         }
         else {
             G2L_LOOP_DELETE(item);

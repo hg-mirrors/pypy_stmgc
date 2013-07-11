@@ -323,9 +323,6 @@ def test_prebuilt_version_2_copy_over_prebuilt():
     check_prebuilt(p1)
     assert lib.stm_hash(p1) == 99
     check_free_old(p2)
-    check_not_free(p3)
-    # XXX: takes another major collection to free p3
-    major_collect()
     check_free_old(p3)
 
 def test_prebuilt_version_to_protected():
