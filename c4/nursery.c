@@ -125,6 +125,9 @@ gcptr stmgc_duplicate_old(gcptr P)
 }
 
 /************************************************************/
+/* list for private/protected, old roots that need to be
+   kept in old_objects_to_trace */
+static __thread struct GcPtrList private_or_protected_roots = {0, 0, NULL};
 
 static inline gcptr create_old_object_copy(gcptr obj)
 {
@@ -204,6 +207,22 @@ static void mark_young_roots(struct tx_descriptor *d)
                                    (revision_t)END_MARKER_ON)) {
             /* 'item' is a regular, non-null pointer */
             visit_if_young(end);
+            
+            /* if old, private or protected, this object needs to be
+               traced again in the next minor_collect if it is
+               currently in old_objects_to_trace. Because then
+               it may be seen as write-ready in the view of
+               someone:
+               pw = write_barrier(); push_root(pw);
+               minor_collect(); pw = pop_root(); // pw still write-ready
+            */
+            if (item && item->h_tid & GCFLAG_OLD
+                && !(item->h_tid & GCFLAG_WRITE_BARRIER) /* not set in
+                                                          obj_to_trace*/
+                && (item->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED
+                    || item->h_revision == stm_private_rev_num)) {
+                gcptrlist_insert(&private_or_protected_roots, item);
+            }
         }
         else if (item != NULL) {
             if (item == END_MARKER_OFF)
@@ -358,6 +377,19 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
 
         stmgc_trace(obj, &visit_if_young);
     }
+
+    while (gcptrlist_size(&private_or_protected_roots) > 0) {
+        gcptr obj = gcptrlist_pop(&private_or_protected_roots);
+        /* if it has the write_barrier flag, clear it so that
+           it doesn't get inserted twice by a later write-barrier */
+        if (obj->h_tid & GCFLAG_WRITE_BARRIER) {
+            /* only insert those that were in old_obj_to_trace
+               and that we didn't insert already */
+            obj->h_tid &= ~GCFLAG_WRITE_BARRIER;
+            gcptrlist_insert(&d->old_objects_to_trace, obj);
+            dprintf(("re-add %p to old_objects_to_trace\n", obj));
+        }
+    }
 }
 
 static void fix_list_of_read_objects(struct tx_descriptor *d)
@@ -406,7 +438,7 @@ static void setup_minor_collect(struct tx_descriptor *d)
 
 static void teardown_minor_collect(struct tx_descriptor *d)
 {
-    assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
+    //assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
     assert(gcptrlist_size(&d->public_with_young_copy) == 0);
     assert(gcptrlist_size(&d->public_descriptor->stolen_objects) == 0);
 

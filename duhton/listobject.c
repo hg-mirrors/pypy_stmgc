@@ -75,7 +75,7 @@ DuTupleObject *DuTuple_New(int length)
 
 void _list_append(DuListObject *ob, DuObject *x)
 {
-    _du_read1(ob);
+    _du_write1(ob);
     DuTupleObject *olditems = ob->ob_tuple;
 
     _du_read1(olditems);
@@ -84,8 +84,6 @@ void _list_append(DuListObject *ob, DuObject *x)
     _du_save3(ob, x, olditems);
     DuTupleObject *newitems = DuTuple_New(newcount);
     _du_restore3(ob, x, olditems);
-
-    _du_write1(ob);
 
     for (i=0; i<newcount-1; i++)
         newitems->ob_items[i] = olditems->ob_items[i];
