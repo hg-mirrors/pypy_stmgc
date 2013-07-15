@@ -1,11 +1,13 @@
 #include "stmimpl.h"
 
 
-gcptr stm_stub_malloc(struct tx_public_descriptor *pd)
+gcptr stm_stub_malloc(struct tx_public_descriptor *pd, size_t minsize)
 {
     assert(pd->collection_lock != 0);
+    if (minsize < sizeof(struct stm_stub_s))
+        minsize = sizeof(struct stm_stub_s);
 
-    gcptr p = stmgcpage_malloc(sizeof(struct stm_stub_s));
+    gcptr p = stmgcpage_malloc(minsize);
     STUB_THREAD(p) = pd;
     return p;
 }
@@ -38,7 +40,8 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
     assert(stub->h_revision == (((revision_t)obj) | 2));
     goto done;
 
- not_found:
+ not_found:;
+    size_t size = 0;
     if (!obj->h_original && !(obj->h_tid & GCFLAG_OLD)) {
         /* There shouldn't be a public, young object without
            a h_original. But there can be priv/protected ones.
@@ -48,12 +51,9 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
            collection later. */
         assert(!(obj->h_tid & GCFLAG_PUBLIC));
         
-        stub = (gcptr)stmgcpage_malloc(stmgc_size(obj));
-        STUB_THREAD(stub) = sd->foreign_pd;
+        size = stmgc_size(obj);
     }
-    else {
-        stub = stm_stub_malloc(sd->foreign_pd);
-    }
+    stub = stm_stub_malloc(sd->foreign_pd, size);
     stub->h_tid = (obj->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
                                                    | GCFLAG_STUB
                                                    | GCFLAG_OLD;
