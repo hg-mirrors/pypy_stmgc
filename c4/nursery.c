@@ -449,6 +449,8 @@ static void move_young_weakrefs(struct tx_descriptor *d)
         weakref = (gcptr)weakref->h_revision;
         size_t size = stmgc_size(weakref);
         gcptr obj = WEAKREF_PTR(weakref, size);
+        if (!is_in_nursery(d, obj))
+            continue;   /* the pointer does not change */
 
         if (obj->h_tid & GCFLAG_NURSERY_MOVED)
             obj = obj->h_revision;
