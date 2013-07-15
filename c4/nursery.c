@@ -448,7 +448,13 @@ static void move_young_weakrefs(struct tx_descriptor *d)
 
         weakref = (gcptr)weakref->h_revision;
         size_t size = stmgc_size(weakref);
-        WEAKREF_PTR(weakref, size) = NULL;   /* XXX */
+        gcptr obj = WEAKREF_PTR(weakref, size);
+
+        if (obj->h_tid & GCFLAG_NURSERY_MOVED)
+            obj = obj->h_revision;
+        else
+            obj = NULL;
+        WEAKREF_PTR(weakref, size) = obj;
     }
 }
 

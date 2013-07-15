@@ -330,3 +330,21 @@ def test_weakref_invalidate():
     minor_collect()
     p1 = lib.stm_pop_root()
     assert lib.rawgetptr(p1, 0) == ffi.NULL
+
+def test_weakref_itself_dies():
+    p2 = nalloc(HDR)
+    p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
+    minor_collect()
+
+def test_weakref_keep():
+    p2 = nalloc(HDR)
+    p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
+    assert p1.h_tid == WEAKREF_TID   # no GC flags
+    assert p1.h_revision == lib.get_private_rev_num()
+    assert lib.rawgetptr(p1, 0) == p2
+    lib.stm_push_root(p1)
+    lib.stm_push_root(p2)
+    minor_collect()
+    p2 = lib.stm_pop_root()
+    p1 = lib.stm_pop_root()
+    assert lib.rawgetptr(p1, 0) == p2
