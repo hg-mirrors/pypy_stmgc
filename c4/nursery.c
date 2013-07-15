@@ -54,6 +54,7 @@ void stmgc_done_nursery(void)
 
     gcptrlist_delete(&d->old_objects_to_trace);
     gcptrlist_delete(&d->public_with_young_copy);
+    gcptrlist_delete(&d->young_weakrefs);
 }
 
 void stmgc_minor_collect_soon(void)
@@ -98,6 +99,15 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     P->h_revision = stm_private_rev_num;
     assert(P->h_original == 0);  /* null-initialized already */
     return P;
+}
+
+gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj)
+{
+    gcptr weakref = stm_allocate(size, tid);
+    assert(stmgc_size(weakref) == size);
+    WEAKREF_PTR(weakref, size) = obj;
+    gcptrlist_insert(&thread_descriptor->young_weakrefs, weakref);
+    return weakref;
 }
 
 gcptr stmgc_duplicate(gcptr P)
@@ -429,6 +439,19 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
     fxcache_clear(&d->recent_reads_cache);
 }
 
+static void move_young_weakrefs(struct tx_descriptor *d)
+{
+    while (gcptrlist_size(&d->young_weakrefs) > 0) {
+        gcptr weakref = gcptrlist_pop(&d->young_weakrefs);
+        if (!(weakref->h_tid & GCFLAG_NURSERY_MOVED))
+            continue;   /* the weakref itself dies */
+
+        weakref = (gcptr)weakref->h_revision;
+        size_t size = stmgc_size(weakref);
+        WEAKREF_PTR(weakref, size) = NULL;   /* XXX */
+    }
+}
+
 static void setup_minor_collect(struct tx_descriptor *d)
 {
     spinlock_acquire(d->public_descriptor->collection_lock, 'M');  /*minor*/
@@ -440,6 +463,7 @@ static void teardown_minor_collect(struct tx_descriptor *d)
 {
     //assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
     assert(gcptrlist_size(&d->public_with_young_copy) == 0);
+    assert(gcptrlist_size(&d->young_weakrefs) == 0);
     assert(gcptrlist_size(&d->public_descriptor->stolen_objects) == 0);
 
     spinlock_release(d->public_descriptor->collection_lock);
@@ -475,6 +499,8 @@ static void minor_collect(struct tx_descriptor *d)
        surviving young-but-outside-the-nursery objects have been flagged
        with GCFLAG_OLD
     */
+    move_young_weakrefs(d);
+
     teardown_minor_collect(d);
     assert(!stm_has_got_any_lock(d));
 
@@ -541,6 +567,7 @@ int minor_collect_anything_to_do(struct tx_descriptor *d)
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
+        assert(gcptrlist_size(&d->young_weakrefs) == 0);
         assert(gcptrlist_size(&d->list_of_read_objects) >=
                d->num_read_objects_known_old);
         assert(gcptrlist_size(&d->private_from_protected) >=

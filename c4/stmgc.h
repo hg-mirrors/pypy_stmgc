@@ -39,10 +39,8 @@ same original object */
 _Bool stm_pointer_equal(gcptr, gcptr);
 
 /* to push/pop objects into the local shadowstack */
-#if 0     // (optimized version below)
-void stm_push_root(gcptr);
-gcptr stm_pop_root(void);
-#endif
+static inline void stm_push_root(gcptr);
+static inline gcptr stm_pop_root(void);
 
 /* initialize/deinitialize the stm framework in the current thread */
 void stm_initialize(void);
@@ -55,16 +53,14 @@ int stm_enter_callback_call(void);
 void stm_leave_callback_call(int);
 
 /* read/write barriers (the most general versions only for now) */
-#if 0     // (optimized version below)
-gcptr stm_read_barrier(gcptr);
-gcptr stm_write_barrier(gcptr);
-#endif
+static inline gcptr stm_read_barrier(gcptr);
+static inline gcptr stm_write_barrier(gcptr);
 
 /* start a new transaction, calls callback(), and when it returns
    finish that transaction.  callback() is called with the 'arg'
    provided, and with a retry_counter number.  Must save roots around
-   this call.  The callback() is called repeatedly as long as it
-   returns a value > 0. */
+   this call.  If callback() returns a value > 0, it is called
+   again. */
 void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int));
 
 /* finish the current transaction, start a new one, or turn the current
@@ -113,6 +109,12 @@ char *stm_inspect_abort_info(void);
 void stm_abort_and_retry(void);
 void stm_minor_collect(void);
 void stm_major_collect(void);
+
+/* weakref support: allocate a weakref object, and set it to point
+   weakly to 'obj'.  The weak pointer offset is hard-coded to be at
+   'size - WORD'.  Important: stmcb_trace() must NOT trace it. */
+gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj);
+
 
 
 /****************  END OF PUBLIC INTERFACE  *****************/

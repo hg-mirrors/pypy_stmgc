@@ -50,7 +50,10 @@
        still in the same transaction, to know that the initial          \
        part of the lists cannot contain young objects any more. */      \
     long num_private_from_protected_known_old;                          \
-    long num_read_objects_known_old;
+    long num_read_objects_known_old;                                    \
+                                                                        \
+    /* Weakref support */                                               \
+    struct GcPtrList young_weakrefs;
 
 
 struct tx_descriptor;  /* from et.h */
@@ -64,5 +67,8 @@ gcptr stmgc_duplicate_old(gcptr);
 size_t stmgc_size(gcptr);
 void stmgc_trace(gcptr, void visit(gcptr *));
 void stmgc_minor_collect_soon(void);
+
+#define WEAKREF_PTR(wr, sz)  (*(gcptr *)(((char *)(wr)) + (sz) - WORD))
+
 
 #endif

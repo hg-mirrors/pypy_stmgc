@@ -319,3 +319,14 @@ def test_nalloc_large_object():
 def test_collect_soon():
     lib.stmgc_minor_collect_soon()
     nalloc(HDR)
+
+def test_weakref_invalidate():
+    p2 = nalloc(HDR)
+    p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
+    assert p1.h_tid == WEAKREF_TID   # no GC flags
+    assert p1.h_revision == lib.get_private_rev_num()
+    assert lib.rawgetptr(p1, 0) == p2
+    lib.stm_push_root(p1)
+    minor_collect()
+    p1 = lib.stm_pop_root()
+    assert lib.rawgetptr(p1, 0) == ffi.NULL
