@@ -39,7 +39,21 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
     goto done;
 
  not_found:
-    stub = stm_stub_malloc(sd->foreign_pd);
+    if (!obj->h_original && !(obj->h_tid & GCFLAG_OLD)) {
+        /* There shouldn't be a public, young object without
+           a h_original. But there can be priv/protected ones.
+           We have a young protected copy without an h_original
+           The stub we allocate will be the h_original, but
+           it must be big enough to be copied over by a major
+           collection later. */
+        assert(!(obj->h_tid & GCFLAG_PUBLIC));
+        
+        stub = (gcptr)stmgcpage_malloc(stmgc_size(obj));
+        STUB_THREAD(stub) = sd->foreign_pd;
+    }
+    else {
+        stub = stm_stub_malloc(sd->foreign_pd);
+    }
     stub->h_tid = (obj->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
                                                    | GCFLAG_STUB
                                                    | GCFLAG_OLD;
@@ -51,10 +65,9 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
         stub->h_original = (revision_t)obj;
     }
     else {
-        /* There shouldn't be a public, young object without
-           a h_original. But there can be protected ones. */
-        assert(!(obj->h_tid & GCFLAG_PUBLIC));
-        obj->h_original = (revision_t)stub;        
+        /* this is the big-stub case described above */
+        obj->h_original = (revision_t)stub; 
+        stub->h_original = 0;   /* stub_malloc does not set to 0... */
         if (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
             ((gcptr)obj->h_revision)->h_original = (revision_t)stub;
         }

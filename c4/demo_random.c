@@ -75,7 +75,7 @@ __thread struct thread_data td;
 // helper functions
 int classify(gcptr p);
 void check(gcptr p);
-
+int in_nursery(gcptr obj);
 static int is_private(gcptr P)
 {
   return (P->h_revision == stm_private_rev_num) ||
@@ -226,8 +226,7 @@ void check(gcptr p)
         if (p->h_original && !(p->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
             // must point to valid old object
             gcptr id = (gcptr)p->h_original;
-            assert(id->h_tid & GCFLAG_OLD);
-            check_not_free(id);
+            assert(!in_nursery(id));
 #ifdef _GC_DEBUG
             if (!is_shared_prebuilt(id) && !(id->h_tid & GCFLAG_PREBUILT))
                 assert(!is_free_old(id));
