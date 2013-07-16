@@ -205,13 +205,13 @@ def test_new_version_id_alive():
     p2 = oalloc(HDR); make_public(p2)
     delegate(p1, p2)
     delegate_original(p1, p2)
-    p2.h_original = ffi.cast("revision_t", p1)
     lib.stm_push_root(p1)
     major_collect()
     major_collect()
     p1b = lib.stm_pop_root()
     check_not_free(p1) # id copy
-    check_not_free(p2)
+    check_free_old(p2)
+    assert p1b == p1
 
     
 def test_new_version_kill_intermediate():
@@ -273,7 +273,6 @@ def test_new_version_not_kill_intermediate_original():
     delegate(p3, p4)
     delegate(p4, p5)
     rawsetptr(p1, 0, p3)
-    delegate_original(p3, p1)
     delegate_original(p3, p2)
     delegate_original(p3, p4)
     delegate_original(p3, p5)
@@ -285,11 +284,8 @@ def test_new_version_not_kill_intermediate_original():
     check_free_old(p2)
     check_not_free(p3) # original
     check_free_old(p4)
-    check_not_free(p5)
-    assert rawgetptr(p1, 0) == p5
-    assert follow_original(p1) == p3
-    assert follow_original(p5) == p3
-
+    check_free_old(p5)
+    assert rawgetptr(p1, 0) == p3
     
 def test_prebuilt_version_1():
     p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
@@ -308,6 +304,23 @@ def test_prebuilt_version_2():
     check_free_old(p2)
     check_not_free(p3)     # XXX replace with p1
 
+def test_prebuilt_version_2_copy_over_prebuilt():
+    p1 = lib.pseudoprebuilt_with_hash(HDR, 42 + HDR, 99)
+    p2 = oalloc(HDR); make_public(p2)
+    p3 = oalloc(HDR); make_public(p3)
+    delegate(p1, p2)
+    delegate_original(p1, p2)
+    delegate(p2, p3)
+    delegate_original(p1, p3)
+    # added by delegate, remove, otherwise
+    # major_collect will not copy over prebuilt p1:
+    p1.h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE
+    major_collect()
+    check_prebuilt(p1)
+    assert lib.stm_hash(p1) == 99
+    check_free_old(p2)
+    check_free_old(p3)
+
 def test_prebuilt_version_to_protected():
     p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
     p2 = lib.stm_write_barrier(p1)
@@ -320,6 +333,24 @@ def test_prebuilt_version_to_protected():
     major_collect()
     check_prebuilt(p1)
     check_not_free(p2)     # XXX replace with p1
+
+def test_prebuilt_version_to_protected_copy_over_prebuilt():
+    py.test.skip("""current copy-over-prebuilt-original approach
+    does not work with public_prebuilt->stub->protected""")
+    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p2 = lib.stm_write_barrier(p1)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    minor_collect()
+    p2 = lib.stm_read_barrier(p1)
+    assert p2 != p1
+    minor_collect()
+    major_collect()
+    major_collect()
+    print classify(p2)
+    check_prebuilt(p1)
+    check_free_old(p2)
+
 
 def test_private():
     p1 = nalloc(HDR)
@@ -396,8 +427,6 @@ def test_backup_stolen():
             print p2
             major_collect()
             r.leave_in_parallel()
-            check_not_free(p2)
-            assert classify(p2) == "public"
             r.enter_in_parallel()
         perform_transaction(cb)
         r.leave_in_parallel()
