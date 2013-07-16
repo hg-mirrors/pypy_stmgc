@@ -354,14 +354,14 @@ static void visit(gcptr *pobj)
             }
         }
 
-        /* if (!(obj->h_revision & 3)) { */
-        /*     /\* obj is neither a stub nor a most recent revision: */
-        /*        completely ignore obj->h_revision *\/ */
+        if (!(obj->h_revision & 3)) {
+            /* obj is neither a stub nor a most recent revision:
+               completely ignore obj->h_revision */
 
-        /*     obj = (gcptr)obj->h_revision; */
-        /*     assert(obj->h_tid & GCFLAG_PUBLIC); */
-        /*     prev_obj->h_revision = (revision_t)obj; */
-        /* } */
+            obj = (gcptr)obj->h_revision;
+            assert(obj->h_tid & GCFLAG_PUBLIC);
+            prev_obj->h_revision = (revision_t)obj;
+        }
         *pobj = obj;
         goto restart;
     }
