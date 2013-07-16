@@ -945,6 +945,7 @@ static void AcquireLocks(struct tx_descriptor *d)
   revision_t my_lock = d->my_lock;
   wlog_t *item;
 
+  dprintf(("acquire_locks\n"));
   assert(!stm_has_got_any_lock(d));
   assert(d->public_descriptor->stolen_objects.size == 0);
 
@@ -957,6 +958,7 @@ static void AcquireLocks(struct tx_descriptor *d)
       revision_t v;
     retry:
       assert(R->h_tid & GCFLAG_PUBLIC);
+      assert(R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
       v = ACCESS_ONCE(R->h_revision);
       if (IS_POINTER(v))     /* "has a more recent revision" */
         {
@@ -989,7 +991,7 @@ static void AcquireLocks(struct tx_descriptor *d)
 static void CancelLocks(struct tx_descriptor *d)
 {
   wlog_t *item;
-
+  dprintf(("cancel_locks\n"));
   if (!g2l_any_entry(&d->public_to_private))
     return;
 
@@ -1257,7 +1259,7 @@ void CommitTransaction(void)
   revision_t cur_time;
   struct tx_descriptor *d = thread_descriptor;
   assert(d->active >= 1);
-
+  dprintf(("CommitTransaction(%p)\n", d));
   spinlock_acquire(d->public_descriptor->collection_lock, 'C');  /*committing*/
   if (d->public_descriptor->stolen_objects.size != 0)
     stm_normalize_stolen_objects(d);
@@ -1341,6 +1343,7 @@ static void make_inevitable(struct tx_descriptor *d)
   d->active = 2;
   d->reads_size_limit_nonatomic = 0;
   update_reads_size_limit(d);
+  dprintf(("make_inevitable(%p)\n", d));
 }
 
 static revision_t acquire_inev_mutex_and_mark_global_cur_time(
