@@ -637,6 +637,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         assert(!(obj->h_tid & GCFLAG_STUB));
 
         if (!(obj->h_tid & GCFLAG_OLD)) {
+            assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
             obj = (gcptr)obj->h_revision;
             items[i] = obj;
         }
@@ -650,9 +651,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
             assert(IS_POINTER(obj->h_revision));
             obj = (gcptr)obj->h_revision;
 
-            /* backup copies will never be candidates for copy over
-               prebuilts, because there is always the priv-from-prot
-               object inbetween */
+            /* the backup-ptr should already be updated: */
             assert(obj->h_tid & GCFLAG_OLD);
         }
 
