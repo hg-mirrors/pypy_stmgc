@@ -302,7 +302,7 @@ int classify(gcptr p)
         }
         else {
             if (in_nursery(p)) {
-                assert(p->h_tid & GCFLAG_NURSERY_MOVED);
+                assert(p->h_tid & GCFLAG_MOVED);
                 assert(!(p->h_revision & 1));
             }
             return C_PUBLIC;

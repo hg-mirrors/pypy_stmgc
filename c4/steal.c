@@ -158,7 +158,7 @@ void stm_steal_stub(gcptr P)
 
             /* note that we should follow h_revision at least one more
                step: it is necessary if L is public but young (and then
-               has GCFLAG_NURSERY_MOVED), but it is fine to do it more
+               has GCFLAG_MOVED), but it is fine to do it more
                generally. */
             v = ACCESS_ONCE(L->h_revision);
             if (IS_POINTER(v)) {
@@ -191,7 +191,7 @@ void stm_steal_stub(gcptr P)
             }
             L->h_revision = (revision_t)O;
 
-            L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
+            L->h_tid |= GCFLAG_PUBLIC | GCFLAG_MOVED;
             /* subtle: we need to remove L from the fxcache of the target
                thread, otherwise its read barrier might not trigger on it.
                It is mostly fine because it is anyway identical to O.  But

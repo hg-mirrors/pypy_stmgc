@@ -396,7 +396,7 @@ def test_stealing_young():
         assert p2 == lib.stm_read_barrier(p)
         assert p2 != plist[-1]   # p2 is a public moved-out-of-nursery
         assert plist[-1].h_tid & GCFLAG_PUBLIC
-        assert plist[-1].h_tid & GCFLAG_NURSERY_MOVED
+        assert plist[-1].h_tid & GCFLAG_MOVED
         assert plist[-1].h_revision == int(ffi.cast("revision_t", p2))
         assert classify(p2) == "public"
         r.set(3)
