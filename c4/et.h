@@ -46,7 +46,7 @@
  * the list 'old_objects_to_trace'; it is set again at the next minor
  * collection.
  *
- * GCFLAG_NURSERY_MOVED is used temporarily during minor collections.
+ * GCFLAG_MOVED is used temporarily during minor/major collections.
  *
  * GCFLAG_STUB is set for debugging on stub objects made by stealing or
  * by major collections.  'p_stub->h_revision' might be a value
@@ -67,7 +67,7 @@ static const revision_t GCFLAG_PUBLIC                 = STM_FIRST_GCFLAG << 2;
 static const revision_t GCFLAG_PREBUILT_ORIGINAL      = STM_FIRST_GCFLAG << 3;
 static const revision_t GCFLAG_PUBLIC_TO_PRIVATE      = STM_FIRST_GCFLAG << 4;
 // in stmgc.h:          GCFLAG_WRITE_BARRIER          = STM_FIRST_GCFLAG << 5;
-static const revision_t GCFLAG_NURSERY_MOVED          = STM_FIRST_GCFLAG << 6;
+static const revision_t GCFLAG_MOVED          = STM_FIRST_GCFLAG << 6;
 static const revision_t GCFLAG_BACKUP_COPY  /*debug*/ = STM_FIRST_GCFLAG << 7;
 static const revision_t GCFLAG_STUB         /*debug*/ = STM_FIRST_GCFLAG << 8;
 static const revision_t GCFLAG_PRIVATE_FROM_PROTECTED = STM_FIRST_GCFLAG << 9;
@@ -85,7 +85,7 @@ static const revision_t GCFLAG_HAS_ID                 = STM_FIRST_GCFLAG << 10;
                          "PREBUILT_ORIGINAL", \
                          "PUBLIC_TO_PRIVATE", \
                          "WRITE_BARRIER",     \
-                         "NURSERY_MOVED",     \
+                         "MOVED",     \
                          "BACKUP_COPY",       \
                          "STUB",              \
                          "PRIVATE_FROM_PROTECTED", \

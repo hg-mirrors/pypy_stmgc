@@ -122,7 +122,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
           gcptr P_prev = P;
           P = (gcptr)v;
           assert((P->h_tid & GCFLAG_PUBLIC) ||
-                 (P_prev->h_tid & GCFLAG_NURSERY_MOVED));
+                 (P_prev->h_tid & GCFLAG_MOVED));
 
           v = ACCESS_ONCE(P->h_revision);
 
@@ -214,7 +214,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
  add_in_recent_reads_cache:
   /* The risks are that the following assert fails, because the flag was
      added just now by a parallel thread during stealing... */
-  /*assert(!(P->h_tid & GCFLAG_NURSERY_MOVED));*/
+  /*assert(!(P->h_tid & GCFLAG_MOVED));*/
   fxcache_add(&d->recent_reads_cache, P);
   return P;
 
@@ -257,7 +257,7 @@ gcptr stm_RepeatReadBarrier(gcptr P)
    */
   if (P->h_tid & GCFLAG_PUBLIC)
     {
-      if (P->h_tid & GCFLAG_NURSERY_MOVED)
+      if (P->h_tid & GCFLAG_MOVED)
         {
           P = (gcptr)P->h_revision;
           assert(P->h_tid & GCFLAG_PUBLIC);
@@ -389,7 +389,7 @@ gcptr _stm_nonrecord_barrier(gcptr P)
 
       while (v = P->h_revision, IS_POINTER(v))
         {
-          if (P->h_tid & GCFLAG_NURSERY_MOVED)
+          if (P->h_tid & GCFLAG_MOVED)
             dprintf(("nursery_moved "));
 
           if (v & 2)
@@ -486,7 +486,7 @@ static gcptr LocalizeProtected(struct tx_descriptor *d, gcptr P)
 static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 {
   assert(R->h_tid & GCFLAG_PUBLIC);
-  assert(!(R->h_tid & GCFLAG_NURSERY_MOVED));
+  assert(!(R->h_tid & GCFLAG_MOVED));
 
 #ifdef _GC_DEBUG
   wlog_t *entry;
@@ -581,7 +581,7 @@ gcptr stm_WriteBarrier(gcptr P)
          Add R into the list 'public_with_young_copy', unless W is
          actually an old object, in which case we need to record W.
       */
-      if (R->h_tid & GCFLAG_NURSERY_MOVED)
+      if (R->h_tid & GCFLAG_MOVED)
         {
           /* Bah, the object turned into this kind of stub, possibly
              while we were waiting for the collection_lock, because it
@@ -671,8 +671,8 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
                   continue;
                 }
             }
-          else if ((R->h_tid & (GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED))
-                            == (GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED))
+          else if ((R->h_tid & (GCFLAG_PUBLIC | GCFLAG_MOVED))
+                            == (GCFLAG_PUBLIC | GCFLAG_MOVED))
             {
               /* such an object is identical to the one it points to
                (stolen protected young object with h_revision pointing
@@ -1084,7 +1084,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       assert(!(L->h_tid & GCFLAG_VISITED));
       assert(!(L->h_tid & GCFLAG_PUBLIC_TO_PRIVATE));
       assert(!(L->h_tid & GCFLAG_PREBUILT_ORIGINAL));
-      assert(!(L->h_tid & GCFLAG_NURSERY_MOVED));
+      assert(!(L->h_tid & GCFLAG_MOVED));
       assert(L->h_revision != localrev);   /* modified by AcquireLocks() */
 
 #ifdef DUMP_EXTRA
@@ -1131,7 +1131,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
 
       assert(R->h_tid & GCFLAG_PUBLIC);
       assert(R->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
-      assert(!(R->h_tid & GCFLAG_NURSERY_MOVED));
+      assert(!(R->h_tid & GCFLAG_MOVED));
       assert(R->h_revision != localrev);
 
 #ifdef DUMP_EXTRA
@@ -1226,7 +1226,7 @@ void AbortPrivateFromProtected(struct tx_descriptor *d)
           assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
           P->h_tid |= GCFLAG_PUBLIC;
           assert(!(P->h_tid & GCFLAG_HAS_ID));
-          if (!(P->h_tid & GCFLAG_OLD)) P->h_tid |= GCFLAG_NURSERY_MOVED;
+          if (!(P->h_tid & GCFLAG_OLD)) P->h_tid |= GCFLAG_MOVED;
           /* P becomes a public outdated object.  It may create an
              exception documented in doc-objects.txt: a public but young
              object.  It's still fine because it should only be seen by
