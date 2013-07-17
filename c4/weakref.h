@@ -3,7 +3,8 @@
 
 
 void stm_move_young_weakrefs(struct tx_descriptor *);
-void stm_invalidate_old_weakrefs(struct tx_public_descriptor *);
+void stm_visit_old_weakrefs(void);
+void stm_clean_old_weakrefs(void);
 
 
 #endif
