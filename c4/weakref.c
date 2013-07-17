@@ -64,29 +64,140 @@ void stm_move_young_weakrefs(struct tx_descriptor *d)
 
 /***** Major collection *****/
 
-void stm_invalidate_old_weakrefs(struct tx_public_descriptor *gcp)
+static _Bool is_partially_visited(gcptr obj)
 {
-    /* walk over list of objects that contain weakrefs.  If the
-       object it references does not survive, invalidate the weakref */
-    long i;
+    /* Based on gcpage.c:visit().  Check the code here if we simplify
+       visit().  Returns True or False depending on whether we find any
+       version of 'obj' to be VISITED or not.
+    */
+ restart:
+    if (obj->h_tid & GCFLAG_VISITED)
+        return 1;
+
+    if (obj->h_revision & 1) {
+        assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+        assert(!(obj->h_tid & GCFLAG_STUB));
+        return 0;
+    }
+    else if (obj->h_tid & GCFLAG_PUBLIC) {
+        /* h_revision is a ptr: we have a more recent version */
+        if (!(obj->h_revision & 2)) {
+            /* go visit the more recent version */
+            obj = (gcptr)obj->h_revision;
+        }
+        else {
+            /* it's a stub */
+            assert(obj->h_tid & GCFLAG_STUB);
+            obj = (gcptr)(obj->h_revision - 2);
+        }
+        goto restart;
+    }
+    else {
+        assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
+        gcptr B = (gcptr)obj->h_revision;
+        assert(B->h_tid & (GCFLAG_PUBLIC | GCFLAG_BACKUP_COPY));
+        if (B->h_tid & GCFLAG_VISITED)
+            return 1;
+        assert(!(obj->h_tid & GCFLAG_STUB));
+        assert(!(B->h_tid & GCFLAG_STUB));
+
+        if (IS_POINTER(B->h_revision)) {
+            assert(B->h_tid & GCFLAG_PUBLIC);
+            assert(!(B->h_tid & GCFLAG_BACKUP_COPY));
+            assert(!(B->h_revision & 2));
+
+            obj = (gcptr)B->h_revision;
+            goto restart;
+        }
+    }
+    return 0;
+}
+
+static void visit_old_weakrefs(struct tx_public_descriptor *gcp)
+{
+    /* Note: it's possible that a weakref points to a public stub to a
+       protected object, and only the protected object was marked as
+       VISITED so far.  In this case, this function needs to mark the
+       public stub as VISITED too.
+    */
+    long i, size = gcp->old_weakrefs.size;
     gcptr *items = gcp->old_weakrefs.items;
 
-    for (i = gcp->old_weakrefs.size - 1; i >= 0; i--) {
+    for (i = 0; i < size; i++) {
         gcptr weakref = items[i];
 
+        /* weakrefs are immutable: during a major collection, they
+           cannot be in the nursery, and so there should be only one
+           version of each weakref object.  XXX relying on this is
+           a bit fragile, but simplifies things a lot... */
+        assert(weakref->h_revision & 1);
+
         if (!(weakref->h_tid & GCFLAG_VISITED)) {
-            /* weakref itself dies */
+            /* the weakref itself dies */
         }
         else {
             size_t size = stmgc_size(weakref);
             gcptr pointing_to = WEAKREF_PTR(weakref, size);
-            //...;
-            abort();
+            assert(pointing_to != NULL);
+            if (is_partially_visited(pointing_to)) {
+                pointing_to = stmgcpage_visit(pointing_to);
+                assert(pointing_to->h_tid & GCFLAG_VISITED);
+                WEAKREF_PTR(weakref, size) = pointing_to;
+            }
+            else {
+                /* the weakref appears to be pointing to a dying object,
+                   but we don't know for sure now.  Clearing it is left
+                   to clean_old_weakrefs(). */
+            }
         }
+    }
+}
 
+static void clean_old_weakrefs(struct tx_public_descriptor *gcp)
+{
+    long i, size = gcp->old_weakrefs.size;
+    gcptr *items = gcp->old_weakrefs.items;
+
+    for (i = size - 1; i >= 0; i--) {
+        gcptr weakref = items[i];
+        assert(weakref->h_revision & 1);
+        if (weakref->h_tid & GCFLAG_VISITED) {
+            size_t size = stmgc_size(weakref);
+            gcptr pointing_to = WEAKREF_PTR(weakref, size);
+            if (pointing_to->h_tid & GCFLAG_VISITED) {
+                continue;   /* the target stays alive, the weakref remains */
+            }
+            WEAKREF_PTR(weakref, size) = NULL;  /* the target dies */
+        }
         /* remove this weakref from the list */
         items[i] = items[--gcp->old_weakrefs.size];
     }
-
     gcptrlist_compress(&gcp->old_weakrefs);
+}
+
+static void for_each_public_descriptor(
+                                  void visit(struct tx_public_descriptor *)) {
+    struct tx_descriptor *d;
+    for (d = stm_tx_head; d; d = d->tx_next)
+        visit(d->public_descriptor);
+
+    struct tx_public_descriptor *gcp;
+    revision_t index = -1;
+    while ((gcp = stm_get_free_public_descriptor(&index)) != NULL)
+        visit(gcp);
+}
+
+void stm_visit_old_weakrefs(void)
+{
+    /* Figure out which weakrefs survive, which possibly
+       adds more objects to 'objects_to_trace'.
+    */
+    for_each_public_descriptor(visit_old_weakrefs);
+}
+
+void stm_clean_old_weakrefs(void)
+{
+    /* Clean up the non-surviving weakrefs
+     */
+    for_each_public_descriptor(clean_old_weakrefs);
 }

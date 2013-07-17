@@ -115,6 +115,6 @@ class TestMajorCollection(BaseTest):
         major_collect()
         p2b = lib.stm_pop_root()
         p1 = lib.stm_pop_root()
-        assert lib.rawgetptr(p1, 0) == p2
+        assert lib.rawgetptr(p1, 0) == p2b
         assert p2b != p2
-        assert lib.rawgetlong(p2b, 0) == 912809218
+        assert lib.getlong(p2b, 0) == 912809218

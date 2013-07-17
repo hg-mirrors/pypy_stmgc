@@ -222,11 +222,13 @@ static void keep_original_alive(gcptr obj)
         if (!(id_copy->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
             id_copy->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;
             /* see fix_outdated() */
-            id_copy->h_tid |= GCFLAG_VISITED;
+            if (!(id_copy->h_tid & GCFLAG_VISITED)) {
+                id_copy->h_tid |= GCFLAG_VISITED;
 
-            /* XXX: may not always need tracing? */
-            if (!(id_copy->h_tid & GCFLAG_STUB))
-                gcptrlist_insert(&objects_to_trace, id_copy);
+                /* XXX: may not always need tracing? */
+                if (!(id_copy->h_tid & GCFLAG_STUB))
+                    gcptrlist_insert(&objects_to_trace, id_copy);
+            }
         } 
         else {
             /* prebuilt originals won't get collected anyway
@@ -234,6 +236,14 @@ static void keep_original_alive(gcptr obj)
                we only ever need their location, not their content */
         }
     }
+}
+
+static void visit(gcptr *pobj);
+
+gcptr stmgcpage_visit(gcptr obj)
+{
+    visit(&obj);
+    return obj;
 }
 
 static void visit(gcptr *pobj)
@@ -275,10 +285,10 @@ static void visit(gcptr *pobj)
                 keep_original_alive(prev_obj);
 
                 assert(*pobj == prev_obj);
-                gcptr obj1 = obj;
-                visit(&obj1);       /* recursion, but should be only once */
+                /* recursion, but should be only once */
+                obj = stmgcpage_visit(obj);
                 assert(prev_obj->h_tid & GCFLAG_STUB);
-                prev_obj->h_revision = ((revision_t)obj1) | 2;
+                prev_obj->h_revision = ((revision_t)obj) | 2;
                 return;
             }
         }
@@ -649,8 +659,6 @@ static void free_unused_local_pages(struct tx_public_descriptor *gcp)
     int i;
     wlog_t *item;
 
-    stm_invalidate_old_weakrefs(gcp);
-
     for (i = 1; i < GC_SMALL_REQUESTS; i++) {
         sweep_pages(gcp, i);
     }
@@ -777,9 +785,13 @@ static void major_collect(void)
     assert(gcptrlist_size(&objects_to_trace) == 0);
     mark_prebuilt_roots();
     mark_all_stack_roots();
-    visit_all_objects();
+    do {
+        visit_all_objects();
+        stm_visit_old_weakrefs();
+    } while (gcptrlist_size(&objects_to_trace) != 0);
     gcptrlist_delete(&objects_to_trace);
     clean_up_lists_of_read_objects_and_fix_outdated_flags();
+    stm_clean_old_weakrefs();
 
     mc_total_in_use = mc_total_reserved = 0;
     free_all_unused_local_pages();

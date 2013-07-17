@@ -84,6 +84,7 @@ void stmgcpage_free(gcptr obj);
 void stmgcpage_add_prebuilt_root(gcptr obj);
 void stmgcpage_possibly_major_collect(int force);
 long stmgcpage_count(int quantity);
+gcptr stmgcpage_visit(gcptr);
 
 extern struct GcPtrList stm_prebuilt_gcroots;
 
