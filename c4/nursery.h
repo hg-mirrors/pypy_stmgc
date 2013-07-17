@@ -68,7 +68,4 @@ size_t stmgc_size(gcptr);
 void stmgc_trace(gcptr, void visit(gcptr *));
 void stmgc_minor_collect_soon(void);
 
-#define WEAKREF_PTR(wr, sz)  (*(gcptr *)(((char *)(wr)) + (sz) - WORD))
-
-
 #endif

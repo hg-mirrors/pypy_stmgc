@@ -101,15 +101,6 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     return P;
 }
 
-gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj)
-{
-    gcptr weakref = stm_allocate(size, tid);
-    assert(stmgc_size(weakref) == size);
-    WEAKREF_PTR(weakref, size) = obj;
-    gcptrlist_insert(&thread_descriptor->young_weakrefs, weakref);
-    return weakref;
-}
-
 gcptr stmgc_duplicate(gcptr P)
 {
     size_t size = stmgc_size(P);
@@ -439,27 +430,6 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
     fxcache_clear(&d->recent_reads_cache);
 }
 
-static void move_young_weakrefs(struct tx_descriptor *d)
-{
-    while (gcptrlist_size(&d->young_weakrefs) > 0) {
-        gcptr weakref = gcptrlist_pop(&d->young_weakrefs);
-        if (!(weakref->h_tid & GCFLAG_NURSERY_MOVED))
-            continue;   /* the weakref itself dies */
-
-        weakref = (gcptr)weakref->h_revision;
-        size_t size = stmgc_size(weakref);
-        gcptr obj = WEAKREF_PTR(weakref, size);
-        if (!is_in_nursery(d, obj))
-            continue;   /* the pointer does not change */
-
-        if (obj->h_tid & GCFLAG_NURSERY_MOVED)
-            obj = obj->h_revision;
-        else
-            obj = NULL;
-        WEAKREF_PTR(weakref, size) = obj;
-    }
-}
-
 static void setup_minor_collect(struct tx_descriptor *d)
 {
     spinlock_acquire(d->public_descriptor->collection_lock, 'M');  /*minor*/
@@ -507,7 +477,7 @@ static void minor_collect(struct tx_descriptor *d)
        surviving young-but-outside-the-nursery objects have been flagged
        with GCFLAG_OLD
     */
-    move_young_weakrefs(d);
+    stm_move_young_weakrefs(d);
 
     teardown_minor_collect(d);
     assert(!stm_has_got_any_lock(d));

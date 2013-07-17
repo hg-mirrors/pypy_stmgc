@@ -16,10 +16,10 @@ clean:
 
 H_FILES = atomic_ops.h stmgc.h stmimpl.h \
 	  et.h lists.h steal.h nursery.h gcpage.h \
-          stmsync.h extra.h dbgmem.h fprintcolor.h
+          stmsync.h extra.h weakref.h dbgmem.h fprintcolor.h
 
 C_FILES = et.c lists.c steal.c nursery.c gcpage.c \
-          stmsync.c extra.c dbgmem.c fprintcolor.c
+          stmsync.c extra.c weakref.c dbgmem.c fprintcolor.c
 
 DEBUG = -g -DGC_NURSERY=0x10000 -D_GC_DEBUG=1 -DDUMP_EXTRA=1 -D_GC_DEBUGPRINTS=1
 

@@ -649,6 +649,8 @@ static void free_unused_local_pages(struct tx_public_descriptor *gcp)
     int i;
     wlog_t *item;
 
+    stm_invalidate_old_weakrefs(gcp);
+
     for (i = 1; i < GC_SMALL_REQUESTS; i++) {
         sweep_pages(gcp, i);
     }
