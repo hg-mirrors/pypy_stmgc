@@ -45,7 +45,8 @@ typedef struct page_header_s {
 
 /* These fields are in tx_public_descriptor rather than tx_descriptor.
    The indirection allows us to keep around the lists of pages even
-   after the thread finishes, until the next major collection.
+   after the thread finishes.  Such a "zombie" tx_public_descriptor
+   is reused by the next thread that starts.
 */
 #define GCPAGE_FIELDS_DECL                                              \
     /* The array 'pages_for_size' contains GC_SMALL_REQUESTS            \
@@ -65,7 +66,10 @@ typedef struct page_header_s {
     /* A set of all non-small objects (outside the nursery).            \
        We could also have a single global set, but this avoids          \
        locking in stmgcpage_malloc/free. */                             \
-    struct G2L nonsmall_objects;
+    struct G2L nonsmall_objects;                                        \
+                                                                        \
+    /* Weakref support */                                               \
+    struct GcPtrList old_weakrefs;
 
 
 #define LOCAL_GCPAGES()  (thread_descriptor->public_descriptor)
