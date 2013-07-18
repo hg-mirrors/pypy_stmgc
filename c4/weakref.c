@@ -5,11 +5,14 @@
 
 gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj)
 {
+    stm_push_root(obj);
     gcptr weakref = stm_allocate(size, tid);
+    obj = stm_pop_root();
     assert(!(weakref->h_tid & GCFLAG_OLD));   /* 'size' too big? */
     assert(stmgc_size(weakref) == size);
     WEAKREF_PTR(weakref, size) = obj;
     gcptrlist_insert(&thread_descriptor->young_weakrefs, weakref);
+    dprintf(("alloc weakref %p -> %p\n", weakref, obj));
     return weakref;
 }
 
