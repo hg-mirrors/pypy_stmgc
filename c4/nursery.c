@@ -101,6 +101,13 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     return P;
 }
 
+gcptr stm_allocate_immutable(size_t size, unsigned long tid)
+{
+    gcptr P = stm_allocate(size, tid);
+    P->h_tid |= GCFLAG_IMMUTABLE;
+    return P;
+}
+
 gcptr stmgc_duplicate(gcptr P)
 {
     size_t size = stmgc_size(P);

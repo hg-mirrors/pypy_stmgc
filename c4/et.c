@@ -545,6 +545,7 @@ static inline void record_write_barrier(gcptr P)
 
 gcptr stm_WriteBarrier(gcptr P)
 {
+  assert(!(P->h_tid & GCFLAG_IMMUTABLE));
   if (is_private(P))
     {
       /* If we have GCFLAG_WRITE_BARRIER in P, then list it into

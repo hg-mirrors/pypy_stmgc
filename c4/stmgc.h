@@ -29,6 +29,9 @@ typedef struct stm_object_s {
 
 /* allocate an object out of the local nursery */
 gcptr stm_allocate(size_t size, unsigned long tid);
+/* allocate an object that is be immutable. it cannot be changed with
+   a stm_write_barrier() or after the next commit */
+gcptr stm_allocate_immutable(size_t size, unsigned long tid);
 
 /* returns a never changing hash for the object */
 revision_t stm_hash(gcptr);
