@@ -506,7 +506,7 @@ gcptr simple_events(gcptr p, gcptr _r, gcptr _sr)
 gcptr weakref_events(gcptr p, gcptr _r, gcptr _sr)
 {
     nodeptr t;
-    weaknodeptr w;
+    weaknodeptr w, ww;
     gcptr ptrs[] = {_r, _sr};
     
     int i = get_rand(2);
@@ -516,10 +516,11 @@ gcptr weakref_events(gcptr p, gcptr _r, gcptr _sr)
         t = (nodeptr)read_barrier(ptrs[i]);
         w = t->weakref;
         if(w) {
-            assert(stm_get_tid((gcptr)w) == GCTID_WEAKREF);
-            if (w->node) {
-                check((gcptr)w->node);
-                return (gcptr)w->node;
+            ww = stm_read_barrier(w);
+            assert(stm_get_tid((gcptr)ww) == GCTID_WEAKREF);
+            if (ww->node) {
+                check((gcptr)ww->node);
+                return (gcptr)ww->node;
             }
             else {
                 t->weakref = NULL;

@@ -18,7 +18,6 @@ gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj)
 
 
 /***** Minor collection *****/
-
 static int is_in_nursery(struct tx_descriptor *d, gcptr obj)
 {
     return (d->nursery_base <= (char*)obj && ((char*)obj) < d->nursery_end);
