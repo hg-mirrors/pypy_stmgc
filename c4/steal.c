@@ -53,7 +53,7 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
                    write_barriers allowed. */
 
                 dprintf(("steal prot immutable -> public: %p | %p\n", obj, O));
-                stub = obj;
+                stub = O;
                 goto done;
             }
             dprintf(("prot immutable -> public: %p\n", obj));
