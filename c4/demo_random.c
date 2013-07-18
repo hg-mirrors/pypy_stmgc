@@ -516,8 +516,8 @@ gcptr weakref_events(gcptr p, gcptr _r, gcptr _sr)
         t = (nodeptr)read_barrier(ptrs[i]);
         w = t->weakref;
         if(w) {
+            assert(stm_get_tid((gcptr)w) == GCTID_WEAKREF);
             if (w->node) {
-                assert(stm_get_tid((gcptr)w) == GCTID_WEAKREF);
                 check((gcptr)w->node);
                 return (gcptr)w->node;
             }

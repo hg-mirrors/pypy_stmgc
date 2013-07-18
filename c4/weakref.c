@@ -6,7 +6,7 @@
 gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj)
 {
     stm_push_root(obj);
-    gcptr weakref = stm_allocate(size, tid);
+    gcptr weakref = stm_allocate_immutable(size, tid);
     obj = stm_pop_root();
     assert(!(weakref->h_tid & GCFLAG_OLD));   /* 'size' too big? */
     assert(stmgc_size(weakref) == size);
