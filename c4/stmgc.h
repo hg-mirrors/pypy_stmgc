@@ -115,7 +115,9 @@ void stm_major_collect(void);
 
 /* weakref support: allocate a weakref object, and set it to point
    weakly to 'obj'.  The weak pointer offset is hard-coded to be at
-   'size - WORD'.  Important: stmcb_trace() must NOT trace it. */
+   'size - WORD'.  Important: stmcb_trace() must NOT trace it.
+   Weakrefs are *immutable*!  Don't attempt to use stm_write_barrier()
+   on them. */
 gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj);
 
 
