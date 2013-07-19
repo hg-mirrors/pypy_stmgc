@@ -200,4 +200,7 @@ struct tx_public_descriptor *stm_get_free_public_descriptor(revision_t *);
 void DescriptorInit(void);
 void DescriptorDone(void);
 
+#ifdef _GC_DEBUG
+char* stm_dbg_get_hdr_str(gcptr obj);
+#endif
 #endif  /* _ET_H */
