@@ -54,11 +54,19 @@ void stm_finalize(void);
 int stm_enter_callback_call(void);
 void stm_leave_callback_call(int);
 
-/* read/write barriers (the most general versions only for now) */
-#if 0     // (optimized version below)
-gcptr stm_read_barrier(gcptr);
-gcptr stm_write_barrier(gcptr);
-#endif
+/* read/write barriers (the most general versions only for now).
+
+   - the read barrier must be applied before reading from an object.
+     the result is valid as long as we're in the same transaction,
+     and stm_write_barrier() is not called on the same object.
+
+   - the write barrier must be applied before writing to an object.
+     the result is valid for a shorter period of time: we have to
+     do stm_write_barrier() again if we ended the transaction, or
+     if we did a potential collection (e.g. stm_allocate()).
+*/
+static inline gcptr stm_read_barrier(gcptr);
+static inline gcptr stm_write_barrier(gcptr);
 
 /* start a new transaction, calls callback(), and when it returns
    finish that transaction.  callback() is called with the 'arg'
