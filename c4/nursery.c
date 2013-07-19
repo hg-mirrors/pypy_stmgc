@@ -1,7 +1,6 @@
 #include "stmimpl.h"
 
-
-static int is_in_nursery(struct tx_descriptor *d, gcptr obj)
+int stmgc_is_in_nursery(struct tx_descriptor *d, gcptr obj)
 {
     return (d->nursery_base <= (char*)obj && ((char*)obj) < d->nursery_end);
 }
@@ -54,6 +53,7 @@ void stmgc_done_nursery(void)
 
     gcptrlist_delete(&d->old_objects_to_trace);
     gcptrlist_delete(&d->public_with_young_copy);
+    gcptrlist_delete(&d->young_weakrefs);
 }
 
 void stmgc_minor_collect_soon(void)
@@ -100,6 +100,13 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     return P;
 }
 
+gcptr stm_allocate_immutable(size_t size, unsigned long tid)
+{
+    gcptr P = stm_allocate(size, tid);
+    P->h_tid |= GCFLAG_IMMUTABLE;
+    return P;
+}
+
 gcptr stmgc_duplicate(gcptr P)
 {
     size_t size = stmgc_size(P);
@@ -125,9 +132,6 @@ gcptr stmgc_duplicate_old(gcptr P)
 }
 
 /************************************************************/
-/* list for private/protected, old roots that need to be
-   kept in old_objects_to_trace */
-static __thread struct GcPtrList private_or_protected_roots = {0, 0, NULL};
 
 static inline gcptr create_old_object_copy(gcptr obj)
 {
@@ -150,7 +154,7 @@ static void visit_if_young(gcptr *root)
     gcptr fresh_old_copy;
     struct tx_descriptor *d = thread_descriptor;
 
-    if (!is_in_nursery(d, obj)) {
+    if (!stmgc_is_in_nursery(d, obj)) {
         /* not a nursery object */
     }
     else {
@@ -207,22 +211,6 @@ static void mark_young_roots(struct tx_descriptor *d)
                                    (revision_t)END_MARKER_ON)) {
             /* 'item' is a regular, non-null pointer */
             visit_if_young(end);
-            item = *end;
-            /* if private or protected, this object needs to be
-               traced again in the next minor_collect if it is
-               currently in old_objects_to_trace. Because then
-               it may be seen as write-ready in the view of
-               someone:
-               pw = write_barrier(); push_root(pw);
-               minor_collect(); pw = pop_root(); // pw still write-ready
-            */
-            if (item
-                && !(item->h_tid & GCFLAG_WRITE_BARRIER) /* not set in
-                                                          obj_to_trace*/
-                && (item->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED
-                    || item->h_revision == stm_private_rev_num)) {
-                gcptrlist_insert(&private_or_protected_roots, item);
-            }
         }
         else if (item != NULL) {
             if (item == END_MARKER_OFF)
@@ -377,29 +365,12 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
 
         stmgc_trace(obj, &visit_if_young);
     }
-
-    while (gcptrlist_size(&private_or_protected_roots) > 0) {
-        gcptr obj = gcptrlist_pop(&private_or_protected_roots);
-        /* if it has the write_barrier flag, clear it so that
-           it doesn't get inserted twice by a later write-barrier */
-        if (obj->h_tid & GCFLAG_WRITE_BARRIER) {
-            /* only insert those that were in old_obj_to_trace
-               and that we didn't insert already */
-            obj->h_tid &= ~GCFLAG_WRITE_BARRIER;
-            gcptrlist_insert(&d->old_objects_to_trace, obj);
-            dprintf(("re-add %p to old_objects_to_trace\n", obj));
-        }
-    }
 }
 
 static void fix_list_of_read_objects(struct tx_descriptor *d)
 {
     long i, limit = d->num_read_objects_known_old;
     gcptr *items = d->list_of_read_objects.items;
-
-    if (d->active < 0)
-        return; // aborts anyway
-
     assert(d->list_of_read_objects.size >= limit);
 
     if (d->active == 2) {
@@ -410,7 +381,7 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
     for (i = d->list_of_read_objects.size - 1; i >= limit; --i) {
         gcptr obj = items[i];
 
-        if (!is_in_nursery(d, obj)) {
+        if (!stmgc_is_in_nursery(d, obj)) {
             /* non-young or visited young objects are kept */
             continue;
         }
@@ -442,8 +413,9 @@ static void setup_minor_collect(struct tx_descriptor *d)
 
 static void teardown_minor_collect(struct tx_descriptor *d)
 {
-    //assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
+    assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
     assert(gcptrlist_size(&d->public_with_young_copy) == 0);
+    assert(gcptrlist_size(&d->young_weakrefs) == 0);
     assert(gcptrlist_size(&d->public_descriptor->stolen_objects) == 0);
 
     spinlock_release(d->public_descriptor->collection_lock);
@@ -479,6 +451,8 @@ static void minor_collect(struct tx_descriptor *d)
        surviving young-but-outside-the-nursery objects have been flagged
        with GCFLAG_OLD
     */
+    stm_move_young_weakrefs(d);
+
     teardown_minor_collect(d);
     assert(!stm_has_got_any_lock(d));
 
@@ -545,9 +519,9 @@ int minor_collect_anything_to_do(struct tx_descriptor *d)
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
-        assert(IMPLIES(d->active > 0,
-                       gcptrlist_size(&d->list_of_read_objects) >=
-                       d->num_read_objects_known_old));
+        assert(gcptrlist_size(&d->young_weakrefs) == 0);
+        assert(gcptrlist_size(&d->list_of_read_objects) >=
+               d->num_read_objects_known_old);
         assert(gcptrlist_size(&d->private_from_protected) >=
                d->num_private_from_protected_known_old);
         d->num_read_objects_known_old =

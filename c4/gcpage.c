@@ -222,12 +222,14 @@ static void keep_original_alive(gcptr obj)
         if (!(id_copy->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
             id_copy->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;
             /* see fix_outdated() */
-            id_copy->h_tid |= GCFLAG_VISITED;
-            assert(!(id_copy->h_tid & GCFLAG_MOVED));
+            if (!(id_copy->h_tid & GCFLAG_VISITED)) {
+                id_copy->h_tid |= GCFLAG_VISITED;
+                assert(!(id_copy->h_tid & GCFLAG_MOVED));
 
-            /* XXX: may not always need tracing? */
-            if (!(id_copy->h_tid & GCFLAG_STUB))
-                gcptrlist_insert(&objects_to_trace, id_copy);
+                /* XXX: may not always need tracing? */
+                if (!(id_copy->h_tid & GCFLAG_STUB))
+                    gcptrlist_insert(&objects_to_trace, id_copy);
+            }
         } 
         else {
             /* prebuilt originals won't get collected anyway
@@ -235,6 +237,14 @@ static void keep_original_alive(gcptr obj)
                we only ever need their location, not their content */
         }
     }
+}
+
+static void visit(gcptr *pobj);
+
+gcptr stmgcpage_visit(gcptr obj)
+{
+    visit(&obj);
+    return obj;
 }
 
 static gcptr copy_over_original(gcptr obj)
@@ -346,10 +356,10 @@ static void visit(gcptr *pobj)
                 keep_original_alive(prev_obj);
 
                 assert(*pobj == prev_obj);
-                gcptr obj1 = obj;
-                visit(&obj1);       /* recursion, but should be only once */
+                /* recursion, but should be only once */
+                obj = stmgcpage_visit(obj);
                 assert(prev_obj->h_tid & GCFLAG_STUB);
-                prev_obj->h_revision = ((revision_t)obj1) | 2;
+                prev_obj->h_revision = ((revision_t)obj) | 2;
                 return;
             }
         }
@@ -481,8 +491,6 @@ static void mark_roots(gcptr *root, gcptr *end)
 
 static void mark_all_stack_roots(void)
 {
-    int i;
-    gcptr *items;
     struct tx_descriptor *d;
     struct G2L new_public_to_private;
     memset(&new_public_to_private, 0, sizeof(struct G2L));
@@ -492,15 +500,6 @@ static void mark_all_stack_roots(void)
 
         /* the roots pushed on the shadowstack */
         mark_roots(d->shadowstack, *d->shadowstack_end_ref);
-
-        /* some roots (^^^) can also be in this list, and
-           we may have a stolen priv_from_prot in here that, 
-           when visited, resolves to its backup (or further) */
-        items = d->old_objects_to_trace.items;
-        for (i = d->old_objects_to_trace.size - 1; i >= 0; i--) {
-            visit(&items[i]);
-            gcptrlist_insert(&objects_to_trace, items[i]);
-        }
 
         /* the thread-local object */
         visit(d->thread_local_obj_ref);
@@ -570,11 +569,11 @@ static void mark_all_stack_roots(void)
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
         assert(gcptrlist_size(&d->public_descriptor->stolen_objects) == 0);
         assert(gcptrlist_size(&d->public_descriptor->stolen_young_stubs) == 0);
+        assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
         /* NOT NECESSARILY EMPTY:
            - list_of_read_objects
            - private_from_protected
            - public_to_private
-           - old_objects_to_trace
         */
         assert(gcptrlist_size(&d->list_of_read_objects) ==
                d->num_read_objects_known_old);
@@ -608,23 +607,20 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         }
     }
 
-    
-    /* we visit old_objects_to_trace during marking and thus, they
-       should be up-to-date */
-#ifdef _GC_DEBUG
-    items = d->old_objects_to_trace.items;
-    for (i = d->old_objects_to_trace.size - 1; i >= 0; i--) {
-        gcptr obj = items[i];
-        assert(!(obj->h_tid & GCFLAG_MOVED));
-        assert(obj->h_tid & GCFLAG_VISITED);
-    }
-#endif
+	assert(d->old_objects_to_trace.size == 0);
 
     /* If we're aborting this transaction anyway, we don't need to do
      * more here.
      */
-    if (d->active < 0)
-        return;       /* already "aborted" during forced minor collection */
+    if (d->active < 0) {
+        /* already "aborted" during forced minor collection
+           clear list of read objects so that a possible minor collection 
+           before the abort doesn't trip 
+           fix_list_of_read_objects should not run */
+        gcptrlist_clear(&d->list_of_read_objects);
+        d->num_read_objects_known_old = 0;
+        return;
+    }
 
     if (d->active == 2) {
         /* inevitable transaction: clear the list of read objects */
@@ -661,6 +657,9 @@ static void cleanup_for_thread(struct tx_descriptor *d)
             dprintf(("ABRT_COLLECT_MAJOR %p: "
                      "%p was read but modified already\n", d, obj));
             AbortTransactionAfterCollect(d, ABRT_COLLECT_MAJOR);
+            /* fix_list_of_read_objects should not run */
+            gcptrlist_clear(&d->list_of_read_objects);
+            d->num_read_objects_known_old = 0;
             return;
         }
 
@@ -919,9 +918,13 @@ static void major_collect(void)
     assert(gcptrlist_size(&objects_to_trace) == 0);
     mark_prebuilt_roots();
     mark_all_stack_roots();
-    visit_all_objects();
+    do {
+        visit_all_objects();
+        stm_visit_old_weakrefs();
+    } while (gcptrlist_size(&objects_to_trace) != 0);
     gcptrlist_delete(&objects_to_trace);
     clean_up_lists_of_read_objects_and_fix_outdated_flags();
+    stm_clean_old_weakrefs();
 
     mc_total_in_use = mc_total_reserved = 0;
     free_all_unused_local_pages();
