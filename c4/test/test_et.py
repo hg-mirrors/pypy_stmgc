@@ -243,6 +243,21 @@ def test_write_barrier_after_minor_collect():
     assert getptr(pr, 0) != r
     assert getptr(pr, 0) == r2
 
+    # the following shouldn't be done
+    # because pw was not saved. Just
+    # here to check that pw gets removed
+    # from old_objects_to_trace when not found
+    # on the root stack anymore
+    rawsetptr(pw, 0, q)
+    lib.stm_push_root(q)
+    minor_collect()
+    q2 = lib.stm_pop_root()
+    check_nursery_free(q)
+    pr = lib.stm_read_barrier(p)
+    assert q != q2
+    assert getptr(pr, 0) == q
+    assert getptr(pr, 0) != q2
+
 def test_write_barrier_after_minor_collect_young_to_old():
     py.test.skip("should fail now")
     p = nalloc_refs(1)

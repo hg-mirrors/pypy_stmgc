@@ -54,6 +54,7 @@ void stmgc_done_nursery(void)
 
     gcptrlist_delete(&d->old_objects_to_trace);
     gcptrlist_delete(&d->public_with_young_copy);
+    gcptrlist_delete(&d->young_weakrefs);
 }
 
 void stmgc_minor_collect_soon(void)
@@ -97,6 +98,13 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     gcptr P = allocate_nursery(size, tid);
     P->h_revision = stm_private_rev_num;
     assert(P->h_original == 0);  /* null-initialized already */
+    return P;
+}
+
+gcptr stm_allocate_immutable(size_t size, unsigned long tid)
+{
+    gcptr P = stm_allocate(size, tid);
+    P->h_tid |= GCFLAG_IMMUTABLE;
     return P;
 }
 
@@ -408,6 +416,7 @@ static void teardown_minor_collect(struct tx_descriptor *d)
 {
     assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
     assert(gcptrlist_size(&d->public_with_young_copy) == 0);
+    assert(gcptrlist_size(&d->young_weakrefs) == 0);
     assert(gcptrlist_size(&d->public_descriptor->stolen_objects) == 0);
 
     spinlock_release(d->public_descriptor->collection_lock);
@@ -443,6 +452,8 @@ static void minor_collect(struct tx_descriptor *d)
        surviving young-but-outside-the-nursery objects have been flagged
        with GCFLAG_OLD
     */
+    stm_move_young_weakrefs(d);
+
     teardown_minor_collect(d);
     assert(!stm_has_got_any_lock(d));
 
@@ -509,6 +520,7 @@ int minor_collect_anything_to_do(struct tx_descriptor *d)
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
+        assert(gcptrlist_size(&d->young_weakrefs) == 0);
         assert(gcptrlist_size(&d->list_of_read_objects) >=
                d->num_read_objects_known_old);
         assert(gcptrlist_size(&d->private_from_protected) >=
