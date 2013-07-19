@@ -41,9 +41,13 @@ void stm_move_young_weakrefs(struct tx_descriptor *d)
 
         if (is_in_nursery(d, pointing_to)) {
             if (pointing_to->h_tid & GCFLAG_NURSERY_MOVED) {
+                dprintf(("weakref ptr moved %p->%p\n", 
+                         WEAKREF_PTR(weakref, size),
+                         (gcptr)pointing_to->h_revision));
                 WEAKREF_PTR(weakref, size) = (gcptr)pointing_to->h_revision;
             }
             else {
+                dprintf(("weakref lost ptr %p\n", WEAKREF_PTR(weakref, size)));
                 WEAKREF_PTR(weakref, size) = NULL;
                 continue;   /* no need to remember this weakref any longer */
             }
@@ -143,6 +147,10 @@ static void visit_old_weakrefs(struct tx_public_descriptor *gcp)
             assert(pointing_to != NULL);
             if (is_partially_visited(pointing_to)) {
                 pointing_to = stmgcpage_visit(pointing_to);
+                dprintf(("mweakref ptr moved %p->%p\n",
+                         WEAKREF_PTR(weakref, size),
+                         pointing_to));
+
                 assert(pointing_to->h_tid & GCFLAG_VISITED);
                 WEAKREF_PTR(weakref, size) = pointing_to;
             }
@@ -169,6 +177,7 @@ static void clean_old_weakrefs(struct tx_public_descriptor *gcp)
             if (pointing_to->h_tid & GCFLAG_VISITED) {
                 continue;   /* the target stays alive, the weakref remains */
             }
+            dprintf(("mweakref lost ptr %p\n", WEAKREF_PTR(weakref, size)));
             WEAKREF_PTR(weakref, size) = NULL;  /* the target dies */
         }
         /* remove this weakref from the list */
