@@ -11,11 +11,11 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 header_files = [os.path.join(parent_dir, _n) for _n in
                 "et.h lists.h steal.h nursery.h gcpage.h "
-                "stmsync.h extra.h dbgmem.h fprintcolor.h "
+                "stmsync.h extra.h weakref.h dbgmem.h fprintcolor.h "
                 "stmgc.h stmimpl.h atomic_ops.h".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
                 "et.c lists.c steal.c nursery.c gcpage.c "
-                "stmsync.c extra.c dbgmem.c fprintcolor.c".split()]
+                "stmsync.c extra.c weakref.c dbgmem.c fprintcolor.c".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):
@@ -46,7 +46,7 @@ ffi.cdef('''
     #define PREBUILT_FLAGS         ...
     #define PREBUILT_REVISION      ...
 
-    gcptr stm_allocate(size_t size, unsigned int tid);
+    gcptr stm_allocate(size_t size, unsigned long tid);
     revision_t stm_hash(gcptr);
     revision_t stm_id(gcptr);
     _Bool stm_pointer_equal(gcptr, gcptr);
@@ -69,6 +69,7 @@ ffi.cdef('''
     void stm_abort_info_pop(long count);
     char *stm_inspect_abort_info(void);
     void stm_abort_and_retry(void);
+    gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj);
 
     /* extra non-public code */
     void printfcolor(char *msg);
@@ -133,6 +134,7 @@ ffi.cdef('''
     #define GCFLAG_STUB              ...
     #define GCFLAG_PRIVATE_FROM_PROTECTED  ...
     #define GCFLAG_HAS_ID            ...
+    #define GCFLAG_IMMUTABLE         ...
     #define ABRT_MANUAL              ...
     typedef struct { ...; } page_header_t;
 ''')
@@ -164,14 +166,18 @@ lib = ffi.verify(r'''
 
     gcptr rawgetptr(gcptr obj, long index)
     {
-        assert(gettid(obj) > 42142 + index);
+        revision_t t = gettid(obj);
+        if (t == 42142) t++;
+        assert(t > 42142 + index);
         return ((gcptr *)(obj + 1))[index];
     }
 
     void rawsetptr(gcptr obj, long index, gcptr newvalue)
     {
         fprintf(stderr, "%p->[%ld] = %p\n", obj, index, newvalue);
-        assert(gettid(obj) > 42142 + index);
+        revision_t t = gettid(obj);
+        if (t == 42142) t++;
+        assert(t > 42142 + index);
         ((gcptr *)(obj + 1))[index] = newvalue;
     }
 
@@ -282,6 +288,8 @@ lib = ffi.verify(r'''
         else {
             int nrefs = gettid(obj) - 42142;
             assert(nrefs < 100);
+            if (nrefs == 0)   /* weakrefs */
+                nrefs = 1;
             return sizeof(*obj) + nrefs * sizeof(gcptr);
         }
     }
@@ -484,7 +492,7 @@ def oalloc(size):
 def oalloc_refs(nrefs):
     """Allocate an 'old' protected object, outside any nursery,
     with nrefs pointers"""
-    size = HDR + WORD * nrefs
+    size = HDR + WORD * (nrefs or 1)
     p = lib.stmgcpage_malloc(size)
     lib.memset(p, 0, size)
     p.h_tid = GCFLAG_OLD | GCFLAG_WRITE_BARRIER
@@ -506,9 +514,9 @@ def nalloc(size):
 
 def nalloc_refs(nrefs):
     "Allocate a fresh object from the nursery, with nrefs pointers"
-    p = lib.stm_allocate(HDR + WORD * nrefs, 42142 + nrefs)
+    p = lib.stm_allocate(HDR + WORD * (nrefs or 1), 42142 + nrefs)
     assert p.h_revision == lib.get_private_rev_num()
-    for i in range(nrefs):
+    for i in range(nrefs or 1):
         assert rawgetptr(p, i) == ffi.NULL   # must already be zero-filled
     return p
 
@@ -524,9 +532,9 @@ def palloc(size, prehash=None):
 def palloc_refs(nrefs, prehash=None):
     "Get a ``prebuilt'' object with nrefs pointers."
     if prehash is None:
-        p = lib.pseudoprebuilt(HDR + WORD * nrefs, 42142 + nrefs)
+        p = lib.pseudoprebuilt(HDR + WORD * (nrefs or 1), 42142 + nrefs)
     else:
-        p = lib.pseudoprebuilt_with_hash(HDR + WORD * nrefs,
+        p = lib.pseudoprebuilt_with_hash(HDR + WORD * (nrefs or 1),
                                          42142 + nrefs, prehash)
     return p
 
@@ -686,5 +694,8 @@ def follow_original(p):
 
 should_break_transaction = lib.stm_should_break_transaction
 
-    
+WEAKREF_SIZE = HDR + WORD
+WEAKREF_TID  = 42142
+
+
 nrb_protected = ffi.cast("gcptr", -1)

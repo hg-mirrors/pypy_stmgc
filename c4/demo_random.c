@@ -25,38 +25,52 @@ extern revision_t get_private_rev_num(void);
 
 // SUPPORT
 #define GCTID_STRUCT_NODE     123
+#define GCTID_WEAKREF         122
+
+struct node;
+typedef struct node * nodeptr;
+struct weak_node {
+    struct stm_object_s hdr;
+    nodeptr node;
+};
+typedef struct weak_node * weaknodeptr;
+#define WEAKNODE_SIZE  sizeof(struct weak_node)
 
 struct node {
     struct stm_object_s hdr;
     long value;
     revision_t id;
     revision_t hash;
-    struct node *next;
+    nodeptr next;
+    weaknodeptr weakref;
 };
-typedef struct node * nodeptr;
+
+
 
 size_t stmcb_size(gcptr ob)
 {
-    assert(stm_get_tid(ob) == GCTID_STRUCT_NODE);
-    return sizeof(struct node);
+    if (stm_get_tid(ob) == GCTID_STRUCT_NODE)
+        return sizeof(struct node);
+    else if (stm_get_tid(ob) == GCTID_WEAKREF)
+        return WEAKNODE_SIZE;
+    assert(0);
 }
+
 void stmcb_trace(gcptr ob, void visit(gcptr *))
 {
     nodeptr n;
+    if (stm_get_tid(ob) == GCTID_WEAKREF)
+        return;
     assert(stm_get_tid(ob) == GCTID_STRUCT_NODE);
     n = (nodeptr)ob;
     visit((gcptr *)&n->next);
+    visit((gcptr *)&n->weakref);
 }
 
 
 // global and per-thread-data
 time_t default_seed;
 gcptr shared_roots[SHARED_ROOTS];
-
-#define CACHE_MASK 65535
-#define CACHE_ENTRIES ((CACHE_MASK + 1) / sizeof(char *))
-#define CACHE_AT(cache, obj) (*(gcptr *)((char *)(cache)               \
-                                         + ((revision_t)(obj) & CACHE_MASK)))
 
 struct thread_data {
     unsigned int thread_seed;
@@ -67,7 +81,6 @@ struct thread_data {
     int steps_left;
     int interruptible;
     int atomic;
-    revision_t writeable[CACHE_ENTRIES];
 };
 __thread struct thread_data td;
 
@@ -105,6 +118,21 @@ int get_rand(int max)
     return (int)(rand_r(&td.thread_seed) % (unsigned int)max);
 }
 
+gcptr get_random_root()
+{
+    int num = get_rand(td.num_roots + 1);
+    if (num == 0)
+        return stm_thread_local_obj;
+    else
+        return td.roots[num - 1];
+}
+
+gcptr get_random_shared_root()
+{
+    int num = get_rand(SHARED_ROOTS);
+    return shared_roots[num];
+}
+
 void copy_roots(gcptr *from, gcptr *to, int num)
 {
     int i;
@@ -137,7 +165,7 @@ gcptr allocate_pseudoprebuilt_with_hash(size_t size, int tid,
     return x;
 }
 
-void push_roots(int with_cache)
+void push_roots()
 {
     int i;
     for (i = 0; i < td.num_roots; i++) {
@@ -145,30 +173,11 @@ void push_roots(int with_cache)
         if (td.roots[i])
             stm_push_root(td.roots[i]);
     }
-
-    if (with_cache) {
-        stm_push_root(NULL);
-        for (i = 0; i < CACHE_ENTRIES; i++) {
-            if (td.writeable[i])
-                stm_push_root((gcptr)td.writeable[i]);
-        }
-    }
 }
 
-void pop_roots(int with_cache)
+void pop_roots()
 {
     int i;
-    /* some objects may have changed positions */
-    memset(td.writeable, 0, sizeof(td.writeable));
-
-    if (with_cache) {
-        gcptr obj = stm_pop_root();
-        while (obj) {
-            CACHE_AT(td.writeable, obj) = obj;
-            obj = stm_pop_root();
-        }
-    }
-
     for (i = td.num_roots - 1; i >= 0; i--) {
         if (td.roots[i])
             td.roots[i] = stm_pop_root();
@@ -186,10 +195,31 @@ void del_root(int idx)
 nodeptr allocate_node()
 {
     nodeptr r;
-    push_roots(1);
+    push_roots();
     r = (nodeptr)stm_allocate(sizeof(struct node), GCTID_STRUCT_NODE);
-    pop_roots(1);
+    pop_roots();
     return r;
+}
+
+
+weaknodeptr allocate_weaknodeptr(nodeptr to)
+{
+    weaknodeptr w;
+    push_roots();
+    w = (weaknodeptr)stm_weakref_allocate(WEAKNODE_SIZE, GCTID_WEAKREF,
+                                          (gcptr)to);
+    pop_roots();
+    return w;
+}
+
+void set_weakref(nodeptr n, nodeptr to)
+{
+    stm_push_root((gcptr)n);
+    weaknodeptr w = allocate_weaknodeptr(to);
+    n = (nodeptr)stm_pop_root();
+    n = (nodeptr)stm_write_barrier((gcptr)n);
+    n->weakref = w;
+    dprintf(("set_weakref %p -> %p -> %p\n", n, w, to));
 }
 
 int is_shared_prebuilt(gcptr p)
@@ -252,7 +282,6 @@ gcptr write_barrier(gcptr p)
     if (p != NULL) {
         check(p);
         w = stm_write_barrier(p);
-        CACHE_AT(td.writeable, w) = w;
         check(w);
         assert(is_private(w));
     }
@@ -369,22 +398,22 @@ gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
 {
     int k = get_rand(100);
     if (k < 10) {
-        push_roots(1);
+        push_roots();
         stm_push_root(p);
         stm_become_inevitable("fun");
         p = stm_pop_root();
-        pop_roots(1);
+        pop_roots();
     } 
     else if (k < 40) {
-        push_roots(1);
+        push_roots();
         stmgc_minor_collect();
-        pop_roots(1);
+        pop_roots();
         p = NULL;
     } else if (k < 41 && DO_MAJOR_COLLECTS) {
         fprintf(stdout, "major collect\n");
-        push_roots(1);
+        push_roots();
         stmgcpage_possibly_major_collect(1);
-        pop_roots(1);
+        pop_roots();
         p = NULL;
     }
     return p;
@@ -423,10 +452,7 @@ gcptr simple_events(gcptr p, gcptr _r, gcptr _sr)
         break;
     case 7: // set 'p' as *next in one of the roots
         check(_r);
-        if (CACHE_AT(td.writeable, _r) == _r)
-            w_r = (nodeptr)_r;
-        else
-            w_r = (nodeptr)write_barrier(_r);
+        w_r = (nodeptr)write_barrier(_r);
         check((gcptr)w_r);
         check(p);
         w_r->next = (struct node*)p;
@@ -447,6 +473,46 @@ gcptr simple_events(gcptr p, gcptr _r, gcptr _sr)
     return p;
 }
 
+gcptr weakref_events(gcptr p, gcptr _r, gcptr _sr)
+{
+    nodeptr t;
+    weaknodeptr w, ww;
+    gcptr ptrs[] = {_r, _sr};
+    
+    int i = get_rand(2);
+    int k = get_rand(3);
+    switch (k) {
+    case 0: // check weakref
+        t = (nodeptr)read_barrier(ptrs[i]);
+        w = t->weakref;
+        if(w) {
+            ww = (weaknodeptr)stm_read_barrier((gcptr)w);
+            assert(stm_get_tid((gcptr)ww) == GCTID_WEAKREF);
+            if (ww->node) {
+                check((gcptr)ww->node);
+            }
+            else {
+                t->weakref = NULL;
+            }
+        }
+        p = NULL;
+        break;
+    case 1: // set weakref to something
+        if (p)
+            set_weakref((nodeptr)_r, (nodeptr)p);
+        else
+            set_weakref((nodeptr)_r, (nodeptr)get_random_root());
+        p = NULL;
+        break;
+    case 2: // set weakref on shared roots
+        set_weakref((nodeptr)_sr, (nodeptr)get_random_shared_root());
+        p = NULL;
+        break;
+    }
+    return p;
+}
+
+
 gcptr shared_roots_events(gcptr p, gcptr _r, gcptr _sr)
 {
     nodeptr w_sr;
@@ -461,7 +527,7 @@ gcptr shared_roots_events(gcptr p, gcptr _r, gcptr _sr)
         break;
     case 2:
         w_sr = (nodeptr)write_barrier(_sr);
-        w_sr->next = (nodeptr)shared_roots[get_rand(SHARED_ROOTS)];
+        w_sr->next = (nodeptr)get_random_shared_root();
         break;
     }
     return p;
@@ -485,10 +551,7 @@ gcptr id_hash_events(gcptr p, gcptr _r, gcptr _sr)
             assert(w_t->id == stm_id((gcptr)_t));
         }
         else {
-            if (CACHE_AT(td.writeable, _t) == _t)
-                w_t = (nodeptr)_t;
-            else
-                w_t = (nodeptr)write_barrier(_t);
+            w_t = (nodeptr)write_barrier(_t);
             w_t->id = stm_id((gcptr)w_t);
             assert(w_t->id == stm_id((gcptr)_t));
         }
@@ -504,10 +567,7 @@ gcptr id_hash_events(gcptr p, gcptr _r, gcptr _sr)
             assert(w_t->hash == stm_hash((gcptr)_t));
         }
         else {
-            if (CACHE_AT(td.writeable, _t) == _t)
-                w_t = (nodeptr)_t;
-            else
-                w_t = (nodeptr)write_barrier(_t);
+            w_t = (nodeptr)write_barrier(_t);
             w_t->hash = stm_hash((gcptr)w_t);
             assert(w_t->hash == stm_hash((gcptr)_t));
         }
@@ -526,18 +586,12 @@ gcptr id_hash_events(gcptr p, gcptr _r, gcptr _sr)
 gcptr do_step(gcptr p)
 {
     gcptr _r, _sr;
-    int num, k;
+    int k;
 
-    num = get_rand(td.num_roots+1);
-    if (num == 0)
-        _r = stm_thread_local_obj;
-    else
-        _r = td.roots[num - 1];
-    
-    num = get_rand(SHARED_ROOTS);
-    _sr = shared_roots[num];
+    _r = get_random_root();
+    _sr = get_random_shared_root();
 
-    k = get_rand(9);
+    k = get_rand(11);
     check(p);
     assert(thread_descriptor->active);
 
@@ -549,6 +603,8 @@ gcptr do_step(gcptr p)
         p = id_hash_events(p, _r, _sr);
     else if (k < 8)
         p = rare_events(p, _r, _sr);
+    else if (k < 10)
+        p = weakref_events(p, _r, _sr);
     else if (get_rand(20) == 1) {
         // transaction break
         fprintf(stdout, "|");
@@ -563,7 +619,7 @@ gcptr do_step(gcptr p)
 
 void transaction_break()
 {
-    push_roots(0);
+    push_roots();
     td.interruptible = 1;
     
     copy_roots(td.roots, td.roots_outside_perform, td.num_roots);
@@ -575,9 +631,7 @@ void transaction_break()
     copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
     
     td.interruptible = 0;
-    pop_roots(0);
-
-    /* done by pop_roots() memset(&td.writeable, 0, sizeof(td.writeable)); */
+    pop_roots();
 }
 
 
@@ -592,8 +646,8 @@ int interruptible_callback(gcptr arg1, int retry_counter)
     assert(end_marker == END_MARKER_ON || end_marker == END_MARKER_OFF);
     arg1 = stm_pop_root();
     assert(arg1 == NULL);
-    pop_roots(0);
-    push_roots(0);
+    pop_roots();
+    push_roots();
     stm_push_root(arg1);
     stm_push_root(end_marker);
 
@@ -608,9 +662,6 @@ int interruptible_callback(gcptr arg1, int retry_counter)
 int run_me()
 {
     gcptr p = NULL;
-
-    // clear cache of writeables:
-    memset(&td.writeable, 0, sizeof(td.writeable));
 
     while (td.steps_left-->0 || td.atomic) {
         if (td.steps_left % 8 == 0)
