@@ -206,6 +206,7 @@ def test_read_barrier_handle_private():
 
 def test_write_barrier_after_minor_collect():
     # should fail
+    py.test.skip("should fail now")
     p = oalloc_refs(1)
     pw = lib.stm_write_barrier(p)
 
@@ -243,6 +244,7 @@ def test_write_barrier_after_minor_collect():
     assert getptr(pr, 0) == r2
 
 def test_write_barrier_after_minor_collect_young_to_old():
+    py.test.skip("should fail now")
     p = nalloc_refs(1)
     pw = lib.stm_write_barrier(p)
 
