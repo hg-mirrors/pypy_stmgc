@@ -201,6 +201,7 @@ def test_old_private_from_protected_to_young_private():
     assert classify(p2) == "private"
 
 def test_old_private_from_protected_to_young_private_2():
+    py.test.skip("not valid")
     p0 = nalloc_refs(1)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
@@ -245,26 +246,27 @@ def test_old_private_from_protected_to_young_private_3():
     assert lib.in_nursery(pr) # a young protected
     #
     minor_collect()
+    # each minor collect adds WRITE_BARRIER to protected/private
+    # objects it moves out of the nursery
     pr = lib.stm_read_barrier(p0)
+    assert pr.h_tid & GCFLAG_WRITE_BARRIER
     pw = lib.stm_write_barrier(pr)
+    # added to old_obj_to_trace
+    assert not (pw.h_tid & GCFLAG_WRITE_BARRIER)
+
     lib.setptr(pw, 0, ffi.NULL)
     assert classify(pw) == "private_from_protected"
     assert not lib.in_nursery(pw)
-    #
-    # Because it was protected young before, it has no WRITE_BARRIER
-    # flag. After transforming it to a PRIV_FROM_PROT, the following
-    # holds:
-    # its h_revision is a pointer to the backup copy, and not 
-    # stm_private_rev_num.  It means that the write barrier will
-    # always enter its slow path, even though the GCFLAG_WRITE_BARRIER 
-    # is not set.
+
     assert pw.h_revision != lib.get_private_rev_num()
     assert not (pw.h_tid & GCFLAG_WRITE_BARRIER)
     # #
+    
     lib.stm_push_root(pw)
     minor_collect()
     p1 = nalloc(HDR)
     pw = lib.stm_pop_root()
+    assert pw.h_tid & GCFLAG_WRITE_BARRIER
     lib.setptr(pw, 0, p1)          # should trigger the write barrier again
     assert classify(pr) == "private_from_protected"
     minor_collect()

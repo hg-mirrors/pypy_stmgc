@@ -406,7 +406,7 @@ static void setup_minor_collect(struct tx_descriptor *d)
 
 static void teardown_minor_collect(struct tx_descriptor *d)
 {
-    //assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
+    assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
     assert(gcptrlist_size(&d->public_with_young_copy) == 0);
     assert(gcptrlist_size(&d->public_descriptor->stolen_objects) == 0);
 
