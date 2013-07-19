@@ -545,10 +545,15 @@ int minor_collect_anything_to_do(struct tx_descriptor *d)
                d->num_read_objects_known_old);
         assert(gcptrlist_size(&d->private_from_protected) >=
                d->num_private_from_protected_known_old);
+#if 0
+        /* we could here force the following, but there is little point
+           and it's a bad idea to do things in this function that is
+           compiled only in debug mode */
         d->num_read_objects_known_old =
             gcptrlist_size(&d->list_of_read_objects);
         d->num_private_from_protected_known_old =
             gcptrlist_size(&d->private_from_protected);
+#endif
         return 0;
     }
     else {
