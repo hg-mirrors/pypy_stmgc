@@ -358,19 +358,6 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
 
         stmgc_trace(obj, &visit_if_young);
     }
-
-    while (gcptrlist_size(&private_or_protected_roots) > 0) {
-        gcptr obj = gcptrlist_pop(&private_or_protected_roots);
-        /* if it has the write_barrier flag, clear it so that
-           it doesn't get inserted twice by a later write-barrier */
-        if (obj->h_tid & GCFLAG_WRITE_BARRIER) {
-            /* only insert those that were in old_obj_to_trace
-               and that we didn't insert already */
-            obj->h_tid &= ~GCFLAG_WRITE_BARRIER;
-            gcptrlist_insert(&d->old_objects_to_trace, obj);
-            dprintf(("re-add %p to old_objects_to_trace\n", obj));
-        }
-    }
 }
 
 static void fix_list_of_read_objects(struct tx_descriptor *d)
