@@ -293,3 +293,63 @@ will access it anyway.
 The backup copy of a GCFLAG_PRIVATE_FROM_PROTECTED copy is allocated
 old, and explicitly freed when the thread commits (unless it was
 stolen).
+
+
+
+The role of GCFLAG_WRITE_BARRIER
+--------------------------------
+
+This flag's purpose is to mark old objects that, if written to again,
+should be traced because they may contain young pointers again. So
+for example:
+|  p = old protected obj with WRITE_BARRIER
+|  pw = stm_write_barrier(p)
+|  pw->field = young private obj
+The WB-flag tells a write_barrier that it must add the object to the
+list `old_objects_to_trace`. This flag gets added automatically in
+every minor collection to all private & protected objects that are
+moved out of the nursery.
+On public objects, this flag means nothing and can be ignored.
+
+
+
+The implementation of ID and HASH
+---------------------------------
+
+The ID of an object must be unique during its lifetime. It is the same
+for all copies or versions of an object.
+The HASH is an identity hash, basically a hash of the ID of an object.
+On prebuilt objects, one can define a value that should be returned
+for a certain object (useful for objects that should have the same
+HASH during compilation/translation and during runtime).
+
+The ID is based on the address of the object. Since objects can move
+if they are young, and since they can have multiple copies, a special
+non-moving location has to be defined in order for it to not change
+during the lifetime of an object. For that reason, calling `stm_id`
+on an object does the following:
+
+| if object is young:
+|     create a shadow copy in the non-moving space that
+|     is later used when moving the object out of the nursery
+| else:
+|     the copy is non-moving and therefore the ID is its address
+|     OR: we already have an ID for that object
+
+To maintain a unique ID over all copies, every object has a `h_original`
+field in its header. The point of this field is to point to a copy
+of the object that is non-moving and chosen to be the *original copy*.
+On the *original copy* itself, the field is `NULL`.
+
+(I) If we have a young object, its `h_original` is `NULL` iff there exists
+**no old copy** of the same object. Otherwise it must point to it.
+
+(II) If we have an old object, its `h_original` is `NULL` iff it is the
+*original copy*.
+
+These invariants must be upheld all the time. There is one single
+exception to (II): Prebuilt objects (`GCFLAG_PREBUILT_ORIGINAL`),
+are always their *original copy* and if `h_original` is not `NULL`,
+it is a predefined HASH value for this object. This is used by
+`stm_hash` which otherwise returns a hashed version of the ID of
+the object.
