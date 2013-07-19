@@ -42,8 +42,10 @@ same original object */
 _Bool stm_pointer_equal(gcptr, gcptr);
 
 /* to push/pop objects into the local shadowstack */
-static inline void stm_push_root(gcptr);
-static inline gcptr stm_pop_root(void);
+#if 0     // (optimized version below)
+void stm_push_root(gcptr);
+gcptr stm_pop_root(void);
+#endif
 
 /* initialize/deinitialize the stm framework in the current thread */
 void stm_initialize(void);
@@ -55,15 +57,25 @@ void stm_finalize(void);
 int stm_enter_callback_call(void);
 void stm_leave_callback_call(int);
 
-/* read/write barriers (the most general versions only for now) */
+/* read/write barriers (the most general versions only for now).
+
+   - the read barrier must be applied before reading from an object.
+     the result is valid as long as we're in the same transaction,
+     and stm_write_barrier() is not called on the same object.
+
+   - the write barrier must be applied before writing to an object.
+     the result is valid for a shorter period of time: we have to
+     do stm_write_barrier() again if we ended the transaction, or
+     if we did a potential collection (e.g. stm_allocate()).
+*/
 static inline gcptr stm_read_barrier(gcptr);
 static inline gcptr stm_write_barrier(gcptr);
 
 /* start a new transaction, calls callback(), and when it returns
    finish that transaction.  callback() is called with the 'arg'
    provided, and with a retry_counter number.  Must save roots around
-   this call.  If callback() returns a value > 0, it is called
-   again. */
+   this call.  The callback() is called repeatedly as long as it
+   returns a value > 0. */
 void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int));
 
 /* finish the current transaction, start a new one, or turn the current

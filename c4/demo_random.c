@@ -72,11 +72,6 @@ void stmcb_trace(gcptr ob, void visit(gcptr *))
 time_t default_seed;
 gcptr shared_roots[SHARED_ROOTS];
 
-#define CACHE_MASK 65535
-#define CACHE_ENTRIES ((CACHE_MASK + 1) / sizeof(char *))
-#define CACHE_AT(cache, obj) (*(gcptr *)((char *)(cache)               \
-                                         + ((revision_t)(obj) & CACHE_MASK)))
-
 struct thread_data {
     unsigned int thread_seed;
     gcptr roots[MAXROOTS];
@@ -86,7 +81,6 @@ struct thread_data {
     int steps_left;
     int interruptible;
     int atomic;
-    revision_t writeable[CACHE_ENTRIES];
 };
 __thread struct thread_data td;
 
@@ -94,7 +88,7 @@ __thread struct thread_data td;
 // helper functions
 int classify(gcptr p);
 void check(gcptr p);
-
+int in_nursery(gcptr obj);
 static int is_private(gcptr P)
 {
   return (P->h_revision == stm_private_rev_num) ||
@@ -171,7 +165,7 @@ gcptr allocate_pseudoprebuilt_with_hash(size_t size, int tid,
     return x;
 }
 
-void push_roots(int with_cache)
+void push_roots()
 {
     int i;
     for (i = 0; i < td.num_roots; i++) {
@@ -179,30 +173,11 @@ void push_roots(int with_cache)
         if (td.roots[i])
             stm_push_root(td.roots[i]);
     }
-
-    if (with_cache) {
-        stm_push_root(NULL);
-        for (i = 0; i < CACHE_ENTRIES; i++) {
-            if (td.writeable[i])
-                stm_push_root((gcptr)td.writeable[i]);
-        }
-    }
 }
 
-void pop_roots(int with_cache)
+void pop_roots()
 {
     int i;
-    /* some objects may have changed positions */
-    memset(td.writeable, 0, sizeof(td.writeable));
-
-    if (with_cache) {
-        gcptr obj = stm_pop_root();
-        while (obj) {
-            CACHE_AT(td.writeable, obj) = obj;
-            obj = stm_pop_root();
-        }
-    }
-
     for (i = td.num_roots - 1; i >= 0; i--) {
         if (td.roots[i])
             td.roots[i] = stm_pop_root();
@@ -220,9 +195,9 @@ void del_root(int idx)
 nodeptr allocate_node()
 {
     nodeptr r;
-    push_roots(1);
+    push_roots();
     r = (nodeptr)stm_allocate(sizeof(struct node), GCTID_STRUCT_NODE);
-    pop_roots(1);
+    pop_roots();
     return r;
 }
 
@@ -281,8 +256,7 @@ void check(gcptr p)
         if (p->h_original && !(p->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
             // must point to valid old object
             gcptr id = (gcptr)p->h_original;
-            assert(id->h_tid & GCFLAG_OLD);
-            check_not_free(id);
+            assert(!in_nursery(id));
 #ifdef _GC_DEBUG
             if (!is_shared_prebuilt(id) && !(id->h_tid & GCFLAG_PREBUILT))
                 assert(!is_free_old(id));
@@ -308,7 +282,6 @@ gcptr write_barrier(gcptr p)
     if (p != NULL) {
         check(p);
         w = stm_write_barrier(p);
-        CACHE_AT(td.writeable, w) = w;
         check(w);
         assert(is_private(w));
     }
@@ -425,22 +398,22 @@ gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
 {
     int k = get_rand(100);
     if (k < 10) {
-        push_roots(1);
+        push_roots();
         stm_push_root(p);
         stm_become_inevitable("fun");
         p = stm_pop_root();
-        pop_roots(1);
+        pop_roots();
     } 
     else if (k < 40) {
-        push_roots(1);
+        push_roots();
         stmgc_minor_collect();
-        pop_roots(1);
+        pop_roots();
         p = NULL;
     } else if (k < 41 && DO_MAJOR_COLLECTS) {
         fprintf(stdout, "major collect\n");
-        push_roots(1);
+        push_roots();
         stmgcpage_possibly_major_collect(1);
-        pop_roots(1);
+        pop_roots();
         p = NULL;
     }
     return p;
@@ -479,10 +452,7 @@ gcptr simple_events(gcptr p, gcptr _r, gcptr _sr)
         break;
     case 7: // set 'p' as *next in one of the roots
         check(_r);
-        if (CACHE_AT(td.writeable, _r) == _r)
-            w_r = (nodeptr)_r;
-        else
-            w_r = (nodeptr)write_barrier(_r);
+        w_r = (nodeptr)write_barrier(_r);
         check((gcptr)w_r);
         check(p);
         w_r->next = (struct node*)p;
@@ -582,10 +552,7 @@ gcptr id_hash_events(gcptr p, gcptr _r, gcptr _sr)
             assert(w_t->id == stm_id((gcptr)_t));
         }
         else {
-            if (CACHE_AT(td.writeable, _t) == _t)
-                w_t = (nodeptr)_t;
-            else
-                w_t = (nodeptr)write_barrier(_t);
+            w_t = (nodeptr)write_barrier(_t);
             w_t->id = stm_id((gcptr)w_t);
             assert(w_t->id == stm_id((gcptr)_t));
         }
@@ -601,10 +568,7 @@ gcptr id_hash_events(gcptr p, gcptr _r, gcptr _sr)
             assert(w_t->hash == stm_hash((gcptr)_t));
         }
         else {
-            if (CACHE_AT(td.writeable, _t) == _t)
-                w_t = (nodeptr)_t;
-            else
-                w_t = (nodeptr)write_barrier(_t);
+            w_t = (nodeptr)write_barrier(_t);
             w_t->hash = stm_hash((gcptr)w_t);
             assert(w_t->hash == stm_hash((gcptr)_t));
         }
@@ -656,7 +620,7 @@ gcptr do_step(gcptr p)
 
 void transaction_break()
 {
-    push_roots(0);
+    push_roots();
     td.interruptible = 1;
     
     copy_roots(td.roots, td.roots_outside_perform, td.num_roots);
@@ -668,9 +632,7 @@ void transaction_break()
     copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
     
     td.interruptible = 0;
-    pop_roots(0);
-
-    /* done by pop_roots() memset(&td.writeable, 0, sizeof(td.writeable)); */
+    pop_roots();
 }
 
 
@@ -685,8 +647,8 @@ int interruptible_callback(gcptr arg1, int retry_counter)
     assert(end_marker == END_MARKER_ON || end_marker == END_MARKER_OFF);
     arg1 = stm_pop_root();
     assert(arg1 == NULL);
-    pop_roots(0);
-    push_roots(0);
+    pop_roots();
+    push_roots();
     stm_push_root(arg1);
     stm_push_root(end_marker);
 
@@ -701,9 +663,6 @@ int interruptible_callback(gcptr arg1, int retry_counter)
 int run_me()
 {
     gcptr p = NULL;
-
-    // clear cache of writeables:
-    memset(&td.writeable, 0, sizeof(td.writeable));
 
     while (td.steps_left-->0 || td.atomic) {
         if (td.steps_left % 8 == 0)
