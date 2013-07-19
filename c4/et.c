@@ -6,6 +6,28 @@
  */
 #include "stmimpl.h"
 
+#ifdef _GC_DEBUG
+char tmp_buf[128];
+char* stm_dbg_get_hdr_str(gcptr obj)
+{
+    char *cur;
+    char *flags[] = GC_FLAG_NAMES;
+    int i;
+
+    i = 0;
+    cur = tmp_buf;
+    while (flags[i]) {
+        if (obj->h_tid & (STM_FIRST_GCFLAG << i)) {
+            cur += sprintf(cur, "%s|", flags[i]);
+        }
+        i++;
+    }
+    cur += sprintf(cur, "tid=%ld\n", stm_get_tid(obj));
+    return tmp_buf;
+}
+#endif
+
+
 
 __thread struct tx_descriptor *thread_descriptor = NULL;
 
