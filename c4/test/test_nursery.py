@@ -200,6 +200,41 @@ def test_old_private_from_protected_to_young_private():
     check_not_free(p2)
     assert classify(p2) == "private"
 
+def test_old_private_from_protected_to_young_private_2():
+    p0 = nalloc_refs(1)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    lib.setptr(p0, 0, ffi.NULL)
+    assert classify(p0) == "private_from_protected"
+    assert lib.in_nursery(p0)      # a young private_from_protected
+    #
+    lib.stm_push_root(p0)
+    minor_collect()
+    p0 = lib.stm_pop_root()
+    assert classify(p0) == "private_from_protected"
+    assert not lib.in_nursery(p0)  # becomes an old private_from_protected
+    #
+    # Because it's a private_from_protected, its h_revision is a pointer
+    # to the backup copy, and not stm_private_rev_num.  It means that the
+    # write barrier will always enter its slow path, even though the
+    # GCFLAG_WRITE_BARRIER is not set.
+    assert p0.h_revision != lib.get_private_rev_num()
+    assert not (p0.h_tid & GCFLAG_WRITE_BARRIER)
+    #
+    p1 = nalloc(HDR)
+    lib.setptr(p0, 0, p1)          # should trigger the write barrier again
+    assert classify(p0) == "private_from_protected"
+    lib.stm_push_root(p0)
+    minor_collect()
+    p0b = lib.stm_pop_root()
+    assert p0b == p0
+    check_nursery_free(p1)
+    assert classify(p0) == "private_from_protected"
+    p2 = lib.getptr(p0, 0)
+    assert not lib.in_nursery(p2)
+    check_not_free(p2)
+    assert classify(p2) == "private"
+
 def test_new_version():
     p1 = oalloc(HDR)
     assert lib.stm_write_barrier(p1) == p1
