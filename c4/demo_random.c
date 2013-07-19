@@ -205,10 +205,10 @@ nodeptr allocate_node()
 weaknodeptr allocate_weaknodeptr(nodeptr to)
 {
     weaknodeptr w;
-    push_roots(1);
+    push_roots();
     w = (weaknodeptr)stm_weakref_allocate(WEAKNODE_SIZE, GCTID_WEAKREF,
                                           (gcptr)to);
-    pop_roots(1);
+    pop_roots();
     return w;
 }
 
@@ -490,7 +490,6 @@ gcptr weakref_events(gcptr p, gcptr _r, gcptr _sr)
             assert(stm_get_tid((gcptr)ww) == GCTID_WEAKREF);
             if (ww->node) {
                 check((gcptr)ww->node);
-                return (gcptr)ww->node;
             }
             else {
                 t->weakref = NULL;

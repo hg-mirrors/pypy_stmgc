@@ -3,7 +3,7 @@
 
 void stm_copy_to_old_id_copy(gcptr obj, gcptr id)
 {
-    //assert(!is_in_nursery(thread_descriptor, id));
+    //assert(!stmgc_is_in_nursery(thread_descriptor, id));
     assert(id->h_tid & GCFLAG_OLD);
 
     size_t size = stmgc_size(obj);

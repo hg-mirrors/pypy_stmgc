@@ -67,5 +67,6 @@ gcptr stmgc_duplicate_old(gcptr);
 size_t stmgc_size(gcptr);
 void stmgc_trace(gcptr, void visit(gcptr *));
 void stmgc_minor_collect_soon(void);
+int stmgc_is_in_nursery(struct tx_descriptor *d, gcptr obj);
 
 #endif
