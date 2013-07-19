@@ -18,10 +18,6 @@ gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj)
 
 
 /***** Minor collection *****/
-static int is_in_nursery(struct tx_descriptor *d, gcptr obj)
-{
-    return (d->nursery_base <= (char*)obj && ((char*)obj) < d->nursery_end);
-}
 
 void stm_move_young_weakrefs(struct tx_descriptor *d)
 {
@@ -39,7 +35,7 @@ void stm_move_young_weakrefs(struct tx_descriptor *d)
         gcptr pointing_to = WEAKREF_PTR(weakref, size);
         assert(pointing_to != NULL);
 
-        if (is_in_nursery(d, pointing_to)) {
+        if (stmgc_is_in_nursery(d, pointing_to)) {
             if (pointing_to->h_tid & GCFLAG_NURSERY_MOVED) {
                 dprintf(("weakref ptr moved %p->%p\n", 
                          WEAKREF_PTR(weakref, size),

@@ -15,7 +15,7 @@ class TestMinorCollection(BaseTest):
     def test_weakref_invalidate(self):
         p2 = nalloc(HDR)
         p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
-        assert p1.h_tid == WEAKREF_TID   # no GC flags
+        assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE
         assert p1.h_revision == lib.get_private_rev_num()
         assert lib.rawgetptr(p1, 0) == p2
         lib.stm_push_root(p1)
@@ -31,7 +31,7 @@ class TestMinorCollection(BaseTest):
     def test_weakref_keep(self):
         p2 = nalloc(HDR)
         p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
-        assert p1.h_tid == WEAKREF_TID   # no GC flags
+        assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE
         assert p1.h_revision == lib.get_private_rev_num()
         assert lib.rawgetptr(p1, 0) == p2
         lib.stm_push_root(p1)
@@ -44,7 +44,7 @@ class TestMinorCollection(BaseTest):
     def test_weakref_old_keep(self):
         p2 = oalloc(HDR)
         p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
-        assert p1.h_tid == WEAKREF_TID   # no GC flags
+        assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE
         assert p1.h_revision == lib.get_private_rev_num()
         assert lib.rawgetptr(p1, 0) == p2
         lib.stm_push_root(p1)

@@ -1,7 +1,6 @@
 #include "stmimpl.h"
 
-
-static int is_in_nursery(struct tx_descriptor *d, gcptr obj)
+int stmgc_is_in_nursery(struct tx_descriptor *d, gcptr obj)
 {
     return (d->nursery_base <= (char*)obj && ((char*)obj) < d->nursery_end);
 }
@@ -155,7 +154,7 @@ static void visit_if_young(gcptr *root)
     gcptr fresh_old_copy;
     struct tx_descriptor *d = thread_descriptor;
 
-    if (!is_in_nursery(d, obj)) {
+    if (!stmgc_is_in_nursery(d, obj)) {
         /* not a nursery object */
     }
     else {
@@ -382,7 +381,7 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
     for (i = d->list_of_read_objects.size - 1; i >= limit; --i) {
         gcptr obj = items[i];
 
-        if (!is_in_nursery(d, obj)) {
+        if (!stmgc_is_in_nursery(d, obj)) {
             /* non-young or visited young objects are kept */
             continue;
         }

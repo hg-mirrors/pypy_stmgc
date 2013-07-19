@@ -461,11 +461,11 @@ static void mark_all_stack_roots(void)
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
         assert(gcptrlist_size(&d->public_descriptor->stolen_objects) == 0);
         assert(gcptrlist_size(&d->public_descriptor->stolen_young_stubs) == 0);
+        assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
         /* NOT NECESSARILY EMPTY:
            - list_of_read_objects
            - private_from_protected
            - public_to_private
-           - old_objects_to_trace
         */
         assert(gcptrlist_size(&d->list_of_read_objects) ==
                d->num_read_objects_known_old);
@@ -497,8 +497,15 @@ static void cleanup_for_thread(struct tx_descriptor *d)
     /* If we're aborting this transaction anyway, we don't need to do
      * more here.
      */
-    if (d->active < 0)
-        return;       /* already "aborted" during forced minor collection */
+    if (d->active < 0) {
+        /* already "aborted" during forced minor collection
+           clear list of read objects so that a possible minor collection 
+           before the abort doesn't trip 
+           fix_list_of_read_objects should not run */
+        gcptrlist_clear(&d->list_of_read_objects);
+        d->num_read_objects_known_old = 0;
+        return;
+    }
 
     if (d->active == 2) {
         /* inevitable transaction: clear the list of read objects */
@@ -527,6 +534,9 @@ static void cleanup_for_thread(struct tx_descriptor *d)
             dprintf(("ABRT_COLLECT_MAJOR %p: "
                      "%p was read but modified already\n", d, obj));
             AbortTransactionAfterCollect(d, ABRT_COLLECT_MAJOR);
+            /* fix_list_of_read_objects should not run */
+            gcptrlist_clear(&d->list_of_read_objects);
+            d->num_read_objects_known_old = 0;
             return;
         }
 
