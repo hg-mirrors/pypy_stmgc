@@ -125,9 +125,6 @@ gcptr stmgc_duplicate_old(gcptr P)
 }
 
 /************************************************************/
-/* list for private/protected, old roots that need to be
-   kept in old_objects_to_trace */
-static __thread struct GcPtrList private_or_protected_roots = {0, 0, NULL};
 
 static inline gcptr create_old_object_copy(gcptr obj)
 {
@@ -207,22 +204,6 @@ static void mark_young_roots(struct tx_descriptor *d)
                                    (revision_t)END_MARKER_ON)) {
             /* 'item' is a regular, non-null pointer */
             visit_if_young(end);
-            item = *end;
-            /* if private or protected, this object needs to be
-               traced again in the next minor_collect if it is
-               currently in old_objects_to_trace. Because then
-               it may be seen as write-ready in the view of
-               someone:
-               pw = write_barrier(); push_root(pw);
-               minor_collect(); pw = pop_root(); // pw still write-ready
-            */
-            if (item
-                && !(item->h_tid & GCFLAG_WRITE_BARRIER) /* not set in
-                                                          obj_to_trace*/
-                && (item->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED
-                    || item->h_revision == stm_private_rev_num)) {
-                gcptrlist_insert(&private_or_protected_roots, item);
-            }
         }
         else if (item != NULL) {
             if (item == END_MARKER_OFF)
@@ -545,15 +526,10 @@ int minor_collect_anything_to_do(struct tx_descriptor *d)
                d->num_read_objects_known_old);
         assert(gcptrlist_size(&d->private_from_protected) >=
                d->num_private_from_protected_known_old);
-#if 0
-        /* we could here force the following, but there is little point
-           and it's a bad idea to do things in this function that is
-           compiled only in debug mode */
         d->num_read_objects_known_old =
             gcptrlist_size(&d->list_of_read_objects);
         d->num_private_from_protected_known_old =
             gcptrlist_size(&d->private_from_protected);
-#endif
         return 0;
     }
     else {
