@@ -225,8 +225,17 @@ static void mark_private_from_protected(struct tx_descriptor *d)
         assert(items[i]->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
         assert(IS_POINTER(items[i]->h_revision));
 
+        /* if items[i] is young, move it, update the pointer, and
+           schedule the object for later consideration by
+           visit_all_outside_objects() (which will for example ensure
+           that the WRITE_BARRIER flag is added to it).
+        */
         visit_if_young(&items[i]);
 
+        /* the backup copy is always allocated outside the nursery,
+           but we have to trace it as well, as it may contain its own
+           young pointers.
+        */
         stmgc_trace((gcptr)items[i]->h_revision, &visit_if_young);
     }
 
