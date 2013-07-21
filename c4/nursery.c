@@ -235,6 +235,12 @@ static void mark_private_from_protected(struct tx_descriptor *d)
         /* the backup copy is always allocated outside the nursery,
            but we have to trace it as well, as it may contain its own
            young pointers.
+           
+           but only once: if the transaction was running for long enough
+           to have num_private_from_protected_known_old > 0, then the
+           backup copies of known-old objects have already been traced
+           in a previous minor collection, and as they are read-only,
+           they cannot contain young pointers any more.
         */
         stmgc_trace((gcptr)items[i]->h_revision, &visit_if_young);
     }
