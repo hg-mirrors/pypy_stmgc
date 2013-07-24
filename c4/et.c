@@ -1120,6 +1120,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
       gcptr stub = stm_stub_malloc(d->public_descriptor, 0);
       stub->h_tid = (L->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
                                                    | GCFLAG_STUB
+                                                   | GCFLAG_SMALLSTUB
                                                    | GCFLAG_OLD;
       stub->h_revision = ((revision_t)L) | 2;
 
