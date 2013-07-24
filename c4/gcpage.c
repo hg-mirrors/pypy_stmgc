@@ -278,7 +278,7 @@ static gcptr copy_over_original(gcptr obj)
         memcpy(id_copy, obj, stmgc_size(obj));
         assert(!((id_copy->h_tid ^ old_tid)
                  & (GCFLAG_BACKUP_COPY //| GCFLAG_STUB, id_copy may be stub
-                    | GCFLAG_PUBLIC | GCFLAG_HAS_ID
+                    | GCFLAG_PUBLIC | GCFLAG_HAS_ID | GCFLAG_SMALLSTUB
                     | GCFLAG_PRIVATE_FROM_PROTECTED)));
         id_copy->h_original = prehash;
         id_copy->h_tid = old_tid & ~(GCFLAG_VISITED |/* will be visited next */
