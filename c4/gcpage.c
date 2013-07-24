@@ -219,6 +219,7 @@ static void keep_original_alive(gcptr obj)
     /* prebuilt original objects may have a predifined
        hash in h_original */
     if (id_copy && !(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
+        assert(id_copy->h_tid & GCFLAG_PUBLIC);
         if (!(id_copy->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
             id_copy->h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE;
             /* see fix_outdated() */
@@ -608,7 +609,12 @@ static void cleanup_for_thread(struct tx_descriptor *d)
 
         if (!(obj->h_tid & GCFLAG_VISITED)) {
             /* forget 'obj' */
+            dprintf(("private_from_protected: %p UNLISTED\n", obj));
             items[i] = items[--d->private_from_protected.size];
+        }
+        else {
+            dprintf(("private_from_protected: %p\n", obj));
+            assert(((gcptr)obj->h_revision)->h_tid & GCFLAG_VISITED);
         }
     }
 
