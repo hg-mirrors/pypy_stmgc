@@ -1122,6 +1122,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
                                                    | GCFLAG_STUB
                                                    | GCFLAG_SMALLSTUB
                                                    | GCFLAG_OLD;
+      dprintf(("et.c: stm_stub_malloc -> %p\n", stub));
       stub->h_revision = ((revision_t)L) | 2;
 
       assert(!(L->h_tid & GCFLAG_HAS_ID));
