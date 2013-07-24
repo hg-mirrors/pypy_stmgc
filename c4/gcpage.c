@@ -266,6 +266,7 @@ static gcptr copy_over_original(gcptr obj)
 
         /* id_copy may be a stub, but in this case, as the original, it
            should have been allocated with a big enough chunk of memory */
+        assert(!(id_copy->h_tid & GCFLAG_SMALLSTUB));
         assert((id_copy->h_tid & GCFLAG_STUB) ||
                stmgc_size(id_copy) == stmgc_size(obj));
         /* prehash may be specific hash value for prebuilts, or 0 */

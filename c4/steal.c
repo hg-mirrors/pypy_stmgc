@@ -103,6 +103,7 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
     stub = stm_stub_malloc(sd->foreign_pd, size);
     stub->h_tid = (obj->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
                                                    | GCFLAG_STUB
+                                                   | GCFLAG_SMALLSTUB
                                                    | GCFLAG_OLD;
     stub->h_revision = ((revision_t)obj) | 2;
     if (obj->h_original) {
