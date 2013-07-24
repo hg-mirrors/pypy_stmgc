@@ -727,11 +727,12 @@ int main(void)
 {
     int i, status;
     
-    // seed changes daily
-    // a bit pointless for now..
+    /* pick a random seed from the time in seconds.
+       A bit pointless for now... because the interleaving of the
+       threads is really random. */
     default_seed = time(NULL);
-    default_seed -= (default_seed % (3600 * 24));
-    
+    printf("running with seed=%lld\n", (long long)default_seed);
+
     for (i = 0; i < SHARED_ROOTS; i++) {
         if (i % 3 == 0) {
             shared_roots[i] = allocate_pseudoprebuilt_with_hash(
