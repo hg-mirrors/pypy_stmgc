@@ -264,7 +264,10 @@ static gcptr copy_over_original(gcptr obj)
                                    where backup is stolen and its h-original
                                    points to it. */
 
-        assert(stmgc_size(id_copy) == stmgc_size(obj));
+        /* id_copy may be a stub, but in this case, as the original, it
+           should have been allocated with a big enough chunk of memory */
+        assert((id_copy->h_tid & GCFLAG_STUB) ||
+               stmgc_size(id_copy) == stmgc_size(obj));
         /* prehash may be specific hash value for prebuilts, or 0 */
         revision_t prehash = id_copy->h_original;
         assert(IMPLIES(prehash, id_copy->h_tid & GCFLAG_PREBUILT_ORIGINAL));
@@ -277,7 +280,8 @@ static gcptr copy_over_original(gcptr obj)
                     | GCFLAG_PUBLIC | GCFLAG_HAS_ID
                     | GCFLAG_PRIVATE_FROM_PROTECTED)));
         id_copy->h_original = prehash;
-        id_copy->h_tid = old_tid & ~GCFLAG_VISITED; /* will be visited next */
+        id_copy->h_tid = old_tid & ~(GCFLAG_VISITED |/* will be visited next */
+                                     GCFLAG_STUB);   /* no longer a stub */
 
         dprintf(("copy %p over %p\n", obj, id_copy));
 
