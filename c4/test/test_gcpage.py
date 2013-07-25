@@ -250,41 +250,43 @@ def test_new_version_kill_intermediate_non_root():
     major_collect()
     lib.stm_pop_root()
     check_not_free(p1)
-    check_free_old(p2)
+    check_not_free(p2)
     check_free_old(p3)
     check_free_old(p4)
-    check_not_free(p5)
+    check_free_old(p5)
     print 'p1:', p1
     print '      containing:', rawgetptr(p1, 0)
     print 'p2:', p2
     print 'p3:', p3
     print 'p4:', p4
     print 'p5:', p5
-    assert rawgetptr(p1, 0) == p5
+    assert rawgetptr(p1, 0) == p2
 
 def test_new_version_not_kill_intermediate_original():
     p1 = oalloc_refs(1); make_public(p1)
-    p2 = oalloc(HDR);    make_public(p2)
-    p3 = oalloc(HDR);    make_public(p3)
-    p4 = oalloc(HDR);    make_public(p4)
-    p5 = oalloc(HDR);    make_public(p5)
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p3 = oalloc(HDR + WORD); make_public(p3)
+    p4 = oalloc(HDR + WORD); make_public(p4)
+    p5 = oalloc(HDR + WORD); make_public(p5)
     delegate(p2, p3)
     delegate(p3, p4)
     delegate(p4, p5)
     rawsetptr(p1, 0, p3)
-    delegate_original(p3, p2)
-    delegate_original(p3, p4)
-    delegate_original(p3, p5)
+    lib.rawsetlong(p2, 0, 222)
+    lib.rawsetlong(p3, 0, 333)
+    lib.rawsetlong(p4, 0, 444)
+    lib.rawsetlong(p5, 0, 555)
 
     lib.stm_push_root(p1)
     major_collect()
     lib.stm_pop_root()
     check_not_free(p1)
-    check_free_old(p2)
-    check_not_free(p3) # original
+    check_not_free(p2)
+    check_free_old(p3)
     check_free_old(p4)
     check_free_old(p5)
-    assert rawgetptr(p1, 0) == p3
+    assert rawgetptr(p1, 0) == p2
+    assert lib.rawgetlong(p2, 0) == 555   # copied over from p5
     
 def test_prebuilt_version_1():
     p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
