@@ -215,6 +215,7 @@ static struct GcPtrList objects_to_trace;
 static gcptr copy_over_original(gcptr obj, gcptr id_copy)
 {
     assert(obj != id_copy);
+    assert(id_copy == (gcptr)obj->h_original);
     assert(!(id_copy->h_revision & 1)); /* not head-revision itself */
 
     /* check a few flags */
