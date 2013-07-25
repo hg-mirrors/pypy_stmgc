@@ -193,12 +193,12 @@ def test_new_version():
     major_collect()
     major_collect()
     p1b = lib.stm_pop_root()
-    assert p1b == p2
-    check_free_old(p1)
-    check_not_free(p2)
-    p3 = lib.stm_write_barrier(p2)
-    assert p3 != p2
-    assert p3 == lib.stm_write_barrier(p2)
+    assert p1b == p1
+    check_not_free(p1)
+    check_free_old(p2)
+    p3 = lib.stm_write_barrier(p1)
+    assert p3 != p1
+    assert p3 == lib.stm_write_barrier(p1)
 
 def test_new_version_id_alive():
     p1 = oalloc(HDR); make_public(p1)
