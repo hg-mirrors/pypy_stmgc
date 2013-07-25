@@ -159,7 +159,7 @@ def test_keep_global_roots_alive_2():
     lib.stm_pop_root()
 
 def test_local_copy_from_global_obj():
-    p1 = oalloc(HDR); make_public(p1)
+    p1 = oalloc(HDR + WORD); make_public(p1)
     p2n = lib.stm_write_barrier(p1)
     assert p2n != p1
     assert lib.stm_write_barrier(p1) == p2n
@@ -184,8 +184,8 @@ def test_local_copy_from_global_obj():
     assert p3 == p2
 
 def test_new_version():
-    p1 = oalloc(HDR); make_public(p1)
-    p2 = oalloc(HDR); make_public(p2)
+    p1 = oalloc(HDR + WORD); make_public(p1)
+    p2 = oalloc(HDR + WORD); make_public(p2)
     delegate(p1, p2)
     check_not_free(p1)
     check_not_free(p2)
@@ -214,10 +214,10 @@ def test_new_version_id_alive():
 
     
 def test_new_version_kill_intermediate():
-    p1 = oalloc(HDR); make_public(p1)
-    p2 = oalloc(HDR); make_public(p2)
-    p3 = oalloc(HDR); make_public(p3)
-    p4 = oalloc(HDR); make_public(p4)
+    p1 = oalloc(HDR + WORD); make_public(p1)
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p3 = oalloc(HDR + WORD); make_public(p3)
+    p4 = oalloc(HDR + WORD); make_public(p4)
     delegate(p1, p2)
     delegate(p2, p3)
     delegate(p3, p4)
@@ -318,7 +318,7 @@ def test_prebuilt_with_hash():
     check_free_old(p3)
 
 def test_prebuilt_version_to_protected():
-    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p1 = lib.pseudoprebuilt(HDR + WORD, 42 + HDR + WORD)
     p2 = lib.stm_write_barrier(p1)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
@@ -366,7 +366,7 @@ def test_major_collect_first_does_minor_collect():
     check_not_free(p1)
 
 def test_private_from_protected_young():
-    p1 = nalloc(HDR)
+    p1 = nalloc(HDR + WORD)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     p1b = lib.stm_write_barrier(p1)
@@ -384,7 +384,7 @@ def test_private_from_protected_young():
     assert follow_revision(p1).h_tid & GCFLAG_BACKUP_COPY
 
 def test_backup_stolen():
-    p = palloc(HDR)
+    p = palloc(HDR + WORD)
     def f1(r):
         p1 = lib.stm_write_barrier(p)   # private copy
         lib.stm_push_root(p1)
@@ -429,7 +429,7 @@ def test_backup_stolen():
     run_parallel(f1, f2)
 
 def test_private_from_protected_inevitable():
-    p1 = nalloc(HDR)
+    p1 = nalloc(HDR + WORD)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     p1b = lib.stm_write_barrier(p1)
@@ -452,7 +452,7 @@ def test_private_from_protected_trace_backup():
     check_not_free(lib.getptr(p1, 0))
 
 def test_prebuilt_modified_during_transaction():
-    p1 = palloc(HDR)
+    p1 = palloc(HDR + WORD)
     p2 = nalloc_refs(1)
     lib.setptr(p2, 0, p1)
     lib.stm_push_root(p2)
@@ -466,7 +466,7 @@ def test_prebuilt_modified_during_transaction():
     check_not_free(p1b)
 
 def test_prebuilt_modified_later():
-    p1 = palloc(HDR)
+    p1 = palloc(HDR + WORD)
     p2 = nalloc_refs(1)
     lib.setptr(p2, 0, p1)
     lib.stm_push_root(p2)
@@ -490,7 +490,7 @@ def test_big_old_object():
     # assert did not crash
 
 def test_big_old_object_free():
-    for words in range(80):
+    for words in range(1, 80):
         p1 = oalloc(HDR + words * WORD)
         p1b = lib.stm_write_barrier(p1)
         assert p1b == p1
