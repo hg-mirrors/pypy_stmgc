@@ -477,9 +477,12 @@ def test_prebuilt_modified_later():
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     major_collect()
-    lib.stm_pop_root()
+    p2b = lib.stm_pop_root()
+    check_not_free(p2b)
+    check_not_free(p1)
     p1b = lib.stm_read_barrier(p1)
     check_not_free(p1b)
+    assert p1 != p1b and p1b != p2 and p2 != p1
 
 def test_big_old_object():
     for words in range(80):
