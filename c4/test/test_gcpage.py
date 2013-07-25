@@ -303,19 +303,14 @@ def test_prebuilt_version_2():
     major_collect()
     check_prebuilt(p1)
     check_free_old(p2)
-    check_not_free(p3)     # XXX replace with p1
+    check_free_old(p3)
 
-def test_prebuilt_version_2_copy_over_prebuilt():
+def test_prebuilt_with_hash():
     p1 = lib.pseudoprebuilt_with_hash(HDR, 42 + HDR, 99)
     p2 = oalloc(HDR); make_public(p2)
     p3 = oalloc(HDR); make_public(p3)
     delegate(p1, p2)
-    delegate_original(p1, p2)
     delegate(p2, p3)
-    delegate_original(p1, p3)
-    # added by delegate, remove, otherwise
-    # major_collect will not copy over prebuilt p1:
-    p1.h_tid &= ~GCFLAG_PUBLIC_TO_PRIVATE
     major_collect()
     check_prebuilt(p1)
     assert lib.stm_hash(p1) == 99

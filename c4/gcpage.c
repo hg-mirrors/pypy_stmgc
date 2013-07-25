@@ -237,8 +237,13 @@ static gcptr copy_over_original(gcptr obj, gcptr id_copy)
     obj->h_tid |= GCFLAG_MOVED;
 
     /* copy the object's content */
-    dprintf(("copy %p over %p\n", obj, id_copy));
-    memcpy(id_copy + 1, obj + 1, stmgc_size(obj) - sizeof(struct stm_object_s));
+    size_t objsize;
+    if (obj->h_tid & GCFLAG_STUB)
+        objsize = sizeof(struct stm_stub_s);
+    else
+        objsize = stmgc_size(obj);
+    dprintf(("copy %p over %p (%ld bytes)\n", obj, id_copy, objsize));
+    memcpy(id_copy + 1, obj + 1, objsize - sizeof(struct stm_object_s));
 
     /* copy the object's h_revision number */
     id_copy->h_revision = obj->h_revision;
@@ -346,7 +351,8 @@ static gcptr visit_public(gcptr obj)
 
     /* return this original */
     original->h_tid |= GCFLAG_VISITED;
-    gcptrlist_insert(&objects_to_trace, original);
+    if (!(original->h_tid & GCFLAG_STUB))
+        gcptrlist_insert(&objects_to_trace, original);
     return original;
 }
 
