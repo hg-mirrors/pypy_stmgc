@@ -589,6 +589,12 @@ def delegate(p1, p2):
     p1.h_tid |= GCFLAG_PUBLIC_TO_PRIVATE
     if p1.h_tid & GCFLAG_PREBUILT_ORIGINAL:
         lib.stm_add_prebuilt_root(p1)
+    assert p2.h_original == 0
+    assert p1 != p2
+    if (p1.h_original == 0) or (p1.h_tid & GCFLAG_PREBUILT_ORIGINAL):
+        p2.h_original = ffi.cast("revision_t", p1)
+    else:
+        p2.h_original = p1.h_original
 
 def delegate_original(p1, p2):
     # no h_original or it is a prebuilt with a specified hash in h_original
