@@ -332,8 +332,10 @@ static gcptr visit_public(gcptr obj)
         }
         else {
             /* the stub target is just a protected object.
-               The head of the public chain is obj. */
+               The head of the public chain is obj.  We have to
+               explicitly keep obj2 alive. */
             assert(!IS_POINTER(obj2->h_revision));
+            visit_nonpublic(obj2);
             break;
         }
     }
@@ -355,7 +357,7 @@ static void visit(gcptr *pobj)
        survived.
     */
     gcptr obj = *pobj;
-    if (obj == NULL);
+    if (obj == NULL)
         return;
 
     if (!(obj->h_tid & GCFLAG_PUBLIC)) {
