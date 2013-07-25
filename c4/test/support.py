@@ -238,7 +238,8 @@ lib = ffi.verify(r'''
 
     gcptr pseudoprebuilt(size_t size, int tid)
     {
-        gcptr x = calloc(1, size);
+        gcptr x = stm_malloc(size);
+        memset(x, 0, size);
         x->h_tid = PREBUILT_FLAGS | tid;
         x->h_revision = PREBUILT_REVISION;
         return x;
