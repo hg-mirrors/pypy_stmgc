@@ -540,7 +540,8 @@ static void cleanup_for_thread(struct tx_descriptor *d)
 
         if (obj->h_tid & GCFLAG_MOVED) {
             assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
-            obj = (gcptr)obj->h_revision;
+            assert(IS_POINTER(obj->h_original));
+            obj = (gcptr)obj->h_original;
             items[i] = obj;
         }
         else if (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
