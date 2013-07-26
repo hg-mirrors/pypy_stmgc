@@ -593,7 +593,6 @@ static void cleanup_for_thread(struct tx_descriptor *d)
     items = d->list_of_read_objects.items;
     for (i = d->list_of_read_objects.size - 1; i >= 0; --i) {
         gcptr obj = items[i];
-        assert(!(obj->h_tid & GCFLAG_STUB));
 
         if (obj->h_tid & GCFLAG_MOVED) {
             assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
@@ -616,7 +615,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
         }
 
         revision_t v = obj->h_revision;
-        if (IS_POINTER(v)) {
+        if ((obj->h_tid & GCFLAG_STUB) || IS_POINTER(v)) {
             /* has a more recent revision.  Oups. */
             dprintf(("ABRT_COLLECT_MAJOR %p: "
                      "%p was read but modified already\n", d, obj));
