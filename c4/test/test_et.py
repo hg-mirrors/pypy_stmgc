@@ -45,7 +45,7 @@ def test_protected_no_backup():
     assert classify(p) == "protected"
 
 def test_private_with_backup():
-    p = nalloc(HDR)
+    p = nalloc(HDR + WORD)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     r2 = lib.get_private_rev_num()
@@ -88,7 +88,7 @@ def test_prebuilt_is_public():
     assert lib.stm_id(p) != 0
 
 def test_prebuilt_object_to_private():
-    p = palloc(HDR)
+    p = palloc(HDR + WORD)
     flags = p.h_tid
     assert (flags & GCFLAG_PUBLIC_TO_PRIVATE) == 0
     pid = lib.stm_id(p)
@@ -158,7 +158,7 @@ def test_read_barrier_public_shortcut():
     assert p1.h_revision == int(ffi.cast("revision_t", p3))   # shortcutted
 
 def test_read_barrier_public_to_private():
-    p = palloc(HDR)
+    p = palloc(HDR + WORD)
     pid = lib.stm_id(p)
     p2 = lib.stm_write_barrier(p)
     assert p2 != p
@@ -173,7 +173,7 @@ def test_read_barrier_public_to_private():
     assert pid == lib.stm_id(p2)
 
 def test_read_barrier_handle_protected():
-    p = palloc(HDR)
+    p = palloc(HDR + WORD)
     p2 = lib.stm_write_barrier(p)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
@@ -188,7 +188,7 @@ def test_read_barrier_handle_protected():
     assert list_of_read_objects() == [p2]
 
 def test_read_barrier_handle_private():
-    p = palloc(HDR)
+    p = palloc(HDR + WORD)
     p2 = lib.stm_write_barrier(p)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
@@ -302,14 +302,14 @@ def test_id_private_from_protected():
     assert porig == ffi.NULL
     # }
 
-    p1 = oalloc(HDR)
+    p1 = oalloc(HDR + WORD)
     p1id = lib.stm_id(p1)
     p1r = lib.stm_read_barrier(p1)
     assert lib.stm_id(p1r) == p1id
     p1w = lib.stm_write_barrier(p1)
     assert lib.stm_id(p1w) == p1id
 
-    p2 = oalloc(HDR)
+    p2 = oalloc(HDR + WORD)
     p2w = lib.stm_write_barrier(p2)
     p2id = lib.stm_id(p2w)
     assert p2id == lib.stm_id(p2)
@@ -581,8 +581,8 @@ def id_with_stealing(a, b, c):
     pid = []
     rid = []
     def f1(r):
-        r1 = nalloc(HDR)
-        q1 = nalloc(HDR)
+        r1 = nalloc(HDR + WORD)
+        q1 = nalloc(HDR + WORD)
         p1 = lib.stm_write_barrier(p)   # private copy
         plist.append(p1)
         qlist.append(q1)
@@ -669,7 +669,7 @@ def test_id_with_stealing7():
 
 
 def test_prehash_simple():
-    p = palloc(HDR, 99)
+    p = palloc(HDR + WORD, 99)
     assert lib.stm_hash(p) == 99
     assert lib.stm_id(p) != lib.stm_hash(p)
     pr = lib.stm_read_barrier(p)
@@ -685,7 +685,7 @@ def test_prehash_simple():
 
 
 def test_prehash_with_stealing():
-    p = palloc(HDR, 99)
+    p = palloc(HDR + WORD, 99)
     def f1(r):
         lib.stm_write_barrier(p)   # private copy
         lib.stm_commit_transaction()
