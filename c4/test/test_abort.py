@@ -37,7 +37,7 @@ def test_abort():
     assert seen == range(5000)
 
 def test_global_to_local_copies():
-    p1 = palloc(HDR)
+    p1 = palloc(HDR + WORD)
     #
     @perform_transaction
     def run(retry_counter):
