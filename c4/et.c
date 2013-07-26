@@ -569,7 +569,8 @@ static inline void record_write_barrier(gcptr P)
 gcptr stm_WriteBarrier(gcptr P)
 {
   assert(!(P->h_tid & GCFLAG_IMMUTABLE));
-  assert(stmgc_size(P) > sizeof(struct stm_stub_s) - WORD);
+  assert((P->h_tid & GCFLAG_STUB) ||
+         stmgc_size(P) > sizeof(struct stm_stub_s) - WORD);
   /* If stmgc_size(P) gives a number <= sizeof(stub)-WORD, then there is a
      risk of overrunning the object later in gcpage.c when copying a stub
      over it.  However such objects are so small that they contain no field
