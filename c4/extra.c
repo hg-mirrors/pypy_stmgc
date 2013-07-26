@@ -105,12 +105,9 @@ revision_t stm_id(gcptr p)
                  p, (gcptr)p->h_original));
     }
     else {
-        /* must create shadow original object XXX: or use
-           backup, if exists */
+        /* must create shadow original object
+           (XXX could use the backup, if it exists) */
         gcptr O = (gcptr)stmgcpage_malloc(stmgc_size(p));
-        memcpy(O, p, stmgc_size(p)); /* at least major collections
-                                      depend on some content of id_copy.
-                                      remove after fixing that XXX */
         O->h_tid |= GCFLAG_OLD;
 
         p->h_original = (revision_t)O;
