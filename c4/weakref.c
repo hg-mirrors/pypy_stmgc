@@ -70,11 +70,11 @@ static _Bool is_partially_visited(gcptr obj)
 {
     /* Based on gcpage.c:visit_public().  Check the code here if we change
        visit_public().  Returns True or False depending on whether we find any
-       version of 'obj' to be VISITED or not.
+       version of 'obj' to be MARKED or not.
     */
     assert(IMPLIES(obj->h_tid & GCFLAG_VISITED,
                    obj->h_tid & GCFLAG_MARKED));
-    if (obj->h_tid & GCFLAG_VISITED)
+    if (obj->h_tid & GCFLAG_MARKED)
         return 1;
 
     if (!(obj->h_tid & GCFLAG_PUBLIC))

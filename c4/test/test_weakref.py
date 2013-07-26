@@ -109,12 +109,14 @@ class TestMajorCollection(BaseTest):
         lib.stm_commit_transaction()
         lib.stm_begin_inevitable_transaction()
         #
+        assert lib.rawgetptr(p1, 0) == p2
         assert lib.rawgetlong(p2, 0) == 0
         lib.stm_push_root(p1)
         lib.stm_push_root(p2)
         major_collect()
         p2b = lib.stm_pop_root()
         p1 = lib.stm_pop_root()
-        assert lib.rawgetptr(p1, 0) == p2b
+        assert lib.rawgetptr(p1, 0) == p2
         assert p2b != p2
         assert lib.getlong(p2b, 0) == 912809218
+        assert lib.getlong(p2, 0) == 912809218
