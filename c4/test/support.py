@@ -586,7 +586,7 @@ def check_prebuilt(p):
 def delegate(p1, p2):
     assert classify(p1) == "public"
     assert classify(p2) == "public"
-    assert lib.gettid(p1) != 42 and lib.gettid(p2) == lib.gettid(p1)
+    assert lib.gettid(p1) != 42 + HDR and lib.gettid(p2) == lib.gettid(p1)
     p1.h_revision = ffi.cast("revision_t", p2)
     p1.h_tid |= GCFLAG_PUBLIC_TO_PRIVATE
     if p1.h_tid & GCFLAG_PREBUILT_ORIGINAL:
