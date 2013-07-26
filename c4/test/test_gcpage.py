@@ -532,3 +532,64 @@ def test_keep_original_alive():
     check_not_free(ffi.cast("gcptr", p2c.h_original))
     assert p2c == p2b
     assert ffi.cast("gcptr", p2c.h_original) == p2
+
+def test_more_h_original_1():
+    p2 = oalloc_refs(1); make_public(p2)
+    lib.stm_push_root(p2)
+    def f1(_):
+        p1 = oalloc(HDR + WORD)
+        lib.rawsetlong(p1, 0, -8922908)
+        setptr(p2, 0, p1)
+    run_parallel(f1)
+    p2 = lib.stm_pop_root()
+    p1 = getptr(p2, 0)
+    assert classify(p1) == "stub"
+    assert not lib.in_nursery(p1)
+    p1org = p1.h_original
+    assert p1org != 0
+    assert classify(ffi.cast("gcptr", p1org)) == "protected"
+    assert not lib.in_nursery(ffi.cast("gcptr", p1org))
+    assert lib.getlong(p1, 0) == -8922908
+    p1r = lib.stm_read_barrier(p1)    # protected->public
+    assert classify(p1r) == "public"
+    assert p1r == ffi.cast("gcptr", p1org)
+    assert p1r.h_original == 0
+    #
+    lib.stm_push_root(p2)
+    major_collect()
+    p2 = lib.stm_pop_root()
+    check_not_free(ffi.cast("gcptr", p1org))
+    p1 = getptr(p2, 0)
+    assert p1 == p1r
+    assert p1.h_original == 0
+    assert classify(p1) == "public"
+    assert ffi.cast("gcptr", p1org) == p1
+    assert lib.getlong(p1, 0) == -8922908
+
+def test_more_h_original_2():
+    p2 = oalloc_refs(1); make_public(p2)
+    lib.stm_push_root(p2)
+    def f1(_):
+        p1 = oalloc(HDR + WORD)
+        lib.rawsetlong(p1, 0, -8922908)
+        setptr(p2, 0, p1)
+    run_parallel(f1)
+    p2 = lib.stm_pop_root()
+    p1 = getptr(p2, 0)
+    assert classify(p1) == "stub"
+    assert not lib.in_nursery(p1)
+    p1org = p1.h_original
+    assert p1org != 0
+    assert classify(ffi.cast("gcptr", p1org)) == "protected"
+    assert not lib.in_nursery(ffi.cast("gcptr", p1org))
+    #
+    lib.stm_push_root(p2)
+    major_collect()
+    p2 = lib.stm_pop_root()
+    check_not_free(p1)
+    check_not_free(ffi.cast("gcptr", p1org))
+    p1b = getptr(p2, 0)
+    assert p1b == p1
+    assert p1b.h_original == p1org
+    assert classify(p1b) == "stub"
+    assert lib.getlong(p1, 0) == -8922908
