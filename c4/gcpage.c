@@ -241,8 +241,10 @@ static gcptr copy_over_original(gcptr obj, gcptr id_copy)
     size_t objsize;
     if (obj->h_tid & GCFLAG_STUB)
         objsize = sizeof(struct stm_stub_s);
-    else
+    else {
         objsize = stmgc_size(obj);
+        assert(objsize > sizeof(struct stm_stub_s) - WORD);
+    }
     dprintf(("copy %p over %p (%ld bytes)\n", obj, id_copy, objsize));
     memcpy(id_copy + 1, obj + 1, objsize - sizeof(struct stm_object_s));
 

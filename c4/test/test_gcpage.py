@@ -201,8 +201,8 @@ def test_new_version():
     assert p3 == lib.stm_write_barrier(p1)
 
 def test_new_version_id_alive():
-    p1 = oalloc(HDR); make_public(p1)
-    p2 = oalloc(HDR); make_public(p2)
+    p1 = oalloc(HDR + WORD); make_public(p1)
+    p2 = oalloc(HDR + WORD); make_public(p2)
     delegate(p1, p2)
     lib.stm_push_root(p1)
     major_collect()
@@ -237,10 +237,10 @@ def test_new_version_kill_intermediate():
 
 def test_new_version_kill_intermediate_non_root():
     p1 = oalloc_refs(1); make_public(p1)
-    p2 = oalloc(HDR);    make_public(p2)
-    p3 = oalloc(HDR);    make_public(p3)
-    p4 = oalloc(HDR);    make_public(p4)
-    p5 = oalloc(HDR);    make_public(p5)
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p3 = oalloc(HDR + WORD); make_public(p3)
+    p4 = oalloc(HDR + WORD); make_public(p4)
+    p5 = oalloc(HDR + WORD); make_public(p5)
     delegate(p2, p3)
     delegate(p3, p4)
     delegate(p4, p5)
@@ -295,9 +295,9 @@ def test_prebuilt_version_1():
     check_prebuilt(p1)
 
 def test_prebuilt_version_2():
-    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
-    p2 = oalloc(HDR); make_public(p2)
-    p3 = oalloc(HDR); make_public(p3)
+    p1 = lib.pseudoprebuilt(HDR + WORD, 42 + HDR + WORD)
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p3 = oalloc(HDR + WORD); make_public(p3)
     delegate(p1, p2)
     delegate(p2, p3)
     major_collect()
@@ -306,9 +306,9 @@ def test_prebuilt_version_2():
     check_free_old(p3)
 
 def test_prebuilt_with_hash():
-    p1 = lib.pseudoprebuilt_with_hash(HDR, 42 + HDR, 99)
-    p2 = oalloc(HDR); make_public(p2)
-    p3 = oalloc(HDR); make_public(p3)
+    p1 = lib.pseudoprebuilt_with_hash(HDR + WORD, 42 + HDR + WORD, 99)
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p3 = oalloc(HDR + WORD); make_public(p3)
     delegate(p1, p2)
     delegate(p2, p3)
     major_collect()
