@@ -80,10 +80,7 @@ def test_get_backup_copy():
 def test_prebuilt_is_public():
     p = palloc(HDR)
     assert p.h_revision == 1
-    assert p.h_tid == lib.gettid(p) | (GCFLAG_OLD |
-                                       GCFLAG_VISITED |
-                                       GCFLAG_PUBLIC |
-                                       GCFLAG_PREBUILT_ORIGINAL)
+    assert p.h_tid == lib.gettid(p) | lib.PREBUILT_FLAGS
     assert classify(p) == "public"
     assert lib.stm_id(p) != 0
 
