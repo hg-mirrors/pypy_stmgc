@@ -276,8 +276,12 @@ static void visit_nonpublic(gcptr obj, struct tx_public_descriptor *gcp)
     if (obj->h_tid & GCFLAG_VISITED)
         return;        /* already visited */
 
-    obj->h_tid |= GCFLAG_VISITED;
+    obj->h_tid |= GCFLAG_VISITED | GCFLAG_MARKED;
     gcptrlist_insert2(&objects_to_trace, obj, (gcptr)gcp);
+
+    obj = (gcptr)obj->h_original;
+    if (obj != NULL)
+        obj->h_tid |= GCFLAG_MARKED;
 }
 
 static gcptr visit_public(gcptr obj, struct tx_public_descriptor *gcp)
@@ -369,7 +373,7 @@ static gcptr visit_public(gcptr obj, struct tx_public_descriptor *gcp)
         copy_over_original(obj, original);
 
     /* return this original */
-    original->h_tid |= GCFLAG_VISITED;
+    original->h_tid |= GCFLAG_VISITED | GCFLAG_MARKED;
     if (!(original->h_tid & GCFLAG_STUB))
         gcptrlist_insert2(&objects_to_trace, original, NULL);
     return original;
@@ -426,13 +430,15 @@ static void mark_prebuilt_roots(void)
        contains all the ones that have been modified.  Because they are
        themselves not in any page managed by this file, their
        GCFLAG_VISITED is not removed at the end of the current
-       collection.  That's why we remove it here. */
+       collection.  That's why we remove it here.  GCFLAG_MARKED is not
+       relevant for prebuilt objects, but we avoid objects with MARKED
+       but not VISITED, which trigger some asserts. */
     gcptr *pobj = stm_prebuilt_gcroots.items;
     gcptr *pend = stm_prebuilt_gcroots.items + stm_prebuilt_gcroots.size;
     gcptr obj, obj2;
     for (; pobj != pend; pobj++) {
         obj = *pobj;
-        obj->h_tid &= ~GCFLAG_VISITED;
+        obj->h_tid &= ~(GCFLAG_VISITED | GCFLAG_MARKED);
         assert(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL);
 
         obj2 = visit_public(obj, NULL);
@@ -680,7 +686,9 @@ static void sweep_pages(struct tx_public_descriptor *gcp, int size_class)
            and the flag is removed; other locations are marked as free. */
         p = (gcptr)(lpage + 1);
         for (j = 0; j < objs_per_page; j++) {
-            if (p->h_tid & GCFLAG_VISITED)
+            assert(IMPLIES(p->h_tid & GCFLAG_VISITED,
+                           p->h_tid & GCFLAG_MARKED));
+            if (p->h_tid & GCFLAG_MARKED)
                 break;  /* first object that stays alive */
             p = (gcptr)(((char *)p) + obj_size);
         }
@@ -690,8 +698,10 @@ static void sweep_pages(struct tx_public_descriptor *gcp, int size_class)
             surviving_pages = lpage;
             p = (gcptr)(lpage + 1);
             for (j = 0; j < objs_per_page; j++) {
-                if (p->h_tid & GCFLAG_VISITED) {
-                    p->h_tid &= ~GCFLAG_VISITED;
+                assert(IMPLIES(p->h_tid & GCFLAG_VISITED,
+                               p->h_tid & GCFLAG_MARKED));
+                if (p->h_tid & GCFLAG_MARKED) {
+                    p->h_tid &= ~(GCFLAG_VISITED | GCFLAG_MARKED);
                     mc_total_in_use += obj_size;
                 }
                 else {
@@ -717,6 +727,7 @@ static void sweep_pages(struct tx_public_descriptor *gcp, int size_class)
             p = (gcptr)(lpage + 1);
             for (j = 0; j < objs_per_page; j++) {
                 assert(!(p->h_tid & GCFLAG_VISITED));
+                assert(!(p->h_tid & GCFLAG_MARKED));
                 if (p->h_tid != DEBUG_WORD(0xDD)) {
                     dprintf(("| freeing %p (with page %p)\n", p, lpage));
                 }
@@ -746,8 +757,10 @@ static void free_unused_local_pages(struct tx_public_descriptor *gcp)
     G2L_LOOP_FORWARD(gcp->nonsmall_objects, item) {
 
         gcptr p = item->addr;
-        if (p->h_tid & GCFLAG_VISITED) {
-            p->h_tid &= ~GCFLAG_VISITED;
+        assert(IMPLIES(p->h_tid & GCFLAG_VISITED,
+                       p->h_tid & GCFLAG_MARKED));
+        if (p->h_tid & GCFLAG_MARKED) {
+            p->h_tid &= ~(GCFLAG_VISITED | GCFLAG_MARKED);
         }
         else {
             G2L_LOOP_DELETE(item);
