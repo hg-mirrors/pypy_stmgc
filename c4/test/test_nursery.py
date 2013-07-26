@@ -279,7 +279,7 @@ def test_old_private_from_protected_to_young_private_3():
     assert classify(p2) == "private"
 
 def test_new_version():
-    p1 = oalloc(HDR)
+    p1 = oalloc(HDR + WORD)
     assert lib.stm_write_barrier(p1) == p1
     lib.stm_push_root(p1)
     transaction_break()
@@ -300,7 +300,7 @@ def test_new_version():
     assert classify(p2) == "private_from_protected"
 
 def test_prebuilt_version():
-    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p1 = lib.pseudoprebuilt(HDR + WORD, 42 + HDR + WORD)
     p2 = lib.stm_write_barrier(p1)
     assert p2 != p1
     check_prebuilt(p1)

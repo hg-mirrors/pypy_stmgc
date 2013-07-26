@@ -104,7 +104,7 @@ def test_latest_version():
             assert ffi.string(c).endswith("ei424242ee")
 
 def test_pointer_equal():
-    p = palloc(HDR)
+    p = palloc(HDR + WORD)
     assert lib.stm_pointer_equal(p, p)
     assert not lib.stm_pointer_equal(p, ffi.NULL)
     assert not lib.stm_pointer_equal(ffi.NULL, p)

@@ -25,7 +25,11 @@
  *
  * GCFLAG_OLD is set on old objects.
  *
- * GCFLAG_VISITED is used temporarily during major collections.
+ * GCFLAG_VISITED and GCFLAG_MARKED are used temporarily during major
+ * collections.  The objects are MARKED|VISITED as soon as they have been
+ * added to 'objects_to_trace', and so will be or have been traced.  The
+ * objects are only MARKED if their memory must be kept alive, but (so far)
+ * we found that tracing them is not useful.
  *
  * GCFLAG_PUBLIC is set on public objects.
  *
@@ -74,10 +78,12 @@ static const revision_t GCFLAG_PRIVATE_FROM_PROTECTED = STM_FIRST_GCFLAG << 9;
 static const revision_t GCFLAG_HAS_ID                 = STM_FIRST_GCFLAG << 10;
 static const revision_t GCFLAG_IMMUTABLE              = STM_FIRST_GCFLAG << 11;
 static const revision_t GCFLAG_SMALLSTUB              = STM_FIRST_GCFLAG << 12;
+static const revision_t GCFLAG_MARKED                 = STM_FIRST_GCFLAG << 13;
 
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
 #define GCFLAG_PREBUILT  (GCFLAG_VISITED           | \
+                          GCFLAG_MARKED            | \
                           GCFLAG_PREBUILT_ORIGINAL | \
                           GCFLAG_OLD               | \
                           GCFLAG_PUBLIC)
@@ -88,12 +94,14 @@ static const revision_t GCFLAG_SMALLSTUB              = STM_FIRST_GCFLAG << 12;
                          "PREBUILT_ORIGINAL", \
                          "PUBLIC_TO_PRIVATE", \
                          "WRITE_BARRIER",     \
-                         "MOVED",     \
+                         "MOVED",             \
                          "BACKUP_COPY",       \
                          "STUB",              \
                          "PRIVATE_FROM_PROTECTED", \
-                         "HAS_ID", \
-                         "IMMUTABLE", \
+                         "HAS_ID",            \
+                         "IMMUTABLE",         \
+                         "SMALLSTUB",         \
+                         "MARKED",            \
                          NULL }
 
 #define IS_POINTER(v)    (!((v) & 1))   /* even-valued number */

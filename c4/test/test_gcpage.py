@@ -511,3 +511,24 @@ def test_big_old_object_collect():
         #
         major_collect()
         check_free_old(p1)
+
+def test_keep_original_alive():
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p2b = lib.stm_write_barrier(p2)
+    lib.stm_push_root(p2)
+    minor_collect()
+    p2 = lib.stm_pop_root()
+    p2b = lib.stm_write_barrier(p2)
+    assert not lib.in_nursery(p2)
+    assert not lib.in_nursery(p2b)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert classify(p2) == "public"
+    assert classify(p2b) == "protected"
+    assert ffi.cast("gcptr", p2b.h_original) == p2
+    lib.stm_push_root(p2b)
+    major_collect()
+    p2c = lib.stm_pop_root()
+    check_not_free(ffi.cast("gcptr", p2c.h_original))
+    assert p2c == p2b
+    assert ffi.cast("gcptr", p2c.h_original) == p2
