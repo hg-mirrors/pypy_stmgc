@@ -104,6 +104,8 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
     stub->h_tid = (obj->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
                                                    | GCFLAG_STUB
                                                    | GCFLAG_OLD;
+    if (size == 0)
+        stub->h_tid |= GCFLAG_SMALLSTUB;
     stub->h_revision = ((revision_t)obj) | 2;
     if (obj->h_original) {
         stub->h_original = obj->h_original;
