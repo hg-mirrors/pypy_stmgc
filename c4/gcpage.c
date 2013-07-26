@@ -302,8 +302,10 @@ static gcptr visit_public(gcptr obj, struct tx_public_descriptor *gcp)
         /* the h_original may be protected, or private_from_protected,
            in some cases.  Then we can't use it.  We'll use the most
            recent h_revision which is public. */
-        if (!(original->h_tid & GCFLAG_PUBLIC))
+        if (!(original->h_tid & GCFLAG_PUBLIC)) {
+            original->h_tid |= GCFLAG_MARKED;
             original = NULL;
+        }
     }
     else
         original = obj;
