@@ -291,25 +291,28 @@ static gcptr visit_public(gcptr obj, struct tx_public_descriptor *gcp)
        h_original.  Or, if gcp != NULL and the most recent copy is
        protected by precisely 'gcp', then we return it instead.
     */
+    assert(obj->h_tid & GCFLAG_PUBLIC);
+    assert(!(obj->h_tid & GCFLAG_BACKUP_COPY));
+    assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+
     gcptr original;
     if (obj->h_original != 0 &&
-            !(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL))
+            !(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
         original = (gcptr)obj->h_original;
+        /* the h_original may be protected, or private_from_protected,
+           in some cases.  Then we can't use it.  We'll use the most
+           recent h_revision which is public. */
+        if (!(original->h_tid & GCFLAG_PUBLIC))
+            original = NULL;
+    }
     else
         original = obj;
 
-    /* the original object must also be a public object, and cannot
-       be a small stub. */
-    assert(original->h_tid & GCFLAG_PUBLIC);
-    assert(!(original->h_tid & GCFLAG_SMALLSTUB));
-
-    assert(!(obj->h_tid & GCFLAG_BACKUP_COPY));
-    assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
-    assert(!(original->h_tid & GCFLAG_BACKUP_COPY));
-    assert(!(original->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+    /* the original object must not be a small stub. */
+    assert(original == NULL || !(original->h_tid & GCFLAG_SMALLSTUB));
 
     /* if 'original' was already visited, we are done */
-    if (original->h_tid & GCFLAG_VISITED)
+    if (original != NULL && original->h_tid & GCFLAG_VISITED)
         return original;
 
     /* walk to the head of the chained list */
@@ -368,9 +371,17 @@ static gcptr visit_public(gcptr obj, struct tx_public_descriptor *gcp)
         }
     }
 
-    /* copy obj over original */
-    if (obj != original)
+    /* at this point, 'obj' contains the most recent revision which is
+       public. */
+    if (original == NULL) {
+        original = obj;
+        if (original->h_tid & GCFLAG_VISITED)
+            return original;
+    }
+    else if (obj != original) {
+        /* copy obj over original */
         copy_over_original(obj, original);
+    }
 
     /* return this original */
     original->h_tid |= GCFLAG_VISITED | GCFLAG_MARKED;
