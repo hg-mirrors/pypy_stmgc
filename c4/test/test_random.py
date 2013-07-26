@@ -525,6 +525,6 @@ def test_specific_issue_1():
     test_multi_thread(1624)
 
 def test_more_multi_thread():
-    #py.test.skip("more random tests")
-    for i in range(200):
+    py.test.skip("more random tests")
+    for i in range(100):
         yield test_multi_thread, 1100 + i
