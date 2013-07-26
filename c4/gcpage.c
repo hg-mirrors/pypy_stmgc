@@ -245,7 +245,7 @@ static gcptr copy_over_original(gcptr obj, gcptr id_copy)
         objsize = stmgc_size(obj);
         assert(objsize > sizeof(struct stm_stub_s) - WORD);
     }
-    dprintf(("copy %p over %p (%ld bytes)\n", obj, id_copy, objsize));
+    dprintf(("copy %p over %p (%zd bytes)\n", obj, id_copy, objsize));
     memcpy(id_copy + 1, obj + 1, objsize - sizeof(struct stm_object_s));
 
     /* copy the object's h_revision number */
@@ -258,8 +258,15 @@ static gcptr copy_over_original(gcptr obj, gcptr id_copy)
     return id_copy;
 }
 
-static void visit_nonpublic(gcptr obj)
+static void visit_nonpublic(gcptr obj, struct tx_public_descriptor *gcp)
 {
+    /* Visit a protected or private object.  'gcp' must be either NULL or
+       point to the thread that has got the object.  This 'gcp' is only an
+       optimization: it lets us trace (most) private/protected objects
+       and replace pointers to public objects in them with pointers to
+       private/protected objects if they are the most recent ones,
+       provided they belong to the same thread.
+    */
     assert(!(obj->h_tid & GCFLAG_PUBLIC));
     assert(!(obj->h_tid & GCFLAG_STUB));
     assert(!(obj->h_tid & GCFLAG_HAS_ID));
@@ -270,14 +277,15 @@ static void visit_nonpublic(gcptr obj)
         return;        /* already visited */
 
     obj->h_tid |= GCFLAG_VISITED;
-    gcptrlist_insert(&objects_to_trace, obj);
+    gcptrlist_insert2(&objects_to_trace, obj, (gcptr)gcp);
 }
 
-static gcptr visit_public(gcptr obj)
+static gcptr visit_public(gcptr obj, struct tx_public_descriptor *gcp)
 {
     /* The goal is to walk to the most recent copy, then copy its
        content back into the h_original, and finally returns this
-       h_original.
+       h_original.  Or, if gcp != NULL and the most recent copy is
+       protected by precisely 'gcp', then we return it instead.
     */
     gcptr original;
     if (obj->h_original != 0 &&
@@ -335,6 +343,10 @@ static gcptr visit_public(gcptr obj)
                    The pair obj2/obj3 was or will be handled by
                    mark_all_stack_roots(). */
                 assert(obj3->h_tid & GCFLAG_BACKUP_COPY);
+
+                assert(STUB_THREAD(obj) != NULL);
+                if (STUB_THREAD(obj) == gcp)
+                    return obj2;
                 break;
             }
         }
@@ -343,7 +355,11 @@ static gcptr visit_public(gcptr obj)
                The head of the public chain is obj.  We have to
                explicitly keep obj2 alive. */
             assert(!IS_POINTER(obj2->h_revision));
-            visit_nonpublic(obj2);
+            visit_nonpublic(obj2, STUB_THREAD(obj));
+
+            assert(STUB_THREAD(obj) != NULL);
+            if (STUB_THREAD(obj) == gcp)
+                return obj2;
             break;
         }
     }
@@ -355,15 +371,19 @@ static gcptr visit_public(gcptr obj)
     /* return this original */
     original->h_tid |= GCFLAG_VISITED;
     if (!(original->h_tid & GCFLAG_STUB))
-        gcptrlist_insert(&objects_to_trace, original);
+        gcptrlist_insert2(&objects_to_trace, original, NULL);
     return original;
 }
 
-static void visit(gcptr *pobj)
+static struct tx_public_descriptor *visit_protected_gcp;
+
+static void visit_take_protected(gcptr *pobj)
 {
     /* Visits '*pobj', marking it as surviving and possibly adding it to
        objects_to_trace.  Fixes *pobj to point to the exact copy that
-       survived.
+       survived.  This function will replace *pobj with a protected
+       copy if it belongs to the thread 'visit_protected_gcp', so the
+       latter must be initialized before any call!
     */
     gcptr obj = *pobj;
     if (obj == NULL)
@@ -371,25 +391,33 @@ static void visit(gcptr *pobj)
 
     if (!(obj->h_tid & GCFLAG_PUBLIC)) {
         /* 'obj' is a private or protected copy. */
-        visit_nonpublic(obj);
+        visit_nonpublic(obj, visit_protected_gcp);
     }
     else {
-        *pobj = visit_public(obj);
+        *pobj = visit_public(obj, visit_protected_gcp);
     }
 }
 
 gcptr stmgcpage_visit(gcptr obj)
 {
-    visit(&obj);
+    if (!(obj->h_tid & GCFLAG_PUBLIC)) {
+        visit_nonpublic(obj, NULL);
+    }
+    else {
+        obj = visit_public(obj, NULL);
+    }
     return obj;
 }
 
 static void visit_all_objects(void)
 {
     while (gcptrlist_size(&objects_to_trace) > 0) {
+        visit_protected_gcp =
+            (struct tx_public_descriptor *)gcptrlist_pop(&objects_to_trace);
         gcptr obj = gcptrlist_pop(&objects_to_trace);
-        stmgc_trace(obj, &visit);
+        stmgc_trace(obj, &visit_take_protected);
     }
+    visit_protected_gcp = NULL;
 }
 
 static void mark_prebuilt_roots(void)
@@ -407,7 +435,7 @@ static void mark_prebuilt_roots(void)
         obj->h_tid &= ~GCFLAG_VISITED;
         assert(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL);
 
-        obj2 = visit_public(obj);
+        obj2 = visit_public(obj, NULL);
         assert(obj2 == obj);    /* it is its own original */
     }
 }
@@ -422,7 +450,7 @@ static void mark_roots(gcptr *root, gcptr *end)
         if (((revision_t)item) & ~((revision_t)END_MARKER_OFF |
                                    (revision_t)END_MARKER_ON)) {
             /* 'item' is a regular, non-null pointer */
-            visit(root);
+            visit_take_protected(root);
             dprintf(("visit stack root: %p -> %p\n", item, *root));
         }
         else if (item == END_MARKER_OFF) {
@@ -440,13 +468,14 @@ static void mark_all_stack_roots(void)
 
     for (d = stm_tx_head; d; d = d->tx_next) {
         assert(!stm_has_got_any_lock(d));
+        visit_protected_gcp = d->public_descriptor;
 
         /* the roots pushed on the shadowstack */
         mark_roots(d->shadowstack, *d->shadowstack_end_ref);
 
         /* the thread-local object */
-        visit(d->thread_local_obj_ref);
-        visit(&d->old_thread_local_obj);
+        visit_take_protected(d->thread_local_obj_ref);
+        visit_take_protected(&d->old_thread_local_obj);
 
         /* the current transaction's private copies of public objects */
         wlog_t *item;
@@ -456,8 +485,10 @@ static void mark_all_stack_roots(void)
             gcptr R = item->addr;
             gcptr L = item->val;
 
-            /* we visit the public object R */
-            gcptr new_R = visit_public(R);
+            /* we visit the public object R.  Must keep a public object
+               here, so we pass NULL as second argument. */
+            gcptr new_R = visit_public(R, NULL);
+            assert(new_R->h_tid & GCFLAG_PUBLIC);
 
             if (new_R != R) {
                 /* we have to update the key in public_to_private, which
@@ -471,7 +502,7 @@ static void mark_all_stack_roots(void)
                should be private, possibly private_from_protected,
                so visit() should return the same private copy */
             if (L != NULL) {
-                visit_nonpublic(L);
+                visit_nonpublic(L, visit_protected_gcp);
             }
 
         } G2L_LOOP_END;
@@ -489,8 +520,13 @@ static void mark_all_stack_roots(void)
         for (i = d->private_from_protected.size - 1; i >= 0; i--) {
             gcptr obj = items[i];
             assert(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED);
-            visit_nonpublic(obj);
-            visit((gcptr *)&obj->h_revision);
+            visit_nonpublic(obj, visit_protected_gcp);
+
+            gcptr backup_obj = (gcptr)obj->h_revision;
+            if (!(backup_obj->h_tid & GCFLAG_PUBLIC))
+                visit_nonpublic(backup_obj, visit_protected_gcp);
+            else
+                obj->h_revision = (revision_t)visit_public(backup_obj, NULL);
         }
 
         /* make sure that the other lists are empty */
@@ -509,6 +545,7 @@ static void mark_all_stack_roots(void)
                d->num_private_from_protected_known_old);
     }
 
+    visit_protected_gcp = NULL;
     gcptrlist_delete(&new_public_to_private);
 }
 
@@ -516,7 +553,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
 {
     long i;
     gcptr *items;
-	assert(d->old_objects_to_trace.size == 0);
+    assert(d->old_objects_to_trace.size == 0);
 
     /* If we're aborting this transaction anyway, we don't need to do
      * more here.
