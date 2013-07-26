@@ -8,7 +8,7 @@
 #ifdef _GC_DEBUG
 /************************************************************/
 
-#define MMAP_TOTAL  671088640   /* 640MB */
+#define MMAP_TOTAL  1280*1024*1024   /* 1280MB */
 
 static pthread_mutex_t malloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char *zone_start, *zone_current = NULL, *zone_end = NULL;
