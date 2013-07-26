@@ -77,8 +77,9 @@ static const revision_t GCFLAG_STUB         /*debug*/ = STM_FIRST_GCFLAG << 8;
 static const revision_t GCFLAG_PRIVATE_FROM_PROTECTED = STM_FIRST_GCFLAG << 9;
 static const revision_t GCFLAG_HAS_ID                 = STM_FIRST_GCFLAG << 10;
 static const revision_t GCFLAG_IMMUTABLE              = STM_FIRST_GCFLAG << 11;
-static const revision_t GCFLAG_SMALLSTUB              = STM_FIRST_GCFLAG << 12;
+static const revision_t GCFLAG_SMALLSTUB    /*debug*/ = STM_FIRST_GCFLAG << 12;
 static const revision_t GCFLAG_MARKED                 = STM_FIRST_GCFLAG << 13;
+/* warning, the last flag available is "<< 15" on 32-bit */
 
 
 /* this value must be reflected in PREBUILT_FLAGS in stmgc.h */
