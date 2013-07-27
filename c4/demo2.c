@@ -8,7 +8,7 @@
 #include "fprintcolor.h"
 
 
-#define LIST_LENGTH 500
+#define LIST_LENGTH 200
 #define NUMTHREADS  4
 
 
@@ -89,7 +89,7 @@ int bubble_run(gcptr arg1, int retry_counter)
         if (r_next->value < r_current->value) {
             // swap current and next
             swap_nodes(r_prev, r_current, r_next);	  
-            fprintf(stdout, "#");
+            //fprintf(stdout, "#");
             
             // needs read barriers, because of write barriers in swap_nodes
             r_prev = (struct node*)stm_read_barrier((gcptr)r_prev);
