@@ -765,6 +765,7 @@ int main(void)
             newthread(demo, NULL);
         }
     }
-    
+
+    printf("Test OK!\n");
     return 0;
 }
