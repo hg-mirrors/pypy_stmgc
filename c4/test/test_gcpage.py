@@ -159,7 +159,7 @@ def test_keep_global_roots_alive_2():
     lib.stm_pop_root()
 
 def test_local_copy_from_global_obj():
-    p1 = oalloc(HDR); make_public(p1)
+    p1 = oalloc(HDR + WORD); make_public(p1)
     p2n = lib.stm_write_barrier(p1)
     assert p2n != p1
     assert lib.stm_write_barrier(p1) == p2n
@@ -184,8 +184,8 @@ def test_local_copy_from_global_obj():
     assert p3 == p2
 
 def test_new_version():
-    p1 = oalloc(HDR); make_public(p1)
-    p2 = oalloc(HDR); make_public(p2)
+    p1 = oalloc(HDR + WORD); make_public(p1)
+    p2 = oalloc(HDR + WORD); make_public(p2)
     delegate(p1, p2)
     check_not_free(p1)
     check_not_free(p2)
@@ -193,32 +193,31 @@ def test_new_version():
     major_collect()
     major_collect()
     p1b = lib.stm_pop_root()
-    assert p1b == p2
-    check_free_old(p1)
-    check_not_free(p2)
-    p3 = lib.stm_write_barrier(p2)
-    assert p3 != p2
-    assert p3 == lib.stm_write_barrier(p2)
+    assert p1b == p1
+    check_not_free(p1)
+    check_free_old(p2)
+    p3 = lib.stm_write_barrier(p1)
+    assert p3 != p1
+    assert p3 == lib.stm_write_barrier(p1)
 
 def test_new_version_id_alive():
-    p1 = oalloc(HDR); make_public(p1)
-    p2 = oalloc(HDR); make_public(p2)
+    p1 = oalloc(HDR + WORD); make_public(p1)
+    p2 = oalloc(HDR + WORD); make_public(p2)
     delegate(p1, p2)
-    delegate_original(p1, p2)
-    p2.h_original = ffi.cast("revision_t", p1)
     lib.stm_push_root(p1)
     major_collect()
     major_collect()
     p1b = lib.stm_pop_root()
     check_not_free(p1) # id copy
-    check_not_free(p2)
+    check_free_old(p2)
+    assert p1b == p1
 
     
 def test_new_version_kill_intermediate():
-    p1 = oalloc(HDR); make_public(p1)
-    p2 = oalloc(HDR); make_public(p2)
-    p3 = oalloc(HDR); make_public(p3)
-    p4 = oalloc(HDR); make_public(p4)
+    p1 = oalloc(HDR + WORD); make_public(p1)
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p3 = oalloc(HDR + WORD); make_public(p3)
+    p4 = oalloc(HDR + WORD); make_public(p4)
     delegate(p1, p2)
     delegate(p2, p3)
     delegate(p3, p4)
@@ -226,22 +225,22 @@ def test_new_version_kill_intermediate():
     major_collect()
     major_collect()
     p2b = lib.stm_pop_root()
-    assert p2b == p4
-    check_free_old(p1)
+    assert p2b == p1
+    check_not_free(p1)
     check_free_old(p2)
     check_free_old(p3)
-    check_not_free(p4)
-    p5 = lib.stm_write_barrier(p4)
-    assert p5 != p4
-    assert p5 == lib.stm_write_barrier(p4)
+    check_free_old(p4)
+    p5 = lib.stm_write_barrier(p1)
+    assert p5 != p1
+    assert p5 == lib.stm_write_barrier(p1)
     assert p5 == lib.stm_write_barrier(p5)
 
 def test_new_version_kill_intermediate_non_root():
     p1 = oalloc_refs(1); make_public(p1)
-    p2 = oalloc(HDR);    make_public(p2)
-    p3 = oalloc(HDR);    make_public(p3)
-    p4 = oalloc(HDR);    make_public(p4)
-    p5 = oalloc(HDR);    make_public(p5)
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p3 = oalloc(HDR + WORD); make_public(p3)
+    p4 = oalloc(HDR + WORD); make_public(p4)
+    p5 = oalloc(HDR + WORD); make_public(p5)
     delegate(p2, p3)
     delegate(p3, p4)
     delegate(p4, p5)
@@ -251,45 +250,43 @@ def test_new_version_kill_intermediate_non_root():
     major_collect()
     lib.stm_pop_root()
     check_not_free(p1)
-    check_free_old(p2)
+    check_not_free(p2)
     check_free_old(p3)
     check_free_old(p4)
-    check_not_free(p5)
+    check_free_old(p5)
     print 'p1:', p1
     print '      containing:', rawgetptr(p1, 0)
     print 'p2:', p2
     print 'p3:', p3
     print 'p4:', p4
     print 'p5:', p5
-    assert rawgetptr(p1, 0) == p5
+    assert rawgetptr(p1, 0) == p2
 
 def test_new_version_not_kill_intermediate_original():
     p1 = oalloc_refs(1); make_public(p1)
-    p2 = oalloc(HDR);    make_public(p2)
-    p3 = oalloc(HDR);    make_public(p3)
-    p4 = oalloc(HDR);    make_public(p4)
-    p5 = oalloc(HDR);    make_public(p5)
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p3 = oalloc(HDR + WORD); make_public(p3)
+    p4 = oalloc(HDR + WORD); make_public(p4)
+    p5 = oalloc(HDR + WORD); make_public(p5)
     delegate(p2, p3)
     delegate(p3, p4)
     delegate(p4, p5)
     rawsetptr(p1, 0, p3)
-    delegate_original(p3, p1)
-    delegate_original(p3, p2)
-    delegate_original(p3, p4)
-    delegate_original(p3, p5)
+    lib.rawsetlong(p2, 0, 222)
+    lib.rawsetlong(p3, 0, 333)
+    lib.rawsetlong(p4, 0, 444)
+    lib.rawsetlong(p5, 0, 555)
 
     lib.stm_push_root(p1)
     major_collect()
     lib.stm_pop_root()
     check_not_free(p1)
-    check_free_old(p2)
-    check_not_free(p3) # original
+    check_not_free(p2)
+    check_free_old(p3)
     check_free_old(p4)
-    check_not_free(p5)
-    assert rawgetptr(p1, 0) == p5
-    assert follow_original(p1) == p3
-    assert follow_original(p5) == p3
-
+    check_free_old(p5)
+    assert rawgetptr(p1, 0) == p2
+    assert lib.rawgetlong(p2, 0) == 555   # copied over from p5
     
 def test_prebuilt_version_1():
     p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
@@ -298,18 +295,30 @@ def test_prebuilt_version_1():
     check_prebuilt(p1)
 
 def test_prebuilt_version_2():
-    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
-    p2 = oalloc(HDR); make_public(p2)
-    p3 = oalloc(HDR); make_public(p3)
+    p1 = lib.pseudoprebuilt(HDR + WORD, 42 + HDR + WORD)
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p3 = oalloc(HDR + WORD); make_public(p3)
     delegate(p1, p2)
     delegate(p2, p3)
     major_collect()
     check_prebuilt(p1)
     check_free_old(p2)
-    check_not_free(p3)     # XXX replace with p1
+    check_free_old(p3)
+
+def test_prebuilt_with_hash():
+    p1 = lib.pseudoprebuilt_with_hash(HDR + WORD, 42 + HDR + WORD, 99)
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p3 = oalloc(HDR + WORD); make_public(p3)
+    delegate(p1, p2)
+    delegate(p2, p3)
+    major_collect()
+    check_prebuilt(p1)
+    assert lib.stm_hash(p1) == 99
+    check_free_old(p2)
+    check_free_old(p3)
 
 def test_prebuilt_version_to_protected():
-    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p1 = lib.pseudoprebuilt(HDR + WORD, 42 + HDR + WORD)
     p2 = lib.stm_write_barrier(p1)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
@@ -320,6 +329,24 @@ def test_prebuilt_version_to_protected():
     major_collect()
     check_prebuilt(p1)
     check_not_free(p2)     # XXX replace with p1
+
+def test_prebuilt_version_to_protected_copy_over_prebuilt():
+    py.test.skip("""current copy-over-prebuilt-original approach
+    does not work with public_prebuilt->stub->protected""")
+    p1 = lib.pseudoprebuilt(HDR, 42 + HDR)
+    p2 = lib.stm_write_barrier(p1)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    minor_collect()
+    p2 = lib.stm_read_barrier(p1)
+    assert p2 != p1
+    minor_collect()
+    major_collect()
+    major_collect()
+    print classify(p2)
+    check_prebuilt(p1)
+    check_free_old(p2)
+
 
 def test_private():
     p1 = nalloc(HDR)
@@ -339,7 +366,7 @@ def test_major_collect_first_does_minor_collect():
     check_not_free(p1)
 
 def test_private_from_protected_young():
-    p1 = nalloc(HDR)
+    p1 = nalloc(HDR + WORD)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     p1b = lib.stm_write_barrier(p1)
@@ -357,7 +384,7 @@ def test_private_from_protected_young():
     assert follow_revision(p1).h_tid & GCFLAG_BACKUP_COPY
 
 def test_backup_stolen():
-    p = palloc(HDR)
+    p = palloc(HDR + WORD)
     def f1(r):
         p1 = lib.stm_write_barrier(p)   # private copy
         lib.stm_push_root(p1)
@@ -396,15 +423,13 @@ def test_backup_stolen():
             print p2
             major_collect()
             r.leave_in_parallel()
-            check_not_free(p2)
-            assert classify(p2) == "public"
             r.enter_in_parallel()
         perform_transaction(cb)
         r.leave_in_parallel()
     run_parallel(f1, f2)
 
 def test_private_from_protected_inevitable():
-    p1 = nalloc(HDR)
+    p1 = nalloc(HDR + WORD)
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     p1b = lib.stm_write_barrier(p1)
@@ -427,7 +452,7 @@ def test_private_from_protected_trace_backup():
     check_not_free(lib.getptr(p1, 0))
 
 def test_prebuilt_modified_during_transaction():
-    p1 = palloc(HDR)
+    p1 = palloc(HDR + WORD)
     p2 = nalloc_refs(1)
     lib.setptr(p2, 0, p1)
     lib.stm_push_root(p2)
@@ -441,7 +466,7 @@ def test_prebuilt_modified_during_transaction():
     check_not_free(p1b)
 
 def test_prebuilt_modified_later():
-    p1 = palloc(HDR)
+    p1 = palloc(HDR + WORD)
     p2 = nalloc_refs(1)
     lib.setptr(p2, 0, p1)
     lib.stm_push_root(p2)
@@ -452,9 +477,12 @@ def test_prebuilt_modified_later():
     lib.stm_commit_transaction()
     lib.stm_begin_inevitable_transaction()
     major_collect()
-    lib.stm_pop_root()
+    p2b = lib.stm_pop_root()
+    check_not_free(p2b)
+    check_not_free(p1)
     p1b = lib.stm_read_barrier(p1)
     check_not_free(p1b)
+    assert p1 != p1b and p1b != p2 and p2 != p1
 
 def test_big_old_object():
     for words in range(80):
@@ -462,7 +490,7 @@ def test_big_old_object():
     # assert did not crash
 
 def test_big_old_object_free():
-    for words in range(80):
+    for words in range(1, 80):
         p1 = oalloc(HDR + words * WORD)
         p1b = lib.stm_write_barrier(p1)
         assert p1b == p1
@@ -483,3 +511,85 @@ def test_big_old_object_collect():
         #
         major_collect()
         check_free_old(p1)
+
+def test_keep_original_alive():
+    p2 = oalloc(HDR + WORD); make_public(p2)
+    p2b = lib.stm_write_barrier(p2)
+    lib.stm_push_root(p2)
+    minor_collect()
+    p2 = lib.stm_pop_root()
+    p2b = lib.stm_write_barrier(p2)
+    assert not lib.in_nursery(p2)
+    assert not lib.in_nursery(p2b)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert classify(p2) == "public"
+    assert classify(p2b) == "protected"
+    assert ffi.cast("gcptr", p2b.h_original) == p2
+    lib.stm_push_root(p2b)
+    major_collect()
+    p2c = lib.stm_pop_root()
+    check_not_free(ffi.cast("gcptr", p2c.h_original))
+    assert p2c == p2b
+    assert ffi.cast("gcptr", p2c.h_original) == p2
+
+def test_more_h_original_1():
+    p2 = oalloc_refs(1); make_public(p2)
+    lib.stm_push_root(p2)
+    def f1(_):
+        p1 = oalloc(HDR + WORD)
+        lib.rawsetlong(p1, 0, -8922908)
+        setptr(p2, 0, p1)
+    run_parallel(f1)
+    p2 = lib.stm_pop_root()
+    p1 = getptr(p2, 0)
+    assert classify(p1) == "stub"
+    assert not lib.in_nursery(p1)
+    p1org = p1.h_original
+    assert p1org != 0
+    assert classify(ffi.cast("gcptr", p1org)) == "protected"
+    assert not lib.in_nursery(ffi.cast("gcptr", p1org))
+    assert lib.getlong(p1, 0) == -8922908
+    p1r = lib.stm_read_barrier(p1)    # protected->public
+    assert classify(p1r) == "public"
+    assert p1r == ffi.cast("gcptr", p1org)
+    assert p1r.h_original == 0
+    #
+    lib.stm_push_root(p2)
+    major_collect()
+    p2 = lib.stm_pop_root()
+    check_not_free(ffi.cast("gcptr", p1org))
+    p1 = getptr(p2, 0)
+    assert p1 == p1r
+    assert p1.h_original == 0
+    assert classify(p1) == "public"
+    assert ffi.cast("gcptr", p1org) == p1
+    assert lib.getlong(p1, 0) == -8922908
+
+def test_more_h_original_2():
+    p2 = oalloc_refs(1); make_public(p2)
+    lib.stm_push_root(p2)
+    def f1(_):
+        p1 = oalloc(HDR + WORD)
+        lib.rawsetlong(p1, 0, -8922908)
+        setptr(p2, 0, p1)
+    run_parallel(f1)
+    p2 = lib.stm_pop_root()
+    p1 = getptr(p2, 0)
+    assert classify(p1) == "stub"
+    assert not lib.in_nursery(p1)
+    p1org = p1.h_original
+    assert p1org != 0
+    assert classify(ffi.cast("gcptr", p1org)) == "protected"
+    assert not lib.in_nursery(ffi.cast("gcptr", p1org))
+    #
+    lib.stm_push_root(p2)
+    major_collect()
+    p2 = lib.stm_pop_root()
+    check_not_free(p1)
+    check_not_free(ffi.cast("gcptr", p1org))
+    p1b = getptr(p2, 0)
+    assert p1b == p1
+    assert p1b.h_original == p1org
+    assert classify(p1b) == "stub"
+    assert lib.getlong(p1, 0) == -8922908
