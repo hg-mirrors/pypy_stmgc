@@ -1,7 +1,6 @@
 #include "stmimpl.h"
 
-
-static int is_in_nursery(struct tx_descriptor *d, gcptr obj)
+int stmgc_is_in_nursery(struct tx_descriptor *d, gcptr obj)
 {
     return (d->nursery_base <= (char*)obj && ((char*)obj) < d->nursery_end);
 }
@@ -54,6 +53,7 @@ void stmgc_done_nursery(void)
 
     gcptrlist_delete(&d->old_objects_to_trace);
     gcptrlist_delete(&d->public_with_young_copy);
+    gcptrlist_delete(&d->young_weakrefs);
 }
 
 void stmgc_minor_collect_soon(void)
@@ -100,6 +100,13 @@ gcptr stm_allocate(size_t size, unsigned long tid)
     return P;
 }
 
+gcptr stm_allocate_immutable(size_t size, unsigned long tid)
+{
+    gcptr P = stm_allocate(size, tid);
+    P->h_tid |= GCFLAG_IMMUTABLE;
+    return P;
+}
+
 gcptr stmgc_duplicate(gcptr P)
 {
     size_t size = stmgc_size(P);
@@ -129,7 +136,7 @@ gcptr stmgc_duplicate_old(gcptr P)
 static inline gcptr create_old_object_copy(gcptr obj)
 {
     assert(!(obj->h_tid & GCFLAG_PUBLIC));
-    assert(!(obj->h_tid & GCFLAG_NURSERY_MOVED));
+    assert(!(obj->h_tid & GCFLAG_MOVED));
     assert(!(obj->h_tid & GCFLAG_VISITED));
     assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
     assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
@@ -147,14 +154,14 @@ static void visit_if_young(gcptr *root)
     gcptr fresh_old_copy;
     struct tx_descriptor *d = thread_descriptor;
 
-    if (!is_in_nursery(d, obj)) {
+    if (!stmgc_is_in_nursery(d, obj)) {
         /* not a nursery object */
     }
     else {
         /* it's a nursery object.  Was it already moved? */
-        if (UNLIKELY(obj->h_tid & GCFLAG_NURSERY_MOVED)) {
+        if (UNLIKELY(obj->h_tid & GCFLAG_MOVED)) {
             /* yes.  Such an object can be a public object in the nursery
-               too (such objects are always NURSERY_MOVED).  For all cases,
+               too (such objects are always MOVED).  For all cases,
                we can just fix the ref. 
                Can be stolen objects or those we already moved.
             */
@@ -175,7 +182,7 @@ static void visit_if_young(gcptr *root)
             fresh_old_copy = create_old_object_copy(obj);
         }
         
-        obj->h_tid |= GCFLAG_NURSERY_MOVED;
+        obj->h_tid |= GCFLAG_MOVED;
         obj->h_revision = (revision_t)fresh_old_copy;
 
         /* fix the original reference */
@@ -389,17 +396,17 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
     for (i = d->list_of_read_objects.size - 1; i >= limit; --i) {
         gcptr obj = items[i];
 
-        if (!is_in_nursery(d, obj)) {
+        if (!stmgc_is_in_nursery(d, obj)) {
             /* non-young or visited young objects are kept */
             continue;
         }
-        else if (obj->h_tid & GCFLAG_NURSERY_MOVED) {
+        else if (obj->h_tid & GCFLAG_MOVED) {
             /* visited nursery objects are kept and updated */
             items[i] = (gcptr)obj->h_revision;
             assert(!(items[i]->h_tid & GCFLAG_STUB));
             continue;
         }
-        /* Sanity check: a nursery object without the NURSERY_MOVED flag
+        /* Sanity check: a nursery object without the MOVED flag
            is necessarily a private-without-backup object, or a protected
            object; it cannot be a public object. */
         assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
@@ -423,6 +430,7 @@ static void teardown_minor_collect(struct tx_descriptor *d)
 {
     assert(gcptrlist_size(&d->old_objects_to_trace) == 0);
     assert(gcptrlist_size(&d->public_with_young_copy) == 0);
+    assert(gcptrlist_size(&d->young_weakrefs) == 0);
     assert(gcptrlist_size(&d->public_descriptor->stolen_objects) == 0);
 
     spinlock_release(d->public_descriptor->collection_lock);
@@ -438,7 +446,7 @@ static void minor_collect(struct tx_descriptor *d)
     setup_minor_collect(d);
 
     /* first do this, which asserts that some objects are private ---
-       which fails if they have already been GCFLAG_NURSERY_MOVED */
+       which fails if they have already been GCFLAG_MOVED */
     mark_public_to_young(d);
 
     mark_young_roots(d);
@@ -458,6 +466,8 @@ static void minor_collect(struct tx_descriptor *d)
        surviving young-but-outside-the-nursery objects have been flagged
        with GCFLAG_OLD
     */
+    stm_move_young_weakrefs(d);
+
     teardown_minor_collect(d);
     assert(!stm_has_got_any_lock(d));
 
@@ -524,6 +534,7 @@ int minor_collect_anything_to_do(struct tx_descriptor *d)
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
+        assert(gcptrlist_size(&d->young_weakrefs) == 0);
         assert(gcptrlist_size(&d->list_of_read_objects) >=
                d->num_read_objects_known_old);
         assert(gcptrlist_size(&d->private_from_protected) >=

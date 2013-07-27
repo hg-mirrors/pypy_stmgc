@@ -104,13 +104,28 @@ def test_latest_version():
             assert ffi.string(c).endswith("ei424242ee")
 
 def test_pointer_equal():
-    p = palloc(HDR)
-    assert lib.stm_pointer_equal(p, p)
-    assert not lib.stm_pointer_equal(p, ffi.NULL)
-    assert not lib.stm_pointer_equal(ffi.NULL, p)
-    assert lib.stm_pointer_equal(ffi.NULL, ffi.NULL)
-    q = lib.stm_write_barrier(p)
-    assert q != p
-    assert lib.stm_pointer_equal(p, q)
-    assert lib.stm_pointer_equal(q, q)
-    assert lib.stm_pointer_equal(q, p)
+    p1 = palloc(HDR + WORD)
+    p2 = palloc(HDR + WORD)
+    p3 = oalloc(HDR + WORD)
+    p4 = nalloc(HDR + WORD)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    p1b = lib.stm_write_barrier(p1)
+    p2b = lib.stm_write_barrier(p2)
+    p3b = lib.stm_write_barrier(p3)
+    p4b = lib.stm_write_barrier(p4)
+    #
+    got = []
+    for qa in [ffi.NULL, p1, p1b, p2, p2b, p3, p3b, p4, p4b]:
+        for qb in [ffi.NULL, p1, p1b, p2, p2b, p3, p3b, p4, p4b]:
+            got.append(lib.stm_pointer_equal(qa, qb))
+    #
+    assert got == [1, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 1, 1, 0, 0, 0, 0, 0, 0,
+                   0, 1, 1, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 1, 1, 0, 0, 0, 0,
+                   0, 0, 0, 1, 1, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 1, 1, 0, 0,
+                   0, 0, 0, 0, 0, 1, 1, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 1, 1,
+                   0, 0, 0, 0, 0, 0, 0, 1, 1]

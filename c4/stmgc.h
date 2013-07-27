@@ -23,12 +23,16 @@ typedef struct stm_object_s {
 #define STM_SIZE_OF_USER_TID       (sizeof(revision_t) / 2)    /* in bytes */
 #define STM_FIRST_GCFLAG           (1L << (8 * STM_SIZE_OF_USER_TID))
 #define STM_USER_TID_MASK          (STM_FIRST_GCFLAG - 1)
-#define PREBUILT_FLAGS             (STM_FIRST_GCFLAG * (1 + 2 + 4 + 8))
+#define PREBUILT_FLAGS             (STM_FIRST_GCFLAG * ((1<<0) | (1<<1) |    \
+                                               (1<<2) | (1<<3) | (1<<13)))
 #define PREBUILT_REVISION          1
 
 
 /* allocate an object out of the local nursery */
 gcptr stm_allocate(size_t size, unsigned long tid);
+/* allocate an object that is be immutable. it cannot be changed with
+   a stm_write_barrier() or after the next commit */
+gcptr stm_allocate_immutable(size_t size, unsigned long tid);
 
 /* returns a never changing hash for the object */
 revision_t stm_hash(gcptr);
@@ -121,6 +125,14 @@ char *stm_inspect_abort_info(void);
 void stm_abort_and_retry(void);
 void stm_minor_collect(void);
 void stm_major_collect(void);
+
+/* weakref support: allocate a weakref object, and set it to point
+   weakly to 'obj'.  The weak pointer offset is hard-coded to be at
+   'size - WORD'.  Important: stmcb_trace() must NOT trace it.
+   Weakrefs are *immutable*!  Don't attempt to use stm_write_barrier()
+   on them. */
+gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj);
+
 
 
 /****************  END OF PUBLIC INTERFACE  *****************/

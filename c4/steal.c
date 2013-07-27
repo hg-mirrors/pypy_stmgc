@@ -23,9 +23,56 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
 {
     gcptr stub, obj = *pobj;
     if (obj == NULL || (obj->h_tid & (GCFLAG_PUBLIC | GCFLAG_OLD)) ==
-                        (GCFLAG_PUBLIC | GCFLAG_OLD))
+                                     (GCFLAG_PUBLIC | GCFLAG_OLD))
         return;
 
+    if (obj->h_tid & GCFLAG_IMMUTABLE) {
+        assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+        if (obj->h_tid & GCFLAG_PUBLIC) {
+            /* young public, replace with stolen old copy */
+            assert(obj->h_tid & GCFLAG_MOVED);
+            assert(IS_POINTER(obj->h_revision));
+            stub = (gcptr)obj->h_revision;
+            assert(!IS_POINTER(stub->h_revision)); /* not outdated */
+            goto done;
+        }
+
+        /* old or young protected! mark as PUBLIC */
+        if (!(obj->h_tid & GCFLAG_OLD)) {
+            /* young protected */
+            gcptr O;
+            
+            if (obj->h_tid & GCFLAG_HAS_ID) {
+                /* use id-copy for us */
+                O = (gcptr)obj->h_original;
+                obj->h_tid &= ~GCFLAG_HAS_ID;
+                stm_copy_to_old_id_copy(obj, O);
+                O->h_original = 0;
+            } else {
+                O = stmgc_duplicate_old(obj);
+                
+                /* young and without original? */
+                if (!(obj->h_original))
+                    obj->h_original = (revision_t)O;
+            }
+            obj->h_tid |= (GCFLAG_MOVED | GCFLAG_PUBLIC);
+            obj->h_revision = (revision_t)O;
+            
+            O->h_tid |= GCFLAG_PUBLIC;
+            /* here it is fine if it stays in read caches because
+               the object is immutable anyway and there are no
+               write_barriers allowed. */
+            dprintf(("steal prot immutable -> public: %p -> %p\n", obj, O));
+            stub = O;
+            goto done;
+        }
+        /* old protected: */
+        dprintf(("prot immutable -> public: %p\n", obj));
+        obj->h_tid |= GCFLAG_PUBLIC;
+        
+        return;
+    }
+    
     /* we use 'all_stubs', a dictionary, in order to try to avoid
        duplicate stubs for the same object.  XXX maybe it would be
        better to use a fast approximative cache that stays around for
@@ -57,6 +104,8 @@ static void replace_ptr_to_protected_with_stub(gcptr *pobj)
     stub->h_tid = (obj->h_tid & STM_USER_TID_MASK) | GCFLAG_PUBLIC
                                                    | GCFLAG_STUB
                                                    | GCFLAG_OLD;
+    if (size == 0)
+        stub->h_tid |= GCFLAG_SMALLSTUB;
     stub->h_revision = ((revision_t)obj) | 2;
     if (obj->h_original) {
         stub->h_original = obj->h_original;
@@ -158,7 +207,7 @@ void stm_steal_stub(gcptr P)
 
             /* note that we should follow h_revision at least one more
                step: it is necessary if L is public but young (and then
-               has GCFLAG_NURSERY_MOVED), but it is fine to do it more
+               has GCFLAG_MOVED), but it is fine to do it more
                generally. */
             v = ACCESS_ONCE(L->h_revision);
             if (IS_POINTER(v)) {
@@ -191,7 +240,7 @@ void stm_steal_stub(gcptr P)
             }
             L->h_revision = (revision_t)O;
 
-            L->h_tid |= GCFLAG_PUBLIC | GCFLAG_NURSERY_MOVED;
+            L->h_tid |= GCFLAG_PUBLIC | GCFLAG_MOVED;
             /* subtle: we need to remove L from the fxcache of the target
                thread, otherwise its read barrier might not trigger on it.
                It is mostly fine because it is anyway identical to O.  But

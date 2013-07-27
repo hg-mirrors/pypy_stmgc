@@ -20,7 +20,7 @@ def test_should_break_transaction():
 
 def test_set_transaction_length():
     lib.stm_set_transaction_length(5)    # breaks after 4 read-or-writes
-    plist = [palloc(HDR) for i in range(6)]
+    plist = [palloc(HDR + WORD) for i in range(6)]
     should_br = ['?'] * (len(plist) + 1)
     #
     @perform_transaction
