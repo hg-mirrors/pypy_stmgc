@@ -160,13 +160,13 @@ extern __thread char *stm_read_barrier_cache;
 #define UNLIKELY(test)  __builtin_expect(test, 0)
 
 #define stm_read_barrier(obj)                                   \
-    (UNLIKELY(((obj)->h_revision != stm_private_rev_num) &      \
+    (UNLIKELY(((obj)->h_revision != stm_private_rev_num) &&     \
               (FXCACHE_AT(obj) != (obj))) ?                     \
         stm_DirectReadBarrier(obj)                              \
      :  (obj))
 
 #define stm_write_barrier(obj)                                  \
-    (UNLIKELY(((obj)->h_revision != stm_private_rev_num) |      \
+    (UNLIKELY(((obj)->h_revision != stm_private_rev_num) ||     \
               (((obj)->h_tid & GCFLAG_WRITE_BARRIER) != 0)) ?   \
         stm_WriteBarrier(obj)                                   \
      :  (obj))
