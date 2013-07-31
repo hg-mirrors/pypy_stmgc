@@ -81,6 +81,7 @@ struct thread_data {
     int steps_left;
     int interruptible;
     int atomic;
+    char to_clear_on_abort[20];
 };
 __thread struct thread_data td;
 
@@ -360,6 +361,10 @@ void setup_thread()
     td.interruptible = 0;
     td.atomic = 0;
 
+    stm_clear_on_abort(&td.to_clear_on_abort, sizeof(td.to_clear_on_abort));
+    td.to_clear_on_abort[0] = 1;
+    td.to_clear_on_abort[19] = 1;
+
     td.num_roots = PREBUILT + NUMROOTS;
     for (i = 0; i < PREBUILT; i++) {
         if (i % 3 == 0) {
@@ -637,6 +642,17 @@ void transaction_break()
 
 int interruptible_callback(gcptr arg1, int retry_counter)
 {
+    if (retry_counter) {
+        assert(td.to_clear_on_abort[0] == 0);
+        assert(td.to_clear_on_abort[19] == 0);
+        td.to_clear_on_abort[0] = 1;
+        td.to_clear_on_abort[19] = 1;
+    }
+    else {
+        assert(td.to_clear_on_abort[0] == 1);
+        assert(td.to_clear_on_abort[19] == 1);
+    }
+
     td.num_roots = td.num_roots_outside_perform;
     // done & overwritten by the following pop_roots():
     // copy_roots(td.roots_outside_perform, td.roots, td.num_roots);
