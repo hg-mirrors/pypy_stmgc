@@ -713,3 +713,19 @@ def test_enter_callback_call():
     assert x == 1
     lib.stm_leave_callback_call(x)
     lib.stm_initialize_tests(0)
+
+def test_repeat_read_barrier():
+    p = nalloc(HDR + WORD)
+    assert lib.stm_repeat_read_barrier(p) == p
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert lib.stm_repeat_read_barrier(p) == p
+    #
+    p = palloc(HDR + WORD)
+    assert classify(p) == "public"
+    assert lib.stm_read_barrier(p) == p
+    q = lib.stm_write_barrier(p)
+    assert classify(q) == "private"
+    assert q != p
+    assert lib.stm_repeat_read_barrier(q) == q
+    assert lib.stm_repeat_read_barrier(p) == q

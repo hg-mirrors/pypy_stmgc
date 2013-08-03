@@ -204,7 +204,7 @@ size_t stm_decode_abort_info(struct tx_descriptor *d, long long elapsed_time,
     WRITE_BUF(buffer, res_size);
     WRITE('e');
     for (i=0; i<d->abortinfo.size; i+=2) {
-        char *object = (char *)stm_RepeatReadBarrier(d->abortinfo.items[i+0]);
+        char *object = (char*)stm_repeat_read_barrier(d->abortinfo.items[i+0]);
         long *fieldoffsets = (long*)d->abortinfo.items[i+1];
         long kind, offset;
         size_t rps_size;
