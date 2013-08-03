@@ -729,3 +729,19 @@ def test_repeat_read_barrier():
     assert q != p
     assert lib.stm_repeat_read_barrier(q) == q
     assert lib.stm_repeat_read_barrier(p) == q
+
+def test_immut_read_barrier():
+    p = palloc(HDR + WORD)
+    p2 = lib.stm_write_barrier(p)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert classify(p) == "public"
+    assert classify(p2) == "protected"
+    pstub = ffi.cast("gcptr", p.h_revision)
+    assert classify(pstub) == "stub"
+    assert lib.stm_immut_read_barrier(p) == p
+    assert lib.stm_immut_read_barrier(pstub) == p2
+    assert lib.stm_immut_read_barrier(p2) == p2
+    assert lib.stm_read_barrier(p2) == p2
+    assert lib.stm_read_barrier(pstub) == p2
+    assert lib.stm_read_barrier(p) == p2

@@ -58,6 +58,7 @@ ffi.cdef('''
     gcptr stm_read_barrier(gcptr);
     gcptr stm_write_barrier(gcptr);
     gcptr stm_repeat_read_barrier(gcptr);
+    gcptr stm_immut_read_barrier(gcptr);
     void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int));
     void stm_commit_transaction(void);
     void stm_begin_inevitable_transaction(void);
