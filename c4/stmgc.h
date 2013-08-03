@@ -75,11 +75,16 @@ void stm_leave_callback_call(int);
      The only thing that may have occurred is that a
      stm_write_barrier() on the same object could have made it
      invalid.
+
+   - a different optimization is to read immutable fields: in order
+     to do that, use stm_immut_read_barrier(), which only activates
+     on stubs.
 */
 #if 0     // (optimized version below)
 gcptr stm_read_barrier(gcptr);
 gcptr stm_write_barrier(gcptr);
 gcptr stm_repeat_read_barrier(gcptr);
+gcptr stm_immut_read_barrier(gcptr);
 #endif
 
 /* start a new transaction, calls callback(), and when it returns
@@ -169,6 +174,7 @@ gcptr stm_WriteBarrier(gcptr);
 static const revision_t GCFLAG_PUBLIC_TO_PRIVATE = STM_FIRST_GCFLAG << 4;
 static const revision_t GCFLAG_WRITE_BARRIER = STM_FIRST_GCFLAG << 5;
 static const revision_t GCFLAG_MOVED = STM_FIRST_GCFLAG << 6;
+static const revision_t GCFLAG_STUB = STM_FIRST_GCFLAG << 8;
 extern __thread char *stm_read_barrier_cache;
 #define FX_MASK 65535
 #define FXCACHE_AT(obj)  \
@@ -191,6 +197,11 @@ extern __thread char *stm_read_barrier_cache;
 #define stm_repeat_read_barrier(obj)                            \
     (UNLIKELY((obj)->h_tid & (GCFLAG_PUBLIC_TO_PRIVATE | GCFLAG_MOVED)) ? \
         stm_RepeatReadBarrier(obj)                              \
+     :  (obj))
+
+#define stm_immut_read_barrier(obj)                             \
+    (UNLIKELY((obj)->h_tid & GCFLAG_STUB) ?                     \
+        stm_ImmutReadBarrier(obj)                               \
      :  (obj))
 
 

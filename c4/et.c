@@ -318,6 +318,41 @@ gcptr stm_RepeatReadBarrier(gcptr P)
   return P;
 }
 
+gcptr stm_ImmutReadBarrier(gcptr P)
+{
+  assert(P->h_tid & GCFLAG_STUB);
+  assert(P->h_tid & GCFLAG_PUBLIC);
+
+  revision_t v = ACCESS_ONCE(P->h_revision);
+  assert(IS_POINTER(v));  /* "is a pointer", "has a more recent revision" */
+
+  if (!(v & 2))
+    {
+      P = (gcptr)v;
+    }
+  else
+    {
+      /* follow a stub reference */
+      struct tx_descriptor *d = thread_descriptor;
+      struct tx_public_descriptor *foreign_pd = STUB_THREAD(P);
+      if (foreign_pd == d->public_descriptor)
+        {
+          /* Same thread: dereference the pointer directly. */
+          dprintf(("immut_read_barrier: %p -> %p via stub\n  ", P,
+                   (gcptr)(v - 2)));
+          P = (gcptr)(v - 2);
+        }
+      else
+        {
+          /* stealing: needed because accessing v - 2 from this thread
+             is forbidden (the target might disappear under our feet) */
+          dprintf(("immut_read_barrier: %p -> stealing...\n  ", P));
+          stm_steal_stub(P);
+        }
+    }
+  return stm_immut_read_barrier(P);   /* retry */
+}
+
 static gcptr _match_public_to_private(gcptr P, gcptr pubobj, gcptr privobj,
                                       int from_stolen)
 {
