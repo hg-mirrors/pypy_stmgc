@@ -276,28 +276,45 @@ gcptr stm_RepeatReadBarrier(gcptr P)
   /* Version of stm_DirectReadBarrier() that doesn't abort and assumes
    * that 'P' was already an up-to-date result of a previous
    * stm_DirectReadBarrier().  We only have to check if we did in the
-   * meantime a stm_write_barrier().
+   * meantime a stm_write_barrier().  Should only be called if we
+   * have the flag PUBLIC_TO_PRIVATE or on MOVED objects.  This version
+   * should never abort (it is used in stm_decode_abort_info()).
    */
-  if (P->h_tid & GCFLAG_PUBLIC)
-    {
-      if (P->h_tid & GCFLAG_MOVED)
-        {
-          P = (gcptr)P->h_revision;
-          assert(P->h_tid & GCFLAG_PUBLIC);
-        }
-      if (P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE)
-        {
-          struct tx_descriptor *d = thread_descriptor;
-          wlog_t *item;
-          G2L_FIND(d->public_to_private, P, item, goto no_private_obj);
-
-          P = item->val;
-          assert(!(P->h_tid & GCFLAG_PUBLIC));
-        no_private_obj:
-          ;
-        }
-    }
+  assert(P->h_tid & GCFLAG_PUBLIC);
   assert(!(P->h_tid & GCFLAG_STUB));
+
+  if (P->h_tid & GCFLAG_MOVED)
+    {
+      dprintf(("repeat_read_barrier: %p -> %p moved\n", P,
+               (gcptr)P->h_revision));
+      P = (gcptr)P->h_revision;
+      assert(P->h_tid & GCFLAG_PUBLIC);
+      assert(!(P->h_tid & GCFLAG_STUB));
+      assert(!(P->h_tid & GCFLAG_MOVED));
+      if (!(P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE))
+        return P;
+    }
+  assert(P->h_tid & GCFLAG_PUBLIC_TO_PRIVATE);
+
+  struct tx_descriptor *d = thread_descriptor;
+  wlog_t *item;
+  G2L_FIND(d->public_to_private, P, item, goto no_private_obj);
+
+  /* We have a key in 'public_to_private'.  The value is the
+     corresponding private object. */
+  dprintf(("repeat_read_barrier: %p -> %p public_to_private\n", P, item->val));
+  P = item->val;
+  assert(!(P->h_tid & GCFLAG_PUBLIC));
+  assert(!(P->h_tid & GCFLAG_STUB));
+  assert(is_private(P));
+  return P;
+
+ no_private_obj:
+  /* Key not found.  It should not be waiting in 'stolen_objects',
+     because this case from steal.c applies to objects to were originally
+     backup objects.  'P' cannot be a backup object if it was obtained
+     earlier as a result of stm_read_barrier().
+  */
   return P;
 }
 

@@ -58,7 +58,7 @@ void stm_finalize(void);
 int stm_enter_callback_call(void);
 void stm_leave_callback_call(int);
 
-/* read/write barriers (the most general versions only for now).
+/* read/write barriers.
 
    - the read barrier must be applied before reading from an object.
      the result is valid as long as we're in the same transaction,
@@ -68,10 +68,18 @@ void stm_leave_callback_call(int);
      the result is valid for a shorter period of time: we have to
      do stm_write_barrier() again if we ended the transaction, or
      if we did a potential collection (e.g. stm_allocate()).
+
+   - as an optimization, stm_repeat_read_barrier() can be used
+     instead of stm_read_barrier() if the object was already
+     obtained by a stm_read_barrier() in the same transaction.
+     The only thing that may have occurred is that a
+     stm_write_barrier() on the same object could have made it
+     invalid.
 */
 #if 0     // (optimized version below)
 gcptr stm_read_barrier(gcptr);
 gcptr stm_write_barrier(gcptr);
+gcptr stm_repeat_read_barrier(gcptr);
 #endif
 
 /* start a new transaction, calls callback(), and when it returns
@@ -158,7 +166,9 @@ extern __thread gcptr *stm_shadowstack;
 extern __thread revision_t stm_private_rev_num;
 gcptr stm_DirectReadBarrier(gcptr);
 gcptr stm_WriteBarrier(gcptr);
+static const revision_t GCFLAG_PUBLIC_TO_PRIVATE = STM_FIRST_GCFLAG << 4;
 static const revision_t GCFLAG_WRITE_BARRIER = STM_FIRST_GCFLAG << 5;
+static const revision_t GCFLAG_MOVED = STM_FIRST_GCFLAG << 6;
 extern __thread char *stm_read_barrier_cache;
 #define FX_MASK 65535
 #define FXCACHE_AT(obj)  \
@@ -176,6 +186,11 @@ extern __thread char *stm_read_barrier_cache;
     (UNLIKELY(((obj)->h_revision != stm_private_rev_num) ||     \
               (((obj)->h_tid & GCFLAG_WRITE_BARRIER) != 0)) ?   \
         stm_WriteBarrier(obj)                                   \
+     :  (obj))
+
+#define stm_repeat_read_barrier(obj)                            \
+    (UNLIKELY((obj)->h_tid & (GCFLAG_PUBLIC_TO_PRIVATE | GCFLAG_MOVED)) ? \
+        stm_RepeatReadBarrier(obj)                              \
      :  (obj))
 
 
