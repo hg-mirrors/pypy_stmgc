@@ -129,3 +129,30 @@ def test_pointer_equal():
                    0, 0, 0, 0, 0, 1, 1, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 1, 1,
                    0, 0, 0, 0, 0, 0, 0, 1, 1]
+
+def test_pointer_equal_prebuilt():
+    p1 = palloc(HDR + WORD)
+    p2 = palloc(HDR + WORD)
+    p3 = oalloc(HDR + WORD)
+    p4 = nalloc(HDR + WORD)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    p1b = lib.stm_write_barrier(p1)
+    p2b = lib.stm_write_barrier(p2)
+    p3b = lib.stm_write_barrier(p3)
+    p4b = lib.stm_write_barrier(p4)
+    #
+    got = []
+    for qa in [ffi.NULL, p1, p1b, p2, p2b, p3, p3b, p4, p4b]:
+        for qb in [p1, p2]:
+            got.append(lib.stm_pointer_equal_prebuilt(qa, qb))
+    #
+    assert got == [0, 0,
+                   1, 0,
+                   1, 0,
+                   0, 1,
+                   0, 1,
+                   0, 0,
+                   0, 0,
+                   0, 0,
+                   0, 0]

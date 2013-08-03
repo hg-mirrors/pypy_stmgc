@@ -41,6 +41,7 @@ revision_t stm_id(gcptr);
 /* returns nonzero if the two object-copy pointers belong to the
 same original object */
 _Bool stm_pointer_equal(gcptr, gcptr);
+_Bool stm_pointer_equal_prebuilt(gcptr, gcptr); /* 2nd arg is known prebuilt */
 
 /* to push/pop objects into the local shadowstack */
 #if 0     // (optimized version below)
