@@ -79,12 +79,17 @@ void stm_leave_callback_call(int);
    - a different optimization is to read immutable fields: in order
      to do that, use stm_immut_read_barrier(), which only activates
      on stubs.
+
+   - stm_repeat_write_barrier() can be used on an object on which
+     we already did stm_write_barrier(), but a potential collection
+     can have occurred.
 */
 #if 0     // (optimized version below)
 gcptr stm_read_barrier(gcptr);
 gcptr stm_write_barrier(gcptr);
 gcptr stm_repeat_read_barrier(gcptr);
 gcptr stm_immut_read_barrier(gcptr);
+gcptr stm_repeat_write_barrier(gcptr);   /* <= always returns its argument */
 #endif
 
 /* start a new transaction, calls callback(), and when it returns
@@ -202,6 +207,11 @@ extern __thread char *stm_read_barrier_cache;
 #define stm_immut_read_barrier(obj)                             \
     (UNLIKELY((obj)->h_tid & GCFLAG_STUB) ?                     \
         stm_ImmutReadBarrier(obj)                               \
+     :  (obj))
+
+#define stm_repeat_write_barrier(obj)                           \
+    (UNLIKELY((obj)->h_tid & GCFLAG_WRITE_BARRIER) ?            \
+        stm_RepeatWriteBarrier(obj)                             \
      :  (obj))
 
 

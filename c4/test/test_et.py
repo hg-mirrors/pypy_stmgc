@@ -745,3 +745,20 @@ def test_immut_read_barrier():
     assert lib.stm_read_barrier(p2) == p2
     assert lib.stm_read_barrier(pstub) == p2
     assert lib.stm_read_barrier(p) == p2
+
+def test_repeat_write_barrier():
+    n = nalloc_refs(1)
+    lib.stm_push_root(n)
+    minor_collect()
+    n = lib.stm_pop_root()
+    q = nalloc(HDR + WORD)
+    lib.rawsetlong(q, 0, 1298719)
+    n1 = lib.stm_repeat_write_barrier(n)
+    assert n1 == n
+    lib.rawsetptr(n, 0, q)
+    lib.stm_push_root(n)
+    minor_collect()
+    n1 = lib.stm_pop_root()
+    assert n1 == n
+    q = lib.rawgetptr(n, 0)
+    assert lib.rawgetlong(q, 0) == 1298719

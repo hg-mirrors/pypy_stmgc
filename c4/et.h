@@ -198,6 +198,7 @@ gcptr stm_DirectReadBarrier(gcptr);
 gcptr stm_WriteBarrier(gcptr);
 gcptr stm_RepeatReadBarrier(gcptr);
 gcptr stm_ImmutReadBarrier(gcptr);
+gcptr stm_RepeatWriteBarrier(gcptr);
 gcptr _stm_nonrecord_barrier(gcptr);  /* debugging: read barrier, but
                                          not recording anything */
 int _stm_is_private(gcptr);  /* debugging */

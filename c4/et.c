@@ -618,6 +618,16 @@ static inline void record_write_barrier(gcptr P)
     }
 }
 
+gcptr stm_RepeatWriteBarrier(gcptr P)
+{
+  assert(!(P->h_tid & GCFLAG_IMMUTABLE));
+  assert(is_private(P));
+  assert(P->h_tid & GCFLAG_WRITE_BARRIER);
+  P->h_tid &= ~GCFLAG_WRITE_BARRIER;
+  gcptrlist_insert(&thread_descriptor->old_objects_to_trace, P);
+  return P;
+}
+
 gcptr stm_WriteBarrier(gcptr P)
 {
   assert(!(P->h_tid & GCFLAG_IMMUTABLE));
