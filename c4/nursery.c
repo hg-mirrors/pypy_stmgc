@@ -175,6 +175,7 @@ static void visit_if_young(gcptr *root)
 
             stm_copy_to_old_id_copy(obj, id_obj);
             fresh_old_copy = id_obj;
+            fresh_old_copy->h_original = 0;
             obj->h_tid &= ~GCFLAG_HAS_ID;
         } 
         else {

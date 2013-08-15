@@ -156,3 +156,17 @@ def test_pointer_equal_prebuilt():
                    0, 0,
                    0, 0,
                    0, 0]
+
+def test_bug():
+    p1 = nalloc(HDR)
+    pid = lib.stm_id(p1)
+    lib.stm_push_root(p1)
+    minor_collect()
+    p1o = lib.stm_pop_root()
+
+    assert p1o == ffi.cast("gcptr", pid)
+    assert follow_original(p1o) == ffi.NULL
+    
+
+
+    
