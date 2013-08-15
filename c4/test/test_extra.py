@@ -157,7 +157,29 @@ def test_pointer_equal_prebuilt():
                    0, 0,
                    0, 0]
 
+def test_bug():
+    p1 = nalloc(HDR)
+    pid = lib.stm_id(p1)
+    lib.stm_push_root(p1)
+    minor_collect()
+    p1o = lib.stm_pop_root()
 
+    assert p1o == ffi.cast("gcptr", pid)
+    assert follow_original(p1o) == ffi.NULL
+    
+def test_bug2():
+    p = oalloc(HDR+WORD)
+    
+    def cb(c):
+        if c == 0:
+            pw = lib.stm_write_barrier(p)
+            abort_and_retry()
+    lib.stm_push_root(p)
+    perform_transaction(cb)
+    p = lib.stm_pop_root()
+    assert follow_original(p) == ffi.NULL
+
+    
 
 def test_allocate_public_integer_address():
     p1 = palloc(HDR)
