@@ -156,3 +156,47 @@ def test_pointer_equal_prebuilt():
                    0, 0,
                    0, 0,
                    0, 0]
+
+
+
+def test_allocate_public_integer_address():
+    p1 = palloc(HDR)
+    p2 = oalloc(HDR)
+    p3 = nalloc(HDR)
+    lib.stm_push_root(p3)
+    p3p = lib.stm_allocate_public_integer_address(p3)
+    p1p = lib.stm_allocate_public_integer_address(p1)
+    p2p = lib.stm_allocate_public_integer_address(p2)
+
+    # p3 stub points to p3o:
+    p3o = lib.stm_pop_root()
+    p3po = ffi.cast("gcptr", p3p)
+    assert ffi.cast("gcptr", p3po.h_revision - 2) == p3o
+
+    # we have stubs here:
+    assert ffi.cast("gcptr", p1p).h_tid & GCFLAG_PUBLIC
+    assert classify(ffi.cast("gcptr", p1p)) == 'stub'
+    assert classify(ffi.cast("gcptr", p2p)) == 'stub'
+    assert classify(ffi.cast("gcptr", p3p)) == 'stub'
+
+    major_collect()
+
+    # kept alive through stubs:
+    check_not_free(p3o)
+    check_not_free(p2)
+
+    check_not_free(ffi.cast("gcptr", p1p))
+    check_not_free(ffi.cast("gcptr", p2p))
+    check_not_free(ffi.cast("gcptr", p3p))
+
+    lib.stm_unregister_integer_address(p1p)
+    lib.stm_unregister_integer_address(p2p)
+    lib.stm_unregister_integer_address(p3p)
+
+    major_collect()
+    major_collect()
+    
+    check_free_old(p3o)
+    check_free_old(p2)
+    
+    
