@@ -60,6 +60,8 @@ intptr_t stm_allocate_public_integer_address(gcptr obj)
     result = (intptr_t)stub;
     spinlock_release(d->public_descriptor->collection_lock);
     stm_register_integer_address(result);
+
+    dprintf(("allocate_public_int_adr(%p): %p", obj, stub));
     return result;
 }
 
