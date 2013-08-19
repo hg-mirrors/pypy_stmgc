@@ -157,7 +157,7 @@ def test_pointer_equal_prebuilt():
                    0, 0,
                    0, 0]
 
-def test_bug():
+def test_clear_original_on_id_copy():
     p1 = nalloc(HDR)
     pid = lib.stm_id(p1)
     lib.stm_push_root(p1)
@@ -167,7 +167,7 @@ def test_bug():
     assert p1o == ffi.cast("gcptr", pid)
     assert follow_original(p1o) == ffi.NULL
     
-def test_bug2():
+def test_clear_original_on_priv_from_prot_abort():
     p = oalloc(HDR+WORD)
     
     def cb(c):
@@ -179,6 +179,25 @@ def test_bug2():
     p = lib.stm_pop_root()
     assert follow_original(p) == ffi.NULL
 
+def test_set_backups_original_on_move_to_id_copy():
+    p1 = nalloc(HDR+WORD)
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert classify(p1) == 'protected'
+
+    pw = lib.stm_write_barrier(p1)
+    assert classify(pw) == 'private_from_protected'
+    assert pw == p1
+    
+    lib.stm_push_root(pw)
+    # make pw old
+    minor_collect()
+    p1o = lib.stm_pop_root()
+
+    # Backup has updated h_original:
+    assert classify(p1o) == 'private_from_protected'
+    B = follow_revision(p1o)
+    assert follow_original(B) == p1o
     
 
 def test_allocate_public_integer_address():
