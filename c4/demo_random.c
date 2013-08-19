@@ -20,6 +20,7 @@ extern revision_t get_private_rev_num(void);
 #define MAXROOTS 1000
 #define SHARED_ROOTS 5 // shared by threads
 #define DO_MAJOR_COLLECTS 1
+#define MAX_PUBLIC_INTS 5
 
 
 
@@ -82,6 +83,8 @@ struct thread_data {
     int interruptible;
     int atomic;
     char to_clear_on_abort[20];
+    intptr_t public_ints[MAX_PUBLIC_INTS];
+    int num_public_ints;
 };
 __thread struct thread_data td;
 
@@ -266,6 +269,38 @@ void check(gcptr p)
     }
 }
 
+void check_public_ints()
+{
+    int i;
+    for (i = 0; i < td.num_public_ints; i++) {
+        intptr_t ip = td.public_ints[i];
+        gcptr obj = (gcptr)ip;
+        assert(obj->h_tid & GCFLAG_PUBLIC);
+        assert(obj->h_tid & GCFLAG_SMALLSTUB);
+        check(obj);
+        check((gcptr)(obj->h_revision - 2));
+    }
+}
+
+void add_as_public_int(gcptr p)
+{
+    if (!p || td.num_public_ints >= MAX_PUBLIC_INTS)
+        return;
+
+    push_roots();
+    intptr_t ip = stm_allocate_public_integer_address(p);
+    pop_roots();
+    td.public_ints[td.num_public_ints++] = ip;
+}
+
+void pop_public_int()
+{
+    if (td.num_public_ints == 0)
+        return;
+
+    stm_unregister_integer_address(td.public_ints[--td.num_public_ints]);
+}
+
 gcptr read_barrier(gcptr p)
 {
     gcptr r = p;
@@ -401,6 +436,7 @@ void setup_thread()
 
 gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
 {
+    check_public_ints();
     int k = get_rand(100);
     if (k < 10) {
         push_roots();
@@ -408,13 +444,22 @@ gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
         stm_become_inevitable("fun");
         p = stm_pop_root();
         pop_roots();
-    } 
+    }
     else if (k < 40) {
         push_roots();
         stmgc_minor_collect();
         pop_roots();
         p = NULL;
-    } else if (k < 41 && DO_MAJOR_COLLECTS) {
+    }
+    else if (k < 50) {
+        add_as_public_int(p);
+        p = NULL;
+    }
+    else if (k < 60) {
+        pop_public_int();
+        p = NULL;
+    }
+    else if (k < 61 && DO_MAJOR_COLLECTS) {
         fprintf(stdout, "major collect\n");
         push_roots();
         stmgcpage_possibly_major_collect(1);
