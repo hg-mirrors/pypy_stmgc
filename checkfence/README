@@ -1,0 +1,56 @@
+Installing checkfence on Linux 64
+---------------------------------
+
+apt-get install bison flex ocaml ocaml-findlib
+
+cvs -z3 -d:pserver:anonymous@checkfence.cvs.sourceforge.net:/cvsroot/checkfence co -P checkfence
+
+cvs -z3 -d:pserver:anonymous@checkfence.cvs.sourceforge.net:/cvsroot/checkfence co -P c2lsl
+
+
+http://www.princeton.edu/~chaff/zchaff.html
+   for Linux 64 you need zchaff.64bit.2007.3.12.zip.
+   I did not try the 32-bit version.
+
+   Build with "make -j1".
+
+   This is C++ code with errors: it's missing these lines
+       #include <cstdlib>
+       #include <cstring>
+   at the top of some files.  Add as you get the errors.
+
+
+CIL version 1.3.7 (the more recent 1.7.3 doesn't work here)
+   http://sourceforge.net/projects/cil/files/cil/cil-1.3.7/
+
+   cd /usr/lib/ocaml
+   sudo ln -s libcamlstr.a libstr.a
+   
+   ./configure
+   make -j1
+
+
+Compiling checkfence:
+   cd checkfence/build
+   
+   edit the Makefile: ZCHAFFDIR=/path/to/zchaff64
+   make opt
+
+
+Compiling C2LSL:
+   cd c2lsl
+   
+   edit the Makefile: CILDIR=/path/to/cil-1.3.7
+   and also: CILINCLUDES=....x86_LINUX (instead of x86_WIN32)
+
+   make -j1
+
+
+
+Running the examples:
+   cd c4
+   ln -s /full/path/to/c2lsl
+   ln -s /full/path/to/checkfence
+   ./run test1.c test1.lsl
+
+   Look at 'T0.bsc-overview.htm' in your web browser.
