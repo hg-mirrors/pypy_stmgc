@@ -52,7 +52,7 @@ void i()
     o1.h_revision = 0;
     o1.h_original = 0;
     o1.value      = 50;
-    global_timestamp = 2;
+    global_timestamp = 0;
 }
 
 void commit(struct tx_descriptor *d)
@@ -64,9 +64,8 @@ void commit(struct tx_descriptor *d)
         lsl_assume(old <= d->starttime);   /* otherwise, abort */
         lsl_assume(lsl_cas_32(&o1.h_revision, old, LOCKED));  /* retry */
     }
-
+    lsl_fence("full");
     int endtime = global_timestamp + 1;
-    lsl_fence("load-load");
     lsl_assume(lsl_cas_32(&global_timestamp, endtime - 1, endtime));
     /* otherwise, retry */
 
