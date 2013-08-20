@@ -2,7 +2,7 @@
 
 
 #define PREBUILT_FLAGS     0
-#define LOCKED             5
+#define LOCKED            99
 
 typedef int revision_t;
 
