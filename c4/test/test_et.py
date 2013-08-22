@@ -762,3 +762,21 @@ def test_repeat_write_barrier():
     assert n1 == n
     q = lib.rawgetptr(n, 0)
     assert lib.rawgetlong(q, 0) == 1298719
+
+def test_write_barrier_noptr():
+    p = nalloc(HDR + WORD)
+    assert lib.stm_write_barrier_noptr(p) == p
+    assert p.h_revision == lib.get_private_rev_num()
+    assert p.h_tid == lib.gettid(p) | 0    # no GC flags
+    assert classify(p) == "private"
+    #
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    assert classify(p) == "protected"
+    q = lib.stm_write_barrier_noptr(p)
+    assert q == p
+    assert classify(p) == "private_from_protected"
+    assert q == lib.stm_write_barrier_noptr(p)
+    assert q == lib.stm_write_barrier_noptr(q)
+    assert q == lib.stm_write_barrier(p)
+    assert q == lib.stm_write_barrier(q)
