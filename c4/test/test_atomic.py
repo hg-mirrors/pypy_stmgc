@@ -65,6 +65,26 @@ def test_atomic_but_abort():
             lib.stm_atomic(+1)
             abort_and_retry()
 
+def test_entering_atomic():
+    seen = []
+    def run1(c1):
+        assert c1 == 0
+        lib.stm_atomic(+1)
+        def run2(c2):
+            if c2 == 0:
+                if not seen:
+                    assert lib.stm_atomic(0) == 1
+                    lib.stm_atomic(-1)
+                    seen.append("continue running, but now in non-atomic mode")
+                    return True
+                assert lib.stm_atomic(0) == 0
+                seen.append("aborting now")
+                abort_and_retry()
+            seen.append("done!")
+        perform_transaction(run2)
+    perform_transaction(run1)
+    assert len(seen) == len(set(seen)) == 3
+
 def test_bug_v_atomic():
     p1 = palloc(HDR + WORD)
     #
