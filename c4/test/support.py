@@ -47,6 +47,9 @@ ffi.cdef('''
     #define PREBUILT_REVISION      ...
 
     gcptr stm_allocate(size_t size, unsigned long tid);
+    gcptr stm_allocate_immutable(size_t size, unsigned long tid);
+    intptr_t stm_allocate_public_integer_address(gcptr adr);
+    void stm_unregister_integer_address(intptr_t adr);
     revision_t stm_hash(gcptr);
     revision_t stm_id(gcptr);
     _Bool stm_pointer_equal(gcptr, gcptr);
