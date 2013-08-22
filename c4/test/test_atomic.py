@@ -64,3 +64,27 @@ def test_atomic_but_abort():
         if retry_counter == 0:
             lib.stm_atomic(+1)
             abort_and_retry()
+
+def test_bug_v_atomic():
+    p1 = palloc(HDR + WORD)
+    #
+    def f1(r):
+        def cb(retry_counter):
+            assert retry_counter == 0
+            r.enter_in_parallel()
+            lib.setlong(p1, 0, 1111)
+            lib.stm_commit_transaction()
+            lib.stm_begin_inevitable_transaction()
+            r.leave_in_parallel()
+        perform_transaction(cb)
+    #
+    def f2(r):
+        def cb(retry_counter):
+            if retry_counter == 0:
+                lib.setlong(p1, 0, 2222)
+                r.wait_while_in_parallel()
+                # finish the transaction, but it will abort
+                lib.stm_atomic(+1)
+        perform_transaction(cb)
+    #
+    run_parallel(f1, f2, max_aborts=1)
