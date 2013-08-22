@@ -56,3 +56,11 @@ def test_transaction_atomic_mode():
     assert lib.stm_in_transaction()
     lib.stm_begin_inevitable_transaction()
     lib.stm_atomic(-1)
+
+def test_atomic_but_abort():
+    @perform_transaction
+    def run(retry_counter):
+        assert lib.stm_atomic(0) == 0
+        if retry_counter == 0:
+            lib.stm_atomic(+1)
+            abort_and_retry()
