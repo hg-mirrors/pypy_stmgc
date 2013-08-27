@@ -361,3 +361,10 @@ def test_nalloc_large_object():
 def test_collect_soon():
     lib.stmgc_minor_collect_soon()
     nalloc(HDR)
+
+
+# def test_out_of_memory():
+#     import sys
+#     size = sys.maxint - 3
+#     p = lib.stm_allocate(size, 111)
+#     assert p == ffi.NULL
