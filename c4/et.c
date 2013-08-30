@@ -1746,5 +1746,5 @@ void DescriptorDone(void)
     p += sprintf(p, "]\n");
     dprintf(("%s", line));
 
-    stm_free(d, sizeof(struct tx_descriptor));
+    stm_free(d);
 }

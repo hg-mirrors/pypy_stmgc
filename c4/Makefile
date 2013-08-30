@@ -21,7 +21,7 @@ H_FILES = atomic_ops.h stmgc.h stmimpl.h \
 C_FILES = et.c lists.c steal.c nursery.c gcpage.c \
           stmsync.c extra.c weakref.c dbgmem.c fprintcolor.c
 
-DEBUG = -g -DGC_NURSERY=0x10000 -D_GC_DEBUG=1 -DDUMP_EXTRA=1 -D_GC_DEBUGPRINTS=1 -DSTM_BARRIER_COUNT=1
+DEBUG = -g -DGC_NURSERY=0x10000 -D_GC_DEBUG=1 -DDUMP_EXTRA=1 -D_GC_DEBUGPRINTS=1 -DSTM_BARRIER_COUNT=1 -D_GC_MEMPROTECT
 
 
 # note that we don't say -DNDEBUG, so that asserts should still be compiled in

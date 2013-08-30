@@ -49,7 +49,7 @@ void stmgc_done_nursery(void)
        updatechainheads() -> stub_malloc() -> ...): */
     assert(!minor_collect_anything_to_do(d)
            || d->nursery_current == d->nursery_end);
-    stm_free(d->nursery_base, GC_NURSERY);
+    stm_free(d->nursery_base);
 
     gcptrlist_delete(&d->old_objects_to_trace);
     gcptrlist_delete(&d->public_with_young_copy);
@@ -523,7 +523,7 @@ static void minor_collect(struct tx_descriptor *d)
 #if defined(_GC_DEBUG) && _GC_DEBUG >= 2
     if (d->nursery_cleared == NC_ALREADY_CLEARED)
         assert_cleared(d->nursery_base, GC_NURSERY);
-    stm_free(d->nursery_base, GC_NURSERY);
+    stm_free(d->nursery_base);
     d->nursery_base = stm_malloc(GC_NURSERY);
     d->nursery_end = d->nursery_base + GC_NURSERY;
     dprintf(("minor: nursery moved to [%p to %p]\n", d->nursery_base,
