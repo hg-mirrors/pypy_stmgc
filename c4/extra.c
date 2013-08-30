@@ -41,7 +41,8 @@ intptr_t stm_allocate_public_integer_address(gcptr obj)
         stm_minor_collect();
         obj = stm_pop_root();
     }
-    
+    assert(obj->h_tid & GCFLAG_OLD);
+
     spinlock_acquire(d->public_descriptor->collection_lock, 'P');
 
     stub = stm_stub_malloc(d->public_descriptor, 0);
@@ -56,8 +57,6 @@ intptr_t stm_allocate_public_integer_address(gcptr obj)
     else {
         stub->h_original = (revision_t)obj;
     }
-
-    STUB_THREAD(stub) = d->public_descriptor;
 
     result = (intptr_t)stub;
     spinlock_release(d->public_descriptor->collection_lock);

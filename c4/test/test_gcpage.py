@@ -593,3 +593,34 @@ def test_more_h_original_2():
     assert p1b.h_original == p1org
     assert classify(p1b) == "stub"
     assert lib.getlong(p1, 0) == -8922908
+
+
+def test_copy_stub_over_prebuilt():
+    p = palloc(HDR + WORD)
+    def f1(r):
+        p1 = lib.stm_read_barrier(p)
+        #lib.stm_push_root(p1)
+        r.set(1)
+        r.wait(2)
+        p1n = p1#lib.stm_pop_root()
+        assert p1n.h_tid & GCFLAG_STUB
+        
+    def f2(r):
+        r.wait(1)
+        pw = lib.stm_write_barrier(p)
+        lib.stm_commit_transaction()
+        lib.stm_begin_inevitable_transaction()
+        assert classify(follow_revision(p)) == "stub"
+        
+        lib.stm_push_root(pw)
+        major_collect()
+        pw = lib.stm_pop_root()
+
+        assert p.h_tid & GCFLAG_STUB
+        
+        r.set(2)
+    run_parallel(f1, f2)
+
+    
+
+    

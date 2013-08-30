@@ -68,7 +68,7 @@ static void done_shadowstack(void)
     assert(x == END_MARKER_ON);
     assert(stm_shadowstack == d->shadowstack);
     stm_shadowstack = NULL;
-    stm_free(d->shadowstack, sizeof(gcptr) * LENGTH_SHADOW_STACK);
+    stm_free(d->shadowstack);
 }
 
 void stm_set_max_aborts(int max_aborts)
