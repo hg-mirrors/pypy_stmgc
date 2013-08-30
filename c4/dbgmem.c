@@ -32,8 +32,9 @@ static void _stm_dbgmem(void *p, size_t sz, int prot)
 void *stm_malloc(size_t sz)
 {
     size_t real_sz = sz + sizeof(size_t);
-    pthread_mutex_lock(&malloc_mutex);
 
+#ifdef _GC_MEMPROTECT
+    pthread_mutex_lock(&malloc_mutex);
     if (zone_current == NULL) {
         zone_start = mmap(NULL, MMAP_TOTAL, PROT_NONE,
                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -43,11 +44,8 @@ void *stm_malloc(size_t sz)
         zone_current = zone_start;
         zone_end = zone_start + MMAP_TOTAL;
         assert((MMAP_TOTAL % PAGE_SIZE) == 0);
-#ifdef _GC_MEMPROTECT
+
         _stm_dbgmem(zone_start, MMAP_TOTAL, PROT_NONE);
-#else
-        _stm_dbgmem(zone_start, MMAP_TOTAL, PROT_READ | PROT_WRITE);
-#endif
     }
 
     size_t nb_pages = (real_sz + PAGE_SIZE - 1) / PAGE_SIZE + 1;
@@ -61,16 +59,18 @@ void *stm_malloc(size_t sz)
 
     result += (-real_sz) & (PAGE_SIZE-1);
     assert(((intptr_t)(result + real_sz) & (PAGE_SIZE-1)) == 0);
-#ifdef _GC_MEMPROTECT
     _stm_dbgmem(result, real_sz, PROT_READ | PROT_WRITE);
-#endif
 
     long i, base = (result - zone_start) / PAGE_SIZE;
     for (i = 0; i < nb_pages; i++)
         accessible_pages[base + i] = 42;
 
-    dprintf(("stm_malloc(%zu): %p\n", sz, result));
     assert(((intptr_t)(result + real_sz) & (PAGE_SIZE-1)) == 0);
+#else
+    char * result = malloc(real_sz);
+#endif
+
+    dprintf(("stm_malloc(%zu): %p\n", sz, result));
     memset(result, 0xBB, real_sz);
     
     result += sizeof(size_t);
@@ -87,6 +87,8 @@ void stm_free(void *p)
     void *real_p = p - sizeof(size_t);
     assert(real_sz > 0);
 
+    memset(real_p, 0xDD, real_sz);
+#ifdef _GC_MEMPROTECT
     assert(((intptr_t)((char *)real_p + real_sz) & (PAGE_SIZE-1)) == 0);
 
     size_t nb_pages = (real_sz + PAGE_SIZE - 1) / PAGE_SIZE + 1;
@@ -96,8 +98,7 @@ void stm_free(void *p)
         assert(accessible_pages[base + i] == 42);
         accessible_pages[base + i] = -1;
     }
-    memset(real_p, 0xDD, real_sz);
-#ifdef _GC_MEMPROTECT
+
     _stm_dbgmem(real_p, real_sz, PROT_NONE);
 #endif
 }
