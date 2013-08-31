@@ -25,6 +25,7 @@ static void replace_ptr_to_immutable_with_stub(gcptr * pobj)
     assert(obj->h_tid & GCFLAG_IMMUTABLE);
     assert(!(obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
     if (obj->h_tid & GCFLAG_PUBLIC) {
+        assert(!(obj->h_tid & GCFLAG_OLD));
         /* young public, replace with stolen old copy */
         assert(obj->h_tid & GCFLAG_MOVED);
         assert(IS_POINTER(obj->h_revision));

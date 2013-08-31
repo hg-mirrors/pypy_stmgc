@@ -156,6 +156,7 @@ static void visit_if_young(gcptr *root)
     struct tx_descriptor *d = thread_descriptor;
 
     if (!stmgc_is_in_nursery(d, obj)) {
+        assert(IMPLIES(obj, obj->h_tid & GCFLAG_OLD));
         /* not a nursery object */
     }
     else {
