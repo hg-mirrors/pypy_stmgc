@@ -175,6 +175,7 @@ struct tx_descriptor {
   struct FXCache recent_reads_cache;
   char **read_barrier_cache_ref;
   struct tx_descriptor *tx_prev, *tx_next;
+  int tcolor;
 };
 
 extern __thread struct tx_descriptor *thread_descriptor;
