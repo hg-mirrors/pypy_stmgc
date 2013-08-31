@@ -26,6 +26,31 @@ char* stm_dbg_get_hdr_str(gcptr obj)
     return tmp_buf;
 }
 
+void stm_dump_dbg(void)
+{
+    fprintf(stderr, "/**** stm_dump_dbg ****/\n\n");
+
+    int i;
+    for (i = 0; i < MAX_THREADS; i++) {
+        struct tx_public_descriptor *pd = stm_descriptor_array[i];
+        if (pd == NULL)
+            continue;
+        fprintf(stderr, "stm_descriptor_array[%d]\npublic_descriptor: %p\n",
+                i, pd);
+
+        struct tx_descriptor *d = stm_tx_head;
+        while (d && d->public_descriptor != pd)
+            d = d->tx_next;
+        if (!d)
+            continue;
+
+        fprintf(stderr, "thread_descriptor: \033[%dm%p\033[0m\n\n",
+                d->tcolor, d);
+    }
+
+    fprintf(stderr, "/**********************/\n");
+}
+
 
 
 __thread struct tx_descriptor *thread_descriptor = NULL;
@@ -1673,6 +1698,7 @@ void DescriptorInit(void)
       stm_thread_local_obj = NULL;
       d->thread_local_obj_ref = &stm_thread_local_obj;
       d->max_aborts = -1;
+      d->tcolor = dprintfcolor();
       d->tx_prev = NULL;
       d->tx_next = stm_tx_head;
       if (d->tx_next != NULL) d->tx_next->tx_prev = d;
