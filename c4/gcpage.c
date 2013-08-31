@@ -415,6 +415,7 @@ static gcptr visit_public(gcptr obj, struct tx_public_descriptor *gcp)
     }
     else if (obj != original) {
         /* copy obj over original */
+        assert(obj->h_original == (revision_t)original);
         copy_over_original(obj, original);
     }
 

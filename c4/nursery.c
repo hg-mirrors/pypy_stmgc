@@ -94,6 +94,7 @@ gcptr stm_allocate(size_t size, unsigned long tid)
 {
     /* XXX inline the fast path */
     assert(tid == (tid & STM_USER_TID_MASK));
+    assert(thread_descriptor->active > 0);
     gcptr P = allocate_nursery(size, tid);
     P->h_revision = stm_private_rev_num;
     assert(P->h_original == 0);  /* null-initialized already */

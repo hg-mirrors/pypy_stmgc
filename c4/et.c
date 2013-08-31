@@ -108,6 +108,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
   revision_t v;
 
   d->count_reads++;
+  assert(IMPLIES(!(P->h_tid & GCFLAG_OLD), stmgc_is_in_nursery(d, P)));
 
  restart_all:
   if (P->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED)
@@ -280,6 +281,9 @@ gcptr stm_RepeatReadBarrier(gcptr P)
    */
   assert(P->h_tid & GCFLAG_PUBLIC);
   assert(!(P->h_tid & GCFLAG_STUB));
+  assert(IMPLIES(!(P->h_tid & GCFLAG_OLD), 
+                 stmgc_is_in_nursery(thread_descriptor, P)));
+
 
   if (P->h_tid & GCFLAG_MOVED)
     {
@@ -320,6 +324,9 @@ gcptr stm_ImmutReadBarrier(gcptr P)
 {
   assert(P->h_tid & GCFLAG_STUB);
   assert(P->h_tid & GCFLAG_PUBLIC);
+  assert(IMPLIES(!(P->h_tid & GCFLAG_OLD), 
+                 stmgc_is_in_nursery(thread_descriptor, P)));
+
 
   revision_t v = ACCESS_ONCE(P->h_revision);
   assert(IS_POINTER(v));  /* "is a pointer", "has a more recent revision" */
@@ -568,6 +575,7 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
  not_found:
 #endif
 
+  assert(!(R->h_tid & GCFLAG_STUB));
   R->h_tid |= GCFLAG_PUBLIC_TO_PRIVATE;
 
   /* note that stmgc_duplicate() usually returns a young object, but may
@@ -610,8 +618,12 @@ static gcptr LocalizePublic(struct tx_descriptor *d, gcptr R)
 
 static inline void record_write_barrier(gcptr P)
 {
+  assert(is_private(P));
+  assert(IMPLIES(!(P->h_tid & GCFLAG_OLD),
+                 stmgc_is_in_nursery(thread_descriptor, P)));
   if (P->h_tid & GCFLAG_WRITE_BARRIER)
     {
+      assert(P->h_tid & GCFLAG_OLD);
       P->h_tid &= ~GCFLAG_WRITE_BARRIER;
       gcptrlist_insert(&thread_descriptor->old_objects_to_trace, P);
     }
@@ -619,6 +631,9 @@ static inline void record_write_barrier(gcptr P)
 
 gcptr stm_RepeatWriteBarrier(gcptr P)
 {
+  assert(IMPLIES(!(P->h_tid & GCFLAG_OLD), 
+                 stmgc_is_in_nursery(thread_descriptor, P)));
+
   assert(!(P->h_tid & GCFLAG_IMMUTABLE));
   assert(is_private(P));
   assert(P->h_tid & GCFLAG_WRITE_BARRIER);
@@ -636,6 +651,9 @@ gcptr stm_WriteBarrier(gcptr P)
      risk of overrunning the object later in gcpage.c when copying a stub
      over it.  However such objects are so small that they contain no field
      at all, and so no write barrier should occur on them. */
+
+  assert(IMPLIES(!(P->h_tid & GCFLAG_OLD), 
+                 stmgc_is_in_nursery(thread_descriptor, P)));
 
   if (is_private(P))
     {
