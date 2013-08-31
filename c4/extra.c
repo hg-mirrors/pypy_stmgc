@@ -178,6 +178,8 @@ revision_t stm_id(gcptr p)
         
         if (p->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
             gcptr B = (gcptr)p->h_revision;
+            /* not stolen already: */
+            assert(!(B->h_tid & GCFLAG_PUBLIC));
             B->h_original = (revision_t)O;
         }
         
