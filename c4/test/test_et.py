@@ -625,7 +625,7 @@ def id_with_stealing(a, b, c):
         r.set(3)
 
         assert classify(plist[-1]) == "protected"
-        p2 = lib.stm_read_barrier(plist[-1])    # steals
+        p2 = lib.stm_read_barrier(p)    # steals
         if not c:
             pid.append(lib.stm_id(p2))
         assert pid[-1] == lib.stm_id(p2)

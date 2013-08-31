@@ -320,6 +320,7 @@ lib = ffi.verify(r'''
                  define_macros=[('GC_NURSERY', str(16 * WORD)),
                                 ('_GC_DEBUG', '2'),
                                 ('_GC_DEBUGPRINTS', '1'),
+                                ('_GC_MEMPROTECT', '1'),
                                 ('DUMP_EXTRA', '1'),
                                 ('GC_PAGE_SIZE', '1000'),
                                 ('GC_MIN', '200000'),
