@@ -120,3 +120,35 @@ class TestMajorCollection(BaseTest):
         assert p2b != p2
         assert lib.getlong(p2b, 0) == 912809218
         assert lib.getlong(p2, 0) == 912809218
+
+
+    def test_stealing(self):
+        p = palloc_refs(1)
+        u = palloc_refs(1)
+        
+        def f1(r):
+            q = nalloc(HDR+WORD)
+            # lib.stm_push_root(q)
+            w = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, q)
+            # q = lib.stm_pop_root()
+            setptr(p, 0, w)
+            setptr(u, 0, q)
+            minor_collect()
+            lib.stm_commit_transaction()
+            lib.stm_begin_inevitable_transaction()
+            r.set(2)
+            r.wait(3)
+            print "happy"
+            
+        def f2(r):
+            r.wait(2)
+            # steal p
+            pr = lib.stm_read_barrier(p)
+            w = rawgetptr(pr, 0)
+            assert w.h_tid & GCFLAG_STUB
+            
+            r.set(3)
+            
+        run_parallel(f1, f2)
+
+
