@@ -176,6 +176,7 @@ struct tx_descriptor {
   char **read_barrier_cache_ref;
   struct tx_descriptor *tx_prev, *tx_next;
   int tcolor;
+  pthread_t pthreadid;
 };
 
 extern __thread struct tx_descriptor *thread_descriptor;
