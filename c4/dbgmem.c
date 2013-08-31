@@ -113,6 +113,9 @@ void *stm_realloc(void *p, size_t newsz, size_t oldsz)
 
 int _stm_can_access_memory(char *p)
 {
+#ifndef _GC_MEMPROTECT
+    assert(0);                   /* tests must use MEMPROTECT */
+#endif
     char* real_p = p - sizeof(size_t);
     long base = ((char *)real_p - zone_start) / PAGE_SIZE;
     assert(0 <= base && base < (MMAP_TOTAL / PAGE_SIZE));
