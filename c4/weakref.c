@@ -1,16 +1,15 @@
 #include "stmimpl.h"
 
-#define WEAKREF_PTR(wr, sz)  (*(gcptr *)(((char *)(wr)) + (sz) - WORD))
-
 
 gcptr stm_weakref_allocate(size_t size, unsigned long tid, gcptr obj)
 {
     stm_push_root(obj);
     gcptr weakref = stm_allocate_immutable(size, tid);
     obj = stm_pop_root();
+    weakref->h_tid |= GCFLAG_WEAKREF;
     assert(!(weakref->h_tid & GCFLAG_OLD));   /* 'size' too big? */
     assert(stmgc_size(weakref) == size);
-    WEAKREF_PTR(weakref, size) = obj;
+    *WEAKREF_PTR(weakref, size) = obj;
     gcptrlist_insert(&thread_descriptor->young_weakrefs, weakref);
     dprintf(("alloc weakref %p -> %p\n", weakref, obj));
     return weakref;
@@ -32,19 +31,19 @@ void stm_move_young_weakrefs(struct tx_descriptor *d)
 
         weakref = (gcptr)weakref->h_revision;
         size_t size = stmgc_size(weakref);
-        gcptr pointing_to = WEAKREF_PTR(weakref, size);
+        gcptr pointing_to = *WEAKREF_PTR(weakref, size);
         assert(pointing_to != NULL);
 
         if (stmgc_is_in_nursery(d, pointing_to)) {
             if (pointing_to->h_tid & GCFLAG_MOVED) {
                 dprintf(("weakref ptr moved %p->%p\n", 
-                         WEAKREF_PTR(weakref, size),
+                         *WEAKREF_PTR(weakref, size),
                          (gcptr)pointing_to->h_revision));
-                WEAKREF_PTR(weakref, size) = (gcptr)pointing_to->h_revision;
+                *WEAKREF_PTR(weakref, size) = (gcptr)pointing_to->h_revision;
             }
             else {
-                dprintf(("weakref lost ptr %p\n", WEAKREF_PTR(weakref, size)));
-                WEAKREF_PTR(weakref, size) = NULL;
+                dprintf(("weakref lost ptr %p\n", *WEAKREF_PTR(weakref, size)));
+                *WEAKREF_PTR(weakref, size) = NULL;
                 continue;   /* no need to remember this weakref any longer */
             }
         }
@@ -58,6 +57,8 @@ void stm_move_young_weakrefs(struct tx_descriptor *d)
                 # the next major collection.  Solve this by not registering
                 # the weakref into 'old_objects_with_weakrefs'.
             */
+            /* in case we now point to a stub because the weakref got stolen,
+               simply keep by inserting into old_weakrefs */
         }
         gcptrlist_insert(&d->public_descriptor->old_weakrefs, weakref);
     }
@@ -115,16 +116,16 @@ static void visit_old_weakrefs(struct tx_public_descriptor *gcp)
         }
         else {
             size_t size = stmgc_size(weakref);
-            gcptr pointing_to = WEAKREF_PTR(weakref, size);
+            gcptr pointing_to = *WEAKREF_PTR(weakref, size);
             assert(pointing_to != NULL);
             if (is_partially_visited(pointing_to)) {
                 pointing_to = stmgcpage_visit(pointing_to);
                 dprintf(("mweakref ptr moved %p->%p\n",
-                         WEAKREF_PTR(weakref, size),
+                         *WEAKREF_PTR(weakref, size),
                          pointing_to));
 
                 assert(pointing_to->h_tid & GCFLAG_VISITED);
-                WEAKREF_PTR(weakref, size) = pointing_to;
+                *WEAKREF_PTR(weakref, size) = pointing_to;
             }
             else {
                 /* the weakref appears to be pointing to a dying object,
@@ -145,12 +146,12 @@ static void clean_old_weakrefs(struct tx_public_descriptor *gcp)
         assert(weakref->h_revision & 1);
         if (weakref->h_tid & GCFLAG_VISITED) {
             size_t size = stmgc_size(weakref);
-            gcptr pointing_to = WEAKREF_PTR(weakref, size);
+            gcptr pointing_to = *WEAKREF_PTR(weakref, size);
             if (pointing_to->h_tid & GCFLAG_VISITED) {
                 continue;   /* the target stays alive, the weakref remains */
             }
-            dprintf(("mweakref lost ptr %p\n", WEAKREF_PTR(weakref, size)));
-            WEAKREF_PTR(weakref, size) = NULL;  /* the target dies */
+            dprintf(("mweakref lost ptr %p\n", *WEAKREF_PTR(weakref, size)));
+            *WEAKREF_PTR(weakref, size) = NULL;  /* the target dies */
         }
         /* remove this weakref from the list */
         items[i] = items[--gcp->old_weakrefs.size];

@@ -15,7 +15,7 @@ class TestMinorCollection(BaseTest):
     def test_weakref_invalidate(self):
         p2 = nalloc(HDR)
         p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
-        assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE
+        assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE | GCFLAG_WEAKREF
         assert p1.h_revision == lib.get_private_rev_num()
         assert lib.rawgetptr(p1, 0) == p2
         lib.stm_push_root(p1)
@@ -31,7 +31,7 @@ class TestMinorCollection(BaseTest):
     def test_weakref_keep(self):
         p2 = nalloc(HDR)
         p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
-        assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE
+        assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE | GCFLAG_WEAKREF
         assert p1.h_revision == lib.get_private_rev_num()
         assert lib.rawgetptr(p1, 0) == p2
         lib.stm_push_root(p1)
@@ -44,7 +44,7 @@ class TestMinorCollection(BaseTest):
     def test_weakref_old_keep(self):
         p2 = oalloc(HDR)
         p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
-        assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE
+        assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE | GCFLAG_WEAKREF
         assert p1.h_revision == lib.get_private_rev_num()
         assert lib.rawgetptr(p1, 0) == p2
         lib.stm_push_root(p1)
@@ -142,14 +142,16 @@ class TestMajorCollection(BaseTest):
             
         def f2(r):
             r.wait(2)
-            # steal p
+            # steal p, should stub the weakref contained in it
             pr = lib.stm_read_barrier(p)
             w = rawgetptr(pr, 0)
-            assert w.h_tid & GCFLAG_STUB
+            assert classify(w) == "stub"
 
             # read weakref, should stub out weakptr
             wr = lib.stm_read_barrier(w)
-            assert lib.rawgetptr(wr, 0).h_tid & GCFLAG_STUB
+            assert wr.h_tid & GCFLAG_WEAKREF
+            assert classify(lib.rawgetptr(wr, 0)) == "stub"
+
             r.set(3)
             
         run_parallel(f1, f2)
