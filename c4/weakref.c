@@ -97,9 +97,9 @@ static void update_old_weakrefs_list(struct tx_public_descriptor *gcp)
     for (i = 0; i < size; i++) {
         gcptr weakref = items[i];
 
-        if (weakref->h_tid & GCFLAG_VISITED) {
-            weakref = stmgcpage_visit(weakref);
-            items[i] = weakref;
+        /* if a weakref moved, update its position in the list */
+        if (weakref->h_tid & GCFLAG_MOVED) {
+            items[i] = (gcptr)weakref->h_original;
         }
     }
 }
