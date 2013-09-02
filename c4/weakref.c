@@ -43,7 +43,6 @@ void stm_move_young_weakrefs(struct tx_descriptor *d)
                          *WEAKREF_PTR(weakref, size),
                          (gcptr)pointing_to->h_revision));
                 *WEAKREF_PTR(weakref, size) = (gcptr)pointing_to->h_revision;
-                assert((*WEAKREF_PTR(weakref, size))->h_tid & GCFLAG_OLD);
             }
             else {
                 assert(!IS_POINTER(pointing_to->h_revision));
@@ -55,11 +54,10 @@ void stm_move_young_weakrefs(struct tx_descriptor *d)
                 continue;   /* no need to remember this weakref any longer */
             }
         }
-        else {
-            assert(pointing_to->h_tid & GCFLAG_OLD);
-            /* in case we now point to a stub because the weakref got stolen,
-               simply keep by inserting into old_weakrefs */
-        }
+        assert((*WEAKREF_PTR(weakref, size))->h_tid & GCFLAG_OLD);
+        /* in case we now point to a stub because the weakref got stolen,
+           simply keep by inserting into old_weakrefs */
+
         gcptrlist_insert(&d->public_descriptor->old_weakrefs, weakref);
     }
 }
@@ -73,39 +71,14 @@ static _Bool is_partially_visited(gcptr obj)
        visit_public().  Returns True or False depending on whether we find any
        version of 'obj' to be MARKED or not.
     */
-    while (1) {
-        assert(IMPLIES(obj->h_tid & GCFLAG_VISITED,
-                       obj->h_tid & GCFLAG_MARKED));
+    assert(IMPLIES(obj->h_tid & GCFLAG_VISITED,
+                   obj->h_tid & GCFLAG_MARKED));
+    if (obj->h_tid & GCFLAG_MARKED)
+        return 1;
 
-        if (obj->h_tid & GCFLAG_MARKED)
-            return 1;
-        if (!IS_POINTER(obj->h_revision))
-            break;
-
-        if (obj->h_tid & GCFLAG_PUBLIC) {
-            if (!(obj->h_revision & 2)) {
-                obj = (gcptr)obj->h_revision;
-                continue;
-            }
-            /* stub */
-            obj = (gcptr)(obj->h_revision - 2);
-            continue;
-        }
-        else if (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
-            gcptr B = (gcptr)obj->h_revision;
-            if (B->h_tid & GCFLAG_PUBLIC) {
-                /* stolen */
-                obj = B;
-                continue;
-            }
-        }
-        /* protected/private and not marked */
-        break;
-    }
-
-    /* prebuilts should be marked and caught above: */
+    /* if (!(obj->h_tid & GCFLAG_PUBLIC)) */
+    /*     return 0; */
     assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
-
     if (obj->h_original != 0) {
         gcptr original = (gcptr)obj->h_original;
         assert(IMPLIES(original->h_tid & GCFLAG_VISITED,
@@ -114,6 +87,21 @@ static _Bool is_partially_visited(gcptr obj)
             return 1;
     }
     return 0;
+}
+
+static void update_old_weakrefs_list(struct tx_public_descriptor *gcp)
+{
+    long i, size = gcp->old_weakrefs.size;
+    gcptr *items = gcp->old_weakrefs.items;
+
+    for (i = 0; i < size; i++) {
+        gcptr weakref = items[i];
+
+        if (weakref->h_tid & GCFLAG_VISITED) {
+            weakref = stmgcpage_visit(weakref);
+            items[i] = weakref;
+        }
+    }
 }
 
 static void visit_old_weakrefs(struct tx_public_descriptor *gcp)
@@ -129,16 +117,14 @@ static void visit_old_weakrefs(struct tx_public_descriptor *gcp)
     for (i = 0; i < size; i++) {
         gcptr weakref = items[i];
 
-        /* weakrefs are immutable: during a major collection, they
-           cannot be in the nursery, and so there should be only one
-           version of each weakref object.  XXX relying on this is
-           a bit fragile, but simplifies things a lot... */
-        assert(weakref->h_revision & 1);
-
         if (!(weakref->h_tid & GCFLAG_VISITED)) {
             /* the weakref itself dies */
         }
         else {
+            /* the weakref belongs to our thread, therefore we should
+               always see the most current revision here: */
+            assert(weakref->h_revision & 1);
+
             size_t size = stmgc_size(weakref);
             gcptr pointing_to = *WEAKREF_PTR(weakref, size);
             assert(pointing_to != NULL);
@@ -194,6 +180,14 @@ static void for_each_public_descriptor(
     while ((gcp = stm_get_free_public_descriptor(&index)) != NULL)
         visit(gcp);
 }
+
+void stm_update_old_weakrefs_lists(void)
+{
+    /* go over old weakrefs lists and update the list with possibly
+       new pointers because of copy_over_original */
+    for_each_public_descriptor(update_old_weakrefs_list);
+}
+
 
 void stm_visit_old_weakrefs(void)
 {
