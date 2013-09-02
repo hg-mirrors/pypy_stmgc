@@ -146,7 +146,10 @@ class TestMajorCollection(BaseTest):
             pr = lib.stm_read_barrier(p)
             w = rawgetptr(pr, 0)
             assert w.h_tid & GCFLAG_STUB
-            
+
+            # read weakref, should stub out weakptr
+            wr = lib.stm_read_barrier(w)
+            assert lib.rawgetptr(wr, 0).h_tid & GCFLAG_STUB
             r.set(3)
             
         run_parallel(f1, f2)
