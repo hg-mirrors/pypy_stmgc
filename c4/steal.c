@@ -34,7 +34,7 @@ static void replace_ptr_to_immutable_with_stub(gcptr * pobj)
         goto done;
     }
 
-    /* old or young protected! mark as PUBLIC */
+    /* young protected! mark as PUBLIC */
     if (!(obj->h_tid & GCFLAG_OLD)) {
         /* young protected */
         gcptr O;
@@ -297,6 +297,8 @@ void stm_steal_stub(gcptr P)
     memset(&sd.all_stubs, 0, sizeof(sd.all_stubs));
     steal_data = &sd;
     stmgc_trace(L, &replace_ptr_to_protected_with_stub);
+    if (L->h_tid & GCFLAG_WEAKREF)
+        replace_ptr_to_protected_with_stub(WEAKREF_PTR(L, stmgc_size(L)));
     g2l_delete_not_used_any_more(&sd.all_stubs);
 
     /* If another thread (the foreign or a 3rd party) does a read
