@@ -30,6 +30,9 @@ void stm_move_young_weakrefs(struct tx_descriptor *d)
             continue;   /* the weakref itself dies */
 
         weakref = (gcptr)weakref->h_revision;
+        assert(weakref->h_tid & GCFLAG_OLD);
+        assert(!IS_POINTER(weakref->h_revision));
+
         size_t size = stmgc_size(weakref);
         gcptr pointing_to = *WEAKREF_PTR(weakref, size);
         assert(pointing_to != NULL);
@@ -40,23 +43,20 @@ void stm_move_young_weakrefs(struct tx_descriptor *d)
                          *WEAKREF_PTR(weakref, size),
                          (gcptr)pointing_to->h_revision));
                 *WEAKREF_PTR(weakref, size) = (gcptr)pointing_to->h_revision;
+                assert((*WEAKREF_PTR(weakref, size))->h_tid & GCFLAG_OLD);
             }
             else {
+                assert(!IS_POINTER(pointing_to->h_revision));
+                assert(IMPLIES(!(pointing_to->h_tid & GCFLAG_HAS_ID),
+                               pointing_to->h_original == 0));
+
                 dprintf(("weakref lost ptr %p\n", *WEAKREF_PTR(weakref, size)));
                 *WEAKREF_PTR(weakref, size) = NULL;
                 continue;   /* no need to remember this weakref any longer */
             }
         }
         else {
-            /*  # see test_weakref_to_prebuilt: it's not useful to put
-                # weakrefs into 'old_objects_with_weakrefs' if they point
-                # to a prebuilt object (they are immortal).  If moreover
-                # the 'pointing_to' prebuilt object still has the
-                # GCFLAG_NO_HEAP_PTRS flag, then it's even wrong, because
-                # 'pointing_to' will not get the GCFLAG_VISITED during
-                # the next major collection.  Solve this by not registering
-                # the weakref into 'old_objects_with_weakrefs'.
-            */
+            assert(pointing_to->h_tid & GCFLAG_OLD);
             /* in case we now point to a stub because the weakref got stolen,
                simply keep by inserting into old_weakrefs */
         }
@@ -73,16 +73,40 @@ static _Bool is_partially_visited(gcptr obj)
        visit_public().  Returns True or False depending on whether we find any
        version of 'obj' to be MARKED or not.
     */
-    assert(IMPLIES(obj->h_tid & GCFLAG_VISITED,
-                   obj->h_tid & GCFLAG_MARKED));
-    if (obj->h_tid & GCFLAG_MARKED)
-        return 1;
+    while (1) {
+        assert(IMPLIES(obj->h_tid & GCFLAG_VISITED,
+                       obj->h_tid & GCFLAG_MARKED));
 
-    if (!(obj->h_tid & GCFLAG_PUBLIC))
-        return 0;
+        if (obj->h_tid & GCFLAG_MARKED)
+            return 1;
+        if (!IS_POINTER(obj->h_revision))
+            break;
 
-    if (obj->h_original != 0 &&
-            !(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
+        if (obj->h_tid & GCFLAG_PUBLIC) {
+            if (!(obj->h_revision & 2)) {
+                obj = (gcptr)obj->h_revision;
+                continue;
+            }
+            /* stub */
+            obj = (gcptr)(obj->h_revision - 2);
+            continue;
+        }
+        else if (obj->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED) {
+            gcptr B = (gcptr)obj->h_revision;
+            if (B->h_tid & GCFLAG_PUBLIC) {
+                /* stolen */
+                obj = B;
+                continue;
+            }
+        }
+        /* protected/private and not marked */
+        break;
+    }
+
+    /* prebuilts should be marked and caught above: */
+    assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
+
+    if (obj->h_original != 0) {
         gcptr original = (gcptr)obj->h_original;
         assert(IMPLIES(original->h_tid & GCFLAG_VISITED,
                        original->h_tid & GCFLAG_MARKED));
