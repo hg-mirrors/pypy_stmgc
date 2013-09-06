@@ -56,21 +56,31 @@ def test_inspect_abort_info_nested_unsigned():
 def test_inspect_abort_info_string():
     fo1 = ffi.new("long[]", [3, HDR + WORD, HDR, 0])
     #
-    @perform_transaction
     def run(retry_counter):
         if retry_counter == 0:
             p = nalloc_refs(2)
+            lib.stm_push_root(p)
             q = nalloc(HDR + 2 * WORD)
+            p = lib.stm_pop_root()
             lib.setptr(p, 1, q)
             lib.setlong(q, 0, 3)
             word = "ABC" + "\xFF" * (WORD - 3)
             lib.setlong(q, 1, struct.unpack("l", word)[0])
             lib.stm_abort_info_push(p, fo1)
+            possibly_collect()
             abort_and_retry()
         else:
+            possibly_collect()
             c = lib.stm_inspect_abort_info()
             assert c
             assert ffi.string(c).endswith("e3:ABCe")
+    #
+    def no_collect():
+        pass
+    for possibly_collect in [no_collect, minor_collect, major_collect]:
+        print '-'*79
+        print 'running with', possibly_collect
+        perform_transaction(run)
 
 def test_inspect_null():
     fo1 = ffi.new("long[]", [3, HDR, HDR + 1, 0])
