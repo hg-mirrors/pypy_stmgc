@@ -269,3 +269,42 @@ def test_clear_on_abort():
             assert p[2] == 'l'
             assert p[3] == 'l'
             assert p[4] == 'o'
+
+def test_call_on_abort():
+    p0 = ffi.new("char[]", "aaa")
+    p1 = ffi.new("char[]", "hello")
+    p2 = ffi.new("char[]", "removed")
+    p3 = ffi.new("char[]", "world")
+    #
+    @ffi.callback("void(void *)")
+    def clear_me(p):
+        p = ffi.cast("char *", p)
+        p[0] = chr(ord(p[0]) + 1)
+    #
+    lib.stm_call_on_abort(p0, clear_me)
+    # the registered callbacks are removed on
+    # successful commit
+    lib.stm_commit_transaction()
+    lib.stm_begin_inevitable_transaction()
+    #
+    @perform_transaction
+    def run(retry_counter):
+        if retry_counter == 0:
+            lib.stm_call_on_abort(p1, clear_me)
+            lib.stm_call_on_abort(p2, clear_me)
+            lib.stm_call_on_abort(p3, clear_me)
+            lib.stm_call_on_abort(p2, ffi.NULL)
+        #
+        assert ffi.string(p0) == "aaa"
+        assert ffi.string(p2) == "removed"
+        if retry_counter == 0:
+            assert ffi.string(p1) == "hello"
+            assert ffi.string(p3) == "world"
+            abort_and_retry()
+        else:
+            assert ffi.string(p1) == "iello"
+            assert ffi.string(p3) == "xorld"
+            if retry_counter == 1:
+                # the registered callbacks are removed
+                # on abort
+                abort_and_retry()
