@@ -127,6 +127,8 @@ ffi.cdef('''
     void stm_initialize_and_set_max_abort(int max_aborts);
     void stm_initialize_tests(int max_aborts);
 
+    void stm_clear_on_abort(void *start, size_t bytes);
+
     /* some constants normally private that are useful in the tests */
     #define WORD                     ...
     #define GC_PAGE_SIZE             ...
