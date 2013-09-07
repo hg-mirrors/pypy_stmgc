@@ -253,5 +253,19 @@ def test_allocate_public_integer_address():
     
     check_free_old(p3o)
     check_free_old(p2)
-    
-    
+
+def test_clear_on_abort():
+    p = ffi.new("char[]", "hello")
+    lib.stm_clear_on_abort(p, 2)
+    #
+    @perform_transaction
+    def run(retry_counter):
+        if retry_counter == 0:
+            assert ffi.string(p) == "hello"
+            abort_and_retry()
+        else:
+            assert p[0] == '\0'
+            assert p[1] == '\0'
+            assert p[2] == 'l'
+            assert p[3] == 'l'
+            assert p[4] == 'o'
