@@ -292,7 +292,7 @@ def test_call_on_abort():
         if retry_counter == 0:
             lib.stm_call_on_abort(p1, clear_me)
             lib.stm_call_on_abort(p2, clear_me)
-            lib.stm_call_on_abort(p3, clear_me)
+            lib.stm_call_on_abort(p3 + 1, clear_me)
             lib.stm_call_on_abort(p2, ffi.NULL)
         #
         assert ffi.string(p0) == "aaa"
@@ -303,7 +303,7 @@ def test_call_on_abort():
             abort_and_retry()
         else:
             assert ffi.string(p1) == "iello"
-            assert ffi.string(p3) == "xorld"
+            assert ffi.string(p3) == "wprld"
             if retry_counter == 1:
                 # the registered callbacks are removed
                 # on abort
