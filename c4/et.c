@@ -902,6 +902,7 @@ void AbortPrivateFromProtected(struct tx_descriptor *d);
 
 void AbortTransaction(int num)
 {
+  static const char *abort_names[] = ABORT_NAMES;
   struct tx_descriptor *d = thread_descriptor;
   unsigned long limit;
   struct timespec now;
@@ -1003,10 +1004,10 @@ void AbortTransaction(int num)
   dprintf(("\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
-          "!!!!!!!!!!!!!!!!!!!!!  [%lx] abort %d\n"
+          "!!!!!!!!!!!!!!!!!!!!!  [%lx] abort %s\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
           "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
-          "\n", (long)d->public_descriptor_index, num));
+          "\n", (long)d->public_descriptor_index, abort_names[num]));
   if (num != ABRT_MANUAL && d->max_aborts >= 0 && !d->max_aborts--)
     stm_fatalerror("unexpected abort!\n");
 
