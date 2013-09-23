@@ -159,7 +159,8 @@ struct tx_public_descriptor {
 struct tx_descriptor {
   struct tx_public_descriptor *public_descriptor;
   revision_t public_descriptor_index;
-  jmp_buf *setjmp_buf;
+  void *setjmp_buf;
+  void(*longjmp_callback)(void *);
   revision_t start_time;
   revision_t my_lock;
   gcptr *shadowstack;
@@ -205,7 +206,6 @@ extern struct tx_descriptor *stm_tx_head;
 /************************************************************/
 
 
-void BeginTransaction(jmp_buf *);
 void BeginInevitableTransaction(void);  /* must save roots around this call */
 void CommitTransaction(void);           /* must save roots around this call */
 void BecomeInevitable(const char *why); /* must save roots around this call */
