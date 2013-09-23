@@ -782,11 +782,17 @@ void newthread(void*(*func)(void*), void *arg)
     printf("started new thread\n");
 }
 
+#ifdef _GC_MEMPROTECT
+extern int stm_use_mprotect;
+#endif
 
 
 int main(void)
 {
     int i, status;
+#ifdef _GC_MEMPROTECT
+    stm_use_mprotect = 0;   /* uses too much memory */
+#endif
     
     /* pick a random seed from the time in seconds.
        A bit pointless for now... because the interleaving of the
