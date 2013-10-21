@@ -643,7 +643,7 @@ gcptr do_step(gcptr p)
 
     k = get_rand(11);
     check(p);
-    assert(thread_descriptor->active);
+    assert(*thread_descriptor->active_ref);
 
     if (k < 3)
         p = simple_events(p, _r, _sr);

@@ -1,5 +1,9 @@
 #include "stmimpl.h"
 
+
+__thread char *stm_nursery_current;
+__thread char *stm_nursery_nextlimit;
+
 int stmgc_is_in_nursery(struct tx_descriptor *d, gcptr obj)
 {
     return (d->nursery_base <= (char*)obj && ((char*)obj) < d->nursery_end);
@@ -32,8 +36,8 @@ void stmgc_init_nursery(void)
     assert(d->nursery_base == NULL);
     d->nursery_base = stm_malloc(GC_NURSERY);       /* start of nursery */
     d->nursery_end = d->nursery_base + GC_NURSERY;  /* end of nursery */
-    d->nursery_current = d->nursery_base;           /* current position */
-    d->nursery_nextlimit = d->nursery_base;         /* next section limit */
+    *d->nursery_current_ref = d->nursery_base;           /* current position */
+    *d->nursery_nextlimit_ref = d->nursery_base;         /* next section limit */
     d->nursery_cleared = NC_REGULAR;
 
     dprintf(("minor: nursery is at [%p to %p]\n", d->nursery_base,
@@ -48,7 +52,7 @@ void stmgc_done_nursery(void)
        this assert (committransaction() -> 
        updatechainheads() -> stub_malloc() -> ...): */
     assert(!minor_collect_anything_to_do(d)
-           || d->nursery_current == d->nursery_end);
+           || *d->nursery_current_ref == d->nursery_end);
     stm_free(d->nursery_base);
 
     gcptrlist_delete(&d->old_objects_to_trace);
@@ -59,7 +63,7 @@ void stmgc_done_nursery(void)
 void stmgc_minor_collect_soon(void)
 {
     struct tx_descriptor *d = thread_descriptor;
-    d->nursery_current = d->nursery_end;
+    *d->nursery_current_ref = d->nursery_end;
 }
 
 inline static gcptr allocate_nursery(size_t size, revision_t tid)
@@ -67,11 +71,11 @@ inline static gcptr allocate_nursery(size_t size, revision_t tid)
     /* if 'tid == -1', we must not collect */
     struct tx_descriptor *d = thread_descriptor;
     gcptr P;
-    char *cur = d->nursery_current;
+    char *cur = *d->nursery_current_ref;
     char *end = cur + size;
     assert((size & 3) == 0);
-    d->nursery_current = end;
-    if (end > d->nursery_nextlimit) {
+    *d->nursery_current_ref = end;
+    if (end > *d->nursery_nextlimit_ref) {
         P = allocate_next_section(size, tid);
     }
     else {
@@ -94,7 +98,7 @@ gcptr stm_allocate(size_t size, unsigned long tid)
 {
     /* XXX inline the fast path */
     assert(tid == (tid & STM_USER_TID_MASK));
-    assert(thread_descriptor->active > 0);
+    assert(*thread_descriptor->active_ref > 0);
     gcptr P = allocate_nursery(size, tid);
     P->h_revision = stm_private_rev_num;
     assert(P->h_original == 0);  /* null-initialized already */
@@ -402,7 +406,7 @@ static void fix_list_of_read_objects(struct tx_descriptor *d)
     gcptr *items = d->list_of_read_objects.items;
     assert(d->list_of_read_objects.size >= limit);
 
-    if (d->active == 2) {
+    if (*d->active_ref == 2) {
         /* inevitable transaction: clear the list of read objects */
         gcptrlist_clear(&d->list_of_read_objects);
     }
@@ -501,10 +505,10 @@ static void minor_collect(struct tx_descriptor *d)
        Second, if the thread is really idle, then its nursery is sent
        back to the system until it's really needed.
     */
-    if ((d->nursery_nextlimit - d->nursery_base) < GC_NURSERY / 10) {
+    if ((*d->nursery_nextlimit_ref - d->nursery_base) < GC_NURSERY / 10) {
         size_t already_cleared = 0;
         if (d->nursery_cleared == NC_ALREADY_CLEARED) {
-            already_cleared = d->nursery_end - d->nursery_current;
+            already_cleared = d->nursery_end - *d->nursery_current_ref;
         }
         stm_clear_large_memory_chunk(d->nursery_base, GC_NURSERY,
                                      already_cleared);
@@ -513,7 +517,7 @@ static void minor_collect(struct tx_descriptor *d)
     else {
         d->nursery_cleared = NC_REGULAR;
 #if defined(_GC_DEBUG)
-        memset(d->nursery_current, 0xEE, d->nursery_end - d->nursery_current);
+        memset(*d->nursery_current_ref, 0xEE, d->nursery_end - *d->nursery_current_ref);
 #endif
     }
 
@@ -531,8 +535,8 @@ static void minor_collect(struct tx_descriptor *d)
     if (d->nursery_cleared == NC_ALREADY_CLEARED)
         memset(d->nursery_base, 0, GC_NURSERY);
 #endif
-    d->nursery_current = d->nursery_base;
-    d->nursery_nextlimit = d->nursery_base;
+    *d->nursery_current_ref = d->nursery_base;
+    *d->nursery_nextlimit_ref = d->nursery_base;
 
     assert(!minor_collect_anything_to_do(d));
 }
@@ -540,7 +544,7 @@ static void minor_collect(struct tx_descriptor *d)
 void stmgc_minor_collect(void)
 {
     struct tx_descriptor *d = thread_descriptor;
-    assert(d->active >= 1);
+    assert(*d->active_ref >= 1);
     minor_collect(d);
     AbortNowIfDelayed();
 }
@@ -554,7 +558,7 @@ void stmgc_minor_collect_no_abort(void)
 #ifndef NDEBUG
 int minor_collect_anything_to_do(struct tx_descriptor *d)
 {
-    if (d->nursery_current == d->nursery_base /*&&
+    if (*d->nursery_current_ref == d->nursery_base /*&&
         !g2l_any_entry(&d->young_objects_outside_nursery)*/ ) {
         /* there is no young object */
         assert(gcptrlist_size(&d->public_with_young_copy) == 0);
@@ -588,7 +592,7 @@ static gcptr allocate_next_section(size_t allocate_size, revision_t tid)
        First fix 'nursery_current', left to a bogus value by the caller.
     */
     struct tx_descriptor *d = thread_descriptor;
-    d->nursery_current -= allocate_size;
+    *d->nursery_current_ref -= allocate_size;
 
     /* Are we asking for a "reasonable" number of bytes, i.e. a value
        at most equal to one section?
@@ -608,8 +612,8 @@ static gcptr allocate_next_section(size_t allocate_size, revision_t tid)
     }
 
     /* Are we at the end of the nursery? */
-    if (d->nursery_nextlimit == d->nursery_end ||
-        d->nursery_current == d->nursery_end) {   // stmgc_minor_collect_soon()
+    if (*d->nursery_nextlimit_ref == d->nursery_end ||
+        *d->nursery_current_ref == d->nursery_end) {   // stmgc_minor_collect_soon()
         /* Yes */
         if (tid == -1)
             return NULL;    /* cannot collect */
@@ -619,19 +623,19 @@ static gcptr allocate_next_section(size_t allocate_size, revision_t tid)
         stmgc_minor_collect();
         stmgcpage_possibly_major_collect(0);
 
-        assert(d->nursery_current == d->nursery_base);
-        assert(d->nursery_nextlimit == d->nursery_base);
+        assert(*d->nursery_current_ref == d->nursery_base);
+        assert(*d->nursery_nextlimit_ref == d->nursery_base);
     }
 
     /* Clear the next section */
     if (d->nursery_cleared != NC_ALREADY_CLEARED)
-        memset(d->nursery_nextlimit, 0, GC_NURSERY_SECTION);
-    d->nursery_nextlimit += GC_NURSERY_SECTION;
+        memset(*d->nursery_nextlimit_ref, 0, GC_NURSERY_SECTION);
+    *d->nursery_nextlimit_ref += GC_NURSERY_SECTION;
 
     /* Return the object from there */
-    gcptr P = (gcptr)d->nursery_current;
-    d->nursery_current += allocate_size;
-    assert(d->nursery_current <= d->nursery_nextlimit);
+    gcptr P = (gcptr)*d->nursery_current_ref;
+    *d->nursery_current_ref += allocate_size;
+    assert(*d->nursery_current_ref <= *d->nursery_nextlimit_ref);
 
     P->h_tid = tid;
     assert_cleared(((char *)P) + sizeof(revision_t),
