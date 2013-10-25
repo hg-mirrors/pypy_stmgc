@@ -230,7 +230,9 @@ def test_allocate_public_integer_address():
 
     # we have stubs here:
     assert ffi.cast("gcptr", p1p).h_tid & GCFLAG_PUBLIC
-    assert classify(ffi.cast("gcptr", p1p)) == 'stub'
+    p1pp = ffi.cast("gcptr", p1p)
+    assert p1 == p1pp
+    assert classify(p1pp) == 'public'
     assert classify(ffi.cast("gcptr", p2p)) == 'stub'
     assert classify(ffi.cast("gcptr", p3p)) == 'stub'
 

@@ -276,9 +276,14 @@ void check_public_ints()
         intptr_t ip = td.public_ints[i];
         gcptr obj = (gcptr)ip;
         assert(obj->h_tid & GCFLAG_PUBLIC);
-        assert(obj->h_tid & GCFLAG_SMALLSTUB);
+        assert((obj->h_tid & GCFLAG_SMALLSTUB)
+               || (obj->h_original == 0 
+                   || obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
         check(obj);
-        check((gcptr)(obj->h_revision - 2));
+        if (obj->h_revision & 2)
+            check((gcptr)(obj->h_revision - 2));
+        else if ((obj->h_revision & 3) == 0)
+            check((gcptr)(obj->h_revision));
     }
 }
 
