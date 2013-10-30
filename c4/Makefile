@@ -21,13 +21,14 @@ H_FILES = atomic_ops.h stmgc.h stmimpl.h \
 C_FILES = et.c lists.c steal.c nursery.c gcpage.c \
           stmsync.c extra.c weakref.c dbgmem.c fprintcolor.c
 
-DEBUG = -g -DGC_NURSERY=0x10000 -D_GC_DEBUG=1 -DDUMP_EXTRA=1 -D_GC_DEBUGPRINTS=1 -DSTM_BARRIER_COUNT=1 -D_GC_MEMPROTECT=1
+DEBUG = -g -DGC_NURSERY=0x10000 -D_GC_DEBUG=1 -DDUMP_EXTRA=1 -D_GC_DEBUGPRINTS=1 -DSTM_BARRIER_COUNT=1 -D_GC_MEMPROTECT=1 -D_USE_VALGRIND=1
 
 
 # note that we don't say -DNDEBUG, so that asserts should still be compiled in
 # also, all debug code with extra checks but not the debugprints
 build-%: %.c ${H_FILES} ${C_FILES} stmgc.c
-	gcc -pthread -DGC_NURSERY=0x10000  -D_GC_DEBUG=1 -g $< -o build-$* -Wall stmgc.c -lrt
+	gcc -pthread -DGC_NURSERY=0x10000 -D_USE_VALGRIND   -g $< -o build-$* -Wall stmgc.c -lrt
+# gcc address sanitizer: -fPIE -pie -fsanitize=address -lasan -fno-omit-frame-pointer
 
 debug-%: %.c ${H_FILES} ${C_FILES}
 	gcc -pthread -DDUMP_EXTRA=1 ${DEBUG} $< -o debug-$* -Wall ${C_FILES} -lrt
