@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "stmgc.h"
 #include "stmimpl.h"
@@ -442,7 +443,7 @@ void setup_thread()
 gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
 {
     check_public_ints();
-    int k = get_rand(100);
+    int k = get_rand(200);
     if (k < 10) {
         push_roots();
         stm_push_root(p);
@@ -464,7 +465,24 @@ gcptr rare_events(gcptr p, gcptr _r, gcptr _sr)
         pop_public_int();
         p = NULL;
     }
-    else if (k < 61 && DO_MAJOR_COLLECTS) {
+    else if (k < 61) {
+        push_roots();
+        stm_push_root(p);
+
+        stm_stop_all_other_threads();
+
+        p = stm_pop_root();
+        p = write_barrier(p);
+        stm_push_root(p);
+
+        sleep(0);
+        
+        stm_partial_commit_and_resume_other_threads();
+
+        p = stm_pop_root();
+        pop_roots();
+    }
+    else if (k < 62 && DO_MAJOR_COLLECTS) {
         fprintf(stdout, "major collect\n");
         push_roots();
         stmgcpage_possibly_major_collect(1);
