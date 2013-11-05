@@ -31,7 +31,7 @@ build-%: %.c ${H_FILES} ${C_FILES} stmgc.c
 # gcc address sanitizer: -fPIE -pie -fsanitize=address -lasan -fno-omit-frame-pointer
 
 debug-%: %.c ${H_FILES} ${C_FILES}
-	gcc -pthread -DDUMP_EXTRA=1 ${DEBUG} $< -o debug-$* -Wall ${C_FILES} -lrt
+	gcc -Wall -pthread -DDUMP_EXTRA=1 ${DEBUG} $< -o debug-$* -Wall ${C_FILES} -lrt
 
 release-%: %.c ${H_FILES} ${C_FILES} stmgc.c
 	gcc -pthread -DNDEBUG -O2 -g $< -o release-$* -Wall stmgc.c -lrt
