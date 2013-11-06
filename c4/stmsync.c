@@ -319,17 +319,21 @@ static void stop_exclusivelock(void)
 }
 
 
+static int single_thread_nesting = 0;
 void stm_stop_all_other_threads(void)
 {                               /* push gc roots! */
     struct tx_descriptor *d;
 
     BecomeInevitable("stop_all_other_threads");
-    stm_start_single_thread();
-    
-    for (d = stm_tx_head; d; d = d->tx_next) {
-        if (*d->active_ref == 1) // && d != thread_descriptor) <- TRUE
-            AbortTransactionAfterCollect(d, ABRT_OTHER_THREADS);
+    if (!single_thread_nesting) {
+        stm_start_single_thread();
+        
+        for (d = stm_tx_head; d; d = d->tx_next) {
+            if (*d->active_ref == 1) // && d != thread_descriptor) <- TRUE
+                AbortTransactionAfterCollect(d, ABRT_OTHER_THREADS);
+        }
     }
+    single_thread_nesting++;
 }
 
 
@@ -339,20 +343,23 @@ void stm_partial_commit_and_resume_other_threads(void)
     assert(stm_active == 2);
     int atomic = d->atomic;
 
-    /* Give up atomicity during commit. This still works because
-       we keep the inevitable status, thereby being guaranteed to 
-       commit before all others. */
-    stm_atomic(-atomic);
-
-    /* Commit and start new inevitable transaction while never
-       giving up the inevitable status. */
-    CommitTransaction(1);       /* 1=stay_inevitable! */
-    BeginInevitableTransaction(1);
-
-    /* restore atomic-count */
-    stm_atomic(atomic);
-
-    stm_stop_single_thread();
+    single_thread_nesting--;
+    if (single_thread_nesting == 0) {
+        /* Give up atomicity during commit. This still works because
+           we keep the inevitable status, thereby being guaranteed to 
+           commit before all others. */
+        stm_atomic(-atomic);
+        
+        /* Commit and start new inevitable transaction while never
+           giving up the inevitable status. */
+        CommitTransaction(1);       /* 1=stay_inevitable! */
+        BeginInevitableTransaction(1);
+        
+        /* restore atomic-count */
+        stm_atomic(atomic);
+        
+        stm_stop_single_thread();
+    }
 }
 
 void stm_start_single_thread(void)
