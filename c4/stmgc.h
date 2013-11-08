@@ -38,7 +38,7 @@ gcptr stm_allocate_immutable(size_t size, unsigned long tid);
 
 /* allocates a public reference to the object that will 
    not be freed until stm_unregister_integer_address is 
-   called on the result */
+   called on the result (push roots!) */
 intptr_t stm_allocate_public_integer_address(gcptr);
 void stm_unregister_integer_address(intptr_t);
 
