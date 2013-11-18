@@ -278,8 +278,7 @@ void check_public_ints()
         gcptr obj = (gcptr)ip;
         assert(obj->h_tid & GCFLAG_PUBLIC);
         assert((obj->h_tid & GCFLAG_SMALLSTUB)
-               || (obj->h_original == 0 
-                   || obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
+               || (obj->h_tid & GCFLAG_PREBUILT_ORIGINAL));
         check(obj);
         if (obj->h_revision & 2)
             check((gcptr)(obj->h_revision - 2));
@@ -304,7 +303,9 @@ void pop_public_int()
     if (td.num_public_ints == 0)
         return;
 
+    push_roots();
     stm_unregister_integer_address(td.public_ints[--td.num_public_ints]);
+    pop_roots();
 }
 
 gcptr read_barrier(gcptr p)
