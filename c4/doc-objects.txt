@@ -62,6 +62,7 @@ Public objects:
 - prebuilt object, never modified                          1
 - other public object, never modified                     GT
 - outdated                             ptr to a more recent public copy
+- stolen protected, made public                        some PRN
 
 Public stubs (have also a ref to one thread):
 - from stealing                            ptr (maybe to priv/prot) | 2
@@ -353,3 +354,6 @@ are always their *original copy* and if `h_original` is not `NULL`,
 it is a predefined HASH value for this object. This is used by
 `stm_hash` which otherwise returns a hashed version of the ID of
 the object.
+
+DONT ASSUME THE H_ORIGINAL TO BE INITIALIZED. IT MAY HAVE E.G.
+H_REVISION SET TO AN OLD, FREED OBJECT.
