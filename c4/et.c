@@ -738,9 +738,11 @@ gcptr stm_WriteBarrier(gcptr P)
       W = LocalizePublic(d, R);
       assert(is_private(W));
 
-      if (W->h_tid & GCFLAG_OLD)
+      if (W->h_tid & GCFLAG_OLD) {
+        /* XXX: probably unnecessary as it is done in allocate_next_section
+           already */
         gcptrlist_insert(&d->old_objects_to_trace, W);
-      else
+      } else
         gcptrlist_insert(&d->public_with_young_copy, R);
     }
   else
@@ -900,6 +902,21 @@ void SpinLoop(int num)
   smp_spinloop();
 }
 
+static void purge_private_objs_from_old_objects_to_trace()
+{
+  struct tx_descriptor *d = thread_descriptor;
+  int i, size = d->old_objects_to_trace.size;
+  gcptr *items = d->old_objects_to_trace.items;
+
+  for(i = 0; i < size; i++) {
+    if (items[i] && items[i]->h_revision == stm_private_rev_num) {
+      /* private objects from the same aborting transaction */
+      items[i] = NULL;
+      dprintf(("purge old private object %p\n", items[i]));
+    }
+  }
+}
+
 void stm_abort_and_retry(void)
 {
     AbortTransaction(ABRT_MANUAL);
@@ -989,6 +1006,12 @@ void AbortTransaction(int num)
   assert(d->thread_local_obj_ref = &stm_thread_local_obj);
   stm_thread_local_obj = d->old_thread_local_obj;
   d->old_thread_local_obj = NULL;
+
+  /* remove old private objects from old_objects_to_trace
+     because they never have to be traced (also because
+     weakrefs are kept alive even when their target is not
+     and stm_move_young_weakrefs doesn't handle that). */
+  purge_private_objs_from_old_objects_to_trace();
 
   // notifies the CPU that we're potentially in a spin loop
   SpinLoop(SPLP_ABORT);
