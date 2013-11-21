@@ -1745,6 +1745,8 @@ void DescriptorInit(void)
           /* there may be a thread holding the collection lock
              because it steals a stub belonging to the thread
              that previously owned this descriptor.
+             (not currently, as we do a start_exclusivelock()
+             before calling DescriptorInit)
           */
       }
       else {
@@ -1808,6 +1810,10 @@ void DescriptorDone(void)
     assert(d->public_descriptor->stolen_young_stubs.size == 0);
     gcptrlist_delete(&d->public_descriptor->stolen_objects);
     gcptrlist_delete(&d->public_descriptor->stolen_young_stubs);
+
+    assert(d->young_weakrefs.size == 0);
+    assert(d->public_with_young_copy.size == 0);
+    assert(d->old_objects_to_trace.size == 0);
 
     stmgcpage_done_tls();
     i = d->public_descriptor_index;

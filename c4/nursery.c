@@ -278,6 +278,9 @@ static void mark_private_from_protected(struct tx_descriptor *d)
 
 static void trace_stub(struct tx_descriptor *d, gcptr S)
 {
+    /* ignore stub if it is outdated, because then the transaction
+       will abort (or has been aborted long ago) */
+
     revision_t w = ACCESS_ONCE(S->h_revision);
     if ((w & 3) != 2) {
         /* P has a ptr in h_revision, but this object is not a stub
