@@ -54,6 +54,61 @@ class TestMinorCollection(BaseTest):
         p1 = lib.stm_pop_root()
         assert lib.rawgetptr(p1, 0) == p2
 
+        
+    def test_old_private_not_keep_alive_weakref(self):
+        p = palloc(HDR + WORD)
+        q = palloc_refs(1)
+
+        def f1(c):
+            if c == 1:
+                # currently fails because:
+                # p1 still in old_objects_to_trace
+                # -> keeps alive weakp1w
+                # -> stm_move_young_weakrefs() sees a weakref pointing
+                #    to an aborted object
+                minor_collect()
+                return
+
+            # allocate the "container" as old, private q1
+            q1 = lib.stm_write_barrier(q)
+            assert classify(q1) == "private"
+            lib.stm_push_root(q1)
+            minor_collect()
+            q1 = lib.stm_pop_root()
+            assert classify(q1) == "private"
+            assert q1.h_tid & GCFLAG_OLD
+            assert q1.h_tid & GCFLAG_WRITE_BARRIER
+
+            # allocate young private p1 to point to
+            p1 = lib.stm_write_barrier(p)
+            assert ffi.cast("gcptr", p1.h_original) == p
+            assert classify(p1) == "private"
+            assert not (p1.h_tid & GCFLAG_OLD)
+
+            lib.stm_push_root(p1)
+            lib.stm_push_root(q1)
+            weakp1w = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p1)
+            q1 = lib.stm_pop_root()
+            p1 = lib.stm_pop_root()
+            # q1 still old, p1 still young, weakp1w also young
+
+            q1w = lib.stm_write_barrier(q1)
+            # add q1 to old_objects_to_trace
+            assert q1 == q1w # was and is private
+            lib.rawsetptr(q1, 0, weakp1w)
+
+            abort_and_retry()
+
+        perform_transaction(f1)            
+
+
+        
+
+
+
+        
+
+
 
 class TestMajorCollection(BaseTest):
 
