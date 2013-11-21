@@ -408,7 +408,8 @@ static void visit_all_outside_objects(struct tx_descriptor *d)
 {
     while (gcptrlist_size(&d->old_objects_to_trace) > 0) {
         gcptr obj = gcptrlist_pop(&d->old_objects_to_trace);
-
+        if (!obj)
+            continue;
         assert(obj->h_tid & GCFLAG_OLD);
         assert(!(obj->h_tid & GCFLAG_WRITE_BARRIER));
 
