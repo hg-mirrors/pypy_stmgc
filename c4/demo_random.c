@@ -566,6 +566,7 @@ gcptr weakref_events(gcptr p, gcptr _r, gcptr _sr)
                 check((gcptr)ww->node);
             }
             else {
+                t = (nodeptr)write_barrier(ptrs[i]);
                 t->weakref = NULL;
             }
         }
