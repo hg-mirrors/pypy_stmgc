@@ -12,6 +12,7 @@ typedef struct stm_object_s {
     revision_t h_tid;
     revision_t h_revision;
     revision_t h_original;
+    revision_t h_contention;
 } *gcptr;
 
 

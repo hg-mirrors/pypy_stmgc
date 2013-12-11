@@ -758,6 +758,7 @@ static void cleanup_for_thread(struct tx_descriptor *d)
             /* has a more recent revision.  Oups. */
             dprintf(("ABRT_COLLECT_MAJOR %p: "
                      "%p was read but modified already\n", d, obj));
+            abort_because_of(obj);
             AbortTransactionAfterCollect(d, ABRT_COLLECT_MAJOR);
             /* fix_list_of_read_objects should not run */
             gcptrlist_clear(&d->list_of_read_objects);
