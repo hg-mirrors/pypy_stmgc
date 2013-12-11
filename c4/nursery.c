@@ -368,6 +368,7 @@ static void mark_public_to_young(struct tx_descriptor *d)
             */
             dprintf(("public_to_young: %p was modified! abort!\n", P));
             item->val = NULL;
+            abort_because_of(P);
             AbortTransactionAfterCollect(d, ABRT_COLLECT_MINOR);
             continue;
         }

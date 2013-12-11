@@ -94,6 +94,41 @@ void stm_clear_read_cache(void)
   fxcache_clear(&thread_descriptor->recent_reads_cache);
 }
 
+
+/************************************************************/
+/* CONTENTION COUNTER THINGS */
+#define RPY_STM_CONT_RMA_SAMPLES 64
+
+void abort_because_of(gcptr L) 
+{
+  gcptr obj = (gcptr)L->h_original;
+  if (!obj || (L->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
+    obj = L;
+
+    /* abort-object should never be a priv_from_prot
+       *without* an original */
+    assert(!(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
+  }
+
+  //g->h_contention += (g->h_contention + 1) << 2;
+  revision_t old =  (RPY_STM_CONT_RMA_SAMPLES - 1) * obj->h_contention;
+  old += 1000000;
+  obj->h_contention = old / RPY_STM_CONT_RMA_SAMPLES 
+    + ((old % RPY_STM_CONT_RMA_SAMPLES) != 0);
+}
+
+void commit_object(gcptr L)
+{
+  gcptr obj = L;
+  if (!(L->h_tid & GCFLAG_PREBUILT_ORIGINAL) && L->h_original)
+    obj = (gcptr)L->h_original;
+
+  revision_t old = obj->h_contention;
+  revision_t old_rma = (RPY_STM_CONT_RMA_SAMPLES - 1) * old;
+  old_rma += old >> 2;
+  obj->h_contention = old_rma / RPY_STM_CONT_RMA_SAMPLES;
+}
+
 /************************************************************/
 
 static void ValidateNow(struct tx_descriptor *);
@@ -148,8 +183,10 @@ gcptr stm_DirectReadBarrier(gcptr G)
       /* check P->h_revision->h_revision: if a pointer, then it means
          the backup copy has been stolen into a public object and then
          modified by some other thread.  Abort. */
-      if (IS_POINTER(((gcptr)P->h_revision)->h_revision))
+      if (IS_POINTER(((gcptr)P->h_revision)->h_revision)) {
+        abort_because_of(P);
         AbortTransaction(ABRT_STOLEN_MODIFIED);
+      }
 
       goto add_in_recent_reads_cache;
     }
@@ -830,6 +867,7 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
             {
               dprintf(("validation failed: "
                        "%p has a more recent revision\n", R));
+              abort_because_of(R);
               return 0;
             }
         }
@@ -865,6 +903,7 @@ static _Bool ValidateDuringTransaction(struct tx_descriptor *d,
                   */
                   dprintf(("validation failed: "
                            "%p is locked by another thread\n", R));
+                  abort_because_of(R);
                   return 0;
                 }
             }
@@ -1157,6 +1196,7 @@ static void AcquireLocks(struct tx_descriptor *d)
       if (IS_POINTER(v))     /* "has a more recent revision" */
         {
           assert(v != 0);
+          abort_because_of(R);
           AbortTransaction(ABRT_COMMIT);
         }
       if (v >= LOCKED)         // already locked by someone else
@@ -1343,7 +1383,7 @@ static void UpdateChainHeads(struct tx_descriptor *d, revision_t cur_time,
           gcptrlist_insert(&stm_prebuilt_gcroots, R);
           pthread_mutex_unlock(&mutex_prebuilt_gcroots);
         }
-
+      commit_object(R);
     } G2L_LOOP_END;
 
   g2l_clear(&d->public_to_private);
@@ -1383,8 +1423,10 @@ void CommitPrivateFromProtected(struct tx_descriptor *d, revision_t cur_time)
           while (1)
             {
               revision_t v = ACCESS_ONCE(B->h_revision);
-              if (IS_POINTER(v))    /* "was modified" */
+              if (IS_POINTER(v)) {   /* "was modified" */
+                abort_because_of(P);
                 AbortTransaction(ABRT_STOLEN_MODIFIED);
+              }
 
               if (bool_cas(&B->h_revision, v, (revision_t)P))
                 break;
