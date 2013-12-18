@@ -36,6 +36,12 @@
    writes to it now happen to go to the new mm page instead of the old
    one.
 
+   This is basically what happens automatically with fork() for regular
+   memory; the difference is that at commit time, we try to publish the
+   modified pages back for everybody to see.  This involves possibly
+   merging changes done by other processes to other objects from the
+   same page.
+
    The local pages are usually referenced by pointers, but may also be
    expressed as an index, called the "local index" of the page.
 */
@@ -132,6 +138,11 @@ _Bool _stm_was_read(struct object_s *object)
 {
     return (stm_local.current_read_markers[((uintptr_t)object) >> 4].c ==
             (unsigned char)(uintptr_t)stm_local.current_read_markers);
+}
+
+static struct read_marker_s *get_current_read_marker(struct object_s *object)
+{
+    return stm_local.current_read_markers + (((uintptr_t)object) >> 4);
 }
 
 void _stm_write_slowpath(struct object_s *);
@@ -280,6 +291,26 @@ void stm_set_read_marker_number(uint8_t num)
     stm_local.current_read_markers = crm - delta;
     assert(stm_get_read_marker_number() == 0);
     stm_local.current_read_markers += num;
+}
+
+static void clear_all_read_markers(void)
+{
+    /* set the largest possible read marker number, to find the last
+       possible read_marker to clear */
+    stm_set_read_marker_number(0xff);
+
+    uint64_t page_index = stm_shared_descriptor->index_page_never_used;
+    char *o = ((char *)stm_shared_descriptor) + page_index * 4096;
+    char *m = (char *)get_current_read_marker((struct object_s *)o);
+    size_t length = m - (char *)stm_local.read_markers;
+    length = (length + 4095) & ~4095;
+
+    int r = madvise(stm_local.read_markers, length, MADV_DONTNEED);
+    if (r != 0) {
+        perror("madvise() failure");
+        abort();
+    }
+    stm_set_read_marker_number(1);
 }
 
 void stm_setup(void)
@@ -491,8 +522,12 @@ _Bool stm_stop_transaction(void)
     }
     stm_local.writes_by_this_transaction = NULL;
 
-    assert(stm_get_read_marker_number() < 0xff);
-    stm_local.current_read_markers++;
+    if (stm_get_read_marker_number() < 0xff) {
+        stm_local.current_read_markers++;
+    }
+    else {
+        clear_all_read_markers();
+    }
     return !conflict;
 }
 
