@@ -236,7 +236,7 @@ void _stm_write_slowpath(struct object_s * object)
         struct write_history_s *cur = stm_local.writes_by_this_transaction;
         uint64_t i = cur->nb_updates++;
         size_t history_size_max = 4096 - (((uintptr_t)cur) & 4095);
-        assert(sizeof(*cur) + cur->nb_updates * 8 <= history_size_max);
+        assert(sizeof(*cur) + cur->nb_updates * 8 <= history_size_max);//XXX
         cur->updates[i * 2 + 0] = get_local_index(page);
         cur->updates[i * 2 + 1] = new_pgoff;
     }
@@ -262,7 +262,7 @@ struct object_s *stm_allocate(size_t size)
 {
     assert(size % 8 == 0);
     size_t i = size / 8;
-    assert(2 <= i && i < LARGE_OBJECT_WORDS);
+    assert(2 <= i && i < LARGE_OBJECT_WORDS);//XXX
     struct alloc_for_size_s *alloc = &stm_local.alloc[i];
 
     char *p = alloc->next;
@@ -356,8 +356,8 @@ void stm_setup_process(void)
         abort();
     }
 
-    stm_set_read_marker_number(42);
-    assert(stm_get_read_marker_number() == 42);
+    assert((stm_set_read_marker_number(42),
+            stm_get_read_marker_number() == 42));
     stm_set_read_marker_number(1);
 }
 
@@ -476,7 +476,7 @@ static int history_fast_forward(struct write_history_s *new, int conflict)
                 struct object_s *myobj = (struct object_s *)
                     (((char *)obj) + diff_to_mypage);
                 assert(obj->flags == 0x42);
-                assert(myobj->flags == 0x42); // || myobj->flags == 0);
+                assert(myobj->flags == 0x42);
                 if (_stm_was_read(myobj)) {
                     fprintf(stderr, "# conflict: %p\n", myobj);
                     conflict = 1;
@@ -496,7 +496,7 @@ void stm_start_transaction(void)
     struct shared_descriptor_s *d = stm_shared_descriptor;
     stm_local.transaction_version =
         __sync_fetch_and_add(&d->next_transaction_version, 2u);
-    assert(stm_local.transaction_version <= 0xffff);
+    assert(stm_local.transaction_version <= 0xffff);//XXX
     assert((stm_local.transaction_version & 1) == 0);   /* EVEN number */
     assert(stm_local.transaction_version >= 2);
 
@@ -533,6 +533,8 @@ void stm_start_transaction(void)
         if (ptr != NULL) {
             page = (struct page_header_s *)(((uintptr_t)ptr) & ~4095);
             page->version = stm_local.transaction_version - 1;
+            /* ^^^ this is one of the only writes to shared memory;
+               usually it is read-only */
         }
     }
 }
