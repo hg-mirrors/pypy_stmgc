@@ -234,3 +234,14 @@ class TestBasic(BaseTest):
         assert p1[8] == 'B'
         assert p2[8] == 'b'
         assert p3[8] == ':'
+
+    def test_overflow_write_history(self):
+        stm_start_transaction()
+        plist = [stm_allocate(n) for n in range(16, 256, 8)]
+        stm_stop_transaction(False)
+        #
+        for i in range(20):
+            stm_start_transaction()
+            for p in plist:
+                stm_write(p)
+            stm_stop_transaction(False)
