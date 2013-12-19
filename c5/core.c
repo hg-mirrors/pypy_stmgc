@@ -250,8 +250,8 @@ char *_stm_alloc_next_page(size_t i)
 {
     struct page_header_s *newpage = _stm_reserve_page();
     newpage->modif_head = 0xff;
-    newpage->kind = i;   /* object size in words */
-    newpage->version = stm_local.transaction_version;
+    newpage->kind = i;      /* object size in words */
+    newpage->version = 0;   /* a completely new page doesn't need a version */
     stm_local.alloc[i].next = ((char *)(newpage + 1)) + (i * 8);
     stm_local.alloc[i].end = ((char *)newpage) + 4096;
     assert(stm_local.alloc[i].next <= stm_local.alloc[i].end);
@@ -498,6 +498,7 @@ void stm_start_transaction(void)
         __sync_fetch_and_add(&d->next_transaction_version, 2u);
     assert(stm_local.transaction_version <= 0xffff);
     assert((stm_local.transaction_version & 1) == 0);   /* EVEN number */
+    assert(stm_local.transaction_version >= 2);
 
     struct write_history_s *cur = NULL;
     if (stm_local.writes_by_this_transaction != NULL) {
