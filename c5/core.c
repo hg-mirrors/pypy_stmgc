@@ -73,8 +73,8 @@ struct page_header_s {
 
 struct read_marker_s {
     /* We associate a single byte to every object, by simply dividing
-       the address of the object by 16.  This is the last byte of the
-       last time we have read the object.  See stm_read(). */
+       the address of the object by 16.  The number in this single byte
+       gives the last time we have read the object.  See stm_read(). */
     unsigned char c;
 };
 
@@ -482,14 +482,25 @@ void stm_start_transaction(void)
         __sync_fetch_and_add(&d->next_transaction_version, 1u);
     assert(stm_local.transaction_version <= 0xffff);
 
-    struct page_header_s *newpage = _stm_reserve_page();
-    newpage->kind = PGKIND_WRITE_HISTORY;
-
-    struct write_history_s *cur = (struct write_history_s *)(newpage + 1);
+    struct write_history_s *cur = NULL;
+    if (stm_local.writes_by_this_transaction != NULL) {
+        cur = stm_local.writes_by_this_transaction;
+        char *next, *page_limit = (char *)cur;
+        page_limit += 4096 - (((uintptr_t)page_limit) & 4095);
+        next = (char *)(cur + 1) + 8 * cur->nb_updates;
+        if (page_limit - next < sizeof(struct write_history_s) + 8)
+            cur = NULL;
+        else
+            cur = (struct write_history_s *)next;
+    }
+    if (cur == NULL) {
+        struct page_header_s *newpage = _stm_reserve_page();
+        newpage->kind = PGKIND_WRITE_HISTORY;
+        cur = (struct write_history_s *)(newpage + 1);
+    }
     cur->previous_older_transaction = NULL;
     cur->transaction_version = stm_local.transaction_version;
     cur->nb_updates = 0;
-    assert(stm_local.writes_by_this_transaction == NULL);
     stm_local.writes_by_this_transaction = cur;
 
     struct write_history_s *hist = d->most_recent_committed_transaction;
@@ -520,7 +531,6 @@ _Bool stm_stop_transaction(void)
                                          hist, cur))
             break;
     }
-    stm_local.writes_by_this_transaction = NULL;
 
     if (stm_get_read_marker_number() < 0xff) {
         stm_local.current_read_markers++;
