@@ -98,7 +98,7 @@ struct shared_descriptor_s {
         char _pad1[CACHE_LINE_SIZE];
     };
     union {
-        unsigned int next_transaction_version;
+        unsigned int next_transaction_version;   /* always EVEN */
         char _pad2[CACHE_LINE_SIZE];
     };
     union {
@@ -118,7 +118,7 @@ struct local_data_s {
        different forked processes. */
     char *read_markers;
     struct read_marker_s *current_read_markers;
-    uint16_t transaction_version;
+    uint16_t transaction_version;    /* always EVEN */
     struct write_history_s *base_page_mapping;
     struct write_history_s *writes_by_this_transaction;
     struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
@@ -335,7 +335,7 @@ void stm_setup(void)
     /* the page at index 0 contains the '*stm_shared_descriptor' structure */
     /* the page at index 1 is reserved for history_fast_forward() */
     stm_shared_descriptor->index_page_never_used = 2;
-    stm_shared_descriptor->next_transaction_version = 1;
+    stm_shared_descriptor->next_transaction_version = 2;
 }
 
 void _stm_teardown(void)
@@ -400,6 +400,22 @@ struct object_s *get_object_in_page(struct page_header_s *page, size_t index)
     return (struct object_s *)(((char *)page) + offset);
 }
 
+static _Bool must_merge_page(struct page_header_s *page)
+{
+    /* The remote page was modified.  Look at the local page (at
+       'page').  If 'page->version' is equal to:
+
+       - stm_local.transaction_version: the local page was
+         also modified in this transaction.  Then we need to merge.
+
+       - stm_local.transaction_version - 1: the local page was
+         not, strictly speaking, modified, but *new* objects have
+         been written to it.  In order not to loose them, ask for
+         a merge too.
+    */
+    return ((uint32_t)(stm_local.transaction_version - page->version)) <= 1;
+}
+
 static int history_fast_forward(struct write_history_s *new, int conflict)
 {
     /* XXX do a non-recursive version, which also should avoid repeated
@@ -419,7 +435,7 @@ static int history_fast_forward(struct write_history_s *new, int conflict)
         struct page_header_s *page = get_page_by_local_index(local_index);
         struct page_header_s *mypage = page;
 
-        if (!conflict && page->version == stm_local.transaction_version) {
+        if (!conflict && must_merge_page(page)) {
             /* If we have also modified this page, then we must merge our
                changes with the ones done at 'new_pgoff'.  In this case
                we map 'new_pgoff' at the local index 1. */
@@ -479,8 +495,9 @@ void stm_start_transaction(void)
 {
     struct shared_descriptor_s *d = stm_shared_descriptor;
     stm_local.transaction_version =
-        __sync_fetch_and_add(&d->next_transaction_version, 1u);
+        __sync_fetch_and_add(&d->next_transaction_version, 2u);
     assert(stm_local.transaction_version <= 0xffff);
+    assert((stm_local.transaction_version & 1) == 0);   /* EVEN number */
 
     struct write_history_s *cur = NULL;
     if (stm_local.writes_by_this_transaction != NULL) {
@@ -506,6 +523,16 @@ void stm_start_transaction(void)
     struct write_history_s *hist = d->most_recent_committed_transaction;
     if (hist != stm_local.base_page_mapping) {
         history_fast_forward(hist, 1);
+    }
+
+    int i;
+    for (i = 2; i < LARGE_OBJECT_WORDS; i++) {
+        struct page_header_s *page;
+        char *ptr = stm_local.alloc[i].next;
+        if (ptr != NULL) {
+            page = (struct page_header_s *)(((uintptr_t)ptr) & ~4095);
+            page->version = stm_local.transaction_version - 1;
+        }
     }
 }
 
