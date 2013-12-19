@@ -71,13 +71,6 @@ struct page_header_s {
     uint32_t pgoff;           /* the mm page offset */
 };
 
-struct read_marker_s {
-    /* We associate a single byte to every object, by simply dividing
-       the address of the object by 16.  The number in this single byte
-       gives the last time we have read the object.  See stm_read(). */
-    unsigned char c;
-};
-
 struct write_history_s {
     struct write_history_s *previous_older_transaction;
     uint16_t transaction_version;
@@ -116,47 +109,36 @@ struct local_data_s {
     /* This is just a bunch of global variables, but during testing,
        we save it all away and restore different ones to simulate
        different forked processes. */
-    char *read_markers;
-    struct read_marker_s *current_read_markers;
-    uint16_t transaction_version;    /* always EVEN */
     struct write_history_s *base_page_mapping;
     struct write_history_s *writes_by_this_transaction;
     struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
+    char *read_markers;
+#ifdef STM_TESTS
+    struct _read_marker_s *_current_read_markers;
+    uint16_t _transaction_version;
+#endif
 };
 
 struct shared_descriptor_s *stm_shared_descriptor;
+struct _read_marker_s *stm_current_read_markers;
 struct local_data_s stm_local;
+uint16_t stm_transaction_version;      /* always EVEN */
 
-
-void stm_read(struct object_s *object)
-{
-    stm_local.current_read_markers[((uintptr_t)object) >> 4].c =
-        (unsigned char)(uintptr_t)stm_local.current_read_markers;
-}
 
 _Bool _stm_was_read(struct object_s *object)
 {
-    return (stm_local.current_read_markers[((uintptr_t)object) >> 4].c ==
-            (unsigned char)(uintptr_t)stm_local.current_read_markers);
+    return (stm_current_read_markers[((uintptr_t)object) >> 4].c ==
+            (unsigned char)(uintptr_t)stm_current_read_markers);
 }
 
-static struct read_marker_s *get_current_read_marker(struct object_s *object)
+static struct _read_marker_s *get_current_read_marker(struct object_s *object)
 {
-    return stm_local.current_read_markers + (((uintptr_t)object) >> 4);
-}
-
-void _stm_write_slowpath(struct object_s *);
-
-void stm_write(struct object_s *object)
-{
-    if (__builtin_expect(object->modified != stm_local.transaction_version,
-                         0))
-        _stm_write_slowpath(object);
+    return stm_current_read_markers + (((uintptr_t)object) >> 4);
 }
 
 _Bool _stm_was_written(struct object_s *object)
 {
-    return (object->modified == stm_local.transaction_version);
+    return (object->modified == stm_transaction_version);
 }
 
 
@@ -216,21 +198,21 @@ void _stm_write_slowpath(struct object_s * object)
     page = (struct page_header_s *)(((uintptr_t)object) & ~4095);
     assert(2 <= page->kind && page->kind < LARGE_OBJECT_WORDS);
 
-    if (page->version != stm_local.transaction_version) {
+    if (page->version != stm_transaction_version) {
         struct page_header_s *newpage = _stm_reserve_page();
         uint32_t old_pgoff = get_pgoff(page);
         uint32_t new_pgoff = get_pgoff(newpage);
 
         pagecopy(newpage, page);
-        newpage->version = stm_local.transaction_version;
+        newpage->version = stm_transaction_version;
         newpage->modif_head = 0xff;
         newpage->pgoff = new_pgoff;
-        assert(page->version != stm_local.transaction_version);
+        assert(page->version != stm_transaction_version);
         assert(page->pgoff == old_pgoff);
 
         remap_file_pages((void *)page, 4096, 0, new_pgoff, MAP_PAGES_FLAGS);
 
-        assert(page->version == stm_local.transaction_version);
+        assert(page->version == stm_transaction_version);
         assert(page->pgoff == new_pgoff);
 
         struct write_history_s *cur = stm_local.writes_by_this_transaction;
@@ -240,7 +222,7 @@ void _stm_write_slowpath(struct object_s * object)
         cur->updates[i * 2 + 0] = get_local_index(page);
         cur->updates[i * 2 + 1] = new_pgoff;
     }
-    object->modified = stm_local.transaction_version;
+    object->modified = stm_transaction_version;
     object->modif_next = page->modif_head;
     page->modif_head = (uint8_t)(((uintptr_t)object) >> 4);
     assert(page->modif_head != 0xff);
@@ -271,7 +253,7 @@ struct object_s *stm_allocate(size_t size)
         p = _stm_alloc_next_page(i);
 
     struct object_s *result = (struct object_s *)p;
-    result->modified = stm_local.transaction_version;
+    result->modified = stm_transaction_version;
     /*result->modif_next is uninitialized*/
     result->flags = 0x42;   /* for debugging */
     return result;
@@ -280,17 +262,17 @@ struct object_s *stm_allocate(size_t size)
 
 unsigned char stm_get_read_marker_number(void)
 {
-    return (unsigned char)(uintptr_t)stm_local.current_read_markers;
+    return (unsigned char)(uintptr_t)stm_current_read_markers;
 }
 
 void stm_set_read_marker_number(uint8_t num)
 {
     char *stm_pages = ((char *)stm_shared_descriptor) + 4096;
     uintptr_t delta = ((uintptr_t)stm_pages) >> 4;
-    struct read_marker_s *crm = (struct read_marker_s *)stm_local.read_markers;
-    stm_local.current_read_markers = crm - delta;
+    struct _read_marker_s *crm = (struct _read_marker_s *)stm_local.read_markers;
+    stm_current_read_markers = crm - delta;
     assert(stm_get_read_marker_number() == 0);
-    stm_local.current_read_markers += num;
+    stm_current_read_markers += num;
 }
 
 static void clear_all_read_markers(void)
@@ -405,15 +387,14 @@ static _Bool must_merge_page(struct page_header_s *page)
     /* The remote page was modified.  Look at the local page (at
        'page').  If 'page->version' is equal to:
 
-       - stm_local.transaction_version: the local page was
-         also modified in this transaction.  Then we need to merge.
+       - stm_transaction_version: the local page was also modified in
+       this transaction.  Then we need to merge.
 
-       - stm_local.transaction_version - 1: the local page was
-         not, strictly speaking, modified, but *new* objects have
-         been written to it.  In order not to loose them, ask for
-         a merge too.
+       - stm_transaction_version - 1: the local page was not, strictly
+       speaking, modified, but *new* objects have been written to it.
+       In order not to loose them, ask for a merge too.
     */
-    return ((uint32_t)(stm_local.transaction_version - page->version)) <= 1;
+    return ((uint32_t)(stm_transaction_version - page->version)) <= 1;
 }
 
 static int history_fast_forward(struct write_history_s *new, int conflict)
@@ -494,11 +475,11 @@ static int history_fast_forward(struct write_history_s *new, int conflict)
 void stm_start_transaction(void)
 {
     struct shared_descriptor_s *d = stm_shared_descriptor;
-    stm_local.transaction_version =
+    stm_transaction_version =
         __sync_fetch_and_add(&d->next_transaction_version, 2u);
-    assert(stm_local.transaction_version <= 0xffff);//XXX
-    assert((stm_local.transaction_version & 1) == 0);   /* EVEN number */
-    assert(stm_local.transaction_version >= 2);
+    assert(stm_transaction_version <= 0xffff);//XXX
+    assert((stm_transaction_version & 1) == 0);   /* EVEN number */
+    assert(stm_transaction_version >= 2);
 
     struct write_history_s *cur = NULL;
     if (stm_local.writes_by_this_transaction != NULL) {
@@ -517,7 +498,7 @@ void stm_start_transaction(void)
         cur = (struct write_history_s *)(newpage + 1);
     }
     cur->previous_older_transaction = NULL;
-    cur->transaction_version = stm_local.transaction_version;
+    cur->transaction_version = stm_transaction_version;
     cur->nb_updates = 0;
     stm_local.writes_by_this_transaction = cur;
 
@@ -532,7 +513,7 @@ void stm_start_transaction(void)
         char *ptr = stm_local.alloc[i].next;
         if (ptr != NULL) {
             page = (struct page_header_s *)(((uintptr_t)ptr) & ~4095);
-            page->version = stm_local.transaction_version - 1;
+            page->version = stm_transaction_version - 1;
             /* ^^^ this is one of the only writes to shared memory;
                usually it is read-only */
         }
@@ -563,7 +544,7 @@ _Bool stm_stop_transaction(void)
     }
 
     if (stm_get_read_marker_number() < 0xff) {
-        stm_local.current_read_markers++;
+        stm_current_read_markers++;
     }
     else {
         clear_all_read_markers();
@@ -580,6 +561,8 @@ struct local_data_s *_stm_save_local_state(void)
                                     page_count * sizeof(uint32_t));
     assert(p != NULL);
     memcpy(p, &stm_local, sizeof(stm_local));
+    p->_current_read_markers = stm_current_read_markers;
+    p->_transaction_version = stm_transaction_version;
 
     pgoffs = (uint32_t *)(p + 1);
     pgoffs[0] = page_count;
@@ -607,6 +590,8 @@ void _stm_restore_local_state(struct local_data_s *p)
     }
 
     memcpy(&stm_local, p, sizeof(struct local_data_s));
+    stm_current_read_markers = p->_current_read_markers;
+    stm_transaction_version = p->_transaction_version;
     free(p);
 }
 #endif
