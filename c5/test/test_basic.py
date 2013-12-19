@@ -151,3 +151,86 @@ class TestBasic(BaseTest):
         stm_stop_transaction(False)
         assert p1[8] == 'b'
         assert p2[8] == 'C'
+
+    def test_page_extra_malloc_unchanged_page(self):
+        stm_start_transaction()
+        p1 = stm_allocate(16)
+        p2 = stm_allocate(16)
+        p1[8] = 'A'
+        p2[8] = 'a'
+        stm_stop_transaction(False)
+        stm_start_transaction()
+        #
+        self.switch("sub1")
+        stm_start_transaction()
+        stm_write(p1)
+        assert p1[8] == 'A'
+        p1[8] = 'B'
+        stm_stop_transaction(False)
+        #
+        self.switch("main")
+        stm_read(p2)
+        assert p2[8] == 'a'
+        p3 = stm_allocate(16)   # goes into the same page, which is
+        p3[8] = ':'             #  not otherwise modified
+        stm_stop_transaction(False)
+        #
+        assert p1[8] == 'B'
+        assert p2[8] == 'a'
+        assert p3[8] == ':'
+
+    def test_page_extra_malloc_changed_page_before(self):
+        stm_start_transaction()
+        p1 = stm_allocate(16)
+        p2 = stm_allocate(16)
+        p1[8] = 'A'
+        p2[8] = 'a'
+        stm_stop_transaction(False)
+        stm_start_transaction()
+        #
+        self.switch("sub1")
+        stm_start_transaction()
+        stm_write(p1)
+        assert p1[8] == 'A'
+        p1[8] = 'B'
+        stm_stop_transaction(False)
+        #
+        self.switch("main")
+        stm_write(p2)
+        assert p2[8] == 'a'
+        p2[8] = 'b'
+        p3 = stm_allocate(16)  # goes into the same page, which I already
+        p3[8] = ':'            #  modified just above
+        stm_stop_transaction(False)
+        #
+        assert p1[8] == 'B'
+        assert p2[8] == 'b'
+        assert p3[8] == ':'
+
+    def test_page_extra_malloc_changed_page_after(self):
+        stm_start_transaction()
+        p1 = stm_allocate(16)
+        p2 = stm_allocate(16)
+        p1[8] = 'A'
+        p2[8] = 'a'
+        stm_stop_transaction(False)
+        stm_start_transaction()
+        #
+        self.switch("sub1")
+        stm_start_transaction()
+        stm_write(p1)
+        assert p1[8] == 'A'
+        p1[8] = 'B'
+        stm_stop_transaction(False)
+        #
+        self.switch("main")
+        p3 = stm_allocate(16)  # goes into the same page, which I will
+        p3[8] = ':'            #  modify just below
+        stm_write(p2)
+        assert p2[8] == 'a'
+        p2[8] = 'b'
+        stm_stop_transaction(False)
+        #
+        assert p1[8] == 'B'
+        assert p2[8] == 'b'
+        assert p3[8] == ':'
