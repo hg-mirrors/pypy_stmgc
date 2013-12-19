@@ -87,15 +87,15 @@ struct shared_descriptor_s {
         char _pad0[CACHE_LINE_SIZE];
     };
     union {
-        uint64_t index_page_never_used;
+        uint64_t volatile index_page_never_used;
         char _pad1[CACHE_LINE_SIZE];
     };
     union {
-        unsigned int next_transaction_version;   /* always EVEN */
+        unsigned int volatile next_transaction_version;   /* always EVEN */
         char _pad2[CACHE_LINE_SIZE];
     };
     union {
-        struct write_history_s *most_recent_committed_transaction;
+        struct write_history_s *volatile most_recent_committed_transaction;
         char _pad3[CACHE_LINE_SIZE];
     };
 };
@@ -166,6 +166,13 @@ struct page_header_s *_stm_reserve_page(void)
     return result;
 }
 
+static struct write_history_s *_reserve_page_write_history(void)
+{
+    struct page_header_s *newpage = _stm_reserve_page();
+    newpage->kind = PGKIND_WRITE_HISTORY;
+    return (struct write_history_s *)(newpage + 1);
+}
+
 
 static uint32_t get_pgoff(struct page_header_s *page)
 {
@@ -216,9 +223,17 @@ void _stm_write_slowpath(struct object_s * object)
         assert(page->pgoff == new_pgoff);
 
         struct write_history_s *cur = stm_local.writes_by_this_transaction;
-        uint64_t i = cur->nb_updates++;
         size_t history_size_max = 4096 - (((uintptr_t)cur) & 4095);
-        assert(sizeof(*cur) + cur->nb_updates * 8 <= history_size_max);//XXX
+        if (sizeof(*cur) + (cur->nb_updates + 1) * 8 > history_size_max) {
+            /* The buffer would overflow its page.  Allocate a new one. */
+            cur = _reserve_page_write_history();
+            cur->previous_older_transaction =
+                stm_local.writes_by_this_transaction;
+            cur->transaction_version = stm_transaction_version;
+            cur->nb_updates = 0;
+            stm_local.writes_by_this_transaction = cur;
+        }
+        uint64_t i = cur->nb_updates++;
         cur->updates[i * 2 + 0] = get_local_index(page);
         cur->updates[i * 2 + 1] = new_pgoff;
     }
@@ -487,15 +502,11 @@ void stm_start_transaction(void)
         char *next, *page_limit = (char *)cur;
         page_limit += 4096 - (((uintptr_t)page_limit) & 4095);
         next = (char *)(cur + 1) + 8 * cur->nb_updates;
-        if (page_limit - next < sizeof(struct write_history_s) + 8)
-            cur = NULL;
-        else
+        if (page_limit - next >= sizeof(struct write_history_s) + 8)
             cur = (struct write_history_s *)next;
     }
     if (cur == NULL) {
-        struct page_header_s *newpage = _stm_reserve_page();
-        newpage->kind = PGKIND_WRITE_HISTORY;
-        cur = (struct write_history_s *)(newpage + 1);
+        cur = _reserve_page_write_history();
     }
     cur->previous_older_transaction = NULL;
     cur->transaction_version = stm_transaction_version;
@@ -527,6 +538,12 @@ _Bool stm_stop_transaction(void)
     int conflict = 0;
     //fprintf(stderr, "stm_stop_transaction\n");
 
+    struct write_history_s *cur_head = stm_local.writes_by_this_transaction;
+    struct write_history_s *cur_tail = cur_head;
+    while (cur_tail->previous_older_transaction != NULL) {
+        cur_tail = cur_tail->previous_older_transaction;
+    }
+
     while (1) {
         struct write_history_s *hist = d->most_recent_committed_transaction;
         if (hist != stm_local.base_page_mapping) {
@@ -536,10 +553,9 @@ _Bool stm_stop_transaction(void)
             else
                 continue;   /* retry from the start of the loop */
         }
-        struct write_history_s *cur = stm_local.writes_by_this_transaction;
-        cur->previous_older_transaction = hist;
+        cur_tail->previous_older_transaction = hist;
         if (__sync_bool_compare_and_swap(&d->most_recent_committed_transaction,
-                                         hist, cur))
+                                         hist, cur_head))
             break;
     }
 
