@@ -502,12 +502,15 @@ void stm_start_transaction(void)
         char *next, *page_limit = (char *)cur;
         page_limit += 4096 - (((uintptr_t)page_limit) & 4095);
         next = (char *)(cur + 1) + 8 * cur->nb_updates;
-        if (page_limit - next >= sizeof(struct write_history_s) + 8)
+        if (page_limit - next < sizeof(struct write_history_s) + 8)
+            cur = NULL;
+        else
             cur = (struct write_history_s *)next;
     }
     if (cur == NULL) {
         cur = _reserve_page_write_history();
     }
+    assert(cur != d->most_recent_committed_transaction);
     cur->previous_older_transaction = NULL;
     cur->transaction_version = stm_transaction_version;
     cur->nb_updates = 0;
@@ -553,6 +556,7 @@ _Bool stm_stop_transaction(void)
             else
                 continue;   /* retry from the start of the loop */
         }
+        assert(cur_head == stm_local.writes_by_this_transaction);
         cur_tail->previous_older_transaction = hist;
         if (__sync_bool_compare_and_swap(&d->most_recent_committed_transaction,
                                          hist, cur_head))
