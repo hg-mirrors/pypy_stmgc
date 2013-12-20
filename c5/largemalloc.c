@@ -77,6 +77,11 @@ static mchunk_t *next_chunk_u(mchunk_t *p)
    decreasing order (if you start from 'd.next').  At the end of this
    list are some unsorted chunks.  All unsorted chunks are after all
    sorted chunks.  The flag 'FLAG_SORTED' distinguishes them.
+
+   Note that if the user always calls stm_large_malloc() with a large
+   enough argument, then the few bins corresponding to smaller values
+   will never be sorted at all.  They are still populated with the
+   fragments of space between bigger allocations.
 */
 
 static dlist_t largebins[N_BINS] = {
@@ -100,6 +105,13 @@ static dlist_t largebins[N_BINS] = {
     INIT(75), INIT(76), INIT(77), INIT(78), INIT(79),
     INIT(80), INIT(81), INIT(82), INIT(83) };
 #undef INIT
+
+void _stm_large_reset(void)
+{
+    int i;
+    for (i = 0; i < N_BINS; i++)
+        largebins[i].prev = largebins[i].next = &largebins[i];
+}
 
 
 static char *allocate_more(size_t request_size);

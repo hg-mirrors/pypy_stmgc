@@ -4,6 +4,9 @@ import random
 
 class TestLargeMalloc(object):
 
+    def setup_method(self, meth):
+        lib._stm_large_reset()
+
     def test_simple(self):
         d1 = lib.stm_large_malloc(7000)
         d2 = lib.stm_large_malloc(8000)
@@ -32,7 +35,8 @@ class TestLargeMalloc(object):
         assert d8 == d4
 
     def test_random(self):
-        r = random.Random(1005)
+        r = random.Random(1007)
+        first = None
         p = []
         for i in range(100000):
             if len(p) != 0 and (len(p) > 100 or r.randrange(0, 5) < 2):
@@ -46,9 +50,12 @@ class TestLargeMalloc(object):
                 sz = r.randrange(8, 160) * 8
                 d = lib.stm_large_malloc(sz)
                 print 'alloc %5d  (%s)' % (sz, d)
+                if first is None:
+                    first = d
                 lib.memset(d, 0xdd, sz)
                 content1 = chr(r.randrange(0, 256))
                 content2 = chr(r.randrange(0, 256))
                 d[0] = content1
                 d[sz - 1] = content2
                 p.append((d, sz, content1, content2))
+        lib._stm_large_dump(first)
