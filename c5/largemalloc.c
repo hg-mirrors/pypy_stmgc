@@ -3,6 +3,11 @@
    blocks, which in our case means at least 288 bytes.
 */
 
+#include <stdlib.h>
+#include <stdio.h>
+#include <stddef.h>
+#include <assert.h>
+
 
 #define MMAP_LIMIT    (1280*1024)
 
@@ -15,32 +20,34 @@
                             83)
 #define N_BINS              84
 
+typedef struct dlist_s {
+    struct dlist_s *next;   /* a doubly-linked list */
+    struct dlist_s *prev;
+} dlist_t;
+
 typedef struct malloc_chunk {
-    size_t prev_size;     /* - if the previous chunk is free: its size
+    size_t prev_size;     /* - if the previous chunk is free: size of its data
                              - otherwise, if this chunk is free: 1
                              - otherwise, 0. */
-    size_t size;          /* size of this chunk */
+    size_t size;          /* size of the data in this chunk */
 
-    union {
-        char data[1];               /* if not free: start of the user data */
-        struct malloc_chunk *next;  /* if free: a doubly-linked list */
-    };
-    struct malloc_chunk *prev;
+    dlist_t d;            /* if free: a doubly-linked list */
+                          /* if not free: the user data starts here */
 
     /* The chunk has a total size of 'size'.  It is immediately followed
        in memory by another chunk.  This list ends with the last "chunk"
        being actually only one word long, 'size_t prev_size'.  Both this
        last chunk and the theoretical chunk before the first one are
        considered "not free". */
-} *mchunk_t;
+} mchunk_t;
 
 #define THIS_CHUNK_FREE      1
 #define BOTH_CHUNKS_USED     0
-#define CHUNK_HEADER_SIZE    offsetof(struct malloc_chunk, data)
-#define MINSIZE              sizeof(struct malloc_chunk)
+#define CHUNK_HEADER_SIZE    offsetof(struct malloc_chunk, d)
 
-#define chunk_at_offset(p, ofs)  ((mchunk_t *)(((char *)(p)) + ofs))
-#define next_chunk(p)            chunk_at_offset(p, (p)->size)
+#define chunk_at_offset(p, ofs)  ((mchunk_t *)(((char *)(p)) + (ofs)))
+#define data2chunk(p)            chunk_at_offset(p, -CHUNK_HEADER_SIZE)
+#define next_chunk(p)         chunk_at_offset(p, CHUNK_HEADER_SIZE + (p)->size)
 
 
 /* The free chunks are stored in "bins".  Each bin is a doubly-linked
@@ -53,55 +60,100 @@ typedef struct malloc_chunk {
    neighbors to ensure this.
 
    In each bin's doubly-linked list, chunks are sorted by their size in
-   decreasing order .  Among chunks of equal size, they are ordered with
-   the most recently freed first, and we take them from the back.  This
-   results in FIFO order, which is better to give each block a while to
-   rest in the list and be consolidated into potentially larger blocks.
+   decreasing order (if you start from 'd.next').
 */
 
-static struct { mchunk_t *head, mchunk_t *tail; } largebins[N_BINS];
+static struct { dlist_t d; dlist_t *unsorted; } largebins[N_BINS] = {
+
+#define INIT(num)   { { &largebins[num].d, &largebins[num].d }, NULL }
+    INIT(0),  INIT(1),  INIT(2),  INIT(3),  INIT(4),
+    INIT(5),  INIT(6),  INIT(7),  INIT(8),  INIT(9),
+    INIT(10), INIT(11), INIT(12), INIT(13), INIT(14),
+    INIT(15), INIT(16), INIT(17), INIT(18), INIT(19),
+    INIT(20), INIT(21), INIT(22), INIT(23), INIT(24),
+    INIT(25), INIT(26), INIT(27), INIT(28), INIT(29),
+    INIT(30), INIT(31), INIT(32), INIT(33), INIT(34),
+    INIT(35), INIT(36), INIT(37), INIT(38), INIT(39),
+    INIT(40), INIT(41), INIT(42), INIT(43), INIT(44),
+    INIT(45), INIT(46), INIT(47), INIT(48), INIT(49),
+    INIT(50), INIT(51), INIT(52), INIT(53), INIT(54),
+    INIT(55), INIT(56), INIT(57), INIT(58), INIT(59),
+    INIT(60), INIT(61), INIT(62), INIT(63), INIT(64),
+    INIT(65), INIT(66), INIT(67), INIT(68), INIT(69),
+    INIT(70), INIT(71), INIT(72), INIT(73), INIT(74),
+    INIT(75), INIT(76), INIT(77), INIT(78), INIT(79),
+    INIT(80), INIT(81), INIT(82), INIT(83) };
+#undef INIT
 
 
 static char *allocate_more(size_t request_size);
 
-static void insert_sort(mchunk_t *new)
+static void insert_unsorted(mchunk_t *new)
 {
     size_t index = largebin_index(new->size);
-    mchunk_t *head = largebins[index]->head;
+    new->d.next = largebins[index].unsorted;
+    largebins[index].unsorted = &new->d;
+}
 
-    if (head == NULL) {
-        assert(largebins[index]->tail == NULL);
-        new->prev = NULL;
-        new->next = NULL;
-        largebins[index]->tail = new;
-        largebins[index]->head = new;
-        return;
-    }
-    assert(largebins[index]->tail != NULL);
+static int compare_chunks(const void *vchunk1, const void *vchunk2)
+{
+    /* sort by decreasing size */
+    const mchunk_t *chunk1 = (const mchunk_t *)vchunk1;
+    const mchunk_t *chunk2 = (const mchunk_t *)vchunk2;
+    if (chunk1->size < chunk2->size)
+        return 1;
+    if (chunk1->size == chunk2->size)
+        return 0;
+    else
+        return -1;
+}
 
-    size_t new_size = new->size;
-    if (new_size >= head->size) {
-        new->prev = NULL;
-        new->next = head;
-        assert(head->prev == NULL);
-        head->prev = new;
-        largebins[index]->head = new;
-        return;
+static void really_sort_bin(size_t index)
+{
+    dlist_t *unsorted = largebins[index].unsorted;
+    largebins[index].unsorted = NULL;
+
+    dlist_t *scan = unsorted->next;
+    size_t count = 1;
+    while (scan != NULL) {
+        scan = scan->next;
+        ++count;
     }
-    mchunk_t *search;
-    for (search = head; search != NULL; search = search->next) {
-        if (new_size >= search->size) {
-            new->prev = search->prev;
-            new->prev->next = new;
-            new->next = search;
-            search->prev = new;
-            return;
+
+    mchunk_t *chunks[count];
+    size_t i;
+    for (i = 0; i < count; i++) {
+        chunks[i] = data2chunk(unsorted);
+        unsorted = unsorted->next;
+    }
+    qsort(chunks, count, sizeof(mchunk_t *), compare_chunks);
+
+    dlist_t *head = largebins[index].d.next;
+    dlist_t *end = &largebins[index].d;
+    size_t search_size = chunks[0]->size;
+    i = 0;
+
+    while (1) {
+        if (head == end || search_size >= data2chunk(head)->size) {
+            /* insert 'chunks[i]' here, before the current head */
+            head->prev->next = &chunks[i]->d;
+            chunks[i]->d.prev = head->prev;
+            head->prev = &chunks[i]->d;
+            chunks[i]->d.next = head;
+            if (++i == count)
+                break;    /* all done */
+            search_size = chunks[i]->size;
+        }
+        else {
+            head = head->next;
         }
     }
-    new->prev = largebins[index]->tail;
-    new->prev->next = new;
-    new->next = NULL;
-    largebins[index]->tail = new;
+}
+
+static void sort_bin(size_t index)
+{
+    if (largebins[index].unsorted != NULL)
+        really_sort_bin(index);
 }
 
 char *stm_large_malloc(size_t request_size)
@@ -109,61 +161,59 @@ char *stm_large_malloc(size_t request_size)
     /* 'request_size' should already be a multiple of the word size here */
     assert((request_size & (sizeof(char *)-1)) == 0);
 
-    size_t chunk_size = request_size + CHUNK_HEADER_SIZE;
-    if (chunk_size < request_size) {
-        /* 'request_size' is so large that the addition wrapped around */
-        fprintf(stderr, "allocation request too large\n");
-        abort();
-    }
-
-    size_t index = largebin_index(chunk_size);
+    size_t index = largebin_index(request_size);
+    sort_bin(index);
 
     /* scan through the chunks of current bin in reverse order
        to find the smallest that fits. */
-    mchunk_t *scan = largebins[index]->tail;
-    mchunk_t *head = largebins[index]->head;
+    dlist_t *scan = largebins[index].d.prev;
+    dlist_t *head = largebins[index].d.next;
+    mchunk_t *mscan;
     while (scan != head) {
-        assert(scan->prev_size == THIS_CHUNK_FREE);
-        assert(next_chunk(scan)->prev_size == scan->size);
+        mscan = data2chunk(scan);
+        assert(mscan->prev_size == THIS_CHUNK_FREE);
+        assert(next_chunk(mscan)->prev_size == mscan->size);
 
-        if (scan->size >= chunk_size) {
+        if (mscan->size >= request_size) {
             /* found! */
          found:
-            if (scan == largebins[index]->tail) {
-                largebins[index]->tail = scan->prev;
-            }
-            else {
-                scan->next->prev = scan->prev;
-            }
+            /* unlink mscan from the doubly-linked list */
+            mscan->d.next->prev = mscan->d.prev;
+            mscan->d.prev->next = mscan->d.next;
 
-            size_t remaining_size = scan->size - chunk_size;
-            if (remaining_size < MINSIZE) {
-                next_chunk(scan)->prev_size = BOTH_CHUNKS_USED;
+            size_t remaining_size = mscan->size - request_size;
+            if (remaining_size < sizeof(struct malloc_chunk)) {
+                next_chunk(mscan)->prev_size = BOTH_CHUNKS_USED;
             }
             else {
                 /* only part of the chunk is being used; reduce the size
-                   of 'scan' down to 'chunk_size', and create a new chunk
-                   of the 'remaining_size' afterwards */
-                mchunk_t *new = chunk_at_offset(scan, chunk_size);
+                   of 'mscan' down to 'request_size', and create a new
+                   chunk of the 'remaining_size' afterwards */
+                mchunk_t *new = chunk_at_offset(mscan, CHUNK_HEADER_SIZE +
+                                                       request_size);
                 new->prev_size = THIS_CHUNK_FREE;
-                new->size = remaining_size;
+                new->size = remaining_size - CHUNK_HEADER_SIZE;
                 next_chunk(new)->prev_size = remaining_size;
-                insert_sort(new);
-                scan->size = chunk_size;
+                insert_unsorted(new);
+                mscan->size = request_size;
             }
-            scan->prev_size = BOTH_CHUNKS_USED;
-            return scan->data;
+            mscan->prev_size = BOTH_CHUNKS_USED;
+            return (char *)&mscan->d;
         }
-        scan = scan->prev;
+        scan = mscan->d.prev;
     }
 
     /* search now through all higher bins.  We only need to take the
        smallest item of the first non-empty bin, as it will be large
        enough.  xxx use a bitmap to speed this up */
     while (++index < N_BINS) {
-        scan = largebins[index]->tail;
-        if (scan != NULL)
+        sort_bin(index);
+        scan = largebins[index].d.prev;
+        if (scan != &largebins[index].d) {
+            mscan = data2chunk(scan);
+            assert(mscan->size >= request_size);
             goto found;
+        }
     }
 
     /* not enough free memory.  We need to allocate more. */
@@ -182,9 +232,9 @@ static char *allocate_more(size_t request_size)
     }
 
     big_chunk->prev_size = THIS_CHUNK_FREE;
-    big_chunk->size = big_size - sizeof(size_t);
+    big_chunk->size = big_size - CHUNK_HEADER_SIZE - sizeof(size_t);
     next_chunk(big_chunk)->prev_size = big_chunk->size;
-    insert_sort(big_chunk);
+    insert_unsorted(big_chunk);
 
     return stm_large_malloc(request_size);
 }
