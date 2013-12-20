@@ -3,24 +3,12 @@
 #include <assert.h>
 
 
-#define END_MARKER           0xDEADBEEF
-
 char *stm_large_malloc(size_t request_size);
 void stm_large_free(char *data);
+void _stm_large_dump(char *data);
 
+#define dump _stm_large_dump
 
-static void dump(char *data)
-{
-    while (1) {
-        fprintf(stderr, "[ %p: %zu\n", data - 16, *(size_t*)(data - 16));
-        if (*(size_t*)(data - 8) == END_MARKER)
-            break;
-        fprintf(stderr, "  %p: %zu ]\n", data - 8, *(size_t*)(data - 8));
-        data += (*(size_t*)(data - 8)) & ~1;
-        data += 16;
-    }
-    fprintf(stderr, "  %p: end. ]\n\n", data - 8);
-}
 
 int main()
 {

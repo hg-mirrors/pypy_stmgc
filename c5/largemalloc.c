@@ -231,6 +231,7 @@ char *stm_large_malloc(size_t request_size)
     size_t remaining_size_plus_1 = mscan->size - request_size;
     if (remaining_size_plus_1 <= sizeof(struct malloc_chunk)) {
         next_chunk_s(mscan)->prev_size = BOTH_CHUNKS_USED;
+        request_size = mscan->size & ~FLAG_SORTED;
     }
     else {
         /* only part of the chunk is being used; reduce the size
@@ -243,8 +244,8 @@ char *stm_large_malloc(size_t request_size)
         new->size = remaining_size;
         next_chunk_u(new)->prev_size = remaining_size;
         insert_unsorted(new);
-        mscan->size = request_size;
     }
+    mscan->size = request_size;
     mscan->prev_size = BOTH_CHUNKS_USED;
     return (char *)&mscan->d;
 }
@@ -259,6 +260,7 @@ static char *allocate_more(size_t request_size)
         fprintf(stderr, "out of memory!\n");
         abort();
     }
+    fprintf(stderr, "allocate_more: %p\n", &big_chunk->d);
 
     big_chunk->prev_size = THIS_CHUNK_FREE;
     big_chunk->size = big_size - CHUNK_HEADER_SIZE * 2;
@@ -284,7 +286,7 @@ void stm_large_free(char *data)
     mchunk_t *mscan = chunk_at_offset(chunk, msize);
 
     if (mscan->prev_size == BOTH_CHUNKS_USED) {
-        assert((mscan->size & (sizeof(char *) - 1)) == 0);
+        assert((mscan->size & ((sizeof(char *) - 1) & ~FLAG_SORTED)) == 0);
         mscan->prev_size = chunk->size;
     }
     else {
@@ -332,4 +334,32 @@ void stm_large_free(char *data)
     }
 
     insert_unsorted(chunk);
+}
+
+
+void _stm_large_dump(char *data)
+{
+    size_t prev_size_if_free = 0;
+    while (1) {
+        fprintf(stderr, "[ %p: %zu\n", data - 16, *(size_t*)(data - 16));
+        if (prev_size_if_free == 0) {
+            assert(*(size_t*)(data - 16) == THIS_CHUNK_FREE ||
+                   *(size_t*)(data - 16) == BOTH_CHUNKS_USED);
+            if (*(size_t*)(data - 16) == THIS_CHUNK_FREE)
+                prev_size_if_free = (*(size_t*)(data - 8)) & ~FLAG_SORTED;
+        }
+        else {
+            assert(*(size_t*)(data - 16) == prev_size_if_free);
+            prev_size_if_free = 0;
+        }
+        if (*(size_t*)(data - 8) == END_MARKER)
+            break;
+        fprintf(stderr, "  %p: %zu]%s\n", data - 8, *(size_t*)(data - 8),
+                prev_size_if_free ? " (free)" : "");
+        if (!prev_size_if_free)
+            assert(!((*(size_t*)(data - 8)) & FLAG_SORTED));
+        data += (*(size_t*)(data - 8)) & ~FLAG_SORTED;
+        data += 16;
+    }
+    fprintf(stderr, "  %p: end. ]\n\n", data - 8);
 }
