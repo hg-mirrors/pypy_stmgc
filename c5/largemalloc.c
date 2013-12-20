@@ -31,7 +31,7 @@ typedef struct malloc_chunk {
                              - otherwise, if this chunk is free: 1
                              - otherwise, 0. */
     size_t size;          /* size of the data in this chunk,
-                             plus optionally the FLAG_UNSORTED */
+                             plus optionally the FLAG_SORTED */
 
     dlist_t d;            /* if free: a doubly-linked list */
                           /* if not free: the user data starts here */
@@ -43,14 +43,25 @@ typedef struct malloc_chunk {
        considered "not free". */
 } mchunk_t;
 
-#define FLAG_UNSORTED        1
+#define FLAG_SORTED          1
 #define THIS_CHUNK_FREE      1
 #define BOTH_CHUNKS_USED     0
 #define CHUNK_HEADER_SIZE    offsetof(struct malloc_chunk, d)
+#define END_MARKER           0xDEADBEEF
 
 #define chunk_at_offset(p, ofs)  ((mchunk_t *)(((char *)(p)) + (ofs)))
 #define data2chunk(p)            chunk_at_offset(p, -CHUNK_HEADER_SIZE)
-#define next_chunk(p)         chunk_at_offset(p, CHUNK_HEADER_SIZE + (p)->size)
+
+static mchunk_t *next_chunk_s(mchunk_t *p)
+{
+    assert(p->size & FLAG_SORTED);
+    return chunk_at_offset(p, CHUNK_HEADER_SIZE + p->size - FLAG_SORTED);
+}
+static mchunk_t *next_chunk_u(mchunk_t *p)
+{
+    assert(!(p->size & FLAG_SORTED));
+    return chunk_at_offset(p, CHUNK_HEADER_SIZE + p->size);
+}
 
 
 /* The free chunks are stored in "bins".  Each bin is a doubly-linked
@@ -64,8 +75,8 @@ typedef struct malloc_chunk {
 
    In each bin's doubly-linked list, chunks are sorted by their size in
    decreasing order (if you start from 'd.next').  At the end of this
-   list are some unsorted chunks (with FLAG_UNSORTED).  All unsorted
-   chunks are after all sorted chunks.
+   list are some unsorted chunks.  All unsorted chunks are after all
+   sorted chunks.  The flag 'FLAG_SORTED' distinguishes them.
 */
 
 static dlist_t largebins[N_BINS] = {
@@ -101,7 +112,7 @@ static void insert_unsorted(mchunk_t *new)
     new->d.prev = largebins[index].prev;
     new->d.prev->next = &new->d;
     largebins[index].prev = &new->d;
-    new->size |= FLAG_UNSORTED;
+    assert(!(new->size & FLAG_SORTED));
 }
 
 static int compare_chunks(const void *vchunk1, const void *vchunk2)
@@ -123,7 +134,7 @@ static void really_sort_bin(size_t index)
     dlist_t *end = &largebins[index];
     dlist_t *scan = unsorted->prev;
     size_t count = 1;
-    while (scan != end && (data2chunk(scan)->size & FLAG_UNSORTED)) {
+    while (scan != end && !(data2chunk(scan)->size & FLAG_SORTED)) {
         scan = scan->prev;
         ++count;
     }
@@ -140,7 +151,7 @@ static void really_sort_bin(size_t index)
     qsort(chunks, count, sizeof(mchunk_t *), compare_chunks);
 
     --count;
-    chunks[count]->size &= ~FLAG_UNSORTED;
+    chunks[count]->size |= FLAG_SORTED;
     size_t search_size = chunks[count]->size;
     dlist_t *head = largebins[index].next;
 
@@ -154,7 +165,7 @@ static void really_sort_bin(size_t index)
             if (count == 0)
                 break;    /* all done */
             --count;
-            chunks[count]->size &= ~FLAG_UNSORTED;
+            chunks[count]->size |= FLAG_SORTED;
             search_size = chunks[count]->size;
         }
         else {
@@ -166,7 +177,7 @@ static void really_sort_bin(size_t index)
 static void sort_bin(size_t index)
 {
     dlist_t *last = largebins[index].prev;
-    if (last != &largebins[index] && (data2chunk(last)->size & FLAG_UNSORTED))
+    if (last != &largebins[index] && !(data2chunk(last)->size & FLAG_SORTED))
         really_sort_bin(index);
 }
 
@@ -186,9 +197,9 @@ char *stm_large_malloc(size_t request_size)
     while (scan != end) {
         mscan = data2chunk(scan);
         assert(mscan->prev_size == THIS_CHUNK_FREE);
-        assert(next_chunk(mscan)->prev_size == mscan->size);
+        assert(next_chunk_s(mscan)->prev_size == mscan->size - FLAG_SORTED);
 
-        if (mscan->size >= request_size)
+        if (mscan->size > request_size)
             goto found;
         scan = mscan->d.prev;
     }
@@ -202,7 +213,6 @@ char *stm_large_malloc(size_t request_size)
         end = &largebins[index];
         if (scan != end) {
             mscan = data2chunk(scan);
-            assert(mscan->size >= request_size);
             goto found;
         }
     }
@@ -211,13 +221,16 @@ char *stm_large_malloc(size_t request_size)
     return allocate_more(request_size);
 
  found:
+    assert(mscan->size & FLAG_SORTED);
+    assert(mscan->size > request_size);
+
     /* unlink mscan from the doubly-linked list */
     mscan->d.next->prev = mscan->d.prev;
     mscan->d.prev->next = mscan->d.next;
 
-    size_t remaining_size = mscan->size - request_size;
-    if (remaining_size < sizeof(struct malloc_chunk)) {
-        next_chunk(mscan)->prev_size = BOTH_CHUNKS_USED;
+    size_t remaining_size_plus_1 = mscan->size - request_size;
+    if (remaining_size_plus_1 <= sizeof(struct malloc_chunk)) {
+        next_chunk_s(mscan)->prev_size = BOTH_CHUNKS_USED;
     }
     else {
         /* only part of the chunk is being used; reduce the size
@@ -226,9 +239,9 @@ char *stm_large_malloc(size_t request_size)
         mchunk_t *new = chunk_at_offset(mscan, CHUNK_HEADER_SIZE +
                                                request_size);
         new->prev_size = THIS_CHUNK_FREE;
-        remaining_size -= CHUNK_HEADER_SIZE;
+        size_t remaining_size = remaining_size_plus_1 - 1 - CHUNK_HEADER_SIZE;
         new->size = remaining_size;
-        next_chunk(new)->prev_size = remaining_size;
+        next_chunk_u(new)->prev_size = remaining_size;
         insert_unsorted(new);
         mscan->size = request_size;
     }
@@ -248,11 +261,12 @@ static char *allocate_more(size_t request_size)
     }
 
     big_chunk->prev_size = THIS_CHUNK_FREE;
-    big_chunk->size = big_size - CHUNK_HEADER_SIZE - sizeof(size_t);
+    big_chunk->size = big_size - CHUNK_HEADER_SIZE * 2;
 
-    assert((char *)&next_chunk(big_chunk)->prev_size ==
-           ((char *)big_chunk) + big_size - sizeof(size_t));
-    next_chunk(big_chunk)->prev_size = big_chunk->size;
+    assert((char *)&next_chunk_u(big_chunk)->prev_size ==
+           ((char *)big_chunk) + big_size - CHUNK_HEADER_SIZE);
+    next_chunk_u(big_chunk)->prev_size = big_chunk->size;
+    next_chunk_u(big_chunk)->size = END_MARKER;
 
     insert_unsorted(big_chunk);
 
@@ -274,7 +288,7 @@ void stm_large_free(char *data)
         mscan->prev_size = chunk->size;
     }
     else {
-        mscan->size &= ~FLAG_UNSORTED;
+        mscan->size &= ~FLAG_SORTED;
         size_t fsize = mscan->size;
         mchunk_t *fscan = chunk_at_offset(mscan, fsize + CHUNK_HEADER_SIZE);
 
@@ -302,7 +316,7 @@ void stm_large_free(char *data)
         msize = chunk->prev_size + CHUNK_HEADER_SIZE;
         mscan = chunk_at_offset(chunk, -msize);
         assert(mscan->prev_size == THIS_CHUNK_FREE);
-        assert((mscan->size & ~FLAG_UNSORTED) == chunk->prev_size);
+        assert((mscan->size & ~FLAG_SORTED) == chunk->prev_size);
 
         /* unlink the previous chunk */
         mscan->d.next->prev = mscan->d.prev;
@@ -310,7 +324,7 @@ void stm_large_free(char *data)
 
         /* merge the two chunks */
         mscan->size = msize + chunk->size;
-        next_chunk(mscan)->prev_size = mscan->size;
+        next_chunk_u(mscan)->prev_size = mscan->size;
 
         assert(chunk->prev_size = (size_t)-1);
         assert(chunk->size = (size_t)-1);

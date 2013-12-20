@@ -3,22 +3,23 @@
 #include <assert.h>
 
 
+#define END_MARKER           0xDEADBEEF
+
 char *stm_large_malloc(size_t request_size);
 void stm_large_free(char *data);
 
 
-static void dump(char *start)
+static void dump(char *data)
 {
-    char *data = start;
-    char *stop = start + 999999;
-
-    while (data < stop) {
+    while (1) {
         fprintf(stderr, "[ %p: %zu\n", data - 16, *(size_t*)(data - 16));
+        if (*(size_t*)(data - 8) == END_MARKER)
+            break;
         fprintf(stderr, "  %p: %zu ]\n", data - 8, *(size_t*)(data - 8));
         data += (*(size_t*)(data - 8)) & ~1;
         data += 16;
     }
-    fprintf(stderr, ". %p: %zu\n\n", data - 16, *(size_t*)(data - 16));
+    fprintf(stderr, "  %p: end. ]\n\n", data - 8);
 }
 
 int main()
@@ -43,6 +44,15 @@ int main()
     dump(start);
 
     stm_large_free(d5);
+
+    dump(start);
+
+    stm_large_malloc(600);
+    stm_large_free(d4);
+
+    dump(start);
+
+    stm_large_malloc(608);
 
     dump(start);
 
