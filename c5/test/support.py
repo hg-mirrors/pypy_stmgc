@@ -42,10 +42,11 @@ void _stm_restore_local_state(struct local_data_s *p);
 void _stm_teardown(void);
 void _stm_teardown_process(void);
 
+void stm_largemalloc_init(char *data_start, size_t data_size);
+int stm_largemalloc_resize_arena(size_t new_size);
 char *stm_large_malloc(size_t request_size);
 void stm_large_free(char *data);
-void _stm_large_dump(char *data);
-void _stm_large_reset(void);
+void _stm_large_dump(void);
 
 void *memset(void *s, int c, size_t n);
 """)

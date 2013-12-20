@@ -84,37 +84,9 @@ static mchunk_t *next_chunk_u(mchunk_t *p)
    fragments of space between bigger allocations.
 */
 
-static dlist_t largebins[N_BINS] = {
+static dlist_t largebins[N_BINS];
+static mchunk_t *first_chunk, *last_chunk;
 
-#define INIT(num)   { largebins + num, largebins + num }
-    INIT(0),  INIT(1),  INIT(2),  INIT(3),  INIT(4),
-    INIT(5),  INIT(6),  INIT(7),  INIT(8),  INIT(9),
-    INIT(10), INIT(11), INIT(12), INIT(13), INIT(14),
-    INIT(15), INIT(16), INIT(17), INIT(18), INIT(19),
-    INIT(20), INIT(21), INIT(22), INIT(23), INIT(24),
-    INIT(25), INIT(26), INIT(27), INIT(28), INIT(29),
-    INIT(30), INIT(31), INIT(32), INIT(33), INIT(34),
-    INIT(35), INIT(36), INIT(37), INIT(38), INIT(39),
-    INIT(40), INIT(41), INIT(42), INIT(43), INIT(44),
-    INIT(45), INIT(46), INIT(47), INIT(48), INIT(49),
-    INIT(50), INIT(51), INIT(52), INIT(53), INIT(54),
-    INIT(55), INIT(56), INIT(57), INIT(58), INIT(59),
-    INIT(60), INIT(61), INIT(62), INIT(63), INIT(64),
-    INIT(65), INIT(66), INIT(67), INIT(68), INIT(69),
-    INIT(70), INIT(71), INIT(72), INIT(73), INIT(74),
-    INIT(75), INIT(76), INIT(77), INIT(78), INIT(79),
-    INIT(80), INIT(81), INIT(82), INIT(83) };
-#undef INIT
-
-void _stm_large_reset(void)
-{
-    int i;
-    for (i = 0; i < N_BINS; i++)
-        largebins[i].prev = largebins[i].next = &largebins[i];
-}
-
-
-static char *allocate_more(size_t request_size);
 
 static void insert_unsorted(mchunk_t *new)
 {
@@ -229,8 +201,8 @@ char *stm_large_malloc(size_t request_size)
         }
     }
 
-    /* not enough free memory.  We need to allocate more. */
-    return allocate_more(request_size);
+    /* not enough memory. */
+    return NULL;
 
  found:
     assert(mscan->size & FLAG_SORTED);
@@ -260,31 +232,6 @@ char *stm_large_malloc(size_t request_size)
     mscan->size = request_size;
     mscan->prev_size = BOTH_CHUNKS_USED;
     return (char *)&mscan->d;
-}
-
-static char *allocate_more(size_t request_size)
-{
-    assert(request_size < MMAP_LIMIT);//XXX
-
-    size_t big_size = MMAP_LIMIT * 8 - 48;
-    mchunk_t *big_chunk = (mchunk_t *)malloc(big_size);
-    if (!big_chunk) {
-        fprintf(stderr, "out of memory!\n");
-        abort();
-    }
-    fprintf(stderr, "allocate_more: %p\n", &big_chunk->d);
-
-    big_chunk->prev_size = THIS_CHUNK_FREE;
-    big_chunk->size = big_size - CHUNK_HEADER_SIZE * 2;
-
-    assert((char *)&next_chunk_u(big_chunk)->prev_size ==
-           ((char *)big_chunk) + big_size - CHUNK_HEADER_SIZE);
-    next_chunk_u(big_chunk)->prev_size = big_chunk->size;
-    next_chunk_u(big_chunk)->size = END_MARKER;
-
-    insert_unsorted(big_chunk);
-
-    return stm_large_malloc(request_size);
 }
 
 void stm_large_free(char *data)
@@ -349,8 +296,9 @@ void stm_large_free(char *data)
 }
 
 
-void _stm_large_dump(char *data)
+void _stm_large_dump(void)
 {
+    char *data = ((char *)first_chunk) + 16;
     size_t prev_size_if_free = 0;
     while (1) {
         fprintf(stderr, "[ %p: %zu\n", data - 16, *(size_t*)(data - 16));
@@ -366,12 +314,88 @@ void _stm_large_dump(char *data)
         }
         if (*(size_t*)(data - 8) == END_MARKER)
             break;
-        fprintf(stderr, "  %p: %zu]%s\n", data - 8, *(size_t*)(data - 8),
+        fprintf(stderr, "  %p: %zu ]%s\n", data - 8, *(size_t*)(data - 8),
                 prev_size_if_free ? " (free)" : "");
         if (!prev_size_if_free)
             assert(!((*(size_t*)(data - 8)) & FLAG_SORTED));
+        assert(*(ssize_t*)(data - 8) > 0);
         data += (*(size_t*)(data - 8)) & ~FLAG_SORTED;
         data += 16;
     }
     fprintf(stderr, "  %p: end. ]\n\n", data - 8);
+    assert(data - 16 == (char *)last_chunk);
+}
+
+void stm_largemalloc_init(char *data_start, size_t data_size)
+{
+    int i;
+    for (i = 0; i < N_BINS; i++)
+        largebins[i].prev = largebins[i].next = &largebins[i];
+
+    assert(data_size >= 2 * sizeof(struct malloc_chunk));
+    assert((data_size & 31) == 0);
+    first_chunk = (mchunk_t *)data_start;
+    first_chunk->prev_size = THIS_CHUNK_FREE;
+    first_chunk->size = data_size - 2 * CHUNK_HEADER_SIZE;
+    last_chunk = chunk_at_offset(first_chunk, data_size - CHUNK_HEADER_SIZE);
+    last_chunk->prev_size = first_chunk->size;
+    last_chunk->size = END_MARKER;
+    assert(last_chunk == next_chunk_u(first_chunk));
+
+    insert_unsorted(first_chunk);
+}
+
+int stm_largemalloc_resize_arena(size_t new_size)
+{
+    assert(new_size >= 2 * sizeof(struct malloc_chunk));
+    assert((new_size & 31) == 0);
+
+    new_size -= CHUNK_HEADER_SIZE;
+    mchunk_t *new_last_chunk = chunk_at_offset(first_chunk, new_size);
+    mchunk_t *old_last_chunk = last_chunk;
+    size_t old_size = ((char *)old_last_chunk) - (char *)first_chunk;
+
+    if (new_size < old_size) {
+        /* check if there is enough free space at the end to allow
+           such a reduction */
+        size_t lsize = last_chunk->prev_size;
+        assert(lsize != THIS_CHUNK_FREE);
+        if (lsize == BOTH_CHUNKS_USED)
+            return 0;
+        lsize += CHUNK_HEADER_SIZE;
+        mchunk_t *prev_chunk = chunk_at_offset(last_chunk, -lsize);
+        if (((char *)new_last_chunk) < ((char *)prev_chunk) +
+                                       sizeof(struct malloc_chunk))
+            return 0;
+
+        /* unlink the prev_chunk from the doubly-linked list */
+        prev_chunk->d.next->prev = prev_chunk->d.prev;
+        prev_chunk->d.prev->next = prev_chunk->d.next;
+
+        /* reduce the prev_chunk */
+        assert((prev_chunk->size & ~FLAG_SORTED) == last_chunk->prev_size);
+        prev_chunk->size = ((char*)new_last_chunk) - (char *)prev_chunk
+                           - CHUNK_HEADER_SIZE;
+
+        /* make a fresh-new last chunk */
+        new_last_chunk->prev_size = prev_chunk->size;
+        new_last_chunk->size = END_MARKER;
+        last_chunk = new_last_chunk;
+        assert(last_chunk == next_chunk_u(prev_chunk));
+
+        insert_unsorted(prev_chunk);
+    }
+    else if (new_size > old_size) {
+        /* make the new last chunk first, with only the extra size */
+        mchunk_t *old_last_chunk = last_chunk;
+        old_last_chunk->size = (new_size - old_size) - CHUNK_HEADER_SIZE;
+        new_last_chunk->prev_size = BOTH_CHUNKS_USED;
+        new_last_chunk->size = END_MARKER;
+        last_chunk = new_last_chunk;
+        assert(last_chunk == next_chunk_u(old_last_chunk));
+
+        /* then free the last_chunk (turn it from "used" to "free) */
+        stm_large_free((char *)&old_last_chunk->d);
+    }
+    return 1;
 }
