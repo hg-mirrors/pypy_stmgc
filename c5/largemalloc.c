@@ -127,32 +127,39 @@ static void really_sort_bin(size_t index)
     end->prev = scan;
     scan->next = end;
 
-    mchunk_t *chunks[count];
-    size_t i;
-    for (i = 0; i < count; i++) {
-        chunks[i] = data2chunk(unsorted);
-        unsorted = unsorted->prev;
+    mchunk_t *chunk1;
+    mchunk_t *chunks[count];    /* dynamically-sized */
+    if (count == 1) {
+        chunk1 = data2chunk(unsorted);   /* common case */
+        count = 0;
     }
-    assert(unsorted == scan);
-    qsort(chunks, count, sizeof(mchunk_t *), compare_chunks);
+    else {
+        size_t i;
+        for (i = 0; i < count; i++) {
+            chunks[i] = data2chunk(unsorted);
+            unsorted = unsorted->prev;
+        }
+        assert(unsorted == scan);
+        qsort(chunks, count, sizeof(mchunk_t *), compare_chunks);
 
-    --count;
-    chunks[count]->size |= FLAG_SORTED;
-    size_t search_size = chunks[count]->size;
+        chunk1 = chunks[--count];
+    }
+    chunk1->size |= FLAG_SORTED;
+    size_t search_size = chunk1->size;
     dlist_t *head = largebins[index].next;
 
     while (1) {
         if (head == end || search_size >= data2chunk(head)->size) {
-            /* insert 'chunks[count]' here, before the current head */
-            head->prev->next = &chunks[count]->d;
-            chunks[count]->d.prev = head->prev;
-            head->prev = &chunks[count]->d;
-            chunks[count]->d.next = head;
+            /* insert 'chunk1' here, before the current head */
+            head->prev->next = &chunk1->d;
+            chunk1->d.prev = head->prev;
+            head->prev = &chunk1->d;
+            chunk1->d.next = head;
             if (count == 0)
                 break;    /* all done */
-            --count;
-            chunks[count]->size |= FLAG_SORTED;
-            search_size = chunks[count]->size;
+            chunk1 = chunks[--count];
+            chunk1->size |= FLAG_SORTED;
+            search_size = chunk1->size;
         }
         else {
             head = head->next;
@@ -317,11 +324,17 @@ void _stm_large_dump(void)
         }
         if (*(size_t*)(data - 8) == END_MARKER)
             break;
-        fprintf(stderr, "  %p: %zu ]%s\n", data - 8, *(size_t*)(data - 8),
-                prev_size_if_free ? " (free)" : "");
+        fprintf(stderr, "  %p: %zu ]", data - 8, *(size_t*)(data - 8));
+        if (prev_size_if_free) {
+            fprintf(stderr, " (free %p / %p)\n",
+                    *(void **)data, *(void **)(data + 8));
+        }
+        else {
+            fprintf(stderr, "\n");
+        }
         if (!prev_size_if_free)
             assert(!((*(size_t*)(data - 8)) & FLAG_SORTED));
-        assert(*(ssize_t*)(data - 8) > 0);
+        assert(*(ssize_t*)(data - 8) >= 16);
         data += (*(size_t*)(data - 8)) & ~FLAG_SORTED;
         data += 16;
     }
