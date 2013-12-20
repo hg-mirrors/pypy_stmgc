@@ -261,18 +261,61 @@ static char *allocate_more(size_t request_size)
 
 void stm_large_free(char *data)
 {
-#if 0
     mchunk_t *chunk = data2chunk(data);
+    assert((chunk->size & (sizeof(char *) - 1)) == 0);
     assert(chunk->prev_size != THIS_CHUNK_FREE);
 
+    /* try to merge with the following chunk in memory */
+    size_t msize = chunk->size + CHUNK_HEADER_SIZE;
+    mchunk_t *mscan = chunk_at_offset(chunk, msize);
+
+    if (mscan->prev_size == BOTH_CHUNKS_USED) {
+        assert((mscan->size & (sizeof(char *) - 1)) == 0);
+        mscan->prev_size = chunk->size;
+    }
+    else {
+        mscan->size &= ~FLAG_UNSORTED;
+        size_t fsize = mscan->size;
+        mchunk_t *fscan = chunk_at_offset(mscan, fsize + CHUNK_HEADER_SIZE);
+
+        /* unlink the following chunk */
+        mscan->d.next->prev = mscan->d.prev;
+        mscan->d.prev->next = mscan->d.next;
+        assert(mscan->prev_size = (size_t)-1);
+        assert(mscan->size = (size_t)-1);
+
+        /* merge the two chunks */
+        assert(fsize == fscan->prev_size);
+        fsize += msize;
+        fscan->prev_size = fsize;
+        chunk->size = fsize;
+    }
+
+    /* try to merge with the previous chunk in memory */
     if (chunk->prev_size == BOTH_CHUNKS_USED) {
         chunk->prev_size = THIS_CHUNK_FREE;
     }
     else {
         assert((chunk->prev_size & (sizeof(char *) - 1)) == 0);
 
-        /* merge with the previous chunk */
-        ...
+        /* get at the previous chunk */
+        msize = chunk->prev_size + CHUNK_HEADER_SIZE;
+        mscan = chunk_at_offset(chunk, -msize);
+        assert(mscan->prev_size == THIS_CHUNK_FREE);
+        assert((mscan->size & ~FLAG_UNSORTED) == chunk->prev_size);
+
+        /* unlink the previous chunk */
+        mscan->d.next->prev = mscan->d.prev;
+        mscan->d.prev->next = mscan->d.next;
+
+        /* merge the two chunks */
+        mscan->size = msize + chunk->size;
+        next_chunk(mscan)->prev_size = mscan->size;
+
+        assert(chunk->prev_size = (size_t)-1);
+        assert(chunk->size = (size_t)-1);
+        chunk = mscan;
     }
-#endif
+
+    insert_unsorted(chunk);
 }
