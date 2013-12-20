@@ -1,6 +1,8 @@
 /* This contains a lot of inspiration from malloc() in the GNU C Library.
    More precisely, this is (a subset of) the part that handles large
-   blocks, which in our case means at least 288 bytes.
+   blocks, which in our case means at least 288 bytes.  It is actually
+   a general allocator, although it doesn't contain any of the small-
+   or medium-block support that are also present in the GNU C Library.
 */
 
 #include <stdio.h>
@@ -190,12 +192,13 @@ char *stm_large_malloc(size_t request_size)
 
     /* search now through all higher bins.  We only need to take the
        smallest item of the first non-empty bin, as it will be large
-       enough.  xxx use a bitmap to speed this up */
+       enough. */
     while (++index < N_BINS) {
-        sort_bin(index);
-        scan = largebins[index].prev;
-        end = &largebins[index];
-        if (scan != end) {
+        if (largebins[index].prev != &largebins[index]) {
+            /* non-empty bin. */
+            sort_bin(index);
+            scan = largebins[index].prev;
+            end = &largebins[index];
             mscan = data2chunk(scan);
             goto found;
         }
