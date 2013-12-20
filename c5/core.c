@@ -490,11 +490,11 @@ static int history_fast_forward(struct write_history_s *new, int conflict)
 void stm_start_transaction(void)
 {
     struct shared_descriptor_s *d = stm_shared_descriptor;
-    stm_transaction_version =
-        __sync_fetch_and_add(&d->next_transaction_version, 2u);
-    assert(stm_transaction_version <= 0xffff);//XXX
-    assert((stm_transaction_version & 1) == 0);   /* EVEN number */
-    assert(stm_transaction_version >= 2);
+    unsigned int v = __sync_fetch_and_add(&d->next_transaction_version, 2u);
+    assert(v <= 0xffff);//XXX
+    assert((v & 1) == 0);       /* EVEN number */
+    assert(v >= 2);
+    stm_transaction_version = v;
 
     struct write_history_s *cur = NULL;
     if (stm_local.writes_by_this_transaction != NULL) {
