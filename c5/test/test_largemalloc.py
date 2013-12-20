@@ -68,6 +68,15 @@ class TestLargeMalloc(object):
         assert r == 1
         lib._stm_large_dump()
 
+    def test_resize_arena_reduce_3(self):
+        d1 = lib.stm_large_malloc(128)
+        r = lib.stm_largemalloc_resize_arena(self.size // 2)
+        assert r == 1
+        d2 = lib.stm_large_malloc(128)
+        assert d1 == self.rawmem + 16
+        assert d2 == d1 + 128 + 16
+        lib._stm_large_dump()
+
     def test_resize_arena_cannot_reduce_1(self):
         lib.stm_large_malloc(self.size // 2)
         r = lib.stm_largemalloc_resize_arena(self.size // 2)
