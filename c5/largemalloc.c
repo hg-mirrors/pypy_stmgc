@@ -3,10 +3,10 @@
    blocks, which in our case means at least 288 bytes.
 */
 
-#include <stdlib.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <assert.h>
+#include "largemalloc.h"
 
 
 #define MMAP_LIMIT    (1280*1024)

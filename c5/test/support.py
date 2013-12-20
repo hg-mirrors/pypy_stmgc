@@ -6,9 +6,9 @@ import cffi
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 header_files = [os.path.join(parent_dir, _n) for _n in
-                "core.h pagecopy.h".split()]
+                "core.h pagecopy.h largemalloc.h".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
-                "core.c pagecopy.c".split()]
+                "core.c pagecopy.c largemalloc.c".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):
@@ -41,15 +41,19 @@ struct local_data_s *_stm_save_local_state(void);
 void _stm_restore_local_state(struct local_data_s *p);
 void _stm_teardown(void);
 void _stm_teardown_process(void);
+
+char *stm_large_malloc(size_t request_size);
+void stm_large_free(char *data);
 """)
 
 lib = ffi.verify('''
 #include "core.h"
+#include "largemalloc.h"
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1')],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0'])
+     extra_compile_args=['-g', '-O0', '-Werror'])
 
 def intptr(p):
     return int(ffi.cast("intptr_t", p))
