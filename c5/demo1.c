@@ -4,6 +4,8 @@
 #include <assert.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <pthread.h>
+#include <errno.h>
 
 #include "core.h"
 
@@ -62,28 +64,33 @@ void do_run_in_thread(int i)
     printf("thread %d: %p, %p\n", i, ob1, ob2);
 }
 
+static void *run_in_thread(void *arg)
+{
+    stm_setup_process();
+    do_run_in_thread((intptr_t)arg);
+    return NULL;
+}
+
 void do_test(void)
 {
-    int i;
-    pid_t child_pids[NUM_THREADS];
+    int i, res;
+    pthread_t threads[NUM_THREADS];
 
     for (i = 0; i < NUM_THREADS; i++) {
-        child_pids[i] = fork();
-        if (child_pids[i] == -1) {
-            perror("fork");
+        res = pthread_create(&threads[i], NULL, run_in_thread,
+                             (void *)(intptr_t)i);
+        if (res != 0) {
+            errno = res;
+            perror("pthread_create");
             abort();
-        }
-        if (child_pids[i] == 0) {
-            stm_setup_process();
-            do_run_in_thread(i);
-            exit(0);
         }
     }
 
     for (i = 0; i < NUM_THREADS; i++) {
-        int status;
-        if (waitpid(child_pids[i], &status, 0) == -1) {
-            perror("waitpid");
+        res = pthread_join(threads[i], NULL);
+        if (res != 0) {
+            errno = res;
+            perror("pthread_join");
             abort();
         }
     }

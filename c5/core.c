@@ -10,94 +10,139 @@
 #include "pagecopy.h"
 
 
-/* This file only works on 64-bit Linux for now.  The logic is based on
-   remapping pages around, which can get a bit confusing.  Each "thread"
-   runs in its own process, so that it has its own mapping.  The
-   processes share an mmap of length NB_PAGES, which is created shared
-   but anonymous, and passed to subprocesses by forking.
+/* This only works with clang, and on 64-bit Linux, for now.
+   It depends on:
+    
+     * the %gs segment prefix
 
-   The mmap's content does not depend on which process is looking at it:
-   it contains what we'll call "mm pages", which is 4096 bytes of data
-   at some file offset (which all processes agree on).  The term "pgoff"
-   used below means such an offset.  It is a uint32_t expressed in units
-   of 4096 bytes; so the underlying mmap is limited to 2**32 pages or
-   16TB.
+         This a hack using __attribute__((address_space(256))) on
+         structs, which makes clang write all pointer dereferences to
+         them using the "%gs:" prefix.  This is a rarely-used way to
+         shift all memory accesses by some offset stored in the %gs
+         special register.  Each thread has its own value in %gs.  Note
+         that %fs is used in a similar way by the pthread library to
+         offset the thread-local variables; what we need is similar to
+         thread-local variables, but in large quantity.
 
-   The mm pages are then mapped in each process at some address, and
-   their content is accessed with regular pointers.  We'll call such a
-   page a "local page".  The term "local" is used because each process
-   has its own, different mapping.  As it turns out, mm pages are
-   initially mapped sequentially as local pages, but this changes over
-   time.  To do writes in a transaction, the data containing the object
-   is first duplicated --- so we allocate a fresh new mm page in the
-   mmap file, and copy the contents to it.  Then we remap the new mm
-   page over the *same* local page as the original.  So from this
-   process' point of view, the object is still at the same address, but
-   writes to it now happen to go to the new mm page instead of the old
-   one.
+     * remap_file_pages()
 
-   This is basically what happens automatically with fork() for regular
-   memory; the difference is that at commit time, we try to publish the
-   modified pages back for everybody to see.  This involves possibly
-   merging changes done by other processes to other objects from the
-   same page.
+         This is a Linux-only system call that allows us to move or
+         duplicate "pages" of an mmap.  A page is 4096 bytes.  The same
+         page can be viewed at several addresses.  It gives an mmap
+         which appears larger than the physical memory that stores it:
+         read/writes at one address are identical to read/writes at
+         different addresses as well, by going to the same physical
+         memory.  This is important in order to share most pages between
+         most threads.
 
-   The local pages are usually referenced by pointers, but may also be
-   expressed as an index, called the "local index" of the page.
+   Here is a more detailed presentation.  All the GC-managed memory is
+   in one big mmap, divided in N+1 sections: the first section holds the
+   status of the latest committed transaction; and the N following
+   sections are thread-local and hold each the status of one of the N
+   threads.  These thread-local sections are initially remapped with
+   remap_file_pages() to correspond to the same memory as the first
+   section.
+
+   When the current transaction does a write to an old page, we call
+   remap_file_pages() again to unshare the page in question before
+   allowing the write to occur.  (This is similar to what occurs after
+   fork(), but done explicitly instead of by the OS.)
+
+   Once a page is unshared, it remains unshared until some event occurs
+   (probably the next major collection; not implemented yet).
+
+   The memory content in the common (first) section contains objects
+   with regular pointers to each other.  Each thread accesses these
+   objects using the %gs segment prefix, which is configured to shift
+   the view to this thread's thread-local section.
+
+   To clarify terminology, we will call "object page" a page of memory
+   from the common (first) section.  The term "pgoff" refers to a page
+   index in this common section.  For convenience this number is a
+   uint32_t (so the limit is 2**32 object pages, or 16 terabytes).
+
+   Exact layout (example with 2 threads only):
+
+       <---------------%gs is thread 2----------->
+
+       <---%gs is thread 1-->
+
+       +-------------..   +-+-+    +---+       +-+-+    +---+
+       | normal progr.    |L|0|    |RM1|       |L|0|    |RM2|
+       +-------------..   +-+-+    +---+       +-+-+    +---+
+       ^null address
+
+       +--------------------+--------------------+--------------------+
+       |  object pages      |  thread-local 1    |  thread-local 2    |
+       +--------------------+--------------------+--------------------+
+
+   There are NB_PAGES object pages; so far it is 1 GB of memory.  The
+   big mmap (bottom line) is thus allocated as 3 GB of consecutive
+   memory, and %gs is set to 1 billion in thread 1 and 2 billion in
+   thread 2.
+
+   The constrains on this layout come from the fact that we'd like the
+   objects (in the object pages) to look correct: they contain pointers
+   to more objects (also in the object pages), or nulls.  This is not
+   really necessary (e.g. we could store indexes from some place, rather
+   than real pointers) but should help debugging.
+
+   We also allocate 2*N pages at known addresses: the L pages, just
+   before the addresses 1GB and 2GB, contain thread-locals and are
+   accessed as %gs:(small negative offset).  The 0 pages are reserved
+   but marked as not accessible, to crash cleanly on null pointer
+   dereferences, done as %gs:(0).
+
+   Finally we have 64 MB of pages written as RM1 and RM2: they are
+   thread-local read markers.  They are placed precisely such that,
+   for object address "p", the read marker is at %gs:(p/16).  In the
+   diagram above RM1 is placed somewhere between the two L-0 blocks,
+   but that's not required.
+
+   This is possible by mmaps at fixed addresses, and hopefully still
+   gives enough flexibility to let us try several other sets of
+   addresses if the first set is busy.  We use here the fact that the
+   total address space available is huge.
 */
 
-#ifdef STM_TESTS
-#  define NB_PAGES   (256*10)   // 10MB
-#else
-#  define NB_PAGES   (256*1024)   // 1GB
-#endif
-#define MAP_PAGES_FLAGS  (MAP_SHARED|MAP_ANONYMOUS)
+#define NB_PAGES   (256*1024)   // 1GB
+#define NB_THREADS  128
+#define MAP_PAGES_FLAGS  (MAP_SHARED|MAP_ANONYMOUS|MAP_NORESERVE)
 
 #define CACHE_LINE_SIZE  128    // conservatively large value to avoid aliasing
 
-#define PGKIND_NEVER_USED         0
-#define LARGE_OBJECT_WORDS        36    /* range(2, LARGE_OBJECT_WORDS) */
-#define PGKIND_FREED              0xff
-#define PGKIND_WRITE_HISTORY      0xfe
-#define PGKIND_SHARED_DESCRIPTOR  0xfd  /* only for the first mm page */
+#define LARGE_OBJECT_WORDS        36
 
 struct page_header_s {
     /* Every page starts with one such structure */
     uint16_t version;         /* when the data in the page was written */
-    uint8_t modif_head;       /* head of a chained list of objects in this
-                                 page that have modified == this->version */
-    uint8_t kind;             /* either PGKIND_xxx or a number in
-                                 range(2, LARGE_OBJECT_WORDS) */
-    uint32_t pgoff;           /* the mm page offset */
+    uint8_t obj_word_size;    /* size of all objects in this page, in words
+                                 in range(2, LARGE_OBJECT_WORDS) */
+    uint32_t write_log_index;
+};
+
+struct write_log_s {
+    uint32_t pgoff;
+    uint32_t modif[8];  /* N'th bit set if and only if object at N*16 changed */
 };
 
 struct write_history_s {
     struct write_history_s *previous_older_transaction;
     uint16_t transaction_version;
-    uint32_t nb_updates;
-    uint32_t updates[];    /* pairs (local_index, new_pgoff) */
+    struct write_log_s log[];   /* ends with pgoff == 0 */
 };
 
 struct shared_descriptor_s {
-    /* There is a single shared descriptor.  This regroups all data
-       that needs to be dynamically shared among processes.  The
-       first mm page is used for this. */
-    union {
-        struct page_header_s header;
-        char _pad0[CACHE_LINE_SIZE];
-    };
-    union {
-        uint64_t volatile index_page_never_used;
-        char _pad1[CACHE_LINE_SIZE];
-    };
-    union {
-        unsigned int volatile next_transaction_version;   /* always EVEN */
-        char _pad2[CACHE_LINE_SIZE];
-    };
-    union {
-        struct write_history_s *volatile most_recent_committed_transaction;
-        char _pad3[CACHE_LINE_SIZE];
-    };
+    /* There is a single shared descriptor.  This contains global
+       variables, but as a structure, in order to control the sharing at
+       the cache line level --- we don't want the following few
+       variables to be accidentally in the same cache line. */
+    char _pad0[CACHE_LINE_SIZE]; uint64_t volatile index_page_never_used;
+    char _pad1[CACHE_LINE_SIZE]; unsigned int volatile next_transaction_version;
+                                                       /* always EVEN */
+    char _pad2[CACHE_LINE_SIZE]; struct write_history_s *
+                                     volatile most_recent_committed_transaction;
+    char _pad3[CACHE_LINE_SIZE];
 };
 
 struct alloc_for_size_s {
@@ -105,24 +150,21 @@ struct alloc_for_size_s {
     char *end;
 };
 
-struct local_data_s {
-    /* This is just a bunch of global variables, but during testing,
-       we save it all away and restore different ones to simulate
-       different forked processes. */
+typedef GCOBJECT struct _thread_local2_s {
+    /* All the thread-local variables we need. */
     struct write_history_s *base_page_mapping;
     struct write_history_s *writes_by_this_transaction;
     struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
     char *read_markers;
-#ifdef STM_TESTS
-    struct _read_marker_s *_current_read_markers;
-    uint16_t _transaction_version;
-#endif
-};
+    _thread_local1_t _stm_tl1;  /* space for the macro _STM_TL1 in core.h */
+} _thread_local2_t;
 
-struct shared_descriptor_s *stm_shared_descriptor;
-struct _read_marker_s *stm_current_read_markers;
-struct local_data_s stm_local;
-uint16_t stm_transaction_version;      /* always EVEN */
+#define _STM_TL2   (((_thread_local2_t *)0)[-1])
+
+struct shared_descriptor_s stm_shared_descriptor;
+
+
+/************************************************************/
 
 
 _Bool _stm_was_read(struct object_s *object)
@@ -133,12 +175,14 @@ _Bool _stm_was_read(struct object_s *object)
 
 static struct _read_marker_s *get_current_read_marker(struct object_s *object)
 {
-    return stm_current_read_markers + (((uintptr_t)object) >> 4);
+    struct _read_marker_s *crm = _STM_TL1.stm_current_read_markers;
+    return crm + (((uintptr_t)object) >> 4);
 }
 
 _Bool _stm_was_written(struct object_s *object)
 {
-    return (object->modified == stm_transaction_version);
+    uint16_t stv = _STM_TL1.stm_transaction_version;
+    return (object->modified == stv);
 }
 
 
@@ -320,7 +364,7 @@ void stm_setup(void)
         fprintf(stderr, "Cannot use more than 1<<32 pages of memory");
         abort();
     }
-    char *stm_pages = mmap(NULL, NB_PAGES*4096, PROT_READ|PROT_WRITE,
+    char *stm_pages = mmap(NULL, NB_PAGES*4096ul, PROT_READ|PROT_WRITE,
                            MAP_PAGES_FLAGS, -1, 0);
     if (stm_pages == MAP_FAILED) {
         perror("mmap stm_pages failed");
