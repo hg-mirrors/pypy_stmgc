@@ -5,11 +5,9 @@
 
 #define GCOBJECT __attribute__((address_space(256)))
 
-#define GCFLAG_WRITE_BARRIER  0x01
-
 typedef GCOBJECT struct object_s {
     /* Every objects starts with one such structure */
-    uint8_t flags;
+    uint16_t modif_version;
 } object_t;
 
 struct _read_marker_s {
@@ -21,6 +19,7 @@ struct _read_marker_s {
 
 typedef GCOBJECT struct _thread_local1_s {
     uint8_t read_marker;
+    uint16_t transaction_version;
 } _thread_local1_t;
 
 #define _STM_TL1   (((_thread_local1_t *)0)[-1])
@@ -46,7 +45,8 @@ void _stm_write_barrier_slowpath(object_t *);
 
 static inline void stm_write(object_t *object)
 {
-    if (__builtin_expect((object->flags & GCFLAG_WRITE_BARRIER) != 0, 0))
+    uint16_t tversion = _STM_TL1.transaction_version;
+    if (__builtin_expect(object->modif_version != tversion, 0))
         _stm_write_barrier_slowpath(object);
 }
 

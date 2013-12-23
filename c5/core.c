@@ -109,7 +109,7 @@
    total address space available is huge.
 */
 
-#define NB_PAGES   (256*1024)   // 1GB
+#define NB_PAGES   (64*1024)   // 256MB
 #define NB_THREADS  16
 #define MAP_PAGES_FLAGS  (MAP_SHARED|MAP_ANONYMOUS|MAP_NORESERVE)
 
@@ -132,7 +132,6 @@ struct write_entry_s {
 
 struct write_history_s {
     struct write_history_s *previous_older_transaction;
-    uint16_t transaction_version;
     uint32_t nb_updates;
     struct write_entry_s updates[];
 };
@@ -143,14 +142,15 @@ struct shared_descriptor_s {
        at the cache line level --- we don't want the following few
        variables to be accidentally in the same cache line. */
     char pad0[CACHE_LINE_SIZE]; uint64_t volatile index_page_never_used;
+    char pad1[CACHE_LINE_SIZE]; uint16_t volatile next_transaction_version;
     char pad2[CACHE_LINE_SIZE]; struct write_history_s *
                                     volatile most_recent_committed_transaction;
     char pad3[CACHE_LINE_SIZE];
 };
 
 struct alloc_for_size_s {
-    char *next;
-    char *end;
+    GCOBJECT char *next;
+    GCOBJECT char *end;
 };
 
 typedef GCOBJECT struct _thread_local2_s {
@@ -180,7 +180,7 @@ _Bool _stm_was_read(object_t *object)
 
 _Bool _stm_was_written(object_t *object)
 {
-    return (object->flags & GCFLAG_WRITE_BARRIER) == 0;
+    return (object->modif_version == _STM_TL1.transaction_version);
 }
 
 
@@ -238,6 +238,8 @@ void _stm_write_barrier_slowpath(object_t *object)
 
     page = fetch_thread_local_page(page);
 
+    object->modif_version = _STM_TL1.transaction_version;
+
     uint32_t write_log_index = page->write_log_index_cache;
     struct write_history_s *log = _STM_TL2.writes_by_this_transaction;
 
@@ -251,6 +253,7 @@ void _stm_write_barrier_slowpath(object_t *object)
         log->updates[write_log_index].bitmask[1] = 0;
         log->updates[write_log_index].bitmask[2] = 0;
         log->updates[write_log_index].bitmask[3] = 0;
+        page->write_log_index_cache = write_log_index;
     }
 
     assert(byte_ofs16 < 256);
@@ -258,54 +261,38 @@ void _stm_write_barrier_slowpath(object_t *object)
         (1UL << (byte_ofs16 & 63));
 }
 
-#if 0
-char *_stm_alloc_next_page(size_t i)
+GCOBJECT char *_stm_alloc_next_page(size_t i)
 {
+    /* NB. 'newpage' points to the "object pages" area, but it is casted
+       to a 'GCOBJECT char *', which if dereferenced will produce a %gs
+       segment prefix and so will address the thread-local pages area. */
     struct page_header_s *newpage = _stm_reserve_page();
-    newpage->modif_head = 0xff;
-    newpage->kind = i;      /* object size in words */
-    newpage->version = 0;   /* a completely new page doesn't need a version */
-    stm_local.alloc[i].next = ((char *)(newpage + 1)) + (i * 8);
-    stm_local.alloc[i].end = ((char *)newpage) + 4096;
-    assert(stm_local.alloc[i].next <= stm_local.alloc[i].end);
-    return (char *)(newpage + 1);
+    newpage->obj_word_size = i;
+    newpage->thread_local_copy = 0;
+    _STM_TL2.alloc[i].next = ((GCOBJECT char *)(newpage + 1)) + (i * 8);
+    _STM_TL2.alloc[i].end = ((GCOBJECT char *)newpage) + 4096;
+    assert(_STM_TL2.alloc[i].next <= _STM_TL2.alloc[i].end);
+    return (GCOBJECT char *)(newpage + 1);
 }
 
-struct object_s *stm_allocate(size_t size)
+object_t *stm_allocate(size_t size)
 {
     assert(size % 8 == 0);
     size_t i = size / 8;
     assert(2 <= i && i < LARGE_OBJECT_WORDS);//XXX
-    struct alloc_for_size_s *alloc = &stm_local.alloc[i];
+    GCOBJECT struct alloc_for_size_s *alloc = &_STM_TL2.alloc[i];
 
-    char *p = alloc->next;
+    GCOBJECT char *p = alloc->next;
     alloc->next += size;
     if (alloc->next > alloc->end)
         p = _stm_alloc_next_page(i);
 
-    struct object_s *result = (struct object_s *)p;
-    result->modified = stm_transaction_version;
-    /*result->modif_next is uninitialized*/
-    result->flags = 0x42;   /* for debugging */
+    object_t *result = (object_t *)p;
+    result->modif_version = _STM_TL1.transaction_version;
     return result;
 }
 
-
-unsigned char stm_get_read_marker_number(void)
-{
-    return (unsigned char)(uintptr_t)stm_current_read_markers;
-}
-
-void stm_set_read_marker_number(uint8_t num)
-{
-    char *stm_pages = ((char *)stm_shared_descriptor) + 4096;
-    uintptr_t delta = ((uintptr_t)stm_pages) >> 4;
-    struct _read_marker_s *crm = (struct _read_marker_s *)stm_local.read_markers;
-    stm_current_read_markers = crm - delta;
-    assert(stm_get_read_marker_number() == 0);
-    stm_current_read_markers += num;
-}
-
+#if 0
 static void clear_all_read_markers(void)
 {
     /* set the largest possible read marker number, to find the last
@@ -353,6 +340,7 @@ void stm_setup(void)
         abort();
     }
     stm_shared_descriptor.index_page_never_used = 0;
+    stm_shared_descriptor.next_transaction_version = 1;
 }
 
 void _stm_teardown(void)
@@ -364,7 +352,7 @@ void _stm_teardown(void)
 
 static void set_gs_register(uint64_t value)
 {
-    int result = syscall(SYS_arch_prctl, ARCH_SET_GS, &value);
+    int result = syscall(SYS_arch_prctl, ARCH_SET_GS, value);
     assert(result == 0);
 }
 
@@ -404,7 +392,8 @@ int stm_setup_thread(void)
         uint64_t nb_rm_pages = (NB_PAGES + 15) >> 4;
         if (mmap(local_RM_pages(gs_value), nb_rm_pages * 4096UL,
                  PROT_READ | PROT_WRITE,
-                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
+                 -1, 0) == MAP_FAILED) {
             munmap(local_L0_pages(gs_value), 2 * 4096UL);
             thnum++;
             continue;
@@ -417,6 +406,8 @@ int stm_setup_thread(void)
         perror("remap_file_pages in stm_setup_thread");
         abort();
     }
+    /* XXX check if the following call doesn't force all pages to be
+       reserved or even zero-filled eagerly */
     res = remap_file_pages(stm_object_pages + gs_value, NB_PAGES * 4096UL, 0,
                            0, MAP_PAGES_FLAGS);
     if (res < 0) {
@@ -426,6 +417,8 @@ int stm_setup_thread(void)
     set_gs_register(gs_value);
     _STM_TL2.gs_value = gs_value;
     _STM_TL1.read_marker = 1;
+
+    fprintf(stderr, "new thread starting at %d (gs=0x%lx)\n", thnum, gs_value);
     return thnum;
 }
 
@@ -568,36 +561,28 @@ static int history_fast_forward(struct write_history_s *new, int conflict)
     stm_local.base_page_mapping = new;
     return conflict;
 }
+#endif
 
 void stm_start_transaction(void)
 {
-    struct shared_descriptor_s *d = stm_shared_descriptor;
-    unsigned int v = __sync_fetch_and_add(&d->next_transaction_version, 2u);
+    struct shared_descriptor_s *d = &stm_shared_descriptor;
+    uint16_t v = __sync_fetch_and_add(&d->next_transaction_version, 1);
     assert(v <= 0xffff);//XXX
-    assert((v & 1) == 0);       /* EVEN number */
-    assert(v >= 2);
-    stm_transaction_version = v;
+    _STM_TL1.transaction_version = v;
 
-    struct write_history_s *cur = NULL;
-    if (stm_local.writes_by_this_transaction != NULL) {
-        cur = stm_local.writes_by_this_transaction;
-        char *next, *page_limit = (char *)cur;
-        page_limit += 4096 - (((uintptr_t)page_limit) & 4095);
-        next = (char *)(cur + 1) + 8 * cur->nb_updates;
-        if (page_limit - next < sizeof(struct write_history_s) + 8)
-            cur = NULL;
-        else
-            cur = (struct write_history_s *)next;
-    }
-    if (cur == NULL) {
-        cur = _reserve_page_write_history();
-    }
-    assert(cur != d->most_recent_committed_transaction);
-    cur->previous_older_transaction = NULL;
-    cur->transaction_version = stm_transaction_version;
-    cur->nb_updates = 0;
-    stm_local.writes_by_this_transaction = cur;
+    assert(_STM_TL2.writes_by_this_transaction == NULL);
 
+    _STM_TL2.nb_updates_max = 4;   /* XXX for now */
+
+    struct write_history_s *log = (struct write_history_s *)
+        malloc(sizeof(struct write_history_s)
+               + _STM_TL2.nb_updates_max * sizeof(struct write_entry_s));
+    assert(log != NULL);
+
+    log->nb_updates = 0;
+    _STM_TL2.writes_by_this_transaction = log;
+
+#if 0
     struct write_history_s *hist = d->most_recent_committed_transaction;
     if (hist != stm_local.base_page_mapping) {
         history_fast_forward(hist, 1);
@@ -614,43 +599,43 @@ void stm_start_transaction(void)
                usually it is read-only */
         }
     }
+#endif
 }
 
 _Bool stm_stop_transaction(void)
 {
-    struct shared_descriptor_s *d = stm_shared_descriptor;
-    assert(stm_local.writes_by_this_transaction != NULL);
     int conflict = 0;
+    struct shared_descriptor_s *d = &stm_shared_descriptor;
+    struct write_history_s *cur = _STM_TL2.writes_by_this_transaction;
+    assert(cur != NULL);
+    _STM_TL2.writes_by_this_transaction = NULL;
     //fprintf(stderr, "stm_stop_transaction\n");
-
-    struct write_history_s *cur_head = stm_local.writes_by_this_transaction;
-    struct write_history_s *cur_tail = cur_head;
-    while (cur_tail->previous_older_transaction != NULL) {
-        cur_tail = cur_tail->previous_older_transaction;
-    }
 
     while (1) {
         struct write_history_s *hist = d->most_recent_committed_transaction;
-        if (hist != stm_local.base_page_mapping) {
-            conflict = history_fast_forward(hist, 0);
+        if (hist != _STM_TL2.base_page_mapping) {
+            abort();
+            //XXX conflict = history_fast_forward(hist, 0);
             if (conflict)
                 break;
             else
                 continue;   /* retry from the start of the loop */
         }
-        assert(cur_head == stm_local.writes_by_this_transaction);
-        cur_tail->previous_older_transaction = hist;
+        cur->previous_older_transaction = hist;
         if (__sync_bool_compare_and_swap(&d->most_recent_committed_transaction,
-                                         hist, cur_head))
+                                         hist, cur))
             break;
     }
 
-    if (stm_get_read_marker_number() < 0xff) {
-        stm_current_read_markers++;
+    if (conflict) {
+        free(cur);
+    }
+
+    if (_STM_TL1.read_marker < 0xff) {
+        _STM_TL1.read_marker++;
     }
     else {
-        clear_all_read_markers();
+        abort();//XXX clear_all_read_markers();
     }
     return !conflict;
 }
-#endif
