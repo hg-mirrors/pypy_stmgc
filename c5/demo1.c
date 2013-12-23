@@ -14,7 +14,7 @@
 
 
 typedef struct {
-    struct object_s header;
+    object_t header;
     int val1, val2;
 } obj_t;
 
@@ -66,7 +66,7 @@ void do_run_in_thread(int i)
 
 static void *run_in_thread(void *arg)
 {
-    stm_setup_process();
+    stm_setup_thread();
     do_run_in_thread((intptr_t)arg);
     return NULL;
 }

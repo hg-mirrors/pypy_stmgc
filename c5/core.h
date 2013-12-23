@@ -5,11 +5,11 @@
 
 #define GCOBJECT __attribute__((address_space(256)))
 
+#define GCFLAG_WRITE_BARRIER  0x01
+
 typedef GCOBJECT struct object_s {
     /* Every objects starts with one such structure */
-    uint16_t modified;
     uint8_t flags;
-    uint8_t reserved;
 } object_t;
 
 struct _read_marker_s {
@@ -20,43 +20,41 @@ struct _read_marker_s {
 };
 
 typedef GCOBJECT struct _thread_local1_s {
-    struct _read_marker_s *stm_current_read_markers;
-    uint16_t stm_transaction_version;      /* always EVEN */
+    uint8_t read_marker;
 } _thread_local1_t;
 
 #define _STM_TL1   (((_thread_local1_t *)0)[-1])
+
+#define _STM_CRM   ((GCOBJECT struct _read_marker_s *)0)
 
 
 /************************************************************/
 
 void stm_setup(void);
-void stm_setup_process(void);
+int stm_setup_thread(void);
 
 void stm_start_transaction(void);
 _Bool stm_stop_transaction(void);
-struct object_s *stm_allocate(size_t size);
+object_t *stm_allocate(size_t size);
 
-static inline void stm_read(struct object_s *object)
+static inline void stm_read(object_t *object)
 {
-    struct _read_marker_s *crm = _STM_TL1.stm_current_read_markers;
-    crm[((uintptr_t)object) >> 4].c = (unsigned char)(uintptr_t)crm;
+    _STM_CRM[((uintptr_t)object) >> 4].c = _STM_TL1.read_marker;
 }
 
-void _stm_write_slowpath(struct object_s *);
+void _stm_write_barrier_slowpath(object_t *);
 
-static inline void stm_write(struct object_s *object)
+static inline void stm_write(object_t *object)
 {
-    uint16_t stv = _STM_TL1.stm_transaction_version;
-    if (__builtin_expect(object->modified != stv, 0))
-        _stm_write_slowpath(object);
+    if (__builtin_expect((object->flags & GCFLAG_WRITE_BARRIER) != 0, 0))
+        _stm_write_barrier_slowpath(object);
 }
 
-_Bool _stm_was_read(struct object_s *object);
-_Bool _stm_was_written(struct object_s *object);
+_Bool _stm_was_read(object_t *object);
+_Bool _stm_was_written(object_t *object);
 
-struct local_data_s *_stm_save_local_state(void);
-void _stm_restore_local_state(struct local_data_s *p);
+void _stm_restore_state_for_thread(int thread_num);
 void _stm_teardown(void);
-void _stm_teardown_process(void);
+void _stm_teardown_thread(void);
 
 #endif

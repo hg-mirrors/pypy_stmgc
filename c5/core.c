@@ -1,7 +1,11 @@
 #define _GNU_SOURCE
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
+#include <asm/prctl.h>
+#include <sys/prctl.h>
 #include <errno.h>
 #include <assert.h>
 #include <string.h>
@@ -12,7 +16,7 @@
 
 /* This only works with clang, and on 64-bit Linux, for now.
    It depends on:
-    
+
      * the %gs segment prefix
 
          This a hack using __attribute__((address_space(256))) on
@@ -106,7 +110,7 @@
 */
 
 #define NB_PAGES   (256*1024)   // 1GB
-#define NB_THREADS  128
+#define NB_THREADS  16
 #define MAP_PAGES_FLAGS  (MAP_SHARED|MAP_ANONYMOUS|MAP_NORESERVE)
 
 #define CACHE_LINE_SIZE  128    // conservatively large value to avoid aliasing
@@ -115,34 +119,33 @@
 
 struct page_header_s {
     /* Every page starts with one such structure */
-    uint16_t version;         /* when the data in the page was written */
     uint8_t obj_word_size;    /* size of all objects in this page, in words
                                  in range(2, LARGE_OBJECT_WORDS) */
-    uint32_t write_log_index;
+    _Bool thread_local_copy;
+    uint32_t write_log_index_cache;
 };
 
-struct write_log_s {
-    uint32_t pgoff;
-    uint32_t modif[8];  /* N'th bit set if and only if object at N*16 changed */
-};
+struct write_entry_s {
+    uint32_t pgoff;      /* the pgoff of the page that was modified */
+    uint64_t bitmask[4]; /* bit N is set if object at 'N*16' was modified */
+} __attribute__((packed));
 
 struct write_history_s {
     struct write_history_s *previous_older_transaction;
     uint16_t transaction_version;
-    struct write_log_s log[];   /* ends with pgoff == 0 */
+    uint32_t nb_updates;
+    struct write_entry_s updates[];
 };
 
 struct shared_descriptor_s {
     /* There is a single shared descriptor.  This contains global
-       variables, but as a structure, in order to control the sharing at
-       the cache line level --- we don't want the following few
+       variables, but as a structure, in order to control the aliasing
+       at the cache line level --- we don't want the following few
        variables to be accidentally in the same cache line. */
-    char _pad0[CACHE_LINE_SIZE]; uint64_t volatile index_page_never_used;
-    char _pad1[CACHE_LINE_SIZE]; unsigned int volatile next_transaction_version;
-                                                       /* always EVEN */
-    char _pad2[CACHE_LINE_SIZE]; struct write_history_s *
-                                     volatile most_recent_committed_transaction;
-    char _pad3[CACHE_LINE_SIZE];
+    char pad0[CACHE_LINE_SIZE]; uint64_t volatile index_page_never_used;
+    char pad2[CACHE_LINE_SIZE]; struct write_history_s *
+                                    volatile most_recent_committed_transaction;
+    char pad3[CACHE_LINE_SIZE];
 };
 
 struct alloc_for_size_s {
@@ -154,139 +157,108 @@ typedef GCOBJECT struct _thread_local2_s {
     /* All the thread-local variables we need. */
     struct write_history_s *base_page_mapping;
     struct write_history_s *writes_by_this_transaction;
+    uint32_t nb_updates_max;
     struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
-    char *read_markers;
+    uint64_t gs_value;
     _thread_local1_t _stm_tl1;  /* space for the macro _STM_TL1 in core.h */
 } _thread_local2_t;
 
 #define _STM_TL2   (((_thread_local2_t *)0)[-1])
 
+char *stm_object_pages;
 struct shared_descriptor_s stm_shared_descriptor;
+volatile int stm_next_thread_index;
 
 
 /************************************************************/
 
 
-_Bool _stm_was_read(struct object_s *object)
+_Bool _stm_was_read(object_t *object)
 {
-    return (stm_current_read_markers[((uintptr_t)object) >> 4].c ==
-            (unsigned char)(uintptr_t)stm_current_read_markers);
+    return _STM_CRM[((uintptr_t)object) >> 4].c == _STM_TL1.read_marker;
 }
 
-static struct _read_marker_s *get_current_read_marker(struct object_s *object)
+_Bool _stm_was_written(object_t *object)
 {
-    struct _read_marker_s *crm = _STM_TL1.stm_current_read_markers;
-    return crm + (((uintptr_t)object) >> 4);
-}
-
-_Bool _stm_was_written(struct object_s *object)
-{
-    uint16_t stv = _STM_TL1.stm_transaction_version;
-    return (object->modified == stv);
+    return (object->flags & GCFLAG_WRITE_BARRIER) == 0;
 }
 
 
 struct page_header_s *_stm_reserve_page(void)
 {
     /* Grab a free mm page, and map it into the address space.
-       Return a pointer to it.  It has kind == PGKIND_FREED. */
+       Return a pointer to it. */
 
     // XXX look in some free list first
 
-    /* Return the index'th mm page, which is so far NEVER_USED.  It
-       should never have been accessed so far, and be already mapped
-       as the index'th local page. */
-    struct shared_descriptor_s *d = stm_shared_descriptor;
-    uint64_t index = __sync_fetch_and_add(&d->index_page_never_used, 1);
+    /* Return the index'th object page, which is so far never used. */
+    uint64_t index = __sync_fetch_and_add(
+        &stm_shared_descriptor.index_page_never_used, 1);
     if (index >= NB_PAGES) {
         fprintf(stderr, "Out of mmap'ed memory!\n");
         abort();
     }
-    struct page_header_s *result = (struct page_header_s *)
-        (((char *)stm_shared_descriptor) + index * 4096);
-    assert(result->kind == PGKIND_NEVER_USED);
-    result->kind = PGKIND_FREED;
-    result->pgoff = index;
-    return result;
+    return (struct page_header_s *)(stm_object_pages + index * 4096UL);
 }
 
-static struct write_history_s *_reserve_page_write_history(void)
+
+static struct page_header_s *
+fetch_thread_local_page(struct page_header_s *page)
 {
-    struct page_header_s *newpage = _stm_reserve_page();
-    newpage->kind = PGKIND_WRITE_HISTORY;
-    return (struct write_history_s *)(newpage + 1);
+    struct page_header_s *mypage = (struct page_header_s *)
+        (((char *)page) + _STM_TL2.gs_value);
+
+    if (!mypage->thread_local_copy) {
+        /* make a thread-local copy of that page, by remapping the page
+           back to its underlying page and manually copying the data. */
+        uint64_t fileofs = ((char *)mypage) - stm_object_pages;
+
+        if (remap_file_pages((void *)mypage, 4096, 0, fileofs / 4096,
+                             MAP_PAGES_FLAGS) < 0) {
+            perror("remap_file_pages in write_barrier");
+            abort();
+        }
+        pagecopy(mypage, page);
+        mypage->thread_local_copy = 1;
+    }
+    return mypage;
 }
 
-
-static uint32_t get_pgoff(struct page_header_s *page)
-{
-    assert(page->pgoff > 0);
-    assert(page->pgoff < NB_PAGES);
-    return page->pgoff;
-}
-
-static uint32_t get_local_index(struct page_header_s *page)
-{
-    uint64_t index = ((char *)page) - (char *)stm_shared_descriptor;
-    assert((index & 4095) == 0);
-    index /= 4096;
-    assert(0 < index && index < NB_PAGES);
-    return index;
-}
-
-static struct page_header_s *get_page_by_local_index(uint32_t index)
-{
-    assert(0 < index && index < NB_PAGES);
-    uint64_t ofs = ((uint64_t)index) * 4096;
-    return (struct page_header_s *)(((char *)stm_shared_descriptor) + ofs);
-}
-
-void _stm_write_slowpath(struct object_s * object)
+void _stm_write_barrier_slowpath(object_t *object)
 {
     stm_read(object);
 
     struct page_header_s *page;
     page = (struct page_header_s *)(((uintptr_t)object) & ~4095);
-    assert(2 <= page->kind && page->kind < LARGE_OBJECT_WORDS);
+    assert(2 <= page->obj_word_size);
+    assert(page->obj_word_size < LARGE_OBJECT_WORDS);
 
-    if (page->version != stm_transaction_version) {
-        struct page_header_s *newpage = _stm_reserve_page();
-        uint32_t old_pgoff = get_pgoff(page);
-        uint32_t new_pgoff = get_pgoff(newpage);
+    uint32_t byte_ofs16 = (((char *)object) - (char *)page) / 16;
+    uint32_t pgoff = (((char *)page) - stm_object_pages) / 4096;
 
-        pagecopy(newpage, page);
-        newpage->version = stm_transaction_version;
-        newpage->modif_head = 0xff;
-        newpage->pgoff = new_pgoff;
-        assert(page->version != stm_transaction_version);
-        assert(page->pgoff == old_pgoff);
+    page = fetch_thread_local_page(page);
 
-        remap_file_pages((void *)page, 4096, 0, new_pgoff, MAP_PAGES_FLAGS);
+    uint32_t write_log_index = page->write_log_index_cache;
+    struct write_history_s *log = _STM_TL2.writes_by_this_transaction;
 
-        assert(page->version == stm_transaction_version);
-        assert(page->pgoff == new_pgoff);
-
-        struct write_history_s *cur = stm_local.writes_by_this_transaction;
-        size_t history_size_max = 4096 - (((uintptr_t)cur) & 4095);
-        if (sizeof(*cur) + (cur->nb_updates + 1) * 8 > history_size_max) {
-            /* The buffer would overflow its page.  Allocate a new one. */
-            cur = _reserve_page_write_history();
-            cur->previous_older_transaction =
-                stm_local.writes_by_this_transaction;
-            cur->transaction_version = stm_transaction_version;
-            cur->nb_updates = 0;
-            stm_local.writes_by_this_transaction = cur;
-        }
-        uint64_t i = cur->nb_updates++;
-        cur->updates[i * 2 + 0] = get_local_index(page);
-        cur->updates[i * 2 + 1] = new_pgoff;
+    if (write_log_index >= log->nb_updates ||
+            log->updates[write_log_index].pgoff != pgoff) {
+        /* make a new entry for this page in the write log */
+        write_log_index = log->nb_updates++;
+        assert(log->nb_updates <= _STM_TL2.nb_updates_max);  // XXX resize
+        log->updates[write_log_index].pgoff = pgoff;
+        log->updates[write_log_index].bitmask[0] = 0;
+        log->updates[write_log_index].bitmask[1] = 0;
+        log->updates[write_log_index].bitmask[2] = 0;
+        log->updates[write_log_index].bitmask[3] = 0;
     }
-    object->modified = stm_transaction_version;
-    object->modif_next = page->modif_head;
-    page->modif_head = (uint8_t)(((uintptr_t)object) >> 4);
-    assert(page->modif_head != 0xff);
+
+    assert(byte_ofs16 < 256);
+    log->updates[write_log_index].bitmask[byte_ofs16 / 64] |=
+        (1UL << (byte_ofs16 & 63));
 }
 
+#if 0
 char *_stm_alloc_next_page(size_t i)
 {
     struct page_header_s *newpage = _stm_reserve_page();
@@ -353,6 +325,7 @@ static void clear_all_read_markers(void)
     }
     stm_set_read_marker_number(1);
 }
+#endif
 
 void stm_setup(void)
 {
@@ -364,50 +337,115 @@ void stm_setup(void)
         fprintf(stderr, "Cannot use more than 1<<32 pages of memory");
         abort();
     }
-    char *stm_pages = mmap(NULL, NB_PAGES*4096ul, PROT_READ|PROT_WRITE,
-                           MAP_PAGES_FLAGS, -1, 0);
-    if (stm_pages == MAP_FAILED) {
-        perror("mmap stm_pages failed");
+
+    /* For now, just prepare to make the layout given at the start of
+       this file, with the RM pages interleaved with the L-0 blocks.
+       The actual L-0-RM pages are allocated by each thread. */
+    uint64_t addr_rm_base = (NB_PAGES + 1) * 4096UL;
+    uint64_t addr_object_pages = addr_rm_base << 4;
+
+    stm_object_pages = mmap((void *)addr_object_pages,
+                            (NB_PAGES * 4096UL) * NB_THREADS,
+                            PROT_READ | PROT_WRITE,
+                            MAP_PAGES_FLAGS | MAP_FIXED, -1, 0);
+    if (stm_object_pages == MAP_FAILED) {
+        perror("mmap stm_object_pages failed");
         abort();
     }
-    assert(sizeof(struct shared_descriptor_s) <= 4096);
-    stm_shared_descriptor = (struct shared_descriptor_s *)stm_pages;
-    stm_shared_descriptor->header.kind = PGKIND_SHARED_DESCRIPTOR;
-    /* the page at index 0 contains the '*stm_shared_descriptor' structure */
-    /* the page at index 1 is reserved for history_fast_forward() */
-    stm_shared_descriptor->index_page_never_used = 2;
-    stm_shared_descriptor->next_transaction_version = 2;
+    stm_shared_descriptor.index_page_never_used = 0;
 }
 
 void _stm_teardown(void)
 {
-    munmap((void *)stm_shared_descriptor, NB_PAGES*4096);
-    stm_shared_descriptor = NULL;
+    munmap((void *)stm_object_pages, (NB_PAGES * 4096UL) * NB_THREADS);
+    stm_object_pages = NULL;
+    memset(&stm_shared_descriptor, 0, sizeof(stm_shared_descriptor));
 }
 
-void stm_setup_process(void)
+static void set_gs_register(uint64_t value)
 {
-    memset(&stm_local, 0, sizeof(stm_local));
-    stm_local.read_markers = mmap(NULL, NB_PAGES*(4096 >> 4) + 1,
-                                  PROT_READ|PROT_WRITE,
-                                  MAP_PRIVATE|MAP_ANONYMOUS,
-                                  -1, 0);
-    if (stm_local.read_markers == MAP_FAILED) {
-        perror("mmap stm_read_markers failed");
-        abort();
+    int result = syscall(SYS_arch_prctl, ARCH_SET_GS, &value);
+    assert(result == 0);
+}
+
+static char *local_L0_pages(uint64_t gs_value)
+{
+    return (char *)(gs_value - 4096UL);
+}
+
+static char *local_RM_pages(uint64_t gs_value)
+{
+    return (char*)gs_value + (((uint64_t)stm_object_pages) >> 4);
+}
+
+int stm_setup_thread(void)
+{
+    int res;
+    int thnum = stm_next_thread_index;
+    int tries = 2 * NB_THREADS;
+    uint64_t gs_value;
+    while (1) {
+        thnum %= NB_THREADS;
+        stm_next_thread_index = thnum + 1;
+
+        if (!--tries) {
+            fprintf(stderr, "too many threads or too many non-fitting mmap\n");
+            abort();
+        }
+
+        gs_value = (thnum+1) * 4096UL * NB_PAGES;
+
+        if (mmap(local_L0_pages(gs_value), 2 * 4096UL, PROT_NONE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
+            thnum++;
+            continue;
+        }
+
+        uint64_t nb_rm_pages = (NB_PAGES + 15) >> 4;
+        if (mmap(local_RM_pages(gs_value), nb_rm_pages * 4096UL,
+                 PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
+            munmap(local_L0_pages(gs_value), 2 * 4096UL);
+            thnum++;
+            continue;
+        }
+        break;
     }
 
-    assert((stm_set_read_marker_number(42),
-            stm_get_read_marker_number() == 42));
-    stm_set_read_marker_number(1);
+    res = mprotect(local_L0_pages(gs_value), 4096, PROT_READ | PROT_WRITE);
+    if (res < 0) {
+        perror("remap_file_pages in stm_setup_thread");
+        abort();
+    }
+    res = remap_file_pages(stm_object_pages + gs_value, NB_PAGES * 4096UL, 0,
+                           0, MAP_PAGES_FLAGS);
+    if (res < 0) {
+        perror("remap_file_pages in stm_setup_thread");
+        abort();
+    }
+    set_gs_register(gs_value);
+    _STM_TL2.gs_value = gs_value;
+    _STM_TL1.read_marker = 1;
+    return thnum;
 }
 
-void _stm_teardown_process(void)
+void _stm_restore_state_for_thread(int thread_num)
 {
-    munmap((void *)stm_local.read_markers, NB_PAGES*(4096 >> 4) + 1);
-    memset(&stm_local, 0, sizeof(stm_local));
+    uint64_t gs_value = (thread_num + 1) * 4096UL * NB_PAGES;
+    set_gs_register(gs_value);
+    assert(_STM_TL2.gs_value == gs_value);
 }
 
+void _stm_teardown_thread(void)
+{
+    uint64_t gs_value = _STM_TL2.gs_value;
+    uint64_t nb_rm_pages = (NB_PAGES + 15) >> 4;
+    munmap(local_RM_pages(gs_value), nb_rm_pages * 4096UL);
+    munmap(local_L0_pages(gs_value), 2 * 4096UL);
+    /* accessing _STM_TL2 is invalid here */
+}
+
+#if 0
 static size_t get_obj_size_in_words(struct page_header_s *page)
 {
     size_t result = page->kind;
@@ -614,48 +652,5 @@ _Bool stm_stop_transaction(void)
         clear_all_read_markers();
     }
     return !conflict;
-}
-
-#ifdef STM_TESTS
-struct local_data_s *_stm_save_local_state(void)
-{
-    uint64_t i, page_count = stm_shared_descriptor->index_page_never_used;
-    uint32_t *pgoffs;
-    struct local_data_s *p = malloc(sizeof(struct local_data_s) +
-                                    page_count * sizeof(uint32_t));
-    assert(p != NULL);
-    memcpy(p, &stm_local, sizeof(stm_local));
-    p->_current_read_markers = stm_current_read_markers;
-    p->_transaction_version = stm_transaction_version;
-
-    pgoffs = (uint32_t *)(p + 1);
-    pgoffs[0] = page_count;
-    for (i = 2; i < page_count; i++) {
-        pgoffs[i] = get_pgoff(get_page_by_local_index(i));
-    }
-
-    return p;
-}
-
-void _stm_restore_local_state(struct local_data_s *p)
-{
-    uint64_t i, page_count;
-    uint32_t *pgoffs;
-
-    remap_file_pages((void *)stm_shared_descriptor, 4096 * NB_PAGES,
-                     0, 0, MAP_PAGES_FLAGS);
-
-    pgoffs = (uint32_t *)(p + 1);
-    page_count = pgoffs[0];
-    for (i = 2; i < page_count; i++) {
-        struct page_header_s *page = get_page_by_local_index(i);
-        remap_file_pages((void *)page, 4096, 0, pgoffs[i], MAP_PAGES_FLAGS);
-        assert(get_pgoff(page) == pgoffs[i]);
-    }
-
-    memcpy(&stm_local, p, sizeof(struct local_data_s));
-    stm_current_read_markers = p->_current_read_markers;
-    stm_transaction_version = p->_transaction_version;
-    free(p);
 }
 #endif
