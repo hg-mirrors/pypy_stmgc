@@ -121,8 +121,8 @@ struct page_header_s {
     /* Every page starts with one such structure */
     uint8_t obj_word_size;    /* size of all objects in this page, in words
                                  in range(2, LARGE_OBJECT_WORDS) */
-    _Bool thread_local_copy;
-    uint32_t write_log_index_cache;
+    uint8_t thread_local_copy;
+    uint32_t reserved;
 };
 
 struct write_entry_s {
@@ -131,7 +131,8 @@ struct write_entry_s {
 } __attribute__((packed));
 
 struct write_history_s {
-    struct write_history_s *previous_older_transaction;
+    struct write_history_s *next_transaction;
+    uint32_t refcount;   /* #threads that have this as their base */
     uint32_t nb_updates;
     struct write_entry_s updates[];
 };
@@ -331,6 +332,7 @@ void stm_setup(void)
     uint64_t addr_rm_base = (NB_PAGES + 1) * 4096UL;
     uint64_t addr_object_pages = addr_rm_base << 4;
 
+    assert(stm_object_pages == NULL);
     stm_object_pages = mmap((void *)addr_object_pages,
                             (NB_PAGES * 4096UL) * NB_THREADS,
                             PROT_READ | PROT_WRITE,
@@ -345,6 +347,7 @@ void stm_setup(void)
 
 void _stm_teardown(void)
 {
+    assert(stm_object_pages != NULL);
     munmap((void *)stm_object_pages, (NB_PAGES * 4096UL) * NB_THREADS);
     stm_object_pages = NULL;
     memset(&stm_shared_descriptor, 0, sizeof(stm_shared_descriptor));
@@ -366,11 +369,16 @@ static char *local_RM_pages(uint64_t gs_value)
     return (char*)gs_value + (((uint64_t)stm_object_pages) >> 4);
 }
 
+static uint64_t get_gs_value(void)
+{
+    return _STM_TL2.gs_value;
+}
+
 int stm_setup_thread(void)
 {
     int res;
     int thnum = stm_next_thread_index;
-    int tries = 2 * NB_THREADS;
+    int tries = 2 * NB_THREADS + 1;
     uint64_t gs_value;
     while (1) {
         thnum %= NB_THREADS;
@@ -418,7 +426,7 @@ int stm_setup_thread(void)
     _STM_TL2.gs_value = gs_value;
     _STM_TL1.read_marker = 1;
 
-    fprintf(stderr, "new thread starting at %d (gs=0x%lx)\n", thnum, gs_value);
+    fprintf(stderr, "new thread %d starting (%%gs=0x%lx)\n", thnum, gs_value);
     return thnum;
 }
 
@@ -582,12 +590,12 @@ void stm_start_transaction(void)
     log->nb_updates = 0;
     _STM_TL2.writes_by_this_transaction = log;
 
-#if 0
     struct write_history_s *hist = d->most_recent_committed_transaction;
-    if (hist != stm_local.base_page_mapping) {
+    if (hist != _STM_TL2.base_page_mapping) {
         history_fast_forward(hist, 1);
     }
 
+#if 0
     int i;
     for (i = 2; i < LARGE_OBJECT_WORDS; i++) {
         struct page_header_s *page;
@@ -614,8 +622,7 @@ _Bool stm_stop_transaction(void)
     while (1) {
         struct write_history_s *hist = d->most_recent_committed_transaction;
         if (hist != _STM_TL2.base_page_mapping) {
-            abort();
-            //XXX conflict = history_fast_forward(hist, 0);
+            conflict = history_fast_forward(hist, 0);
             if (conflict)
                 break;
             else
