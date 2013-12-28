@@ -4,15 +4,14 @@ typedef unsigned short uint16_t;
 typedef boolean_t bool;
 
 
-#define NUM_OBJECTS  2
+#define NUM_OBJECTS  1
 #define NUM_THREADS  2
-#define NUM_HISTORY  5
+#define NUM_HISTORY  2
 
 #define UNDOLOG      NUM_THREADS
 
 
-typedef void *uid_t;
-#define get_uid()  lsl_malloc_noreuse(1)
+typedef unsigned uid_t;
 
 
 typedef struct {
@@ -44,13 +43,11 @@ void setup(void)
     n_global_history = 0;
     lsl_initlock(&undo_lock);
 
-    int t = 0;
-    while (1) {
-        tl[t].n_modified_objects = 0;
-        t++;
-        if (t == NUM_THREADS)
-            break;
-    }
+    /* XXX manual unrolling */
+    tl[0].n_modified_objects = 0;
+    tl[0].transaction_read_version = 0;
+    tl[1].n_modified_objects = 0;
+    tl[1].transaction_read_version = 0;
 }
 
 
@@ -109,11 +106,55 @@ void stm_write(int t, int objnum)
     }
 }
 
+int update_to_leader(int t, int check)
+{
+    /* becomes the leader */
+    uid_t my_version = tl[t].transaction_read_version;
+    int result = check;
+    int nglob = n_global_history;
+
+    if (nglob > 0) {
+        while (1) {
+            int objnum = global_history[--nglob];
+            if (result)
+                result = (obj[t][objnum].read_version != my_version);
+            obj[t][objnum].flag_modified = false;
+            memcpy_obj_without_header(t, objnum, 1 - t, objnum);
+            if (nglob == 0)
+                break;
+        }
+        n_global_history = 0;
+    }
+    int nundo = tl[1 - t].n_modified_objects;
+    if (nundo > 0) {
+        while (1) {
+            int objnum = tl[1 - t].modified_objects[--nundo];
+            if (result)
+                result = (obj[t][objnum].read_version != my_version);
+            obj[t][objnum].flag_modified = false;
+            memcpy_obj_without_header(t, objnum, UNDOLOG, objnum);
+            if (nundo == 0)
+                break;
+        }
+    }
+    return result;
+}
+
+void update_state(int t)
+{
+    lsl_lock(&undo_lock);
+    if (leader_thread_num != t) {
+        update_to_leader(t, 0);
+        leader_thread_num = t;
+    }
+    lsl_unlock(&undo_lock);
+}
+
 void start_transaction(int t)
 {
     lsl_assert(tl[t].n_modified_objects == 0);
     lsl_assert(!obj[t][0].flag_modified);
-    tl[t].transaction_read_version = get_uid();
+    tl[t].transaction_read_version++;
 }
 
 int stop_transaction(int t)
@@ -126,39 +167,18 @@ int stop_transaction(int t)
 
     lsl_lock(&undo_lock);
 
-    int nglob = n_global_history;
-    int result = 1;
-
-    if (leader_thread_num != t) {
-        /* becomes the leader */
-        uid_t my_version = tl[t].transaction_read_version;
-
-        if (nglob > 0) {
-            while (1) {
-                int objnum = global_history[--nglob];
-                result &= (obj[t][objnum].read_version != my_version);
-                obj[t][objnum].flag_modified = false;
-                memcpy_obj_without_header(t, objnum, 1 - t, objnum);
-                if (nglob == 0)
-                    break;
-            }
-        }
-        int nundo = tl[1 - t].n_modified_objects;
-        if (nundo > 0) {
-            while (1) {
-                int objnum = tl[1 - t].modified_objects[--nundo];
-                result &= (obj[t][objnum].read_version != my_version);
-                obj[t][objnum].flag_modified = false;
-                memcpy_obj_without_header(t, objnum, 1 - t, objnum);
-                if (nundo == 0)
-                    break;
-            }
-        }
+    int result;
+    if (leader_thread_num == t) {
+        result = 1;
+    }
+    else {
+        result = update_to_leader(t, 1);
         if (result)
             leader_thread_num = t;
     }
 
     if (result) {
+        int nglob = n_global_history;
         while (1) {
             int objnum = tl[t].modified_objects[--nmod];
             global_history[nglob++] = objnum;
@@ -166,6 +186,7 @@ int stop_transaction(int t)
             if (nmod == 0)
                 break;
         }
+        n_global_history = nglob;
     }
     else {
         while (1) {
@@ -177,9 +198,7 @@ int stop_transaction(int t)
             if (nmod == 0)
                 break;
         }
-        lsl_assert(nglob == 0);
     }
-    n_global_history = nglob;
     tl[t].n_modified_objects = 0;
 
     lsl_unlock(&undo_lock);
@@ -202,14 +221,17 @@ void SETUP100(void)
 {
     int t = 0;
     setup();
-    while (1) {
-        obj[t][0].flag_modified = false;
-        obj[t][0].value1 = 100;
-        obj[t][0].value2 = 200;
-        t++;
-        if (t == NUM_THREADS)
-            break;
-    }
+
+    /* XXX manual unrolling */
+    obj[0][0].flag_modified = false;
+    obj[0][0].read_version = 0;
+    obj[0][0].value1 = 100;
+    obj[0][0].value2 = 200;
+
+    obj[1][0].flag_modified = false;
+    obj[1][0].read_version = 0;
+    obj[1][0].value1 = 100;
+    obj[1][0].value2 = 200;
 }
 
 void R0(void)
@@ -233,15 +255,24 @@ void W0INC1(void)
 {
     int t = lsl_get_thread_id();
     int nvalue1, nvalue2;
-    while (1) {
+    //update_state(t);
+
+    start_transaction(t);
+    stm_write(t, 0);
+    nvalue1 = ++obj[t][0].value1;
+    nvalue2 = ++obj[t][0].value2;
+    lsl_assert(nvalue1 == obj[t][0].value1);
+    lsl_assert(nvalue2 == obj[t][0].value2);
+    if (!stop_transaction(t)) {
         start_transaction(t);
         stm_write(t, 0);
         nvalue1 = ++obj[t][0].value1;
         nvalue2 = ++obj[t][0].value2;
         lsl_assert(nvalue1 == obj[t][0].value1);
         lsl_assert(nvalue2 == obj[t][0].value2);
-        if (stop_transaction(t))
-            break;
+        if (!stop_transaction(t)) {
+            lsl_observe_output("XXX W0INC1 failed twice", 0);
+        }
     }
 
     lsl_observe_output("W0INC1:nvalue1", nvalue1);
