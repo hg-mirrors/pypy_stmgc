@@ -129,14 +129,14 @@ int update_to_leader(int t, int check)
     return result;
 }
 
-/* void update_state(int t) */
-/* { */
-/*     lsl_lock(&undo_lock); */
-/*     if (leader_thread_num != t) { */
-/*         update_to_leader(t, 0); */
-/*     } */
-/*     lsl_unlock(&undo_lock); */
-/* } */
+void update_state(int t)
+{
+    lsl_lock(&undo_lock);
+    if (leader_thread_num != t) {
+        update_to_leader(t, 0);
+    }
+    lsl_unlock(&undo_lock);
+}
 
 void start_transaction(int t)
 {
@@ -248,4 +248,10 @@ void W0INC1(void)
 
     lsl_observe_output("W0INC1:nvalue1", nvalue1);
     lsl_observe_output("W0INC1:nvalue2", nvalue2);
+}
+
+void UPD(void)
+{
+    int t = lsl_get_thread_id();
+    update_state(t);
 }
