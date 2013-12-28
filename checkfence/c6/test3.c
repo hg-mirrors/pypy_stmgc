@@ -105,31 +105,22 @@ int update_to_leader(int t, int check)
 
     if (n_global_history > 0) {
 
-        /* loop over objects modified by the leader, and set their
-           local 'flag_modified' to '2' */
-        if (tl[1 - t].n_modified_objects) {
-            obj[t].flag_modified = 109;
-        }
-
-        /* now loop over objects in 'global_history': if they have been
+        /* loop over objects in 'global_history': if they have been
            read by the current transaction, the current transaction must
-           abort; then either copy, or mark as copy later */
+           abort; then copy them out of the leader's object space ---
+           which may have been modified by the leader's uncommitted
+           transaction; this case will be fixed afterwards. */
         if (result)
             result = (obj[t].read_version != my_version);
-        if (obj[t].flag_modified == 109) {
-            obj[t].flag_modified = 67;
-        }
-        else {
-            memcpy_obj_without_header(t, 1 - t);
-        }
+        memcpy_obj_without_header(t, 1 - t);
 
-        /* finally, loop again over objects modified by the leader,
-           and copy the marked ones out of the undo log */
+        /* finally, loop over objects modified by the leader,
+           and copy them out of the undo log.  XXX We could use
+           a heuristic to avoid copying unneeded objects: it's not
+           useful to copy objects that were not also present in
+           the 'global_history'. */
         if (tl[1 - t].n_modified_objects) {
-            if (obj[t].flag_modified == 67) {
-                memcpy_obj_without_header(t, UNDOLOG);
-            }
-            obj[t].flag_modified = false;
+            memcpy_obj_without_header(t, UNDOLOG);
         }
 
         n_global_history = 0;
