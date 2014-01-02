@@ -478,6 +478,18 @@ void _stm_teardown(void)
 static void reset_transaction_read_version(void)
 {
     /* force-reset all read markers to 0 */
+
+    /* XXX measure the time taken by this madvise() and the following
+       zeroing of pages done lazily by the kernel; compare it with using
+       16-bit read_versions.
+    */
+    /* XXX try to use madvise() on smaller ranges of memory.  In my
+       measures, we could gain a factor 2 --- not really more, even if
+       the range of virtual addresses below is very large, as long as it
+       is already mostly non-reserved pages.  (The following call keeps
+       them non-reserved; apparently the kernel just skips them very
+       quickly.)
+    */
     int res = madvise(real_address(FIRST_READMARKER_PAGE * 4096UL),
                       (FIRST_OBJECT_PAGE - FIRST_READMARKER_PAGE) * 4096UL,
                       MADV_DONTNEED);
@@ -601,9 +613,10 @@ void stm_stop_transaction(void)
         uint16_t cur = (uintptr_t)alloc->next;
 
         if (start == cur) {
-            /* nothing to do: this assigned page was left empty by the
-               previous transaction, and also starts empty in the new
-               transaction.  'flag_partial_page' is unchanged. */
+            /* nothing to do: this page (or fraction thereof) was left
+               empty by the previous transaction, and starts empty as
+               well in the new transaction.  'flag_partial_page' is
+               unchanged. */
         }
         else {
             uintptr_t pagenum = ((uintptr_t)(alloc->next - 1)) / 4096UL;
@@ -616,9 +629,9 @@ void stm_stop_transaction(void)
                 }
             }
             else {
-                /* we can skip checking page->private_page because the
-                   whole page can only contain objects made by the just-
-                   finished transaction. */
+                /* we can skip checking flag_page_private[] in non-debug
+                   builds, because the whole page can only contain
+                   objects made by the just-finished transaction. */
                 assert(flag_page_private[pagenum] == SHARED_PAGE);
 
                 /* the next transaction will start with this page

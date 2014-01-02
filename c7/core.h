@@ -13,9 +13,28 @@ typedef TLPREFIX struct object_s object_t;
 typedef TLPREFIX struct read_marker_s read_marker_t;
 
 
+/* Structure of objects
+   --------------------
+
+   Objects manipulated by the user program, and managed by this library,
+   must start with a "struct object_s" field.  Pointers to any user object
+   must use the "TLPREFIX struct foo *" type --- don't forget TLPREFIX.
+   The best is to use typedefs like above.
+
+   The object_s part contains some fields reserved for the STM library,
+   as well as a 32-bit integer field that can be freely used by the user
+   program.  However, right now this field must be read-only --- i.e. it
+   must never be modified on any object that may already belong to a
+   past transaction; you can only set it on just-allocated objects.  The
+   best is to consider it as a field that is written to only once on
+   newly allocated objects.
+*/
+
 struct object_s {
-    uint16_t write_version;
+    uint16_t write_version;       /* reserved for the STM library */
     /*uint8_t stm_flags;*/
+    uint32_t header;              /* for the user program -- only write in
+                                     newly allocated objects */
 };
 
 struct read_marker_s {
