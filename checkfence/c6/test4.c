@@ -85,11 +85,11 @@ void stm_write(int t)
 {
     if (obj[t].flag_modified)
         return;   /* already modified during this transaction */
+    obj[t].flag_modified = true;
 
     stm_read(t);
 
     int is_leader = acquire_lock_if_leader(t);
-    obj[t].flag_modified = true;
     tl[t].n_modified_objects = 1;
     if (is_leader) {
         memcpy_obj_without_header(UNDOLOG, t);
