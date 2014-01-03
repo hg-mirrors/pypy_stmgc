@@ -19,6 +19,10 @@
 #define MAP_PAGES_FLAGS     (MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE)
 #define LARGE_OBJECT_WORDS  36
 
+#if defined(__i386__) || defined(__x86_64__)
+#  define HAVE_FULL_EXCHANGE_INSN
+#endif
+
 
 typedef TLPREFIX char localchar_t;
 typedef TLPREFIX struct alloc_for_size_s alloc_for_size_t;
@@ -114,11 +118,23 @@ static void _stm_privatize(uintptr_t pagenum)
     if (flag_page_private[pagenum] == PRIVATE_PAGE)
         return;
 
-    if (!__sync_bool_compare_and_swap(&flag_page_private[pagenum],
-                                      SHARED_PAGE, REMAPPING_PAGE)) {
+#ifdef HAVE_FULL_EXCHANGE_INSN
+    /* use __sync_lock_test_and_set() as a cheaper alternative to
+       __sync_bool_compare_and_swap(). */
+    int previous = __sync_lock_test_and_set(&flag_page_private[pagenum],
+                                            REMAPPING_PAGE);
+    if (previous == PRIVATE_PAGE) {
+        flag_page_private[pagenum] = PRIVATE_PAGE;
+        return;
+    }
+    bool was_shared = (previous == SHARED_PAGE);
+#else
+    bool was_shared = __sync_bool_compare_and_swap(&flag_page_private[pagenum],
+                                                  SHARED_PAGE, REMAPPING_PAGE);
+#endif
+    if (!was_shared) {
         while (flag_page_private[pagenum] == REMAPPING_PAGE)
             spin_loop();
-        assert(flag_page_private[pagenum] == PRIVATE_PAGE);
         return;
     }
 
@@ -248,7 +264,8 @@ void _stm_write_slowpath(object_t *obj)
 
     stm_read(obj);
 
-    _STM_TL2->modified_objects = stm_list_append(_STM_TL2->modified_objects, obj);
+    _STM_TL2->modified_objects = stm_list_append(
+        _STM_TL2->modified_objects, obj);
 
     uint16_t wv = obj->write_version;
     obj->write_version = _STM_TL1->transaction_write_version;
@@ -405,6 +422,11 @@ void stm_setup(void)
         memset(REAL_ADDRESS(thread_base, 4096), 0xDD, 4096);
         /* Make a "hole" at _STM_TL1 / _STM_TL2 */
         memset(REAL_ADDRESS(thread_base, _STM_TL2), 0, sizeof(*_STM_TL2));
+
+        /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
+        if (FIRST_READMARKER_PAGE > 2)
+            mprotect(thread_base + 8192, (FIRST_READMARKER_PAGE - 2) * 4096UL,
+                     PROT_NONE);
 
         _STM_TL2->thread_num = i;
         _STM_TL2->thread_base = thread_base;
