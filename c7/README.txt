@@ -153,7 +153,12 @@ Object creation and GC
 
 draft:
 
-- pages containing only freshly allocated objects need not be unshared
+- pages need to be unshared when they contain already-committed objects
+  that are then modified.  They can remain shared if a fraction of (or all)
+  their space was not used previously, but is used by new allocations; any
+  changes to these fresh objects during the same transaction do *not* need
+  to unshare the page.  This should ensure that in the common case the
+  majority of pages are not unshared.
 
 - minor collection: occurs regularly, and maybe always at the end of
   transactions (we'll see).  Should work by marking the young objects
@@ -163,7 +168,7 @@ draft:
   old-objects-pointing-to-young objects (the old object may belong
   to the same running transaction, or be already committed).
 
-- the numers and flags stored in the objects need to be designed with
+- the numbers and flags stored in the objects need to be designed with
   the above goals in mind.
 
 - unclear yet: the minor collections may be triggered only when the
