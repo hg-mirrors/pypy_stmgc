@@ -151,4 +151,37 @@ explicit undo log that would be filled in this case only.
 Object creation and GC
 ----------------------
 
-XXX write me
+draft:
+
+- pages containing only freshly allocated objects need not be unshared
+
+- minor collection: occurs regularly, and maybe always at the end of
+  transactions (we'll see).  Should work by marking the young objects
+  that survive.  Non-marked objects are then sweeped lazily by the
+  next allocation requests (as in "mark-and-don't-sweep" GCs, here
+  for the minor collection only).  Needs a write barrier to detect
+  old-objects-pointing-to-young objects (the old object may belong
+  to the same running transaction, or be already committed).
+
+- the numers and flags stored in the objects need to be designed with
+  the above goals in mind.
+
+- unclear yet: the minor collections may be triggered only when the
+  memory is full, or whenever a few MBs of memory was allocated.  It is
+  not important for small-to-medium transactions that only allocate a
+  few MBs anyway, but it might be for long-running transactions.
+
+- the major collections walk *all* objects.  They'll probably require
+  all threads to be synchronized.  Ideally the threads should then proceed
+  to do a parallel GC, but as a first step, blocking all threads but one
+  should be fine.
+
+- the major collections should be triggered by the amount of really-used
+  memory, which means: counting the unshared pages as N pages.  Major
+  collection should then re-share the pages as much as possible, after
+  making sure that all threads have their timestamp updated.  This is the
+  essential part that guarantees that large, old, no-longer-modified
+  bunches of objects are eventually present in only one copy in memory,
+  in shared pages --- while at the same time bounding the number of
+  calls to remap_file_pages() for each page at 2 per major collection
+  cycle.
