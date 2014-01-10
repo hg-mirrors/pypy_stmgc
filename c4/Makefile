@@ -36,5 +36,9 @@ debug-%: %.c ${H_FILES} ${C_FILES}
 release-%: %.c ${H_FILES} ${C_FILES} stmgc.c
 	gcc -pthread -DNDEBUG -O2 -g $< -o release-$* -Wall stmgc.c -lrt
 
+valgrind-%: %.c ${H_FILES} ${C_FILES} stmgc.c
+	gcc -pthread -DNDEBUG -O1 -g $< -o valgrind-$* -Wall stmgc.c -lrt
+
+
 test-%:
 	./$* 2>/dev/null | grep "check ok"
