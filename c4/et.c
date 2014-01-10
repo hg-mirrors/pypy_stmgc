@@ -99,16 +99,16 @@ void stm_clear_read_cache(void)
 /* CONTENTION COUNTER THINGS */
 #define RPY_STM_CONT_RMA_SAMPLES 64
 
+gcptr get_original_of(gcptr P)
+{
+  if (UNLIKELY(!(P->h_tid & GCFLAG_PREBUILT_ORIGINAL)) && P->h_original)
+    return (gcptr)P->h_original;
+  return P;
+}
+
 void abort_because_of(gcptr L) 
 {
-  gcptr obj = (gcptr)L->h_original;
-  if (!obj || (L->h_tid & GCFLAG_PREBUILT_ORIGINAL)) {
-    obj = L;
-
-    /* abort-object should never be a priv_from_prot
-       *without* an original */
-    assert(!(L->h_tid & GCFLAG_PRIVATE_FROM_PROTECTED));
-  }
+  gcptr obj = get_original_of(L);
 
   //g->h_contention += (g->h_contention + 1) << 2;
   revision_t old =  (RPY_STM_CONT_RMA_SAMPLES - 1) * obj->h_contention;
@@ -119,15 +119,15 @@ void abort_because_of(gcptr L)
 
 void commit_object(gcptr L)
 {
-  gcptr obj = L;
-  if (!(L->h_tid & GCFLAG_PREBUILT_ORIGINAL) && L->h_original)
-    obj = (gcptr)L->h_original;
+  gcptr obj = get_original_of(L);
 
   revision_t old = obj->h_contention;
   revision_t old_rma = (RPY_STM_CONT_RMA_SAMPLES - 1) * old;
   old_rma += old >> 2;
   obj->h_contention = old_rma / RPY_STM_CONT_RMA_SAMPLES;
 }
+
+
 
 /************************************************************/
 
@@ -306,6 +306,10 @@ gcptr stm_DirectReadBarrier(gcptr G)
      added just now by a parallel thread during stealing... */
   /*assert(!(P->h_tid & GCFLAG_MOVED));*/
   fxcache_add(&d->recent_reads_cache, P);
+
+  /* update penalty for reading */
+  gcptr o = get_original_of(P);
+  d->penalty += (o->h_contention >> 1) + 1;
   return P;
 
  follow_stub:;
@@ -1156,6 +1160,7 @@ static void init_transaction(struct tx_descriptor *d, int already_locked)
   assert(!g2l_any_entry(&d->public_to_private));
   assert(d->old_thread_local_obj == NULL);
 
+  d->penalty = 0;
   d->count_reads = 1;
   fxcache_clear(&d->recent_reads_cache);
   gcptrlist_clear(&d->abortinfo);

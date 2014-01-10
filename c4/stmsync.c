@@ -46,7 +46,8 @@ _Bool stm_should_break_transaction(void)
         assert(d->reads_size_limit_nonatomic == 0);
 #endif
 
-    return (sync_required | d->count_reads) >= d->reads_size_limit;
+    return (sync_required | d->penalty) >= d->reads_size_limit;
+    /* return (sync_required | d->count_reads) >= d->reads_size_limit; */
 }
 
 static void init_shadowstack(void)
@@ -179,12 +180,12 @@ void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int))
            When such a shortened transaction succeeds, the next one will
            see its length limit doubled, up to the maximum. */
         if (counter == 0 && stm_active != 2) {
-            unsigned long limit = d->reads_size_limit_nonatomic;
-            if (limit != 0 && limit < (stm_regular_length_limit >> 1))
-                limit = (limit << 1) | 1;
-            else
-                limit = stm_regular_length_limit;
-            d->reads_size_limit_nonatomic = limit;
+            /* unsigned long limit = d->reads_size_limit_nonatomic; */
+            /* if (limit != 0 && limit < (stm_regular_length_limit >> 1)) */
+            /*     limit = (limit << 1) | 1; */
+            /* else */
+            /*     limit = stm_regular_length_limit; */
+            /* d->reads_size_limit_nonatomic = limit; */
         }
         if (!d->atomic) {
             stm_begin_transaction(&_jmpbuf, NULL);
