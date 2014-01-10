@@ -173,6 +173,8 @@ struct tx_descriptor {
   /* sync with pypy stmgc: */
   NURSERY_FIELDS_DECL
 
+  revision_t penalty;
+  
   long atomic;   /* 0 = not atomic, > 0 atomic */
   unsigned long count_reads;
   unsigned long reads_size_limit;        /* see should_break_tr. */
