@@ -121,14 +121,32 @@ containing modified objects are duplicated anyway, and so we already
 have around several copies of the objects at potentially different
 versions.
 
+
+(The rest of this section defines the "leader".  It's a complicated way
+to make sure we always have an object to copy back in case this
+transaction is aborted.  At first, what will be implemented in core.c
+will simply be waiting if necessary until two threads reach the latest
+version; then each thread can use the other's original object.)
+
+
 At most one thread is called the "leader" (this is new terminology as
-far as I know).  The leader is the thread running a transaction whose
-start time is higher than the start time of any other running
-transaction.  If there are several threads with the same highest start
-time, we have no leader.  Leadership is a temporary condition: it is
-acquired (typically) by the thread whose transaction commits and whose
-next transaction starts; but it is lost again as soon as any other
-thread updates its transaction's start time to match.
+far as I know).  The leader is:
+
+- a thread that runs a transaction right now (as opposed to being
+  in some blocking syscall between two transactions, for example);
+
+- not alone: there are other threads running a transaction concurrently
+  (when only one thread is running, there is no leader);
+
+- finally, the start time of this thread's transaction is strictly
+  higher than the start time of any other running transaction.  (If there
+  are several threads with the same highest start time, we have no
+  leader.)
+
+Leadership is a temporary condition: it is acquired (typically) by the
+thread whose transaction commits and whose next transaction starts; but
+it is lost again as soon as any other thread updates its transaction's
+start time to match.
 
 The point of the notion of leadership is that when the leader wants to
 modify an object, it must first make sure that the original version is
@@ -138,11 +156,15 @@ of an older object, because if we need to abort a transaction, we may as
 well update all objects to the latest version.  And if there are several
 threads with the same highest start time, we can be sure that the
 original version of the object is somewhere among them --- this is the
-point of detecting write-write conflicts eagerly.  The only remaining
-case is the one in which there is a leader thread, this leader thread
-has the only latest version of an object, and it tries to further modify
-this object.  To handle this precise case, for now, we simply wait until
-another thread updates and we are no longer the leader.  (*)
+point of detecting write-write conflicts eagerly.  Finally, if there is
+only one thread running, as soon as it was updated, it cannot abort any
+more, so we don't need to record the old version of anything.
+
+The only remaining case is the one in which there is a leader thread,
+this leader thread has the only latest version of an object, and it
+tries to further modify this object.  To handle this precise case, for
+now, we simply wait until another thread updates and we are no longer
+the leader.  (*)
 
 (*) the code in core.c contains, or contained, or will again contain, an
 explicit undo log that would be filled in this case only.
@@ -154,19 +176,21 @@ Object creation and GC
 draft:
 
 - pages need to be unshared when they contain already-committed objects
-  that are then modified.  They can remain shared if a fraction of (or all)
-  their space was not used previously, but is used by new allocations; any
-  changes to these fresh objects during the same transaction do *not* need
-  to unshare the page.  This should ensure that in the common case the
-  majority of pages are not unshared.
+  that are then modified.
+
+- pages can remain shared if a fraction of (or all) their space was not
+  used previously, but is used by new allocations; any changes to these
+  fresh objects during the same transaction do *not* need to unshare the
+  page.  This should ensure that in the common case the majority of pages
+  are not unshared.
 
 - minor collection: occurs regularly, and maybe always at the end of
   transactions (we'll see).  Should work by marking the young objects
   that survive.  Non-marked objects are then sweeped lazily by the
   next allocation requests (as in "mark-and-don't-sweep" GCs, here
   for the minor collection only).  Needs a write barrier to detect
-  old-objects-pointing-to-young objects (the old object may belong
-  to the same running transaction, or be already committed).
+  old-objects-pointing-to-young objects (the old object may be fresh
+  from the same running transaction as well, or be already committed).
 
 - the numbers and flags stored in the objects need to be designed with
   the above goals in mind.
@@ -190,3 +214,10 @@ draft:
   in shared pages --- while at the same time bounding the number of
   calls to remap_file_pages() for each page at 2 per major collection
   cycle.
+
+
+Misc
+----
+
+Use __builtin_setjmp() and __builtin_longjmp() rather than setjmp()
+and longjmp().
