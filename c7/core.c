@@ -16,9 +16,19 @@
 
 #define NB_PAGES            (256*256)    // 256MB
 #define NB_THREADS          2
-#define MAP_PAGES_FLAGS     (MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE)
+#define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
 #define LARGE_OBJECT_WORDS  36
 #define NB_NURSERY_PAGES    1024
+
+
+#define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_THREADS)
+#define READMARKER_END        ((NB_PAGES * 4096UL) >> 4)
+#define FIRST_OBJECT_PAGE     ((READMARKER_END + 4095) / 4096UL)
+#define READMARKER_START      ((FIRST_OBJECT_PAGE * 4096UL) >> 4)
+#define FIRST_READMARKER_PAGE (READMARKER_START / 4096UL)
+#define FIRST_AFTER_NURSERY_PAGE  (FIRST_OBJECT_PAGE + NB_NURSERY_PAGES)
+
+
 
 #if defined(__i386__) || defined(__x86_64__)
 #  define HAVE_FULL_EXCHANGE_INSN
@@ -64,6 +74,7 @@ static void spin_loop(void)
     asm("pause" : : : "memory");
 }
 
+#if 0
 static void acquire_lock(int *lock)
 {
     while (__sync_lock_test_and_set(lock, 1) != 0) {
@@ -92,6 +103,7 @@ static void release_lock(int *lock)
 {
     __sync_lock_release(lock);
 }
+#endif
 
 static void write_fence(void)
 {
@@ -102,11 +114,17 @@ static void write_fence(void)
 #endif
 }
 
-static bool _stm_was_read(object_t *obj)
+bool _stm_was_read(object_t *obj)
 {
     read_marker_t *marker = (read_marker_t *)(((uintptr_t)obj) >> 4);
     return (marker->rm == _STM_TL1->transaction_read_version);
 }
+
+bool _stm_was_written(object_t *obj)
+{
+    return obj->stm_flags & GCFLAG_WRITE_BARRIER;
+}
+
 
 
 static void _stm_privatize(uintptr_t pagenum)
@@ -234,7 +252,6 @@ void _stm_write_slowpath(object_t *obj)
     char* t0_addr = get_thread_base(0) + t0_offset;
     struct object_s *t0_obj = (struct object_s *)t0_addr;
 
-
     int previous = __sync_lock_test_and_set(&t0_obj->stm_write_lock, 1);
     if (previous)
         abort();                /* XXX */
@@ -331,15 +348,6 @@ object_t *stm_allocate(size_t size)
 
 
 
-
-
-#define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_THREADS)
-#define READMARKER_END        ((NB_PAGES * 4096UL) >> 4)
-#define FIRST_OBJECT_PAGE     ((READMARKER_END + 4095) / 4096UL)
-#define READMARKER_START      ((FIRST_OBJECT_PAGE * 4096UL) >> 4)
-#define FIRST_READMARKER_PAGE (READMARKER_START / 4096UL)
-#define FIRST_AFTER_NURSERY_PAGE  (FIRST_OBJECT_PAGE + NB_NURSERY_PAGES)
-
 void stm_setup(void)
 {
     /* Check that some values are acceptable */
@@ -376,14 +384,16 @@ void stm_setup(void)
         /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
         if (FIRST_READMARKER_PAGE > 2)
             mprotect(thread_base + 8192, (FIRST_READMARKER_PAGE - 2) * 4096UL,
-                     PROT_NONE);
+                         PROT_NONE);
 
-        _STM_TL2->thread_num = i;
-        _STM_TL2->thread_base = thread_base;
+        struct _thread_local2_s *th =
+            (struct _thread_local2_s *)REAL_ADDRESS(thread_base, _STM_TL2);
+
+        th->thread_num = i;
+        th->thread_base = thread_base;
 
         if (i > 0) {
             int res;
-
             res = remap_file_pages(
                     thread_base + FIRST_AFTER_NURSERY_PAGE * 4096UL,
                     (NB_PAGES - FIRST_AFTER_NURSERY_PAGE) * 4096UL,
@@ -414,12 +424,8 @@ void stm_setup_thread(void)
     int thread_num = __sync_fetch_and_add(&num_threads_started, 1);
     assert(thread_num < 2);  /* only 2 threads for now */
 
-    char *thread_base = get_thread_base(thread_num);
-    set_gs_register((uintptr_t)thread_base);
-
-    assert(_STM_TL2->thread_num == thread_num);
-    assert(_STM_TL2->thread_base == thread_base);
-
+    _stm_restore_local_state(thread_num);
+    
     _STM_TL2->modified_objects = stm_list_create();
     assert(!_STM_TL2->running_transaction);
 }
@@ -440,6 +446,14 @@ void _stm_teardown(void)
     object_pages = NULL;
 }
 
+void _stm_restore_local_state(int thread_num)
+{
+    char *thread_base = get_thread_base(thread_num);
+    set_gs_register((uintptr_t)thread_base);
+
+    assert(_STM_TL2->thread_num == thread_num);
+    assert(_STM_TL2->thread_base == thread_base);
+}
 
 static void reset_transaction_read_version(void)
 {
@@ -504,6 +518,7 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
     _STM_TL2->running_transaction = 1;
 }
 
+#if 0
 static void update_new_objects_in_other_threads(uintptr_t pagenum,
                                                 uint16_t start, uint16_t stop)
 {
@@ -517,16 +532,17 @@ static void update_new_objects_in_other_threads(uintptr_t pagenum,
     char *src = REAL_ADDRESS(_STM_TL2->thread_base,           local_src);
 
     memcpy(dst, src, size);
-    ...;
+    abort();
 }
+#endif
 
 void stm_stop_transaction(void)
 {
+#if 0
     assert(_STM_TL2->running_transaction);
 
     write_fence();   /* see later in this function for why */
 
-    acquire_lock(&undo_lock);
 
     if (leader_thread_num != _STM_TL2->thread_num) {
         /* non-leader thread */
@@ -617,7 +633,7 @@ void stm_stop_transaction(void)
     }
 
     _STM_TL2->running_transaction = 0;
-    release_lock(&undo_lock);
+#endif
 }
 
 void stm_abort_transaction(void)
