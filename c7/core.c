@@ -188,6 +188,12 @@ static char *get_thread_base(long thread_num)
     return object_pages + thread_num * (NB_PAGES * 4096UL);
 }
 
+bool _stm_is_in_nursery(char *ptr)
+{
+    object_t * o = _stm_tl_address(ptr);
+    assert(o);
+    return (uintptr_t)o < FIRST_AFTER_NURSERY_PAGE * 4096;
+}
 
 char *_stm_real_address(object_t *o)
 {
@@ -358,6 +364,7 @@ object_t *stm_allocate(size_t size)
 
     localchar_t *current = _STM_TL2->nursery_current;
     localchar_t *new_current = current + size;
+    _STM_TL2->nursery_current = new_current;
     if ((uintptr_t)new_current > FIRST_AFTER_NURSERY_PAGE * 4096) {
         /* XXX: do minor collection */
         abort();
@@ -447,6 +454,8 @@ void stm_setup_thread(void)
     assert(thread_num < 2);  /* only 2 threads for now */
 
     _stm_restore_local_state(thread_num);
+
+    _STM_TL2->nursery_current = (localchar_t*)(FIRST_OBJECT_PAGE * 4096);
     
     _STM_TL2->modified_objects = stm_list_create();
     assert(!_STM_TL2->running_transaction);
