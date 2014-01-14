@@ -102,23 +102,19 @@ class BaseTest(object):
     def setup_method(self, meth):
         lib.stm_setup()
         lib.stm_setup_thread()
-        self.saved_states = {}
-        self.current_proc = "main"
+        lib.stm_setup_thread()
+        lib._stm_restore_local_state(0)
+        self.current_thread = 0
 
     def teardown_method(self, meth):
+        lib._stm_restore_local_state(1)
         lib._stm_teardown_thread()
-        for saved_state in self.saved_states.values():
-            lib._stm_restore_local_state(saved_state)
-            lib._stm_teardown_thread()
-        del self.saved_states
+        lib._stm_restore_local_state(0)
+        lib._stm_teardown_thread()
         lib._stm_teardown()
 
-    def switch(self, process_name):
-        self.saved_states[self.current_proc] = lib._stm_save_local_state()
-        try:
-            target_saved_state = self.saved_states.pop(process_name)
-        except KeyError:
-            lib.stm_setup_thread()
-        else:
-            lib._stm_restore_local_state(target_saved_state)
-        self.current_proc = process_name
+    def switch(self, thread_num):
+        assert thread_num != self.current_thread
+        lib._stm_restore_local_state(thread_num)
+        self.current_thread = thread_num
+        
