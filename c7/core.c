@@ -122,7 +122,9 @@ bool _stm_was_read(object_t *obj)
 
 bool _stm_was_written(object_t *obj)
 {
-    return obj->stm_flags & GCFLAG_WRITE_BARRIER;
+    /* if the obj was written to in the current transaction
+       and doesn't trigger the write-barrier slowpath */
+    return !(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 }
 
 

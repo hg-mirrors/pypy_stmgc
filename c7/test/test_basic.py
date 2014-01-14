@@ -23,13 +23,26 @@ class TestBasic(BaseTest):
         p4 = stm_allocate(16)
         assert p4 - p3 == 16
 
-    def test_simple(self):
+    def test_transaction_start_stop(self):
         stm_start_transaction()
         self.switch(1)
         stm_start_transaction()
         stm_stop_transaction()
         self.switch(0)
         stm_stop_transaction()
+
+    def test_simple_read(self):
+        stm_start_transaction()
+        p1 = stm_allocate(16)
+        stm_read(p1)
+        assert stm_was_read(p1)
+
+    def test_simple_write(self):
+        stm_start_transaction()
+        p1 = stm_allocate(16)
+        assert stm_was_written(p1)
+        stm_write(p1)
+        assert stm_was_written(p1)
 
     def test_read_write_1(self):
         stm_start_transaction()
