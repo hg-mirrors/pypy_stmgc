@@ -23,6 +23,14 @@ class TestBasic(BaseTest):
         p4 = stm_allocate(16)
         assert p4 - p3 == 16
 
+    def test_simple(self):
+        stm_start_transaction()
+        self.switch(1)
+        stm_start_transaction()
+        stm_stop_transaction()
+        self.switch(0)
+        stm_stop_transaction()
+
     def test_read_write_1(self):
         stm_start_transaction()
         p1 = stm_allocate(16)

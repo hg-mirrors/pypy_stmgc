@@ -33,7 +33,7 @@ void stm_setup(void);
 void stm_setup_thread(void);
 
 void stm_start_transaction(jmpbufptr_t *);
-void stm_stop_transaction(void);
+bool _stm_stop_transaction(void);
 object_t *stm_allocate(size_t size);
 
 void stm_read(object_t *object);
@@ -54,10 +54,25 @@ void *memset(void *s, int c, size_t n);
 
 lib = ffi.verify('''
 #include <string.h>
+#include <assert.h>
+
 #include "core.h"
 
 size_t stm_object_size_rounded_up(object_t * obj) {
     return 16;
+}
+
+bool _stm_stop_transaction(void) {
+    jmpbufptr_t here;
+    if (__builtin_setjmp(here) == 0) {
+         assert(_STM_TL1->jmpbufptr == (jmpbufptr_t*)-1);
+         _STM_TL1->jmpbufptr = &here;
+         stm_stop_transaction();
+         _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+         return 0;
+    }
+    _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+    return 1;
 }
 
 ''', sources=source_files,
@@ -87,14 +102,14 @@ def _stm_was_written(ptr):
     return lib._stm_was_written(lib._stm_tl_address(ptr))
 
 def stm_start_transaction():
-    lib.stm_start_transaction()
+    lib.stm_start_transaction(ffi.cast("jmpbufptr_t*", -1))
 
-def stm_stop_transaction(expected_conflict):
-    res = lib.stm_stop_transaction()
+def stm_stop_transaction(expected_conflict=False):
+    res = lib._stm_stop_transaction()
     if expected_conflict:
-        assert res == 0
-    else:
         assert res == 1
+    else:
+        assert res == 0
 
 
 class BaseTest(object):

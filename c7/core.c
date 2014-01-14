@@ -463,7 +463,6 @@ void stm_setup_thread(void)
 
 void _stm_teardown_thread(void)
 {
-    assert(!_STM_TL2->running_transaction);
     wait_until_updated();
     stm_list_free(_STM_TL2->modified_objects);
     _STM_TL2->modified_objects = NULL;
@@ -538,7 +537,6 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
 
     wait_until_updated();
     stm_list_clear(_STM_TL2->modified_objects);
-    assert(stm_list_is_empty(_STM_TL2->new_object_ranges));
 
     /* check that there is no stm_abort() in the following maybe_update() */
     _STM_TL1->jmpbufptr = NULL;
@@ -569,8 +567,8 @@ static void update_new_objects_in_other_threads(uintptr_t pagenum,
 
 void stm_stop_transaction(void)
 {
-#if 0
     assert(_STM_TL2->running_transaction);
+#if 0
 
     write_fence();   /* see later in this function for why */
 
@@ -662,9 +660,8 @@ void stm_stop_transaction(void)
             }
         }
     }
-
-    _STM_TL2->running_transaction = 0;
 #endif
+    _STM_TL2->running_transaction = 0;
 }
 
 void stm_abort_transaction(void)
