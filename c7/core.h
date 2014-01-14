@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <setjmp.h>
 
 
 #define TLPREFIX __attribute__((address_space(256)))
@@ -31,8 +30,7 @@ typedef TLPREFIX struct read_marker_s read_marker_t;
 */
 
 struct object_s {
-    uint16_t write_version;       /* reserved for the STM library */
-    /*uint8_t stm_flags;*/
+    uint8_t stm_flags;            /* reserved for the STM library */
     uint32_t header;              /* for the user program -- only write in
                                      newly allocated objects */
 };
@@ -41,8 +39,10 @@ struct read_marker_s {
     uint8_t rm;
 };
 
+typedef intptr_t jmpbufptr_t[5];  /* for use with __builtin_setjmp() */
+
 struct _thread_local1_s {
-    jmp_buf *jmpbufptr;
+    jmpbufptr_t *jmpbufptr;
     uint8_t transaction_read_version;
     uint16_t transaction_write_version;
 };

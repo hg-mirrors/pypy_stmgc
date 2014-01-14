@@ -8,7 +8,7 @@ struct stm_list_s {
     uintptr_t count;
     union {
         uintptr_t last_allocated;       /* always odd */
-        struct stm_list_s *nextlist;    /* always even */
+        //struct stm_list_s *nextlist;    /* always even */
     };
     object_t *items[];
 };
