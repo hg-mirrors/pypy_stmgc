@@ -95,10 +95,10 @@ def stm_read(ptr):
 def stm_write(ptr):
     lib.stm_write(lib._stm_tl_address(ptr))
 
-def _stm_was_read(ptr):
+def stm_was_read(ptr):
     return lib._stm_was_read(lib._stm_tl_address(ptr))
 
-def _stm_was_written(ptr):
+def stm_was_written(ptr):
     return lib._stm_was_written(lib._stm_tl_address(ptr))
 
 def stm_start_transaction():
