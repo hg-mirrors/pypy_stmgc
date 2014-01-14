@@ -18,6 +18,7 @@
 #define NB_THREADS          2
 #define MAP_PAGES_FLAGS     (MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE)
 #define LARGE_OBJECT_WORDS  36
+#define NB_NURSERY_PAGES    1024
 
 #if defined(__i386__) || defined(__x86_64__)
 #  define HAVE_FULL_EXCHANGE_INSN
@@ -42,6 +43,7 @@ struct _thread_local2_s {
     struct stm_list_s *modified_objects;
     struct stm_list_s *new_object_ranges;
     struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
+    localchar_t *nursery_current;
 };
 #define _STM_TL2            ((_thread_local2_t *)_STM_TL1)
 
@@ -226,12 +228,20 @@ static void wait_until_updated(void)
 
 void _stm_write_slowpath(object_t *obj)
 {
-    maybe_update(CAN_CONFLICT);
-
     _stm_privatize(((uintptr_t)obj) / 4096);
 
+    uintptr_t t0_offset = (uintptr_t)obj;
+    char* t0_addr = get_thread_base(0) + t0_offset;
+    struct object_s *t0_obj = (struct object_s *)t0_addr;
+
+
+    int previous = __sync_lock_test_and_set(&t0_obj->stm_write_lock, 1);
+    if (previous)
+        abort();                /* XXX */
+
+    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+    
     stm_read(obj);
-    obj->write_version = _STM_TL1->transaction_write_version;
 
     _STM_TL2->modified_objects = stm_list_append(
         _STM_TL2->modified_objects, obj);
@@ -306,17 +316,21 @@ object_t *stm_allocate(size_t size)
     assert(size % 8 == 0);
     size_t i = size / 8;
     assert(2 <= i && i < LARGE_OBJECT_WORDS);//XXX
-    alloc_for_size_t *alloc = &_STM_TL2->alloc[i];
 
-    localchar_t *p = alloc->next;
-    alloc->next = p + size;
-    if ((uint16_t)(uintptr_t)p == alloc->stop)
-        p = _stm_alloc_next_page(i);
+    localchar_t *current = _STM_TL2->nursery_current;
+    localchar_t *new_current = current + size;
+    if ((uintptr_t)new_current > FIRST_AFTER_NURSERY_PAGE * 4096) {
+        /* XXX: do minor collection */
+        abort();
+    }
 
-    object_t *result = (object_t *)p;
-    result->write_version = _STM_TL1->transaction_write_version;
+    object_t *result = (object_t *)current;
     return result;
 }
+
+
+
+
 
 
 #define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_THREADS)
@@ -324,6 +338,7 @@ object_t *stm_allocate(size_t size)
 #define FIRST_OBJECT_PAGE     ((READMARKER_END + 4095) / 4096UL)
 #define READMARKER_START      ((FIRST_OBJECT_PAGE * 4096UL) >> 4)
 #define FIRST_READMARKER_PAGE (READMARKER_START / 4096UL)
+#define FIRST_AFTER_NURSERY_PAGE  (FIRST_OBJECT_PAGE + NB_NURSERY_PAGES)
 
 void stm_setup(void)
 {
@@ -368,9 +383,12 @@ void stm_setup(void)
 
         if (i > 0) {
             int res;
-            res = remap_file_pages(thread_base + FIRST_OBJECT_PAGE * 4096UL,
-                                   (NB_PAGES - FIRST_OBJECT_PAGE) * 4096UL,
-                                   0, FIRST_OBJECT_PAGE, 0);
+
+            res = remap_file_pages(
+                    thread_base + FIRST_AFTER_NURSERY_PAGE * 4096UL,
+                    (NB_PAGES - FIRST_AFTER_NURSERY_PAGE) * 4096UL,
+                    0, FIRST_AFTER_NURSERY_PAGE, 0);
+
             if (res != 0) {
                 perror("remap_file_pages");
                 abort();
@@ -379,7 +397,7 @@ void stm_setup(void)
     }
 
     num_threads_started = 0;
-    index_page_never_used = FIRST_OBJECT_PAGE;
+    index_page_never_used = FIRST_AFTER_NURSERY_PAGE;
     pending_updates = NULL;
 }
 

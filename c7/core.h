@@ -29,8 +29,13 @@ typedef TLPREFIX struct read_marker_s read_marker_t;
    newly allocated objects.
 */
 
+enum {
+    GCFLAG_WRITE_BARRIER = (1 << 0),
+};
+
 struct object_s {
     uint8_t stm_flags;            /* reserved for the STM library */
+    uint8_t stm_write_lock;       /* 1 if writeable by some thread */
     uint32_t header;              /* for the user program -- only write in
                                      newly allocated objects */
 };
@@ -65,7 +70,7 @@ static inline void stm_read(object_t *obj)
 
 static inline void stm_write(object_t *obj)
 {
-    if (UNLIKELY(obj->write_version != _STM_TL1->transaction_write_version))
+    if (UNLIKELY(obj->stm_flags & GCFLAG_WRITE_BARRIER))
         _stm_write_slowpath(obj);
 }
 
