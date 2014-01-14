@@ -44,7 +44,7 @@ struct read_marker_s {
     uint8_t rm;
 };
 
-typedef intptr_t jmpbufptr_t[5];  /* for use with __builtin_setjmp() */
+typedef void* jmpbufptr_t[5];  /* for use with __builtin_setjmp() */
 
 struct _thread_local1_s {
     jmpbufptr_t *jmpbufptr;
@@ -78,5 +78,17 @@ static inline void stm_write(object_t *obj)
 /* must be provided by the user of this library */
 extern size_t stm_object_size_rounded_up(object_t *);
 
+void _stm_restore_local_state(int thread_num);
+void _stm_teardown(void);
+void _stm_teardown_thread(void);
+
+bool _stm_was_read(object_t *obj);
+bool _stm_was_written(object_t *obj);
+
+object_t *stm_allocate(size_t size);
+void stm_setup(void);
+void stm_setup_thread(void);
+void stm_start_transaction(jmpbufptr_t *jmpbufptr);
+void stm_stop_transaction(void);
 
 #endif
