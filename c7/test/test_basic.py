@@ -15,11 +15,11 @@ class TestBasic(BaseTest):
         p3 = stm_allocate(16)
         assert p3 - p2 == 16
         #
-        self.switch("sub1")
+        self.switch(1)
         p1s = stm_allocate(16)
         assert abs(p1s - p3) >= 4000
         #
-        self.switch("main")
+        self.switch(0)
         p4 = stm_allocate(16)
         assert p4 - p3 == 16
 
