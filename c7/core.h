@@ -90,5 +90,6 @@ void stm_setup(void);
 void stm_setup_thread(void);
 void stm_start_transaction(jmpbufptr_t *jmpbufptr);
 void stm_stop_transaction(void);
-
+char *_stm_real_address(object_t *o);
+object_t *_stm_tl_address(char *ptr);
 #endif

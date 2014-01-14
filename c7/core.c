@@ -182,9 +182,31 @@ static char *real_address(uintptr_t src)
     return REAL_ADDRESS(_STM_TL2->thread_base, src);
 }
 
+
 static char *get_thread_base(long thread_num)
 {
     return object_pages + thread_num * (NB_PAGES * 4096UL);
+}
+
+
+char *_stm_real_address(object_t *o)
+{
+    if (o == NULL)
+        return NULL;
+    assert(FIRST_OBJECT_PAGE * 4096 <= (uintptr_t)o
+           && (uintptr_t)o < NB_PAGES * 4096);
+    return real_address((uintptr_t)o);
+}
+
+object_t *_stm_tl_address(char *ptr)
+{
+    if (ptr == NULL)
+        return NULL;
+    
+    uintptr_t res = ptr - _STM_TL2->thread_base;
+    assert(FIRST_OBJECT_PAGE * 4096 <= res
+           && res < NB_PAGES * 4096);
+    return (object_t*)res;
 }
 
 void stm_abort_transaction(void);

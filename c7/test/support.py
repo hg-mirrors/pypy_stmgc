@@ -2,6 +2,7 @@ import os
 import cffi
 
 # ----------
+os.environ['CC'] = 'clang'
 
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -44,6 +45,8 @@ void _stm_restore_local_state(int thread_num);
 void _stm_teardown(void);
 void _stm_teardown_thread(void);
 
+char *_stm_real_address(object_t *o);
+object_t *_stm_tl_address(char *ptr);
 
 void *memset(void *s, int c, size_t n);
 """)
@@ -63,23 +66,21 @@ size_t stm_object_size_rounded_up(object_t * obj) {
      extra_compile_args=['-g', '-O0', '-Werror'],
      force_generic_engine=True)
 
-def intptr(p):
-    return int(ffi.cast("intptr_t", p))
 
 def stm_allocate(size):
-    return ffi.cast("char *", lib.stm_allocate(size))
+    return lib._stm_real_address(lib.stm_allocate(size))
 
 def stm_read(ptr):
-    lib.stm_read(ffi.cast("struct object_s *", ptr))
+    lib.stm_read(lib._stm_tl_address(ptr))
 
 def stm_write(ptr):
-    lib.stm_write(ffi.cast("struct object_s *", ptr))
+    lib.stm_write(lib._stm_tl_address(ptr))
 
 def _stm_was_read(ptr):
-    return lib._stm_was_read(ffi.cast("struct object_s *", ptr))
+    return lib._stm_was_read(lib._stm_tl_address(ptr))
 
 def _stm_was_written(ptr):
-    return lib._stm_was_written(ffi.cast("struct object_s *", ptr))
+    return lib._stm_was_written(lib._stm_tl_address(ptr))
 
 def stm_start_transaction():
     lib.stm_start_transaction()
