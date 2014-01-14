@@ -68,6 +68,7 @@ static uint8_t flag_page_private[NB_PAGES];   /* xxx_PAGE constants above */
 
 
 /************************************************************/
+uintptr_t _stm_reserve_page(void);
 
 static void spin_loop(void)
 {
@@ -127,6 +128,15 @@ bool _stm_was_written(object_t *obj)
     return !(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 }
 
+
+object_t *_stm_allocate_old(size_t size)
+{
+    assert(size <= 4096);
+    localchar_t* addr = (localchar_t*)(_stm_reserve_page() * 4096);
+    object_t* o = (object_t*)addr;
+    o->stm_flags |= GCFLAG_WRITE_BARRIER;
+    return o;
+}
 
 
 static void _stm_privatize(uintptr_t pagenum)

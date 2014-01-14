@@ -44,6 +44,18 @@ class TestBasic(BaseTest):
         stm_write(p1)
         assert stm_was_written(p1)
 
+    def test_write_on_old(self):
+        p1 = stm_allocate_old(16)
+        p1tl = stm_get_tl_address(p1)
+        self.switch(1)
+        p2 = stm_allocate_old(16)
+        p2tl = stm_get_tl_address(p2)
+        assert p1tl != p2tl
+        
+        
+        
+        
+
     def test_read_write_1(self):
         stm_start_transaction()
         p1 = stm_allocate(16)

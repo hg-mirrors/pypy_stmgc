@@ -31,6 +31,9 @@ typedef TLPREFIX struct read_marker_s read_marker_t;
 
 enum {
     GCFLAG_WRITE_BARRIER = (1 << 0),
+    /* set if the write-barrier slowpath needs to trigger. set on all
+       old objects if there was no write-barrier on it in the same
+       transaction and no collection inbetween. */
 };
 
 struct object_s {
@@ -94,4 +97,5 @@ char *_stm_real_address(object_t *o);
 object_t *_stm_tl_address(char *ptr);
 
 bool _stm_is_in_nursery(char *ptr);
+object_t *_stm_allocate_old(size_t size);
 #endif

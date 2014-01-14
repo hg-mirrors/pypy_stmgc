@@ -48,6 +48,7 @@ void _stm_teardown_thread(void);
 char *_stm_real_address(object_t *o);
 object_t *_stm_tl_address(char *ptr);
 bool _stm_is_in_nursery(char *ptr);
+object_t *_stm_allocate_old(size_t size);
 
 void *memset(void *s, int c, size_t n);
 """)
@@ -86,8 +87,14 @@ bool _stm_stop_transaction(void) {
 def is_in_nursery(ptr):
     return lib._stm_is_in_nursery(ptr)
 
+def stm_allocate_old(size):
+    return lib._stm_real_address(lib._stm_allocate_old(size))
+
 def stm_allocate(size):
     return lib._stm_real_address(lib.stm_allocate(size))
+
+def stm_get_tl_address(ptr):
+    return int(ffi.cast('uintptr_t', lib._stm_tl_address(ptr)))
 
 def stm_read(ptr):
     lib.stm_read(lib._stm_tl_address(ptr))
