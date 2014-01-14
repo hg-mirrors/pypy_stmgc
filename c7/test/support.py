@@ -47,6 +47,7 @@ void _stm_teardown_thread(void);
 
 char *_stm_real_address(object_t *o);
 object_t *_stm_tl_address(char *ptr);
+bool _stm_is_in_nursery(char *ptr);
 
 void *memset(void *s, int c, size_t n);
 """)
@@ -66,6 +67,9 @@ size_t stm_object_size_rounded_up(object_t * obj) {
      extra_compile_args=['-g', '-O0', '-Werror'],
      force_generic_engine=True)
 
+
+def is_in_nursery(ptr):
+    return lib._stm_is_in_nursery(ptr)
 
 def stm_allocate(size):
     return lib._stm_real_address(lib.stm_allocate(size))

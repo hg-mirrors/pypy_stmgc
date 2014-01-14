@@ -5,21 +5,23 @@ class TestBasic(BaseTest):
 
     def test_empty(self):
         pass
-    
+
     def test_thread_local_allocations(self):
         p1 = stm_allocate(16)
         p2 = stm_allocate(16)
-        assert intptr(p2) - intptr(p1) == 16
+        assert is_in_nursery(p1)
+        assert is_in_nursery(p2)
+        assert p2 - p1 == 16
         p3 = stm_allocate(16)
-        assert intptr(p3) - intptr(p2) == 16
+        assert p3 - p2 == 16
         #
         self.switch("sub1")
         p1s = stm_allocate(16)
-        assert abs(intptr(p1s) - intptr(p3)) >= 4000
+        assert abs(p1s - p3) >= 4000
         #
         self.switch("main")
         p4 = stm_allocate(16)
-        assert intptr(p4) - intptr(p3) == 16
+        assert p4 - p3 == 16
 
     def test_read_write_1(self):
         stm_start_transaction()
