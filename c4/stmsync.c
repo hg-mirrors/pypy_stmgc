@@ -179,13 +179,13 @@ void stm_perform_transaction(gcptr arg, int (*callback)(gcptr, int))
            has configured 'reads_size_limit_nonatomic' to a smaller value.
            When such a shortened transaction succeeds, the next one will
            see its length limit doubled, up to the maximum. */
-        if (counter == 0 && stm_active != 2) {
-            /* unsigned long limit = d->reads_size_limit_nonatomic; */
+        if (/* counter == 0 &&  */stm_active != 2) {
+            unsigned long limit = d->reads_size_limit_nonatomic;
             /* if (limit != 0 && limit < (stm_regular_length_limit >> 1)) */
             /*     limit = (limit << 1) | 1; */
             /* else */
-            /*     limit = stm_regular_length_limit; */
-            /* d->reads_size_limit_nonatomic = limit; */
+                limit = stm_regular_length_limit;
+            d->reads_size_limit_nonatomic = limit;
         }
         if (!d->atomic) {
             stm_begin_transaction(&_jmpbuf, NULL);
