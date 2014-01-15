@@ -101,7 +101,7 @@ void stm_clear_read_cache(void)
 
 gcptr get_original_of(gcptr P)
 {
-  if (UNLIKELY(!(P->h_tid & GCFLAG_PREBUILT_ORIGINAL)) && P->h_original)
+  if (!(P->h_tid & GCFLAG_PREBUILT_ORIGINAL) && P->h_original)
     return (gcptr)P->h_original;
   return P;
 }
@@ -112,7 +112,7 @@ void abort_because_of(gcptr L)
 
   //g->h_contention += (g->h_contention + 1) << 2;
   revision_t old =  (RPY_STM_CONT_RMA_SAMPLES - 1) * obj->h_contention;
-  old += 1000000;
+  old += 1000;
   obj->h_contention = old / RPY_STM_CONT_RMA_SAMPLES 
     + ((old % RPY_STM_CONT_RMA_SAMPLES) != 0);
 }
@@ -172,6 +172,7 @@ gcptr stm_DirectReadBarrier(gcptr G)
   revision_t v;
 
   d->count_reads++;
+  
   assert(IMPLIES(!(P->h_tid & GCFLAG_OLD), stmgc_is_in_nursery(d, P)));
   assert(G->h_revision != 0);
 
@@ -309,7 +310,8 @@ gcptr stm_DirectReadBarrier(gcptr G)
 
   /* update penalty for reading */
   gcptr o = get_original_of(P);
-  d->penalty += (o->h_contention >> 1) + 1;
+  d->penalty += /* (o->h_contention >> 1) + */ 1;
+  
   return P;
 
  follow_stub:;
@@ -1030,14 +1032,14 @@ void AbortTransaction(int num)
      so far.  This should ensure that, assuming the retry does the same
      thing, it will commit just before it reaches the conflicting point.
      Note that we should never *increase* the read length limit here. */
-  limit = d->count_reads;
-  if (limit > d->reads_size_limit_nonatomic) {  /* can occur if atomic */
-      limit = d->reads_size_limit_nonatomic;
-  }
-  if (limit > 0) {
-      limit -= (limit >> 4);
-      d->reads_size_limit_nonatomic = limit;
-  }
+  /* limit = d->count_reads; */
+  /* if (limit > d->reads_size_limit_nonatomic) {  /\* can occur if atomic *\/ */
+  /*     limit = d->reads_size_limit_nonatomic; */
+  /* } */
+  /* if (limit > 0) { */
+  /*     limit -= (limit >> 4); */
+  /*     d->reads_size_limit_nonatomic = limit; */
+  /* } */
 
   AbortPrivateFromProtected(d);
   gcptrlist_clear(&d->list_of_read_objects);
@@ -1160,7 +1162,7 @@ static void init_transaction(struct tx_descriptor *d, int already_locked)
   assert(!g2l_any_entry(&d->public_to_private));
   assert(d->old_thread_local_obj == NULL);
 
-  d->penalty = 0;
+  d->penalty = 1;
   d->count_reads = 1;
   fxcache_clear(&d->recent_reads_cache);
   gcptrlist_clear(&d->abortinfo);

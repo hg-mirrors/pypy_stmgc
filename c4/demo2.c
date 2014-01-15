@@ -8,7 +8,7 @@
 #include "fprintcolor.h"
 
 
-#define LIST_LENGTH 200
+#define LIST_LENGTH 4000 
 #define NUMTHREADS  4
 
 
