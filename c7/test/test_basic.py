@@ -7,20 +7,20 @@ class TestBasic(BaseTest):
         pass
 
     def test_thread_local_allocations(self):
-        p1 = stm_allocate(16)
-        p2 = stm_allocate(16)
+        lp1, p1 = stm_allocate(16)
+        lp2, p2 = stm_allocate(16)
         assert is_in_nursery(p1)
         assert is_in_nursery(p2)
         assert p2 - p1 == 16
-        p3 = stm_allocate(16)
+        lp3, p3 = stm_allocate(16)
         assert p3 - p2 == 16
         #
         self.switch(1)
-        p1s = stm_allocate(16)
+        lp1s, p1s = stm_allocate(16)
         assert abs(p1s - p3) >= 4000
         #
         self.switch(0)
-        p4 = stm_allocate(16)
+        lp4, p4 = stm_allocate(16)
         assert p4 - p3 == 16
 
     def test_transaction_start_stop(self):
@@ -33,26 +33,33 @@ class TestBasic(BaseTest):
 
     def test_simple_read(self):
         stm_start_transaction()
-        p1 = stm_allocate(16)
-        stm_read(p1)
-        assert stm_was_read(p1)
+        lp1, _ = stm_allocate(16)
+        stm_read(lp1)
+        assert stm_was_read(lp1)
 
     def test_simple_write(self):
         stm_start_transaction()
-        p1 = stm_allocate(16)
-        assert stm_was_written(p1)
-        stm_write(p1)
-        assert stm_was_written(p1)
+        lp1, _  = stm_allocate(16)
+        assert stm_was_written(lp1)
+        stm_write(lp1)
+        assert stm_was_written(lp1)
 
-    def test_write_on_old(self):
-        p1 = stm_allocate_old(16)
-        p1tl = stm_get_tl_address(p1)
+    def test_allocate_old(self):
+        lp1, _ = stm_allocate_old(16)
         self.switch(1)
-        p2 = stm_allocate_old(16)
-        p2tl = stm_get_tl_address(p2)
-        assert p1tl != p2tl
+        lp2, _ = stm_allocate_old(16)
+        assert lp1 != lp2
         
-        
+    def test_write_on_old(self):
+        lp1, p1 = stm_allocate_old(16)
+        stm_start_transaction()
+        stm_write(lp1)
+        p1[15] = 'a'
+        self.switch(1)
+        stm_start_transaction()
+        stm_read(lp1)
+        tp1 = stm_get_real_address(lp1)
+        assert tp1[15] == '\0'
         
         
 
