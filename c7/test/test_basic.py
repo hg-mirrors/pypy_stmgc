@@ -25,10 +25,12 @@ class TestBasic(BaseTest):
 
     def test_transaction_start_stop(self):
         stm_start_transaction()
+        stm_start_safe_point()
         self.switch(1)
         stm_start_transaction()
         stm_stop_transaction()
         self.switch(0)
+        stm_stop_safe_point()
         stm_stop_transaction()
 
     def test_simple_read(self):
@@ -54,52 +56,85 @@ class TestBasic(BaseTest):
         lp1, p1 = stm_allocate_old(16)
         stm_start_transaction()
         stm_write(lp1)
+        assert stm_was_written(lp1)
         p1[15] = 'a'
         self.switch(1)
         stm_start_transaction()
         stm_read(lp1)
+        assert stm_was_read(lp1)
         tp1 = stm_get_real_address(lp1)
         assert tp1[15] == '\0'
         
-        
-
     def test_read_write_1(self):
+        lp1, p1 = stm_allocate_old(16)
+        p1[8] = 'a'
         stm_start_transaction()
-        p1 = stm_allocate(16)
+        stm_stop_transaction()
+        #
+        self.switch(1)
+        stm_start_transaction()
+        stm_write(lp1)
+        p1 = stm_get_real_address(lp1)
+        assert p1[8] == 'a'
+        p1[8] = 'b'
+        stm_start_safe_point()
+        #
+        self.switch(0)
+        stm_start_transaction()
+        stm_read(lp1)
+        p1 = stm_get_real_address(lp1)
+        assert p1[8] == 'a'
+        stm_start_safe_point()
+        #
+        self.switch(1)
+        stm_stop_safe_point()
+        stm_stop_transaction(False)
+        #
+        self.switch(0)
+        stm_stop_safe_point(True) # detects rw conflict
+        
+        
+    def test_read_write_2(self):
+        stm_start_transaction()
+        lp1, p1 = stm_allocate(16)
         p1[8] = 'a'
         stm_stop_transaction(False)
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_start_transaction()
-        stm_write(p1)
+        stm_write(lp1)
+        p1 = stm_get_real_address(lp1)
         assert p1[8] == 'a'
         p1[8] = 'b'
         #
-        self.switch("main")
+        self.switch(0)
         stm_start_transaction()
-        stm_read(p1)
+        stm_read(lp1)
+        p1 = stm_get_real_address(lp1)
         assert p1[8] == 'a'
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_stop_transaction(False)
         #
-        self.switch("main")
+        self.switch(0)
+        p1 = stm_get_real_address(lp1)
         assert p1[8] == 'a'
 
+        
     def test_start_transaction_updates(self):
         stm_start_transaction()
         p1 = stm_allocate(16)
         p1[8] = 'a'
         stm_stop_transaction(False)
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_start_transaction()
         stm_write(p1)
         assert p1[8] == 'a'
         p1[8] = 'b'
         stm_stop_transaction(False)
         #
-        self.switch("main")
+        self.switch(0)
         assert p1[8] == 'a'
         stm_start_transaction()
         assert p1[8] == 'b'
@@ -107,11 +142,11 @@ class TestBasic(BaseTest):
     def test_resolve_no_conflict_empty(self):
         stm_start_transaction()
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_start_transaction()
         stm_stop_transaction(False)
         #
-        self.switch("main")
+        self.switch(0)
         stm_stop_transaction(False)
 
     def test_resolve_no_conflict_write_only_in_already_committed(self):
@@ -121,13 +156,13 @@ class TestBasic(BaseTest):
         stm_stop_transaction(False)
         stm_start_transaction()
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_start_transaction()
         stm_write(p1)
         p1[8] = 'b'
         stm_stop_transaction(False)
         #
-        self.switch("main")
+        self.switch(0)
         assert p1[8] == 'a'
         stm_stop_transaction(False)
         assert p1[8] == 'b'
@@ -139,13 +174,13 @@ class TestBasic(BaseTest):
         stm_stop_transaction(False)
         stm_start_transaction()
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_start_transaction()
         stm_write(p1)
         p1[8] = 'b'
         stm_stop_transaction(False)
         #
-        self.switch("main")
+        self.switch(0)
         stm_read(p1)
         assert p1[8] == 'a'
         stm_stop_transaction(expected_conflict=True)
@@ -160,13 +195,13 @@ class TestBasic(BaseTest):
         stm_stop_transaction(False)
         stm_start_transaction()
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_start_transaction()
         stm_write(p1)
         p1[8] = 'b'
         stm_stop_transaction(False)
         #
-        self.switch("main")
+        self.switch(0)
         assert p1[8] == 'a'
         stm_write(p1)
         p1[8] = 'c'
@@ -184,13 +219,13 @@ class TestBasic(BaseTest):
         stm_stop_transaction(False)
         stm_start_transaction()
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_start_transaction()
         stm_write(p1)
         p1[8] = 'b'
         stm_stop_transaction(False)
         #
-        self.switch("main")
+        self.switch(0)
         stm_write(p2)
         p2[8] = 'C'
         stm_stop_transaction(False)
@@ -206,14 +241,14 @@ class TestBasic(BaseTest):
         stm_stop_transaction(False)
         stm_start_transaction()
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_start_transaction()
         stm_write(p1)
         assert p1[8] == 'A'
         p1[8] = 'B'
         stm_stop_transaction(False)
         #
-        self.switch("main")
+        self.switch(0)
         stm_read(p2)
         assert p2[8] == 'a'
         p3 = stm_allocate(16)   # goes into the same page, which is
@@ -233,14 +268,14 @@ class TestBasic(BaseTest):
         stm_stop_transaction(False)
         stm_start_transaction()
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_start_transaction()
         stm_write(p1)
         assert p1[8] == 'A'
         p1[8] = 'B'
         stm_stop_transaction(False)
         #
-        self.switch("main")
+        self.switch(0)
         stm_write(p2)
         assert p2[8] == 'a'
         p2[8] = 'b'
@@ -261,14 +296,14 @@ class TestBasic(BaseTest):
         stm_stop_transaction(False)
         stm_start_transaction()
         #
-        self.switch("sub1")
+        self.switch(1)
         stm_start_transaction()
         stm_write(p1)
         assert p1[8] == 'A'
         p1[8] = 'B'
         stm_stop_transaction(False)
         #
-        self.switch("main")
+        self.switch(0)
         p3 = stm_allocate(16)  # goes into the same page, which I will
         p3[8] = ':'            #  modify just below
         stm_write(p2)

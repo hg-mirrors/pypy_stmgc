@@ -98,4 +98,10 @@ object_t *_stm_tl_address(char *ptr);
 
 bool _stm_is_in_nursery(char *ptr);
 object_t *_stm_allocate_old(size_t size);
+
+void _stm_start_safe_point(void);
+void _stm_stop_safe_point(void);
 #endif
+
+
+

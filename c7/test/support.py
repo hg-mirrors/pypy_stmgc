@@ -50,6 +50,10 @@ object_t *_stm_tl_address(char *ptr);
 bool _stm_is_in_nursery(char *ptr);
 object_t *_stm_allocate_old(size_t size);
 
+void _stm_start_safe_point(void);
+void _stm_stop_safe_point(void);
+bool _stm_check_stop_safe_point(void);
+
 void *memset(void *s, int c, size_t n);
 """)
 
@@ -65,7 +69,7 @@ size_t stm_object_size_rounded_up(object_t * obj) {
 
 bool _stm_stop_transaction(void) {
     jmpbufptr_t here;
-    if (__builtin_setjmp(here) == 0) {
+    if (__builtin_setjmp(here) == 0) { // returned directly
          assert(_STM_TL1->jmpbufptr == (jmpbufptr_t*)-1);
          _STM_TL1->jmpbufptr = &here;
          stm_stop_transaction();
@@ -75,6 +79,20 @@ bool _stm_stop_transaction(void) {
     _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
+
+bool _stm_check_stop_safe_point(void) {
+    jmpbufptr_t here;
+    if (__builtin_setjmp(here) == 0) { // returned directly
+         assert(_STM_TL1->jmpbufptr == (jmpbufptr_t*)-1);
+         _STM_TL1->jmpbufptr = &here;
+         _stm_stop_safe_point();
+         _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+         return 0;
+    }
+    _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+    return 1;
+}
+
 
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1')],
@@ -118,6 +136,16 @@ def stm_start_transaction():
 
 def stm_stop_transaction(expected_conflict=False):
     res = lib._stm_stop_transaction()
+    if expected_conflict:
+        assert res == 1
+    else:
+        assert res == 0
+
+def stm_start_safe_point():
+    lib._stm_start_safe_point()
+
+def stm_stop_safe_point(expected_conflict=False):
+    res = lib._stm_check_stop_safe_point()
     if expected_conflict:
         assert res == 1
     else:
