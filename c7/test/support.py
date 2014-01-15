@@ -88,25 +88,30 @@ def is_in_nursery(ptr):
     return lib._stm_is_in_nursery(ptr)
 
 def stm_allocate_old(size):
-    return lib._stm_real_address(lib._stm_allocate_old(size))
+    o = lib._stm_allocate_old(size)
+    return o, lib._stm_real_address(o)
 
 def stm_allocate(size):
-    return lib._stm_real_address(lib.stm_allocate(size))
+    o = lib.stm_allocate(size)
+    return o, lib._stm_real_address(o)
 
+def stm_get_real_address(obj):
+    return lib._stm_real_address(ffi.cast('object_t*', obj))
+    
 def stm_get_tl_address(ptr):
     return int(ffi.cast('uintptr_t', lib._stm_tl_address(ptr)))
 
-def stm_read(ptr):
-    lib.stm_read(lib._stm_tl_address(ptr))
+def stm_read(o):
+    lib.stm_read(o)
 
-def stm_write(ptr):
-    lib.stm_write(lib._stm_tl_address(ptr))
+def stm_write(o):
+    lib.stm_write(o)
 
-def stm_was_read(ptr):
-    return lib._stm_was_read(lib._stm_tl_address(ptr))
+def stm_was_read(o):
+    return lib._stm_was_read(o)
 
-def stm_was_written(ptr):
-    return lib._stm_was_written(lib._stm_tl_address(ptr))
+def stm_was_written(o):
+    return lib._stm_was_written(o)
 
 def stm_start_transaction():
     lib.stm_start_transaction(ffi.cast("jmpbufptr_t*", -1))
