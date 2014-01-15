@@ -8,6 +8,7 @@
 #include <sys/syscall.h>
 #include <asm/prctl.h>
 #include <sys/prctl.h>
+#include <pthread.h>
 
 #include "core.h"
 #include "list.h"
@@ -49,6 +50,7 @@ struct _thread_local2_s {
     struct _thread_local1_s _tl1;
     int thread_num;
     bool running_transaction;
+    bool need_abort;
     char *thread_base;
     struct stm_list_s *modified_objects;
     struct stm_list_s *new_object_ranges;
@@ -69,6 +71,7 @@ static uint8_t flag_page_private[NB_PAGES];   /* xxx_PAGE constants above */
 
 /************************************************************/
 uintptr_t _stm_reserve_page(void);
+void stm_abort_transaction(void);
 
 static void spin_loop(void)
 {
@@ -114,6 +117,59 @@ static void write_fence(void)
 #  error "Define write_fence() for your architecture"
 #endif
 }
+
+/************************************************************/
+
+/* a multi-reader, single-writer lock: transactions normally take a reader
+   lock, so don't conflict with each other; when we need to do a global GC,
+   we take a writer lock to "stop the world".  Note the initializer here,
+   which should give the correct priority for stm_possible_safe_point(). */
+static pthread_rwlock_t rwlock_shared =
+    PTHREAD_RWLOCK_WRITER_NONRECURSIVE_INITIALIZER_NP;
+
+struct tx_descriptor *in_single_thread = NULL;
+
+void stm_start_sharedlock(void)
+{
+    int err = pthread_rwlock_rdlock(&rwlock_shared);
+    if (err != 0)
+        abort();
+}
+
+void stm_stop_sharedlock(void)
+{
+    int err = pthread_rwlock_unlock(&rwlock_shared);
+    if (err != 0)
+        abort();
+}
+
+static void start_exclusivelock(void)
+{
+    int err = pthread_rwlock_wrlock(&rwlock_shared);
+    if (err != 0)
+        abort();
+}
+
+static void stop_exclusivelock(void)
+{
+    int err = pthread_rwlock_unlock(&rwlock_shared);
+    if (err != 0)
+        abort();
+}
+
+void _stm_start_safe_point(void)
+{
+    stm_stop_sharedlock();
+}
+
+void _stm_stop_safe_point(void)
+{
+    stm_start_sharedlock();
+    if (_STM_TL2->need_abort)
+        stm_abort_transaction();
+}
+
+
 
 bool _stm_was_read(object_t *obj)
 {
@@ -227,9 +283,8 @@ object_t *_stm_tl_address(char *ptr)
     return (object_t*)res;
 }
 
-void stm_abort_transaction(void);
 
-enum detect_conflicts_e { CANNOT_CONFLICT, CAN_CONFLICT };
+enum detect_conflicts_e { CANNOT_CONFLICT, CAN_CONFLICT, CHECK_CONFLICT };
 
 static void update_to_current_version(enum detect_conflicts_e check_conflict)
 {
@@ -265,8 +320,12 @@ static void update_to_current_version(enum detect_conflicts_e check_conflict)
     write_fence();
     pending_updates = NULL;
 
-    if (conflict_found_or_dont_check && check_conflict == CAN_CONFLICT) {
-        stm_abort_transaction();
+    if (conflict_found_or_dont_check) {
+        if (check_conflict == CAN_CONFLICT) {
+            stm_abort_transaction();
+        } else {                  /* CHECK_CONFLICT */
+            _STM_TL2->need_abort = 1;
+        }
     }
 }
 
@@ -532,6 +591,8 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
 {
     assert(!_STM_TL2->running_transaction);
 
+    stm_start_sharedlock();
+    
     uint8_t old_rv = _STM_TL1->transaction_read_version;
     _STM_TL1->transaction_read_version = old_rv + 1;
     if (UNLIKELY(old_rv == 0xff))
@@ -557,6 +618,7 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
 
     _STM_TL1->jmpbufptr = jmpbufptr;
     _STM_TL2->running_transaction = 1;
+    _STM_TL2->need_abort = 0;
 }
 
 #if 0
@@ -580,100 +642,87 @@ static void update_new_objects_in_other_threads(uintptr_t pagenum,
 void stm_stop_transaction(void)
 {
     assert(_STM_TL2->running_transaction);
-#if 0
+    stm_stop_sharedlock();
+    start_exclusivelock();
 
-    write_fence();   /* see later in this function for why */
-
-
-    if (leader_thread_num != _STM_TL2->thread_num) {
-        /* non-leader thread */
-        if (global_history != NULL) {
-            update_to_current_version(CAN_CONFLICT);
-            assert(global_history == NULL);
-        }
-
-        /* steal leadership now */
-        leader_thread_num = _STM_TL2->thread_num;
-    }
-
-    /* now we are the leader thread.  the leader can always commit */
     _STM_TL1->jmpbufptr = NULL;          /* cannot abort any more */
-    undo_log_current = undo_log_pages;   /* throw away the content */
+    
+    /* copy modified object versions to other threads */
+    pending_updates = _STM_TL2->modified_objects;
+    int my_thread_num = _STM_TL2->thread_num;
+    int other_thread_num = 1 - my_thread_num;
+    _stm_restore_local_state(other_thread_num);
+    update_to_current_version(CHECK_CONFLICT); /* sets need_abort */
+    _stm_restore_local_state(my_thread_num);
+    
+    
+    /* /\* walk the new_object_ranges and manually copy the new objects */
+    /*    to the other thread's pages in the (hopefully rare) case that */
+    /*    the page they belong to is already unshared *\/ */
+    /* long i; */
+    /* struct stm_list_s *lst = _STM_TL2->new_object_ranges; */
+    /* for (i = stm_list_count(lst); i > 0; ) { */
+    /*     i -= 2; */
+    /*     uintptr_t pagenum = (uintptr_t)stm_list_item(lst, i); */
 
-    /* add these objects to the global_history */
-    _STM_TL2->modified_objects->nextlist = global_history;
-    global_history = _STM_TL2->modified_objects;
-    _STM_TL2->modified_objects = stm_list_create();
+    /*     /\* NB. the read next line should work even against a parallel */
+    /*        thread, thanks to the lock acquisition we do earlier (see the */
+    /*        beginning of this function).  Indeed, if this read returns */
+    /*        SHARED_PAGE, then we know that the real value in memory was */
+    /*        actually SHARED_PAGE at least at the time of the */
+    /*        acquire_lock().  It may have been modified afterwards by a */
+    /*        compare_and_swap() in the other thread, but then we know for */
+    /*        sure that the other thread is seeing the last, up-to-date */
+    /*        version of our data --- this is the reason of the */
+    /*        write_fence() just before the acquire_lock(). */
+    /*     *\/ */
+    /*     if (flag_page_private[pagenum] != SHARED_PAGE) { */
+    /*         object_t *range = stm_list_item(lst, i + 1); */
+    /*         uint16_t start, stop; */
+    /*         FROM_RANGE(start, stop, range); */
+    /*         update_new_objects_in_other_threads(pagenum, start, stop); */
+    /*     } */
+    /* } */
+    
+    /* /\* do the same for the partially-allocated pages *\/ */
+    /* long j; */
+    /* for (j = 2; j < LARGE_OBJECT_WORDS; j++) { */
+    /*     alloc_for_size_t *alloc = &_STM_TL2->alloc[j]; */
+    /*     uint16_t start = alloc->start; */
+    /*     uint16_t cur = (uintptr_t)alloc->next; */
 
-    uint16_t wv = _STM_TL1->transaction_write_version;
-    if (gh_write_version_first < wv) gh_write_version_first = wv;
+    /*     if (start == cur) { */
+    /*         /\* nothing to do: this page (or fraction thereof) was left */
+    /*            empty by the previous transaction, and starts empty as */
+    /*            well in the new transaction.  'flag_partial_page' is */
+    /*            unchanged. *\/ */
+    /*     } */
+    /*     else { */
+    /*         uintptr_t pagenum = ((uintptr_t)(alloc->next - 1)) / 4096UL; */
+    /*         /\* for the new transaction, it will start here: *\/ */
+    /*         alloc->start = cur; */
 
-    /* walk the new_object_ranges and manually copy the new objects
-       to the other thread's pages in the (hopefully rare) case that
-       the page they belong to is already unshared */
-    long i;
-    struct stm_list_s *lst = _STM_TL2->new_object_ranges;
-    for (i = stm_list_count(lst); i > 0; ) {
-        i -= 2;
-        uintptr_t pagenum = (uintptr_t)stm_list_item(lst, i);
+    /*         if (alloc->flag_partial_page) { */
+    /*             if (flag_page_private[pagenum] != SHARED_PAGE) { */
+    /*                 update_new_objects_in_other_threads(pagenum, start, cur); */
+    /*             } */
+    /*         } */
+    /*         else { */
+    /*             /\* we can skip checking flag_page_private[] in non-debug */
+    /*                builds, because the whole page can only contain */
+    /*                objects made by the just-finished transaction. *\/ */
+    /*             assert(flag_page_private[pagenum] == SHARED_PAGE); */
 
-        /* NB. the read next line should work even against a parallel
-           thread, thanks to the lock acquisition we do earlier (see the
-           beginning of this function).  Indeed, if this read returns
-           SHARED_PAGE, then we know that the real value in memory was
-           actually SHARED_PAGE at least at the time of the
-           acquire_lock().  It may have been modified afterwards by a
-           compare_and_swap() in the other thread, but then we know for
-           sure that the other thread is seeing the last, up-to-date
-           version of our data --- this is the reason of the
-           write_fence() just before the acquire_lock().
-        */
-        if (flag_page_private[pagenum] != SHARED_PAGE) {
-            object_t *range = stm_list_item(lst, i + 1);
-            uint16_t start, stop;
-            FROM_RANGE(start, stop, range);
-            update_new_objects_in_other_threads(pagenum, start, stop);
-        }
-    }
+    /*             /\* the next transaction will start with this page */
+    /*                containing objects that are now committed, so */
+    /*                we need to set this flag now *\/ */
+    /*             alloc->flag_partial_page = true; */
+    /*         } */
+    /*     } */
+    /* } */
 
-    /* do the same for the partially-allocated pages */
-    long j;
-    for (j = 2; j < LARGE_OBJECT_WORDS; j++) {
-        alloc_for_size_t *alloc = &_STM_TL2->alloc[j];
-        uint16_t start = alloc->start;
-        uint16_t cur = (uintptr_t)alloc->next;
-
-        if (start == cur) {
-            /* nothing to do: this page (or fraction thereof) was left
-               empty by the previous transaction, and starts empty as
-               well in the new transaction.  'flag_partial_page' is
-               unchanged. */
-        }
-        else {
-            uintptr_t pagenum = ((uintptr_t)(alloc->next - 1)) / 4096UL;
-            /* for the new transaction, it will start here: */
-            alloc->start = cur;
-
-            if (alloc->flag_partial_page) {
-                if (flag_page_private[pagenum] != SHARED_PAGE) {
-                    update_new_objects_in_other_threads(pagenum, start, cur);
-                }
-            }
-            else {
-                /* we can skip checking flag_page_private[] in non-debug
-                   builds, because the whole page can only contain
-                   objects made by the just-finished transaction. */
-                assert(flag_page_private[pagenum] == SHARED_PAGE);
-
-                /* the next transaction will start with this page
-                   containing objects that are now committed, so
-                   we need to set this flag now */
-                alloc->flag_partial_page = true;
-            }
-        }
-    }
-#endif
     _STM_TL2->running_transaction = 0;
+    stop_exclusivelock();
 }
 
 void stm_abort_transaction(void)
@@ -686,10 +735,11 @@ void stm_abort_transaction(void)
         uint16_t num_allocated = ((uintptr_t)alloc->next) - alloc->start;
         alloc->next -= num_allocated;
     }
-    stm_list_clear(_STM_TL2->new_object_ranges);
+    /* stm_list_clear(_STM_TL2->new_object_ranges); */
     stm_list_clear(_STM_TL2->modified_objects);
     assert(_STM_TL1->jmpbufptr != NULL);
     assert(_STM_TL1->jmpbufptr != (jmpbufptr_t *)-1);   /* for tests only */
     _STM_TL2->running_transaction = 0;
+    stm_stop_sharedlock();
     __builtin_longjmp(*_STM_TL1->jmpbufptr, 1);
 }
