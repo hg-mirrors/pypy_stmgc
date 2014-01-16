@@ -237,8 +237,14 @@ static void _stm_privatize(uintptr_t pagenum)
                                                   SHARED_PAGE, REMAPPING_PAGE);
 #endif
     if (!was_shared) {
-        while (flag_page_private[pagenum] == REMAPPING_PAGE)
+        while (1) {
+            uint8_t state = ((uint8_t volatile *)flag_page_private)[pagenum];
+            if (state != REMAPPING_PAGE) {
+                assert(state == PRIVATE_PAGE);
+                break;
+            }
             spin_loop();
+        }
         return;
     }
 
@@ -371,6 +377,7 @@ static void wait_until_updated(void)
 void _stm_write_slowpath(object_t *obj)
 {
     uintptr_t pagenum = ((uintptr_t)obj) / 4096;
+    assert(pagenum < NB_PAGES);
 
     /* old objects from the same transaction */
     if (flag_page_private[pagenum] == UNCOMMITTED_SHARED_PAGE
