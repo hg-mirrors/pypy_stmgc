@@ -505,9 +505,10 @@ void trace_if_young(object_t **pobj)
         return;
 
     /* the location the object moved to is at an 8b offset */
-    object_t **pforwared = (object_t**)(((char*)(*pobj)) + 8);
+    localchar_t *temp = ((localchar_t *)(*pobj)) + 8;
+    object_t * TLPREFIX *pforwarded = (object_t* TLPREFIX *)temp;
     if ((*pobj)->stm_flags & GCFLAG_MOVED) {
-        *pobj = *pforwared;
+        *pobj = *pforwarded;
         return;
     }
 
@@ -520,7 +521,7 @@ void trace_if_young(object_t **pobj)
            size);
 
     (*pobj)->stm_flags |= GCFLAG_MOVED;
-    *pforwared = moved;
+    *pforwarded = moved;
     *pobj = moved;
     
     _STM_TL2->old_objects_to_trace = stm_list_append
