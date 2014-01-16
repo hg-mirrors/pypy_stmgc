@@ -104,6 +104,8 @@ class TestBasic(BaseTest):
         stm_push_root(lp)
         stm_stop_transaction()
         lp = stm_pop_root()
+        p1 = stm_get_real_address(lp)
+        assert p != p1
         
         self.switch(1)
         
@@ -111,6 +113,7 @@ class TestBasic(BaseTest):
         stm_write(lp) # privatize page
         p_ = stm_get_real_address(lp)
         assert p != p_
+        assert p1 != p_
         assert p_[8] == 'u'
         stm_stop_transaction()
 
