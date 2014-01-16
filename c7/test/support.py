@@ -54,6 +54,14 @@ void _stm_start_safe_point(void);
 void _stm_stop_safe_point(void);
 bool _stm_check_stop_safe_point(void);
 
+void _set_type_id(object_t *obj, uint32_t h);
+uint32_t _get_type_id(object_t *obj);
+bool _stm_is_in_transaction(void);
+
+void stm_push_root(object_t *obj);
+object_t *stm_pop_root(void);
+
+
 void *memset(void *s, int c, size_t n);
 """)
 
@@ -62,6 +70,13 @@ lib = ffi.verify('''
 #include <assert.h>
 
 #include "core.h"
+
+struct myobj_s {
+    struct object_s hdr;
+    uint32_t type_id;
+};
+typedef TLPREFIX struct myobj_s myobj_t;
+
 
 size_t stm_object_size_rounded_up(object_t * obj) {
     return 16;
@@ -94,6 +109,45 @@ bool _stm_check_stop_safe_point(void) {
 }
 
 
+void _set_type_id(object_t *obj, uint32_t h) {
+    ((myobj_t*)obj)->type_id = h;
+}
+
+uint32_t _get_type_id(object_t *obj) {
+    return ((myobj_t*)obj)->type_id;
+}
+
+size_t stmcb_size(struct object_s *obj)
+{
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 42142) {
+        /* basic case: tid equals 42 plus the size of the object */
+        assert(myobj->type_id >= 42 + sizeof(struct myobj_s));
+        return myobj->type_id - 42;
+    }
+    else {
+        int nrefs = myobj->type_id - 42142;
+        assert(nrefs < 100);
+        if (nrefs == 0)   /* weakrefs */
+            nrefs = 1;
+        return sizeof(struct myobj_s) + nrefs * sizeof(void*);
+    }
+}
+
+void stmcb_trace(struct object_s *obj, void visit(object_t **))
+{
+    int i;
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 42142) {
+        /* basic case: no references */
+        return;
+    }
+    for (i=0; i < myobj->type_id - 42142; i++) {
+        object_t **ref = ((object_t **)(myobj + 1)) + i;
+        visit(ref);
+    }
+}
+
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1')],
      undef_macros=['NDEBUG'],
@@ -102,15 +156,22 @@ bool _stm_check_stop_safe_point(void) {
      force_generic_engine=True)
 
 
+MAGIC_HEADER = ffi.cast('uint32_t', 42142)
+
+
 def is_in_nursery(ptr):
     return lib._stm_is_in_nursery(ptr)
 
 def stm_allocate_old(size):
     o = lib._stm_allocate_old(size)
+    tid = 42 + size
+    lib._set_type_id(o, tid)
     return o, lib._stm_real_address(o)
 
 def stm_allocate(size):
     o = lib.stm_allocate(size)
+    tid = 42 + size
+    lib._set_type_id(o, tid)
     return o, lib._stm_real_address(o)
 
 def stm_get_real_address(obj):
@@ -130,6 +191,12 @@ def stm_was_read(o):
 
 def stm_was_written(o):
     return lib._stm_was_written(o)
+
+def stm_push_root(o):
+    return lib.stm_push_root(o)
+
+def stm_pop_root():
+    return lib.stm_pop_root()
 
 def stm_start_transaction():
     lib.stm_start_transaction(ffi.cast("jmpbufptr_t*", -1))
@@ -163,13 +230,23 @@ class BaseTest(object):
 
     def teardown_method(self, meth):
         lib._stm_restore_local_state(1)
+        if lib._stm_is_in_transaction():
+            stm_stop_transaction()
         lib._stm_teardown_thread()
         lib._stm_restore_local_state(0)
+        if lib._stm_is_in_transaction():
+            stm_stop_transaction()
         lib._stm_teardown_thread()
         lib._stm_teardown()
 
-    def switch(self, thread_num):
+    def switch(self, thread_num, expect_conflict=False):
         assert thread_num != self.current_thread
+        if lib._stm_is_in_transaction():
+            stm_start_safe_point()
         lib._stm_restore_local_state(thread_num)
+        if lib._stm_is_in_transaction():
+            stm_stop_safe_point(expect_conflict)
+        elif expect_conflict:
+            assert False
         self.current_thread = thread_num
         
