@@ -48,6 +48,11 @@ static inline bool stm_list_count(struct stm_list_s *lst)
     return lst->count;
 }
 
+static inline object_t *stm_list_pop_item(struct stm_list_s *lst)
+{
+    return lst->items[--lst->count];
+}
+
 static inline object_t *stm_list_item(struct stm_list_s *lst, uintptr_t index)
 {
     return lst->items[index];

@@ -30,17 +30,23 @@ typedef TLPREFIX struct read_marker_s read_marker_t;
 */
 
 enum {
-    GCFLAG_WRITE_BARRIER = (1 << 0),
     /* set if the write-barrier slowpath needs to trigger. set on all
        old objects if there was no write-barrier on it in the same
        transaction and no collection inbetween. */
+    GCFLAG_WRITE_BARRIER = (1 << 0),
+    /* set on objects which are in pages visible to others (SHARED
+       or PRIVATE), but not committed yet. So only visible from
+       this transaction. */
+    GCFLAG_NOT_COMMITTED = (1 << 1),
+
+    GCFLAG_MOVED = (1 << 2),
 };
 
 struct object_s {
     uint8_t stm_flags;            /* reserved for the STM library */
     uint8_t stm_write_lock;       /* 1 if writeable by some thread */
-    uint32_t header;              /* for the user program -- only write in
-                                     newly allocated objects */
+    /* make sure it doesn't get bigger than 4 bytes for performance
+     reasons */
 };
 
 struct read_marker_s {
@@ -53,6 +59,8 @@ struct _thread_local1_s {
     jmpbufptr_t *jmpbufptr;
     uint8_t transaction_read_version;
     uint16_t transaction_write_version;
+    object_t **shadow_stack;
+    object_t **shadow_stack_base;
 };
 #define _STM_TL1            ((_thread_local1_t *)4352)
 
@@ -77,13 +85,24 @@ static inline void stm_write(object_t *obj)
         _stm_write_slowpath(obj);
 }
 
+static inline void stm_push_root(object_t *obj)
+{
+    *(_STM_TL1->shadow_stack++) = obj;
+}
+
+static inline object_t *stm_pop_root(void)
+{
+    return *(--_STM_TL1->shadow_stack);
+}
 
 /* must be provided by the user of this library */
-extern size_t stm_object_size_rounded_up(object_t *);
+extern size_t stmcb_size(struct object_s *);
+extern void stmcb_trace(struct object_s *, void (object_t **));
 
 void _stm_restore_local_state(int thread_num);
 void _stm_teardown(void);
 void _stm_teardown_thread(void);
+bool _stm_is_in_transaction(void);
 
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
