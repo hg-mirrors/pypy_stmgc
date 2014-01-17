@@ -324,21 +324,23 @@ static void push_modified_to_other_threads()
     bool conflicted = 0;
     char *t0_base = get_thread_base(0);
     
-    STM_LIST_FOREACH(modified, ({
-                if (!conflicted)
-                    conflicted = _stm_was_read_remote(remote_base, item);
-
-                /* clear the write-lock */
-                struct object_s *t0_obj = (struct object_s*)
-                    REAL_ADDRESS(t0_base, item);
-                assert(t0_obj->stm_write_lock);
-                t0_obj->stm_write_lock = 0;
-                
-                char *src = REAL_ADDRESS(local_base, item);
-                char *dst = REAL_ADDRESS(remote_base, item);
-                size_t size = stmcb_size((struct object_s*)src);
-                memcpy(dst, src, size);
-            }));
+    STM_LIST_FOREACH(
+        modified,
+        ({
+            if (!conflicted)
+                conflicted = _stm_was_read_remote(remote_base, item);
+            
+            /* clear the write-lock */
+            struct object_s *t0_obj = (struct object_s*)
+                REAL_ADDRESS(t0_base, item);
+            assert(t0_obj->stm_write_lock);
+            t0_obj->stm_write_lock = 0;
+            
+            char *src = REAL_ADDRESS(local_base, item);
+            char *dst = REAL_ADDRESS(remote_base, item);
+            size_t size = stmcb_size((struct object_s*)src);
+            memcpy(dst, src, size);
+        }));
     
     if (conflicted) {
         struct _thread_local2_s *remote_TL2 = (struct _thread_local2_s *)
@@ -835,10 +837,12 @@ void stm_stop_transaction(void)
         }
     }
     
-    STM_LIST_FOREACH(_STM_TL2->uncommitted_pages, ({
-                uintptr_t pagenum = (uintptr_t)item;
-                flag_page_private[pagenum] = SHARED_PAGE;
-            }));
+    STM_LIST_FOREACH(
+        _STM_TL2->uncommitted_pages,
+        ({
+            uintptr_t pagenum = (uintptr_t)item;
+            flag_page_private[pagenum] = SHARED_PAGE;
+        }));
     stm_list_clear(_STM_TL2->uncommitted_pages);
 
     
@@ -922,29 +926,31 @@ static void reset_modified_from_other_threads()
     char *remote_base = get_thread_base(1 - _STM_TL2->thread_num);
     char *t0_base = get_thread_base(0);
     
-    STM_LIST_FOREACH(modified, ({
-                /* note: same as push_modified_to... but src/dst swapped
-                   XXX: unify both... */
-                char *dst = REAL_ADDRESS(local_base, item);
-                char *src = REAL_ADDRESS(remote_base, item);
-                size_t size = stmcb_size((struct object_s*)src);
-                memcpy(dst, src, size);
-
-                /* copying from the other thread re-added the
-                   WRITE_BARRIER flag */
-                assert(item->stm_flags & GCFLAG_WRITE_BARRIER);
-
-                struct object_s *t0_obj = (struct object_s*)
-                    REAL_ADDRESS(t0_base, item);
-                if (t0_base != local_base) {
-                    /* clear the write-lock (WE have modified the obj) */
-                    assert(t0_obj->stm_write_lock);
-                    t0_obj->stm_write_lock = 0;
-                } else {
-                    /* done by the memcpy */
-                    assert(!t0_obj->stm_write_lock);
-                }
-            }));
+    STM_LIST_FOREACH(
+        modified,
+        ({
+            /* note: same as push_modified_to... but src/dst swapped
+               XXX: unify both... */
+            char *dst = REAL_ADDRESS(local_base, item);
+            char *src = REAL_ADDRESS(remote_base, item);
+            size_t size = stmcb_size((struct object_s*)src);
+            memcpy(dst, src, size);
+            
+            /* copying from the other thread re-added the
+               WRITE_BARRIER flag */
+            assert(item->stm_flags & GCFLAG_WRITE_BARRIER);
+            
+            struct object_s *t0_obj = (struct object_s*)
+                REAL_ADDRESS(t0_base, item);
+            if (t0_base != local_base) {
+                /* clear the write-lock (WE have modified the obj) */
+                assert(t0_obj->stm_write_lock);
+                t0_obj->stm_write_lock = 0;
+            } else {
+                /* done by the memcpy */
+                assert(!t0_obj->stm_write_lock);
+            }
+        }));
 }
 
 
