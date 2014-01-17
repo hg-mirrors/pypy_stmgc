@@ -330,10 +330,11 @@ class BaseTest(object):
 
     def switch(self, thread_num):
         assert thread_num != self.current_thread
+        self.current_thread = thread_num
         if lib._stm_is_in_transaction():
             stm_start_safe_point()
         lib._stm_restore_local_state(thread_num)
         if lib._stm_is_in_transaction():
             stm_stop_safe_point()
-        self.current_thread = thread_num
+
         
