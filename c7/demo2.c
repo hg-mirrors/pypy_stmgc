@@ -7,7 +7,8 @@
 #include "core.h"
 
 
-#define LIST_LENGTH 2000
+#define LIST_LENGTH 5000
+#define BUNCH       400
 
 typedef TLPREFIX struct node_s node_t;
 typedef node_t* nodeptr_t;
@@ -71,41 +72,49 @@ long check_sorted()
     goto back;
 }
 
-nodeptr_t swap_nodes(nodeptr_t prev)
+nodeptr_t swap_nodes(nodeptr_t initial)
 {
     jmpbufptr_t here;
 
-    assert(prev != NULL);
+    assert(initial != NULL);
  back:
     if (__builtin_setjmp(here) == 0) {
         stm_start_transaction(&here);
-        
+        nodeptr_t prev = initial;
         stm_read((objptr_t)prev);
-        nodeptr_t current = prev->next;
-        if (current == NULL) {
-            stm_stop_transaction();
-            return NULL;
-        }
-        stm_read((objptr_t)current);
-        nodeptr_t next = current->next;
-        if (next == NULL) {
-            stm_stop_transaction();
-            return NULL;
-        }
-        stm_read((objptr_t)next);
         
-        if (next->value < current->value) {
-            stm_write((objptr_t)prev);
-            stm_write((objptr_t)current);
-            stm_write((objptr_t)next);
+        int i;
+        for (i=0; i<BUNCH; i++) {
+            nodeptr_t current = prev->next;
+            if (current == NULL) {
+                stm_stop_transaction();
+                return NULL;
+            }
+            stm_read((objptr_t)current);
+            nodeptr_t next = current->next;
+            if (next == NULL) {
+                stm_stop_transaction();
+                return NULL;
+            }
+            stm_read((objptr_t)next);
             
-            prev->next = next;
-            current->next = next->next;
-            next->next = current;
+            if (next->value < current->value) {
+                stm_write((objptr_t)prev);
+                stm_write((objptr_t)current);
+                stm_write((objptr_t)next);
+                
+                prev->next = next;
+                current->next = next->next;
+                next->next = current;
+
+                _stm_start_safe_point();
+                _stm_stop_safe_point();
+            }
+            prev = current;
         }
 
         stm_stop_transaction();
-        return current;
+        return prev;
     }
     goto back;
 }

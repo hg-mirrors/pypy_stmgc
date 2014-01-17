@@ -986,5 +986,6 @@ void stm_abort_transaction(void)
     assert(_STM_TL1->jmpbufptr != (jmpbufptr_t *)-1);   /* for tests only */
     _STM_TL2->running_transaction = 0;
     stm_stop_lock();
+    fprintf(stderr, "aborted\n");
     __builtin_longjmp(*_STM_TL1->jmpbufptr, 1);
 }
