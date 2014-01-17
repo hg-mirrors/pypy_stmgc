@@ -379,16 +379,21 @@ void _stm_write_slowpath(object_t *obj)
     uintptr_t pagenum = ((uintptr_t)obj) / 4096;
     assert(pagenum < NB_PAGES);
 
-    /* old objects from the same transaction */
-    if (flag_page_private[pagenum] == UNCOMMITTED_SHARED_PAGE
-        || obj->stm_flags & GCFLAG_NOT_COMMITTED) {
-        _STM_TL2->old_objects_to_trace = stm_list_append
-            (_STM_TL2->old_objects_to_trace, obj);
+    _STM_TL2->old_objects_to_trace = stm_list_append
+        (_STM_TL2->old_objects_to_trace, obj);
+    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
 
+    /* for old objects from the same transaction we don't need
+       to privatize the page */
+    if ((flag_page_private[pagenum] == UNCOMMITTED_SHARED_PAGE)
+        || (obj->stm_flags & GCFLAG_NOT_COMMITTED)) {
         return;
     }
+
+    /* privatize if SHARED_PAGE */
     _stm_privatize(pagenum);
 
+    /* lock the object for writing in thread 0's page */
     uintptr_t t0_offset = (uintptr_t)obj;
     char* t0_addr = get_thread_base(0) + t0_offset;
     struct object_s *t0_obj = (struct object_s *)t0_addr;
@@ -397,12 +402,10 @@ void _stm_write_slowpath(object_t *obj)
     if (previous)
         abort();                /* XXX */
 
-    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-    
     stm_read(obj);
 
-    _STM_TL2->modified_objects = stm_list_append(
-        _STM_TL2->modified_objects, obj);
+    _STM_TL2->modified_objects = stm_list_append
+        (_STM_TL2->modified_objects, obj);
 }
 
 
@@ -541,11 +544,16 @@ void minor_collect()
     struct stm_list_s *old_objs = _STM_TL2->old_objects_to_trace;
     while (!stm_list_is_empty(old_objs)) {
         object_t *item = stm_list_pop_item(old_objs);
-        stmcb_trace(real_address(item),
-                    trace_if_young);
+
+        assert(!_is_young(item));
+        assert(!(item->stm_flags & GCFLAG_WRITE_BARRIER));
+        
+        /* re-add write-barrier */
+        item->stm_flags |= GCFLAG_WRITE_BARRIER;
+        
+        stmcb_trace(real_address(item), trace_if_young);
     }
 
-    /* XXX fix modified_objects? */
     
     // also move objects to PRIVATE_PAGE pages, but then
     // also add the GCFLAG_NOT_COMMITTED to these objects.

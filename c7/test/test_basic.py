@@ -117,6 +117,48 @@ class TestBasic(BaseTest):
         assert p_[8] == 'u'
         stm_stop_transaction()
 
+        
+    def test_commit_fresh_objects2(self):
+        self.switch(1)
+        stm_start_transaction()
+        lp, p = stm_allocate(16)
+        p[8] = 'u'
+        lp2, p2 = stm_allocate(16)
+        p2[8] = 'v'
+        assert p2 - p == 16
+        stm_write(lp) # test not crash
+        stm_write(lp2) # test not crash
+        stm_read(lp) # test not crash
+        stm_read(lp2) # test not crash
+        stm_push_root(lp)
+        stm_push_root(lp2)
+        stm_stop_transaction()
+        lp2 = stm_pop_root()
+        lp = stm_pop_root()
+        
+        self.switch(0)
+        
+        stm_start_transaction()
+        stm_write(lp) # privatize page
+        p_ = stm_get_real_address(lp)
+        assert p_[8] == 'u'
+        p_[8] = 'x'
+        stm_write(lp2)
+        p2_ = stm_get_real_address(lp2)
+        assert p2_[8] == 'v'
+        p2_[8] = 'y'
+        stm_stop_transaction()
+
+        self.switch(1)
+
+        stm_start_transaction()
+        stm_write(lp)
+        p_ = stm_get_real_address(lp)
+        assert p_[8] == 'x'
+        stm_read(lp2)
+        p2_ = stm_get_real_address(lp2)
+        assert p2_[8] == 'y'
+        stm_stop_transaction()
 
 
         
