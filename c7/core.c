@@ -376,6 +376,9 @@ void _stm_write_slowpath(object_t *obj)
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
     uint8_t previous;
     while ((previous = __sync_lock_test_and_set(&write_locks[lock_idx], 1))) {
+        usleep(1);              /* XXXXXX */
+        if (!(previous = __sync_lock_test_and_set(&write_locks[lock_idx], 1))) 
+            break;
         stm_abort_transaction();
         /* XXX: only abort if we are younger */
         spin_loop();
@@ -897,6 +900,7 @@ void stm_stop_transaction(void)
 
     _STM_TL2->running_transaction = 0;
     stm_stop_lock();
+    fprintf(stderr, "%c", 'C'+_STM_TL2->thread_num*32);
 }
 
 
@@ -975,7 +979,7 @@ void stm_abort_transaction(void)
     assert(_STM_TL1->jmpbufptr != (jmpbufptr_t *)-1);   /* for tests only */
     _STM_TL2->running_transaction = 0;
     stm_stop_lock();
-    fprintf(stderr, "a");
+    fprintf(stderr, "%c", 'A'+_STM_TL2->thread_num*32);
 
     /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
     reset_modified_from_other_threads();
