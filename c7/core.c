@@ -191,6 +191,14 @@ void _stm_stop_safe_point(void)
         stm_abort_transaction();
 }
 
+bool _stm_was_read_remote(char *base, object_t *obj)
+{
+    struct read_marker_s *marker = (struct read_marker_s *)
+        (base + (((uintptr_t)obj) >> 4));
+    struct _thread_local1_s *other_TL1 = (struct _thread_local1_s*)
+        (base + (uintptr_t)_STM_TL1);
+    return (marker->rm == other_TL1->transaction_read_version);
+}
 
 
 bool _stm_was_read(object_t *obj)
@@ -318,54 +326,37 @@ object_t *_stm_tl_address(char *ptr)
 
 
 
-enum detect_conflicts_e { CANNOT_CONFLICT, CAN_CONFLICT, CHECK_CONFLICT };
-
-static void update_to_current_version(enum detect_conflicts_e check_conflict)
+static void push_modified_to_other_threads()
 {
-    /* Loop over objects in 'pending_updates': if they have been
-       read by the current transaction, the current transaction must
-       abort; then copy them out of the other thread's object space,
-       which is not modified so far (the other thread just committed
-       and will wait until we are done here before it starts the
-       next transaction).
-    */
-    bool conflict_found_or_dont_check = (check_conflict == CANNOT_CONFLICT);
+    struct stm_list_s *modified = _STM_TL2->modified_objects;
     char *local_base = _STM_TL2->thread_base;
     char *remote_base = get_thread_base(1 - _STM_TL2->thread_num);
-    struct stm_list_s *pu = pending_updates;
+    bool conflicted = 0;
+    char *t0_base = get_thread_base(0);
+    
+    STM_LIST_FOREACH(modified, ({
+                if (!conflicted)
+                    conflicted = _stm_was_read_remote(remote_base, item);
 
-    assert(pu != _STM_TL2->modified_objects);
-
-    STM_LIST_FOREACH(pu, ({
-
-        if (!conflict_found_or_dont_check)
-            conflict_found_or_dont_check = _stm_was_read(item);
-
-        char *dst = REAL_ADDRESS(local_base, item);
-        char *src = REAL_ADDRESS(remote_base, item);
-        size_t size = stmcb_size((struct object_s*)src);
-
-        memcpy(dst, src, size);
-    }));
-
-    write_fence();
-    pending_updates = NULL;
-
-    if (conflict_found_or_dont_check) {
-        if (check_conflict == CAN_CONFLICT) {
-            stm_abort_transaction();
-        } else {                  /* CHECK_CONFLICT */
-            _STM_TL2->need_abort = 1;
-        }
+                /* clear the write-lock */
+                struct object_s *t0_obj = (struct object_s*)
+                    REAL_ADDRESS(t0_base, item);
+                assert(t0_obj->stm_write_lock);
+                t0_obj->stm_write_lock = 0;
+                
+                char *src = REAL_ADDRESS(local_base, item);
+                char *dst = REAL_ADDRESS(remote_base, item);
+                size_t size = stmcb_size((struct object_s*)src);
+                memcpy(dst, src, size);
+            }));
+    
+    if (conflicted) {
+        struct _thread_local2_s *remote_TL2 = (struct _thread_local2_s *)
+            REAL_ADDRESS(remote_base, _STM_TL2);
+        remote_TL2->need_abort = 1;
     }
 }
 
-static void maybe_update(enum detect_conflicts_e check_conflict)
-{
-    if (pending_updates != NULL) {
-        update_to_current_version(check_conflict);
-    }
-}
 
 static void wait_until_updated(void)
 {
@@ -788,14 +779,9 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
     }
 
     wait_until_updated();
-    stm_list_clear(_STM_TL2->modified_objects);
+    assert(stm_list_is_empty(_STM_TL2->modified_objects));
     assert(stm_list_is_empty(_STM_TL2->old_objects_to_trace));
     stm_list_clear(_STM_TL2->uncommitted_pages);
-
-    /* check that there is no stm_abort() in the following maybe_update() */
-    _STM_TL1->jmpbufptr = NULL;
-
-    maybe_update(CANNOT_CONFLICT);    /* no read object: cannot conflict */
 
     _STM_TL1->jmpbufptr = jmpbufptr;
     _STM_TL2->running_transaction = 1;
@@ -831,12 +817,8 @@ void stm_stop_transaction(void)
     minor_collect();
     
     /* copy modified object versions to other threads */
-    pending_updates = _STM_TL2->modified_objects;
-    int my_thread_num = _STM_TL2->thread_num;
-    int other_thread_num = 1 - my_thread_num;
-    _stm_restore_local_state(other_thread_num);
-    update_to_current_version(CHECK_CONFLICT); /* sets need_abort */
-    _stm_restore_local_state(my_thread_num);
+    push_modified_to_other_threads();
+    stm_list_clear(_STM_TL2->modified_objects);
 
     /* uncommitted_pages */
     long j;
