@@ -39,6 +39,7 @@ object_t *stm_allocate(size_t size);
 
 void stm_read(object_t *object);
 void stm_write(object_t *object);
+bool _checked_stm_write(object_t *object);
 _Bool _stm_was_read(object_t *object);
 _Bool _stm_was_written(object_t *object);
 
@@ -83,6 +84,20 @@ typedef TLPREFIX struct myobj_s myobj_t;
 
 size_t stm_object_size_rounded_up(object_t * obj) {
     return 16;
+}
+
+
+bool _checked_stm_write(object_t *object) {
+    jmpbufptr_t here;
+    if (__builtin_setjmp(here) == 0) { // returned directly
+         assert(_STM_TL1->jmpbufptr == (jmpbufptr_t*)-1);
+         _STM_TL1->jmpbufptr = &here;
+         stm_write(object);
+         _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+         return 0;
+    }
+    _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+    return 1;
 }
 
 bool _stm_stop_transaction(void) {
@@ -238,7 +253,8 @@ def stm_read(o):
     lib.stm_read(o)
 
 def stm_write(o):
-    lib.stm_write(o)
+    if lib._checked_stm_write(o):
+        raise Conflict()
 
 def stm_was_read(o):
     return lib._stm_was_read(o)
@@ -256,8 +272,7 @@ def stm_start_transaction():
     lib.stm_start_transaction(ffi.cast("jmpbufptr_t*", -1))
 
 def stm_stop_transaction():
-    res = lib._stm_stop_transaction()
-    if res:
+    if lib._stm_stop_transaction():
         raise Conflict()
 
 
@@ -265,8 +280,7 @@ def stm_start_safe_point():
     lib._stm_start_safe_point()
 
 def stm_stop_safe_point():
-    res = lib._stm_check_stop_safe_point()
-    if res:
+    if lib._stm_check_stop_safe_point():
         raise Conflict()
 
 
