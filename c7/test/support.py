@@ -188,6 +188,9 @@ else:
 
 HDR = lib.SIZEOF_MYOBJ
 
+class Conflict(Exception):
+    pass
+
 def is_in_nursery(o):
     return lib._stm_is_young(o)
 
@@ -252,22 +255,19 @@ def stm_pop_root():
 def stm_start_transaction():
     lib.stm_start_transaction(ffi.cast("jmpbufptr_t*", -1))
 
-def stm_stop_transaction(expected_conflict=False):
+def stm_stop_transaction():
     res = lib._stm_stop_transaction()
-    if expected_conflict:
-        assert res == 1
-    else:
-        assert res == 0
+    if res:
+        raise Conflict()
+
 
 def stm_start_safe_point():
     lib._stm_start_safe_point()
 
-def stm_stop_safe_point(expected_conflict=False):
+def stm_stop_safe_point():
     res = lib._stm_check_stop_safe_point()
-    if expected_conflict:
-        assert res == 1
-    else:
-        assert res == 0
+    if res:
+        raise Conflict()
 
 
 class BaseTest(object):
@@ -295,14 +295,12 @@ class BaseTest(object):
         lib._stm_teardown_thread()
         lib._stm_teardown()
 
-    def switch(self, thread_num, expect_conflict=False):
+    def switch(self, thread_num):
         assert thread_num != self.current_thread
         if lib._stm_is_in_transaction():
             stm_start_safe_point()
         lib._stm_restore_local_state(thread_num)
         if lib._stm_is_in_transaction():
-            stm_stop_safe_point(expect_conflict)
-        elif expect_conflict:
-            assert False
+            stm_stop_safe_point()
         self.current_thread = thread_num
         
