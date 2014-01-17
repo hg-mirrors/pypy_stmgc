@@ -185,50 +185,27 @@ class TestBasic(BaseTest):
 
 
         
-    # def test_read_write_2(self):
-    #     stm_start_transaction()
-    #     lp1, p1 = stm_allocate(16)
-    #     p1[8] = 'a'
-    #     stm_stop_transaction(False)
-    #     #
-    #     self.switch(1)
-    #     stm_start_transaction()
-    #     stm_write(lp1)
-    #     p1 = stm_get_real_address(lp1)
-    #     assert p1[8] == 'a'
-    #     p1[8] = 'b'
-    #     #
-    #     self.switch(0)
-    #     stm_start_transaction()
-    #     stm_read(lp1)
-    #     p1 = stm_get_real_address(lp1)
-    #     assert p1[8] == 'a'
-    #     #
-    #     self.switch(1)
-    #     stm_stop_transaction(False)
-    #     #
-    #     self.switch(0)
-    #     p1 = stm_get_real_address(lp1)
-    #     assert p1[8] == 'a'
-
+    def test_start_transaction_updates(self):
+        stm_start_transaction()
+        lp1, p1 = stm_allocate(16)
+        p1[8] = 'a'
+        stm_push_root(lp1)
+        stm_stop_transaction()
+        lp1 = stm_pop_root()
+        #
+        self.switch(1)
+        stm_start_transaction()
+        stm_write(lp1)
+        p1 = stm_get_real_address(lp1)
+        assert p1[8] == 'a'
+        p1[8] = 'b'
+        stm_stop_transaction()
+        #
+        self.switch(0)
+        stm_start_transaction()
+        p1 = stm_get_real_address(lp1)
+        assert p1[8] == 'b'
         
-    # def test_start_transaction_updates(self):
-    #     stm_start_transaction()
-    #     p1 = stm_allocate(16)
-    #     p1[8] = 'a'
-    #     stm_stop_transaction(False)
-    #     #
-    #     self.switch(1)
-    #     stm_start_transaction()
-    #     stm_write(p1)
-    #     assert p1[8] == 'a'
-    #     p1[8] = 'b'
-    #     stm_stop_transaction(False)
-    #     #
-    #     self.switch(0)
-    #     assert p1[8] == 'a'
-    #     stm_start_transaction()
-    #     assert p1[8] == 'b'
 
     # def test_resolve_no_conflict_empty(self):
     #     stm_start_transaction()
