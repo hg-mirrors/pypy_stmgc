@@ -282,29 +282,21 @@ class TestBasic(BaseTest):
         self.switch(0)
         assert stm_get_char(lp1) == 'b'
 
-        
+    def test_resolve_write_write_conflict(self):
+        stm_start_transaction()
+        lp1 = stm_allocate(16)
+        stm_set_char(lp1, 'a')
+        stm_push_root(lp1)
+        stm_stop_transaction()
+        lp1 = stm_pop_root()
+        stm_start_transaction()
+        stm_write(lp1)
+        #
+        self.switch(1)
+        stm_start_transaction()
+        py.test.raises(Conflict, stm_write, lp1) # write-write conflict
 
-    # def test_resolve_write_write_conflict(self):
-    #     stm_start_transaction()
-    #     p1 = stm_allocate(16)
-    #     p1[8] = 'a'
-    #     stm_stop_transaction(False)
-    #     stm_start_transaction()
-    #     #
-    #     self.switch(1)
-    #     stm_start_transaction()
-    #     stm_write(p1)
-    #     p1[8] = 'b'
-    #     stm_stop_transaction(False)
-    #     #
-    #     self.switch(0)
-    #     assert p1[8] == 'a'
-    #     stm_write(p1)
-    #     p1[8] = 'c'
-    #     stm_stop_transaction(expected_conflict=True)
-    #     assert p1[8] in ('a', 'b')
-    #     stm_start_transaction()
-    #     assert p1[8] == 'b'
+
 
     # def test_resolve_write_write_no_conflict(self):
     #     stm_start_transaction()

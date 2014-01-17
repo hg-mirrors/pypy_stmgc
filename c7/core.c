@@ -363,17 +363,19 @@ void _stm_write_slowpath(object_t *obj)
 
     _STM_TL2->old_objects_to_trace = stm_list_append
         (_STM_TL2->old_objects_to_trace, obj);
-    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-
+    
     /* for old objects from the same transaction we don't need
        to privatize the page */
     if ((flag_page_private[pagenum] == UNCOMMITTED_SHARED_PAGE)
         || (obj->stm_flags & GCFLAG_NOT_COMMITTED)) {
+        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
         return;
     }
 
     /* privatize if SHARED_PAGE */
     _stm_privatize(pagenum);
+
+    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
 
     /* lock the object for writing in thread 0's page */
     uintptr_t t0_offset = (uintptr_t)obj;
@@ -382,7 +384,7 @@ void _stm_write_slowpath(object_t *obj)
 
     int previous = __sync_lock_test_and_set(&t0_obj->stm_write_lock, 1);
     if (previous)
-        abort();                /* XXX */
+        stm_abort_transaction();
 
     stm_read(obj);
 
