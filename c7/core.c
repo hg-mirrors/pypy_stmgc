@@ -552,7 +552,9 @@ void minor_collect()
 
 localchar_t *collect_and_reserve(size_t size)
 {
+    _stm_start_safe_point();
     minor_collect();
+    _stm_stop_safe_point();
 
     localchar_t *current = _STM_TL2->nursery_current;
     _STM_TL2->nursery_current = current + size;
@@ -570,6 +572,7 @@ object_t *stm_allocate(size_t size)
     localchar_t *current = _STM_TL2->nursery_current;
     localchar_t *new_current = current + size;
     _STM_TL2->nursery_current = new_current;
+    assert((uintptr_t)new_current < (1L << 32));
     if ((uintptr_t)new_current > FIRST_AFTER_NURSERY_PAGE * 4096) {
         current = collect_and_reserve(size);
     }
@@ -686,7 +689,7 @@ void _stm_teardown_thread(void)
 {
     assert(!pthread_rwlock_trywrlock(&rwlock_shared));
     assert(!pthread_rwlock_unlock(&rwlock_shared));
-        
+    
     wait_until_updated();
     stm_list_free(_STM_TL2->modified_objects);
     _STM_TL2->modified_objects = NULL;
@@ -764,15 +767,6 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
     if (UNLIKELY(old_rv == 0xff))
         reset_transaction_read_version();
 
-    int old_wv = _STM_TL1->transaction_write_version;
-    _STM_TL1->transaction_write_version = old_wv + 1;
-    if (UNLIKELY(old_wv == 0xffff)) {
-        /* We run out of 16-bit numbers before we do the next major
-           collection, which resets it.  XXX This case seems unlikely
-           for now, but check if it could become a bottleneck at some
-           point. */
-        stm_major_collection();
-    }
 
     wait_until_updated();
     assert(stm_list_is_empty(_STM_TL2->modified_objects));

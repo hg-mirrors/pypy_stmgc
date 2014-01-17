@@ -58,7 +58,6 @@ typedef void* jmpbufptr_t[5];  /* for use with __builtin_setjmp() */
 struct _thread_local1_s {
     jmpbufptr_t *jmpbufptr;
     uint8_t transaction_read_version;
-    uint16_t transaction_write_version;
     object_t **shadow_stack;
     object_t **shadow_stack_base;
 };
