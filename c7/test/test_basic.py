@@ -160,6 +160,29 @@ class TestBasic(BaseTest):
         assert p2_[8] == 'y'
         stm_stop_transaction()
 
+    def test_simple_refs(self):
+        stm_start_transaction()
+        lp, p = stm_allocate_refs(3)
+        lq, q = stm_allocate(16)
+        lr, r = stm_allocate(16)
+        q[8] = 'x'
+        r[8] = 'y'
+        stm_set_ref(lp, 0, lq)
+        stm_set_ref(lp, 1, lr)
+        stm_push_root(lp)
+        stm_stop_transaction()
+        lp = stm_pop_root()
+        self.switch(1)
+        stm_start_transaction()
+        stm_write(lp)
+        lq = stm_get_ref(lp, 0)
+        lr = stm_get_ref(lp, 1)
+        stm_read(lq)
+        stm_read(lr)
+        assert stm_get_real_address(lq)[8] == 'x'
+        assert stm_get_real_address(lr)[8] == 'y'
+        stm_stop_transaction()
+
 
         
     # def test_read_write_2(self):

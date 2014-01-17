@@ -37,7 +37,6 @@
 #  define HAVE_FULL_EXCHANGE_INSN
 #endif
 
-typedef TLPREFIX char localchar_t;
 typedef TLPREFIX struct alloc_for_size_s alloc_for_size_t;
 typedef TLPREFIX struct _thread_local2_s _thread_local2_t;
 
@@ -356,6 +355,7 @@ static void push_modified_to_other_threads()
         remote_TL2->need_abort = 1;
     }
 }
+
 
 
 static void wait_until_updated(void)

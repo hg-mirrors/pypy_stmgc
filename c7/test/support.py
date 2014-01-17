@@ -28,6 +28,7 @@ ffi = cffi.FFI()
 ffi.cdef("""
 typedef ... object_t;
 typedef ... jmpbufptr_t;
+#define SIZEOF_MYOBJ ...
 
 void stm_setup(void);
 void stm_setup_thread(void);
@@ -61,6 +62,8 @@ bool _stm_is_in_transaction(void);
 void stm_push_root(object_t *obj);
 object_t *stm_pop_root(void);
 
+void _set_ptr(object_t *obj, int n, object_t *v);
+object_t * _get_ptr(object_t *obj, int n);
 
 void *memset(void *s, int c, size_t n);
 """)
@@ -76,7 +79,7 @@ struct myobj_s {
     uint32_t type_id;
 };
 typedef TLPREFIX struct myobj_s myobj_t;
-
+#define SIZEOF_MYOBJ sizeof(struct myobj_s)
 
 size_t stm_object_size_rounded_up(object_t * obj) {
     return 16;
@@ -109,13 +112,34 @@ bool _stm_check_stop_safe_point(void) {
 }
 
 
-void _set_type_id(object_t *obj, uint32_t h) {
+void _set_type_id(object_t *obj, uint32_t h)
+{
     ((myobj_t*)obj)->type_id = h;
 }
 
 uint32_t _get_type_id(object_t *obj) {
     return ((myobj_t*)obj)->type_id;
 }
+
+
+void _set_ptr(object_t *obj, int n, object_t *v)
+{
+    localchar_t *field_addr = ((localchar_t*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    field_addr += n * sizeof(void*); /* field */
+    object_t * TLPREFIX * field = (object_t * TLPREFIX *)field_addr;
+    *field = v;
+}
+
+object_t * _get_ptr(object_t *obj, int n)
+{
+    localchar_t *field_addr = ((localchar_t*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    field_addr += n * sizeof(void*); /* field */
+    object_t * TLPREFIX * field = (object_t * TLPREFIX *)field_addr;
+    return *field;
+}
+
 
 size_t stmcb_size(struct object_s *obj)
 {
@@ -156,8 +180,13 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
      force_generic_engine=True)
 
 
-MAGIC_HEADER = ffi.cast('uint32_t', 42142)
+import sys
+if sys.maxint > 2**32:
+    WORD = 8
+else:
+    WORD = 4
 
+HDR = lib.SIZEOF_MYOBJ
 
 def is_in_nursery(ptr):
     return lib._stm_is_in_nursery(ptr)
@@ -173,6 +202,20 @@ def stm_allocate(size):
     tid = 42 + size
     lib._set_type_id(o, tid)
     return o, lib._stm_real_address(o)
+
+def stm_allocate_refs(n):
+    o = lib.stm_allocate(HDR + n * WORD)
+    tid = 42142 + n
+    lib._set_type_id(o, tid)
+    return o, lib._stm_real_address(o)
+
+def stm_set_ref(obj, idx, ref):
+    stm_write(obj)
+    lib._set_ptr(obj, idx, ref)
+
+def stm_get_ref(obj, idx):
+    stm_read(obj)
+    return lib._get_ptr(obj, idx)
 
 def stm_get_real_address(obj):
     return lib._stm_real_address(ffi.cast('object_t*', obj))
