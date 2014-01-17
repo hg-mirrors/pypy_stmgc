@@ -48,7 +48,7 @@ void _stm_teardown_thread(void);
 
 char *_stm_real_address(object_t *o);
 object_t *_stm_tl_address(char *ptr);
-bool _stm_is_in_nursery(char *ptr);
+bool _stm_is_young(object_t *o);
 object_t *_stm_allocate_old(size_t size);
 
 void _stm_start_safe_point(void);
@@ -188,26 +188,26 @@ else:
 
 HDR = lib.SIZEOF_MYOBJ
 
-def is_in_nursery(ptr):
-    return lib._stm_is_in_nursery(ptr)
+def is_in_nursery(o):
+    return lib._stm_is_young(o)
 
 def stm_allocate_old(size):
     o = lib._stm_allocate_old(size)
     tid = 42 + size
     lib._set_type_id(o, tid)
-    return o, lib._stm_real_address(o)
+    return o
 
 def stm_allocate(size):
     o = lib.stm_allocate(size)
     tid = 42 + size
     lib._set_type_id(o, tid)
-    return o, lib._stm_real_address(o)
+    return o
 
 def stm_allocate_refs(n):
     o = lib.stm_allocate(HDR + n * WORD)
     tid = 42142 + n
     lib._set_type_id(o, tid)
-    return o, lib._stm_real_address(o)
+    return o
 
 def stm_set_ref(obj, idx, ref):
     stm_write(obj)
@@ -216,6 +216,14 @@ def stm_set_ref(obj, idx, ref):
 def stm_get_ref(obj, idx):
     stm_read(obj)
     return lib._get_ptr(obj, idx)
+
+def stm_set_char(obj, c):
+    stm_write(obj)
+    stm_get_real_address(obj)[HDR] = c
+
+def stm_get_char(obj):
+    stm_read(obj)
+    return stm_get_real_address(obj)[HDR]
 
 def stm_get_real_address(obj):
     return lib._stm_real_address(ffi.cast('object_t*', obj))
@@ -272,11 +280,12 @@ class BaseTest(object):
         self.current_thread = 0
 
     def teardown_method(self, meth):
-        lib._stm_restore_local_state(1)
+        if self.current_thread != 1:
+            self.switch(1)
         if lib._stm_is_in_transaction():
             stm_stop_transaction()
 
-        lib._stm_restore_local_state(0)
+        self.switch(0)
         if lib._stm_is_in_transaction():
             stm_stop_transaction()
 

@@ -115,7 +115,7 @@ void stm_stop_transaction(void);
 char *_stm_real_address(object_t *o);
 object_t *_stm_tl_address(char *ptr);
 
-bool _stm_is_in_nursery(char *ptr);
+bool _stm_is_young(object_t *o);
 object_t *_stm_allocate_old(size_t size);
 
 void _stm_start_safe_point(void);
