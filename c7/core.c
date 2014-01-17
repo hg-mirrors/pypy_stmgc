@@ -87,7 +87,7 @@ static int num_threads_started;
 static uintptr_t index_page_never_used;
 static struct stm_list_s *volatile pending_updates;
 static uint8_t flag_page_private[NB_PAGES];   /* xxx_PAGE constants above */
-
+static uint8_t write_locks[READMARKER_END - READMARKER_START];
 
 /************************************************************/
 uintptr_t _stm_reserve_page(void);
@@ -318,23 +318,23 @@ object_t *_stm_tl_address(char *ptr)
 
 static void push_modified_to_other_threads()
 {
+    /* WE HAVE THE EXCLUSIVE LOCK HERE */
+    
     struct stm_list_s *modified = _STM_TL2->modified_objects;
     char *local_base = _STM_TL2->thread_base;
     char *remote_base = get_thread_base(1 - _STM_TL2->thread_num);
     bool conflicted = 0;
-    char *t0_base = get_thread_base(0);
     
     STM_LIST_FOREACH(
         modified,
         ({
             if (!conflicted)
                 conflicted = _stm_was_read_remote(remote_base, item);
-            
+
             /* clear the write-lock */
-            struct object_s *t0_obj = (struct object_s*)
-                REAL_ADDRESS(t0_base, item);
-            assert(t0_obj->stm_write_lock);
-            t0_obj->stm_write_lock = 0;
+            uintptr_t lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START;
+            assert(write_locks[lock_idx]);
+            write_locks[lock_idx] = 0;
             
             char *src = REAL_ADDRESS(local_base, item);
             char *dst = REAL_ADDRESS(remote_base, item);
@@ -377,13 +377,10 @@ void _stm_write_slowpath(object_t *obj)
     /* privatize if SHARED_PAGE */
     _stm_privatize(pagenum);
 
-    /* lock the object for writing in thread 0's page */
-    uintptr_t t0_offset = (uintptr_t)obj;
-    char* t0_addr = get_thread_base(0) + t0_offset;
-    struct object_s *t0_obj = (struct object_s *)t0_addr;
-
-    int previous;
-    while ((previous = __sync_lock_test_and_set(&t0_obj->stm_write_lock, 1))) {
+    /* claim the write-lock for this object */
+    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
+    uint8_t previous;
+    while ((previous = __sync_lock_test_and_set(&write_locks[lock_idx], 1))) {
         stm_abort_transaction();
         /* XXX: only abort if we are younger */
         spin_loop();
@@ -710,6 +707,7 @@ void _stm_teardown(void)
 {
     munmap(object_pages, TOTAL_MEMORY);
     memset(flag_page_private, 0, sizeof(flag_page_private));
+    memset(write_locks, 0, sizeof(write_locks));
     pthread_rwlock_destroy(&rwlock_shared);
     object_pages = NULL;
 }
@@ -924,32 +922,30 @@ static void reset_modified_from_other_threads()
     struct stm_list_s *modified = _STM_TL2->modified_objects;
     char *local_base = _STM_TL2->thread_base;
     char *remote_base = get_thread_base(1 - _STM_TL2->thread_num);
-    char *t0_base = get_thread_base(0);
     
     STM_LIST_FOREACH(
         modified,
         ({
             /* note: same as push_modified_to... but src/dst swapped
                XXX: unify both... */
+            
             char *dst = REAL_ADDRESS(local_base, item);
             char *src = REAL_ADDRESS(remote_base, item);
             size_t size = stmcb_size((struct object_s*)src);
             memcpy(dst, src, size);
-            
+
             /* copying from the other thread re-added the
                WRITE_BARRIER flag */
             assert(item->stm_flags & GCFLAG_WRITE_BARRIER);
+
+            /* write all changes to the object before we release the
+               write lock below */
+            write_fence();
             
-            struct object_s *t0_obj = (struct object_s*)
-                REAL_ADDRESS(t0_base, item);
-            if (t0_base != local_base) {
-                /* clear the write-lock (WE have modified the obj) */
-                assert(t0_obj->stm_write_lock);
-                t0_obj->stm_write_lock = 0;
-            } else {
-                /* done by the memcpy */
-                assert(!t0_obj->stm_write_lock);
-            }
+            /* clear the write-lock */
+            uintptr_t lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START;
+            assert(write_locks[lock_idx]);
+            write_locks[lock_idx] = 0;
         }));
 }
 
