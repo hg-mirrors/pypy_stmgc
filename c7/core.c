@@ -150,42 +150,38 @@ static pthread_rwlock_t rwlock_shared;
 
 struct tx_descriptor *in_single_thread = NULL;
 
-void stm_start_sharedlock(void)
+void stm_start_shared_lock(void)
 {
     int err = pthread_rwlock_rdlock(&rwlock_shared);
     if (err != 0)
         abort();
 }
 
-void stm_stop_sharedlock(void)
+void stm_stop_lock(void)
 {
     int err = pthread_rwlock_unlock(&rwlock_shared);
     if (err != 0)
         abort();
 }
 
-static void start_exclusivelock(void)
+static void stm_start_exclusive_lock(void)
 {
     int err = pthread_rwlock_wrlock(&rwlock_shared);
     if (err != 0)
         abort();
-}
-
-static void stop_exclusivelock(void)
-{
-    int err = pthread_rwlock_unlock(&rwlock_shared);
-    if (err != 0)
-        abort();
+    if (_STM_TL2->need_abort) {
+        stm_abort_transaction();
+    }
 }
 
 void _stm_start_safe_point(void)
 {
-    stm_stop_sharedlock();
+    stm_stop_lock();
 }
 
 void _stm_stop_safe_point(void)
 {
-    stm_start_sharedlock();
+    stm_start_shared_lock();
     if (_STM_TL2->need_abort)
         stm_abort_transaction();
 }
@@ -757,7 +753,7 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
 {
     assert(!_STM_TL2->running_transaction);
 
-    stm_start_sharedlock();
+    stm_start_shared_lock();
     
     uint8_t old_rv = _STM_TL1->transaction_read_version;
     _STM_TL1->transaction_read_version = old_rv + 1;
@@ -805,8 +801,8 @@ static void update_new_objects_in_other_threads(uintptr_t pagenum,
 void stm_stop_transaction(void)
 {
     assert(_STM_TL2->running_transaction);
-    stm_stop_sharedlock();
-    start_exclusivelock();
+    stm_stop_lock();
+    stm_start_exclusive_lock();
 
     _STM_TL1->jmpbufptr = NULL;          /* cannot abort any more */
 
@@ -908,7 +904,7 @@ void stm_stop_transaction(void)
     /* } */
 
     _STM_TL2->running_transaction = 0;
-    stop_exclusivelock();
+    stm_stop_lock();
 }
 
 void stm_abort_transaction(void)
@@ -927,6 +923,6 @@ void stm_abort_transaction(void)
     assert(_STM_TL1->jmpbufptr != NULL);
     assert(_STM_TL1->jmpbufptr != (jmpbufptr_t *)-1);   /* for tests only */
     _STM_TL2->running_transaction = 0;
-    stm_stop_sharedlock();
+    stm_stop_lock();
     __builtin_longjmp(*_STM_TL1->jmpbufptr, 1);
 }

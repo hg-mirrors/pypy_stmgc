@@ -1,5 +1,5 @@
 from support import *
-
+import py
 
 class TestBasic(BaseTest):
 
@@ -92,9 +92,9 @@ class TestBasic(BaseTest):
         assert stm_get_char(lp1) == 'a'
         #
         self.switch(1)
-        stm_stop_transaction(False)
+        stm_stop_transaction()
         #
-        self.switch(0, expect_conflict=True) # detects rw conflict
+        py.test.raises(Conflict, self.switch, 0) # detects rw conflict
         
     def test_commit_fresh_objects(self):
         stm_start_transaction()
@@ -207,10 +207,10 @@ class TestBasic(BaseTest):
         #
         self.switch(1)
         stm_start_transaction()
-        stm_stop_transaction(False)
+        stm_stop_transaction()
         #
         self.switch(0)
-        stm_stop_transaction(False)
+        stm_stop_transaction()
 
     def test_resolve_no_conflict_write_only_in_already_committed(self):
         stm_start_transaction()
@@ -218,7 +218,7 @@ class TestBasic(BaseTest):
         p1 = stm_get_real_address(lp1)
         p1[HDR] = 'a'
         stm_push_root(lp1)
-        stm_stop_transaction(False)
+        stm_stop_transaction()
         lp1 = stm_pop_root()
         # 'a' in SHARED_PAGE
         
@@ -231,7 +231,7 @@ class TestBasic(BaseTest):
         p1 = stm_get_real_address(lp1)
         assert p1[HDR] == 'a'
         p1[HDR] = 'b'
-        stm_stop_transaction(False)
+        stm_stop_transaction()
         # 'b' both private pages
         #
         self.switch(0)
@@ -239,29 +239,50 @@ class TestBasic(BaseTest):
         assert p1[HDR] == 'b'
         p1 = stm_get_real_address(lp1)
         assert p1[HDR] == 'b'
-        stm_stop_transaction(False)
+        stm_stop_transaction()
         assert p1[HDR] == 'b'
 
-    # def test_resolve_write_read_conflict(self):
-    #     stm_start_transaction()
-    #     p1 = stm_allocate(16)
-    #     p1[8] = 'a'
-    #     stm_stop_transaction(False)
-    #     stm_start_transaction()
-    #     #
-    #     self.switch(1)
-    #     stm_start_transaction()
-    #     stm_write(p1)
-    #     p1[8] = 'b'
-    #     stm_stop_transaction(False)
-    #     #
-    #     self.switch(0)
-    #     stm_read(p1)
-    #     assert p1[8] == 'a'
-    #     stm_stop_transaction(expected_conflict=True)
-    #     assert p1[8] in ('a', 'b')
-    #     stm_start_transaction()
-    #     assert p1[8] == 'b'
+    def test_not_resolve_write_read_conflict(self):
+        stm_start_transaction()
+        lp1 = stm_allocate(16)
+        stm_set_char(lp1, 'a')
+        stm_push_root(lp1)
+        stm_stop_transaction()
+        lp1 = stm_pop_root()
+        
+        stm_start_transaction()
+        stm_read(lp1)
+        #
+        self.switch(1)
+        stm_start_transaction()
+        stm_write(lp1)
+        stm_set_char(lp1, 'b')
+        stm_stop_transaction()
+        #
+        py.test.raises(Conflict, self.switch, 0)
+        stm_start_transaction()
+        assert stm_get_char(lp1) == 'b'
+
+    def test_resolve_write_read_conflict(self):
+        stm_start_transaction()
+        lp1 = stm_allocate(16)
+        stm_set_char(lp1, 'a')
+        stm_push_root(lp1)
+        stm_stop_transaction()
+        lp1 = stm_pop_root()
+        
+        stm_start_transaction()
+        #
+        self.switch(1)
+        stm_start_transaction()
+        stm_write(lp1)
+        stm_set_char(lp1, 'b')
+        stm_stop_transaction()
+        #
+        self.switch(0)
+        assert stm_get_char(lp1) == 'b'
+
+        
 
     # def test_resolve_write_write_conflict(self):
     #     stm_start_transaction()
