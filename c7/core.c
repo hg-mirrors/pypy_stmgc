@@ -291,17 +291,12 @@ static char *get_thread_base(long thread_num)
     return object_pages + thread_num * (NB_PAGES * 4096UL);
 }
 
-bool _is_young(object_t *o)
+bool _stm_is_young(object_t *o)
 {
     assert((uintptr_t)o >= FIRST_NURSERY_PAGE * 4096);
     return (uintptr_t)o < FIRST_AFTER_NURSERY_PAGE * 4096;
 }
 
-bool _stm_is_in_nursery(char *ptr)
-{
-    object_t * o = _stm_tl_address(ptr);
-    return _is_young(o);
-}
 
 char *_stm_real_address(object_t *o)
 {
@@ -495,7 +490,7 @@ void trace_if_young(object_t **pobj)
 {
     if (*pobj == NULL)
         return;
-    if (!_is_young(*pobj))
+    if (!_stm_is_young(*pobj))
         return;
 
     /* the location the object moved to is at an 8b offset */
@@ -536,7 +531,7 @@ void minor_collect()
     while (!stm_list_is_empty(old_objs)) {
         object_t *item = stm_list_pop_item(old_objs);
 
-        assert(!_is_young(item));
+        assert(!_stm_is_young(item));
         assert(!(item->stm_flags & GCFLAG_WRITE_BARRIER));
         
         /* re-add write-barrier */
@@ -567,6 +562,7 @@ localchar_t *collect_and_reserve(size_t size)
 
 object_t *stm_allocate(size_t size)
 {
+    assert(_STM_TL2->running_transaction);
     assert(size % 8 == 0);
     size_t i = size / 8;
     assert(2 <= i && i < LARGE_OBJECT_WORDS);//XXX
