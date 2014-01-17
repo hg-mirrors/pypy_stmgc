@@ -10,7 +10,7 @@
 typedef TLPREFIX struct _thread_local1_s _thread_local1_t;
 typedef TLPREFIX struct object_s object_t;
 typedef TLPREFIX struct read_marker_s read_marker_t;
-
+typedef TLPREFIX char localchar_t;
 
 /* Structure of objects
    --------------------
