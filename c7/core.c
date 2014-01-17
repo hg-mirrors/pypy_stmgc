@@ -164,18 +164,18 @@ void stm_stop_lock(void)
         abort();
 }
 
-static void stm_start_exclusive_lock(void)
+void stm_start_exclusive_lock(void)
 {
     int err = pthread_rwlock_wrlock(&rwlock_shared);
     if (err != 0)
         abort();
-    if (_STM_TL2->need_abort) {
+    if (_STM_TL2->need_abort)
         stm_abort_transaction();
-    }
 }
 
 void _stm_start_safe_point(void)
 {
+    assert(!_STM_TL2->need_abort);
     stm_stop_lock();
 }
 
@@ -375,17 +375,19 @@ void _stm_write_slowpath(object_t *obj)
     /* privatize if SHARED_PAGE */
     _stm_privatize(pagenum);
 
-    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-
     /* lock the object for writing in thread 0's page */
     uintptr_t t0_offset = (uintptr_t)obj;
     char* t0_addr = get_thread_base(0) + t0_offset;
     struct object_s *t0_obj = (struct object_s *)t0_addr;
 
-    int previous = __sync_lock_test_and_set(&t0_obj->stm_write_lock, 1);
-    if (previous)
+    int previous;
+    while ((previous = __sync_lock_test_and_set(&t0_obj->stm_write_lock, 1))) {
         stm_abort_transaction();
+        /* XXX: only abort if we are younger */
+        spin_loop();
+    }
 
+    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
     stm_read(obj);
 
     _STM_TL2->modified_objects = stm_list_append
@@ -581,7 +583,7 @@ object_t *stm_allocate(size_t size)
 
 
 void stm_setup(void)
-{
+{    
     pthread_rwlockattr_t attr;
     pthread_rwlockattr_init(&attr);
     pthread_rwlockattr_setkind_np(&attr,
@@ -912,16 +914,28 @@ void stm_stop_transaction(void)
 void stm_abort_transaction(void)
 {
     assert(_STM_TL2->running_transaction);
-    // XXX copy back the modified objects!!
-    long j;
-    for (j = 2; j < LARGE_OBJECT_WORDS; j++) {
-        alloc_for_size_t *alloc = &_STM_TL2->alloc[j];
-        uint16_t num_allocated = ((uintptr_t)alloc->next) - alloc->start;
-        alloc->next -= num_allocated;
-    }
-    /* stm_list_clear(_STM_TL2->new_object_ranges); */
+    
+    // XXX reset all the modified objects!!
     stm_list_clear(_STM_TL2->modified_objects);
+
+    /* re-add GCFLAG_WRITE_BARRIER */
     stm_list_clear(_STM_TL2->old_objects_to_trace);
+
+    /* clear the nursery */
+
+    /* unreserve uncommitted_pages */
+
+    /* XXX: forget about GCFLAG_UNCOMMITTED objects  */
+    
+    /* long j; */
+    /* for (j = 2; j < LARGE_OBJECT_WORDS; j++) { */
+    /*     alloc_for_size_t *alloc = &_STM_TL2->alloc[j]; */
+    /*     uint16_t num_allocated = ((uintptr_t)alloc->next) - alloc->start; */
+    /*     alloc->next -= num_allocated; */
+    /* } */
+    /* stm_list_clear(_STM_TL2->new_object_ranges); */
+    
+    
     assert(_STM_TL1->jmpbufptr != NULL);
     assert(_STM_TL1->jmpbufptr != (jmpbufptr_t *)-1);   /* for tests only */
     _STM_TL2->running_transaction = 0;

@@ -120,6 +120,8 @@ object_t *_stm_allocate_old(size_t size);
 
 void _stm_start_safe_point(void);
 void _stm_stop_safe_point(void);
+
+void stm_abort_transaction(void);
 #endif
 
 
