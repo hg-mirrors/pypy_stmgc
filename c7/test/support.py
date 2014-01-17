@@ -335,6 +335,6 @@ class BaseTest(object):
             stm_start_safe_point()
         lib._stm_restore_local_state(thread_num)
         if lib._stm_is_in_transaction():
-            stm_stop_safe_point()
+            stm_stop_safe_point() # can raise Conflict
 
         
