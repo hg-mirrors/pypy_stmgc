@@ -275,10 +275,14 @@ class BaseTest(object):
         lib._stm_restore_local_state(1)
         if lib._stm_is_in_transaction():
             stm_stop_transaction()
-        lib._stm_teardown_thread()
+
         lib._stm_restore_local_state(0)
         if lib._stm_is_in_transaction():
             stm_stop_transaction()
+
+        lib._stm_restore_local_state(1)
+        lib._stm_teardown_thread()
+        lib._stm_restore_local_state(0)
         lib._stm_teardown_thread()
         lib._stm_teardown()
 
