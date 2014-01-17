@@ -66,6 +66,9 @@ object_t *stm_pop_root(void);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
 
+
+bool _stm_check_abort_transaction(void);
+
 void *memset(void *s, int c, size_t n);
 """)
 
@@ -119,6 +122,19 @@ bool _stm_check_stop_safe_point(void) {
          assert(_STM_TL1->jmpbufptr == (jmpbufptr_t*)-1);
          _STM_TL1->jmpbufptr = &here;
          _stm_stop_safe_point();
+         _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+         return 0;
+    }
+    _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+    return 1;
+}
+
+bool _stm_check_abort_transaction(void) {
+    jmpbufptr_t here;
+    if (__builtin_setjmp(here) == 0) { // returned directly
+         assert(_STM_TL1->jmpbufptr == (jmpbufptr_t*)-1);
+         _STM_TL1->jmpbufptr = &here;
+         stm_abort_transaction();
          _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
@@ -274,6 +290,9 @@ def stm_start_transaction():
 def stm_stop_transaction():
     if lib._stm_stop_transaction():
         raise Conflict()
+
+def stm_abort_transaction():
+    return lib._stm_check_abort_transaction()
 
 
 def stm_start_safe_point():
