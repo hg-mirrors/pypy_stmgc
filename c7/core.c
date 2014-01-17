@@ -351,11 +351,6 @@ static void push_modified_to_other_threads()
 
 
 
-static void wait_until_updated(void)
-{
-    while (pending_updates == _STM_TL2->modified_objects)
-        spin_loop();
-}
 
 
 void _stm_write_slowpath(object_t *obj)
@@ -690,7 +685,6 @@ void _stm_teardown_thread(void)
     assert(!pthread_rwlock_trywrlock(&rwlock_shared));
     assert(!pthread_rwlock_unlock(&rwlock_shared));
     
-    wait_until_updated();
     stm_list_free(_STM_TL2->modified_objects);
     _STM_TL2->modified_objects = NULL;
 
@@ -767,8 +761,6 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
     if (UNLIKELY(old_rv == 0xff))
         reset_transaction_read_version();
 
-
-    wait_until_updated();
     assert(stm_list_is_empty(_STM_TL2->modified_objects));
     assert(stm_list_is_empty(_STM_TL2->old_objects_to_trace));
     stm_list_clear(_STM_TL2->uncommitted_pages);
@@ -949,9 +941,6 @@ void stm_abort_transaction(void)
     /* here we hold the shared lock as a reader or writer */
     assert(_STM_TL2->running_transaction);
     
-    /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
-    reset_modified_from_other_threads();
-    stm_list_clear(_STM_TL2->modified_objects);
 
     /* clear old_objects_to_trace (they will have the WRITE_BARRIER flag
        set because the ones we care about are also in modified_objects) */
@@ -986,6 +975,12 @@ void stm_abort_transaction(void)
     assert(_STM_TL1->jmpbufptr != (jmpbufptr_t *)-1);   /* for tests only */
     _STM_TL2->running_transaction = 0;
     stm_stop_lock();
-    fprintf(stderr, "aborted\n");
+    fprintf(stderr, "a");
+
+    /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
+    reset_modified_from_other_threads();
+    stm_list_clear(_STM_TL2->modified_objects);
+
+    
     __builtin_longjmp(*_STM_TL1->jmpbufptr, 1);
 }
