@@ -185,10 +185,7 @@ DuType DuList_Type = {
     (len_fn)list_length,
 };
 
-static DuTupleObject du_empty_tuple = {
-    DuOBJECT_HEAD_INIT(DUTYPE_TUPLE),
-    0,
-};
+static DuTupleObject *du_empty_tuple;
 
 DuObject *DuList_New()
 {
