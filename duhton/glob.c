@@ -610,16 +610,30 @@ DuObject *du_assert(DuObject *cons, DuObject *locals)
 }
 
 extern void init_prebuilt_frame_objects(void);
+extern void init_prebuilt_list_objects(void);
+extern void init_prebuilt_object_objects(void);
+extern void init_prebuilt_symbol_objects(void);
+extern void init_prebuilt_transaction_objects(void);
 
 void Du_Initialize(int num_threads)
 {
-    stm_initialize();
+    assert(num_threads == 2);
 
+    stm_setup();
+    stm_setup_thread();
+    stm_setup_thread();
+    _stm_restore_local_state(0);
+
+    init_prebuilt_object_objects();
+    init_prebuilt_symbol_objects();
+    init_prebuilt_list_objects();
     init_prebuilt_frame_objects();
+    init_prebuilt_transaction_objects();
 
     all_threads_count = num_threads;
     all_threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);
 
+    stm_start_transaction(NULL);
     DuFrame_SetBuiltinMacro(Du_Globals, "progn", Du_Progn);
     DuFrame_SetBuiltinMacro(Du_Globals, "setq", du_setq);
     DuFrame_SetBuiltinMacro(Du_Globals, "print", du_print);
@@ -655,9 +669,16 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "pair?", du_pair);
     DuFrame_SetBuiltinMacro(Du_Globals, "assert", du_assert);
     DuFrame_SetSymbolStr(Du_Globals, "None", Du_None);
+    stm_stop_transaction();
 }
 
 void Du_Finalize(void)
 {
-    stm_finalize();
+    _stm_restore_local_state(1);
+    _stm_teardown_thread();
+
+    _stm_restore_local_state(0);
+    _stm_teardown_thread();
+
+    _stm_teardown();
 }

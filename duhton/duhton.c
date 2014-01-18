@@ -42,17 +42,22 @@ int main(int argc, char **argv)
             printf("))) ");
             fflush(stdout);
         }
+        stm_start_transaction(NULL);
         DuObject *code = Du_Compile(filename, interactive);
+        stm_stop_transaction();
         if (code == NULL) {
             printf("\n");
             break;
         }
         /*Du_Print(code, 1);
           printf("\n");*/
+        stm_start_transaction(NULL);
         DuObject *res = Du_Eval(code, Du_Globals);
         if (interactive) {
             Du_Print(res, 1);
         }
+        stm_stop_transaction();
+
         Du_TransactionRun();
         if (!interactive)
             break;

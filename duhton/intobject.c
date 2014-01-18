@@ -1,7 +1,7 @@
 #include "duhton.h"
 
-typedef struct {
-    DuOBJECT_HEAD
+typedef TLPREFIX struct DuIntObject_s {
+    DuOBJECT_HEAD1
     int ob_intval;
 } DuIntObject;
 
