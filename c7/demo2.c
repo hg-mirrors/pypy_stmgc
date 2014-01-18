@@ -7,7 +7,7 @@
 #include "core.h"
 
 
-#define LIST_LENGTH 5000
+#define LIST_LENGTH 6000
 #define BUNCH       400
 
 typedef TLPREFIX struct node_s node_t;
