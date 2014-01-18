@@ -570,6 +570,8 @@ localchar_t *collect_and_reserve(size_t size)
 
 object_t *stm_allocate(size_t size)
 {
+    _stm_start_safe_point();
+    _stm_stop_safe_point();
     assert(_STM_TL2->running_transaction);
     assert(size % 8 == 0);
     size_t i = size / 8;
