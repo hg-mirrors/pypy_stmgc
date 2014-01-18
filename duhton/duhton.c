@@ -44,7 +44,9 @@ int main(int argc, char **argv)
         }
         stm_start_transaction(NULL);
         DuObject *code = Du_Compile(filename, interactive);
+        _du_save1(code);
         stm_stop_transaction();
+        _du_restore1(code);
         if (code == NULL) {
             printf("\n");
             break;

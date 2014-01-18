@@ -543,6 +543,7 @@ void minor_collect()
         item->stm_flags |= GCFLAG_WRITE_BARRIER;
         
         stmcb_trace(real_address(item), trace_if_young);
+        old_objs = _STM_TL2->old_objects_to_trace;
     }
 
     

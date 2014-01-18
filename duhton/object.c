@@ -39,7 +39,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 DuObject *DuObject_New(DuType *tp)
 {
     assert(tp->dt_size >= sizeof(DuObject));
-    DuObject *ob = (DuObject *)stm_allocate(tp->dt_size);
+    DuObject *ob = (DuObject *)stm_allocate(ROUND_UP(tp->dt_size));
     assert(ob);
     ob->type_id = tp->dt_typeindex;
     return ob;
