@@ -64,6 +64,7 @@ void Du_TransactionRun(void)
     _du_write1(root);
     root->cdr = stm_thread_local_obj;
     stm_stop_transaction();
+    
     stm_thread_local_obj = NULL;
 
     run_all_threads();

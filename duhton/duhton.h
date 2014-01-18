@@ -188,4 +188,5 @@ static inline object_t *_pop_root(void) {
 extern pthread_t *all_threads;
 extern int all_threads_count;
 
+extern __thread DuObject *stm_thread_local_obj;  /* XXX temp */
 #endif  /* _DUHTON_H_ */
