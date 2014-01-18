@@ -7,9 +7,9 @@ os.environ['CC'] = 'clang'
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 header_files = [os.path.join(parent_dir, _n) for _n in
-                "core.h pagecopy.h list.h".split()]
+                "core.h pagecopy.h list.h reader_writer_lock.h".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
-                "core.c pagecopy.c list.c".split()]
+                "core.c pagecopy.c list.c reader_writer_lock.c".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):

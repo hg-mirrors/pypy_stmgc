@@ -57,7 +57,9 @@ long check_sorted()
             r_n = r_n->next;
             stm_read((objptr_t)r_n);
             sum += r_n->value;
-        
+
+            _stm_start_safe_point();
+            _stm_stop_safe_point();
             if (prev >= r_n->value) {
                 stm_stop_transaction();
                 return -1;
@@ -184,7 +186,6 @@ void *demo2(void *arg)
         sem_post(&initialized);
         status = sem_wait(&go);
         assert(status == 0);
-
     }
     
     while (check_sorted() == -1) {
