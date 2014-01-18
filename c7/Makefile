@@ -24,4 +24,6 @@ DEBUG = -g
 # note that we don't say -DNDEBUG, so that asserts should still be compiled in
 # also, all debug code with extra checks but not the debugprints
 build-%: %.c ${H_FILES} ${C_FILES} 
-	clang -pthread  -g  $< -o build-$* -Wall ${C_FILES}
+	clang -pthread  -g -O1  $< -o build-$* -Wall ${C_FILES}
+release-%: %.c ${H_FILES} ${C_FILES} 
+	clang -pthread  -g -DNDEBUG -O2 $< -o release-$* -Wall ${C_FILES}
