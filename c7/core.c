@@ -13,6 +13,7 @@
 #include "core.h"
 #include "list.h"
 #include "pagecopy.h"
+#include "reader_writer_lock.h"
 
 
 #define NB_PAGES            (256*256)    // 256MB
@@ -142,41 +143,40 @@ static void write_fence(void)
 
 /************************************************************/
 
+rwticket rw_shared_lock;
+
 /* a multi-reader, single-writer lock: transactions normally take a reader
    lock, so don't conflict with each other; when we need to do a global GC,
    we take a writer lock to "stop the world".  Note the initializer here,
    which should give the correct priority for stm_possible_safe_point(). */
-static pthread_rwlock_t rwlock_shared;
+
 
 struct tx_descriptor *in_single_thread = NULL;
 
 void stm_start_shared_lock(void)
 {
-    int err = pthread_rwlock_rdlock(&rwlock_shared);
-    if (err != 0)
-        abort();
+    rwticket_rdlock(&rw_shared_lock);
 }
 
-void stm_stop_lock(void)
+void stm_stop_shared_lock(void)
 {
-    int err = pthread_rwlock_unlock(&rwlock_shared);
-    if (err != 0)
-        abort();
+    rwticket_rdunlock(&rw_shared_lock);
+}
+
+void stm_stop_exclusive_lock(void)
+{
+    rwticket_wrunlock(&rw_shared_lock);
 }
 
 void stm_start_exclusive_lock(void)
 {
-    int err = pthread_rwlock_wrlock(&rwlock_shared);
-    if (err != 0)
-        abort();
-    if (_STM_TL2->need_abort)
-        stm_abort_transaction();
+    rwticket_wrlock(&rw_shared_lock);
 }
 
 void _stm_start_safe_point(void)
 {
     assert(!_STM_TL2->need_abort);
-    stm_stop_lock();
+    stm_stop_shared_lock();
 }
 
 void _stm_stop_safe_point(void)
@@ -376,9 +376,12 @@ void _stm_write_slowpath(object_t *obj)
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
     uint8_t previous;
     while ((previous = __sync_lock_test_and_set(&write_locks[lock_idx], 1))) {
-        usleep(1);              /* XXXXXX */
-        if (!(previous = __sync_lock_test_and_set(&write_locks[lock_idx], 1))) 
-            break;
+        /* XXXXXX */
+        //_stm_start_semi_safe_point();
+        usleep(1);
+        //_stm_stop_semi_safe_point();
+        //if (!(previous = __sync_lock_test_and_set(&write_locks[lock_idx], 1))) 
+        //    break;
         stm_abort_transaction();
         /* XXX: only abort if we are younger */
         spin_loop();
@@ -583,13 +586,8 @@ object_t *stm_allocate(size_t size)
 
 
 void stm_setup(void)
-{    
-    pthread_rwlockattr_t attr;
-    pthread_rwlockattr_init(&attr);
-    pthread_rwlockattr_setkind_np(&attr,
-                                  PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
-    pthread_rwlock_init(&rwlock_shared, &attr);
-    pthread_rwlockattr_destroy(&attr);
+{
+    memset(&rw_shared_lock, 0, sizeof(rwticket));
 
     /* Check that some values are acceptable */
     assert(4096 <= ((uintptr_t)_STM_TL1));
@@ -685,8 +683,8 @@ bool _stm_is_in_transaction(void)
 
 void _stm_teardown_thread(void)
 {
-    assert(!pthread_rwlock_trywrlock(&rwlock_shared));
-    assert(!pthread_rwlock_unlock(&rwlock_shared));
+    assert(!rwticket_wrtrylock(&rw_shared_lock));
+    assert(!rwticket_wrunlock(&rw_shared_lock));
     
     stm_list_free(_STM_TL2->modified_objects);
     _STM_TL2->modified_objects = NULL;
@@ -708,7 +706,6 @@ void _stm_teardown(void)
     munmap(object_pages, TOTAL_MEMORY);
     memset(flag_page_private, 0, sizeof(flag_page_private));
     memset(write_locks, 0, sizeof(write_locks));
-    pthread_rwlock_destroy(&rwlock_shared);
     object_pages = NULL;
 }
 
@@ -794,7 +791,7 @@ static void update_new_objects_in_other_threads(uintptr_t pagenum,
 void stm_stop_transaction(void)
 {
     assert(_STM_TL2->running_transaction);
-    stm_stop_lock();
+    stm_stop_shared_lock();
     stm_start_exclusive_lock();
 
     _STM_TL1->jmpbufptr = NULL;          /* cannot abort any more */
@@ -899,7 +896,7 @@ void stm_stop_transaction(void)
     /* } */
 
     _STM_TL2->running_transaction = 0;
-    stm_stop_lock();
+    stm_stop_exclusive_lock();
     fprintf(stderr, "%c", 'C'+_STM_TL2->thread_num*32);
 }
 
@@ -978,7 +975,7 @@ void stm_abort_transaction(void)
     assert(_STM_TL1->jmpbufptr != NULL);
     assert(_STM_TL1->jmpbufptr != (jmpbufptr_t *)-1);   /* for tests only */
     _STM_TL2->running_transaction = 0;
-    stm_stop_lock();
+    stm_stop_shared_lock();
     fprintf(stderr, "%c", 'A'+_STM_TL2->thread_num*32);
 
     /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */

@@ -14,9 +14,9 @@ clean:
 	rm -f $(BUILD_EXE) $(DEBUG_EXE) $(RELEASE_EXE)
 
 
-H_FILES = core.h list.h pagecopy.h
+H_FILES = core.h list.h pagecopy.h reader_writer_lock.h
 
-C_FILES = core.c list.c pagecopy.c
+C_FILES = core.c list.c pagecopy.c reader_writer_lock.c
 
 DEBUG = -g 
 
