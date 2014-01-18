@@ -67,6 +67,8 @@ extern DuType DuContainer_Type;
 
 extern DuType *Du_Types[_DUTYPE_TOTAL];
 
+#define ROUND_UP(size)  ((size) < 16 ? 16 : ((size) + 7) & ~7)
+
 
 DuObject *DuObject_New(DuType *tp);
 int DuObject_IsTrue(DuObject *ob);

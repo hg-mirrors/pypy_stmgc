@@ -19,7 +19,7 @@
 #define NB_PAGES            (256*256)    // 256MB
 #define NB_THREADS          2
 #define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
-#define LARGE_OBJECT_WORDS  36
+#define LARGE_OBJECT_WORDS  220  // XXX was 36
 #define NB_NURSERY_PAGES    1024
 #define LENGTH_SHADOW_STACK   163840
 
