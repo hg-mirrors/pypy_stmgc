@@ -5,34 +5,34 @@
 /* 'tuple' objects are only used internally as the current items
    of 'list' objects
 */
-typedef struct {
-    DuOBJECT_HEAD
+typedef TLPREFIX struct DuTupleObject_s {
+    DuOBJECT_HEAD1
     int ob_count;
     DuObject *ob_items[1];
 } DuTupleObject;
 
-typedef struct {
-    DuOBJECT_HEAD
+typedef TLPREFIX struct DuListObject_s {
+    DuOBJECT_HEAD1
     DuTupleObject *ob_tuple;
 } DuListObject;
 
 
-void tuple_trace(DuTupleObject *ob, void visit(gcptr *))
+void tuple_trace(struct DuTupleObject_s *ob, void visit(object_t **))
 {
     int i;
     for (i=ob->ob_count-1; i>=0; i--) {
-        visit(&ob->ob_items[i]);
+        visit((object_t **)&ob->ob_items[i]);
     }
 }
 
-size_t tuple_bytesize(DuTupleObject *ob)
+size_t tuple_bytesize(struct DuTupleObject_s *ob)
 {
     return sizeof(DuTupleObject) + (ob->ob_count - 1) * sizeof(DuObject *);
 }
 
-void list_trace(DuListObject *ob, void visit(gcptr *))
+void list_trace(struct DuListObject_s *ob, void visit(object_t **))
 {
-    visit((gcptr *)&ob->ob_tuple);
+    visit((object_t **)&ob->ob_tuple);
 }
 
 void list_print(DuListObject *ob)
@@ -68,7 +68,8 @@ DuTupleObject *DuTuple_New(int length)
 {
     DuTupleObject *ob;
     size_t size = sizeof(DuTupleObject) + (length-1)*sizeof(DuObject *);
-    ob = (DuTupleObject *)stm_allocate(size, DUTYPE_TUPLE);
+    ob = (DuTupleObject *)stm_allocate(size);
+    ob->ob_base.type_id = DUTYPE_TUPLE;
     ob->ob_count = length;
     return ob;
 }
@@ -187,10 +188,18 @@ DuType DuList_Type = {
 
 static DuTupleObject *du_empty_tuple;
 
+void init_prebuilt_list_objects(void)
+{
+    du_empty_tuple = (DuTupleObject *)
+        stm_allocate_prebuilt(sizeof(DuTupleObject));
+    du_empty_tuple->ob_base.type_id = DUTYPE_TUPLE;
+    du_empty_tuple->ob_count = 0;
+}
+
 DuObject *DuList_New()
 {
     DuListObject *ob = (DuListObject *)DuObject_New(&DuList_Type);
-    ob->ob_tuple = &du_empty_tuple;
+    ob->ob_tuple = du_empty_tuple;
     return (DuObject *)ob;
 }
 

@@ -39,8 +39,9 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 DuObject *DuObject_New(DuType *tp)
 {
     assert(tp->dt_size >= sizeof(DuObject));
-    DuObject *ob = stm_allocate(tp->dt_size, tp->dt_typeindex);
+    DuObject *ob = (DuObject *)stm_allocate(tp->dt_size);
     assert(ob);
+    ob->type_id = tp->dt_typeindex;
     return ob;
 }
 
@@ -64,8 +65,13 @@ DuType DuNone_Type = {
     none_is_true,
 };
 
-DuObject _Du_NoneStruct =
-    DuOBJECT_HEAD_INIT(DUTYPE_NONE);
+DuObject *Du_None;
+
+void init_prebuilt_object_objects(void)
+{
+    Du_None = (DuObject *)stm_allocate_prebuilt(sizeof(DuObject));
+    Du_None->type_id = DUTYPE_NONE;
+}
 
 void Du_FatalError(char *msg, ...)
 {
