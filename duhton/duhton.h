@@ -14,7 +14,7 @@ struct DuObject_s {
 typedef TLPREFIX struct DuObject_s DuObject;
 
 
-#define DuOBJECT_HEAD1   DuObject ob_base;
+#define DuOBJECT_HEAD1   struct DuObject_s ob_base;
 
 
 #ifdef __GNUC__
