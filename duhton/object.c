@@ -23,7 +23,7 @@ size_t stmcb_size(struct object_s *obj)
     size_t result = tp->dt_size;
     if (result == 0)
         result = tp->dt_bytesize((struct DuObject_s *)obj);
-    return result;
+    return ROUND_UP(result);
 }
 
 /* callback: trace the content of an object */
