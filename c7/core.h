@@ -1,6 +1,7 @@
 #ifndef _STM_CORE_H
 #define _STM_CORE_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -116,6 +117,8 @@ object_t *_stm_tl_address(char *ptr);
 
 bool _stm_is_young(object_t *o);
 object_t *_stm_allocate_old(size_t size);
+
+object_t *stm_allocate_prebuilt(size_t size);
 
 void _stm_start_safe_point(void);
 void _stm_stop_safe_point(void);

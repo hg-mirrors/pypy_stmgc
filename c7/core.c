@@ -219,6 +219,11 @@ object_t *_stm_allocate_old(size_t size)
     return o;
 }
 
+object_t *stm_allocate_prebuilt(size_t size)
+{
+    return _stm_allocate_old(size);  /* XXX */
+}
+
 
 static void _stm_privatize(uintptr_t pagenum)
 {

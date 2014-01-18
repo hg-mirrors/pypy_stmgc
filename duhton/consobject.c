@@ -1,10 +1,10 @@
 #include "duhton.h"
 
 
-void cons_trace(DuConsObject *ob, void visit(gcptr *))
+void cons_trace(struct DuConsObject_s *ob, void visit(object_t **))
 {
-    visit(&ob->car);
-    visit(&ob->cdr);
+    visit((object_t **)&ob->car);
+    visit((object_t **)&ob->cdr);
 }
 
 void cons_print(DuConsObject *ob)

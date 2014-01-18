@@ -609,9 +609,14 @@ DuObject *du_assert(DuObject *cons, DuObject *locals)
     return Du_None;
 }
 
+extern void init_prebuilt_frame_objects(void);
+
 void Du_Initialize(int num_threads)
 {
     stm_initialize();
+
+    init_prebuilt_frame_objects();
+
     all_threads_count = num_threads;
     all_threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);
 

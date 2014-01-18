@@ -16,3 +16,12 @@ To run the tests, you need "py.test": http://pytest.org/
 There are demos: try "time duhton demo/many_square_roots.duh".
 
 For more general information see the PAPERS file.
+
+
+
+
+
+XXX
+===
+
+* remove _du_read1() on immutable objects

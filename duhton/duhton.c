@@ -1,3 +1,4 @@
+#include <string.h>
 #include "duhton.h"
 
 #define DEFAULT_NUM_THREADS 4

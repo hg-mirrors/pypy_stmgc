@@ -4,6 +4,7 @@
 
 typedef struct _Du_Symbol {
     DuOBJECT_HEAD
+    int myid;
     char *name;
     struct _Du_Symbol *next;
 } DuSymbolObject;
@@ -50,6 +51,9 @@ DuType DuSymbol_Type = {
     (eval_fn)symbol_eval,
 };
 
+
+static int next_id = 1;
+
 DuObject *DuSymbol_FromString(const char *name)
 {
     DuSymbolObject *p, *head = &_Du_AllSymbols;
@@ -61,6 +65,7 @@ DuObject *DuSymbol_FromString(const char *name)
     }
     p = (DuSymbolObject *)DuObject_New(&DuSymbol_Type);
     p->name = strdup(name);
+    p->myid = __sync_fetch_and_add(&next_id, 1);
 
     _du_write1(head);
     p->next = head->next;
@@ -74,6 +79,12 @@ char *DuSymbol_AsString(DuObject *ob)
     DuSymbol_Ensure("DuSymbol_AsString", ob);
     _du_read1(ob);
     return ((DuSymbolObject *)ob)->name;
+}
+
+int DuSymbol_Id(DuObject *ob)
+{
+    DuSymbol_Ensure("DuSymbol_Id", ob);
+    return ((DuSymbolObject *)ob)->id;
 }
 
 void DuSymbol_Ensure(char *where, DuObject *ob)
