@@ -58,7 +58,9 @@ int main(int argc, char **argv)
         if (interactive) {
             Du_Print(res, 1);
         }
+        _du_save1(stm_thread_local_obj);
         stm_stop_transaction();
+        _du_restore1(stm_thread_local_obj);
 
         Du_TransactionRun();
         if (!interactive)
