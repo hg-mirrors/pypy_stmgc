@@ -1,4 +1,5 @@
 #include "duhton.h"
+#include <string.h>
 #include <stdint.h>
 
 typedef TLPREFIX struct dictentry_s {
@@ -98,6 +99,22 @@ void frame_print(DuFrameObject *ob)
     printf("<frame>");
 }
 
+static void _copy(dictentry_t *dst, dictentry_t *src)
+{
+    /* workaround for a bug in clang-3.4: cannot do "*dst = *src;" */
+    memcpy(_stm_real_address((object_t *)dst),
+           _stm_real_address((object_t *)src),
+           sizeof(dictentry_t));
+}
+
+static void _clear(dictentry_t *dst)
+{
+    /* workaround for a bug in clang-3.4: many "dst->field = NULL;"
+       turn into a single memset() call */
+    memset(_stm_real_address((object_t *)dst), 0,
+           sizeof(dictentry_t));
+}
+
 static dictentry_t *
 find_entry(DuFrameObject *frame, DuObject *symbol, int write_mode)
 {
@@ -154,21 +171,18 @@ find_entry(DuFrameObject *frame, DuObject *symbol, int write_mode)
         entries = ob->ob_items;
 
         for (i=0; i<left; i++)
-            newentries[i] = entries[i];
+            _copy(&newentries[i], &entries[i]);
 
         DuSymbol_Ensure("find_entry", symbol);
 #ifdef _GC_DEBUG
         dprintf(("NEW ENTRY ADDED WITH search_id = %d\n", search_id));
 #endif
+        _clear(&newentries[left]);
         newentries[left].symbol_id = search_id;
         newentries[left].symbol = symbol;
-        newentries[left].value = NULL;
-        newentries[left].builtin_macro = NULL;
-        newentries[left].func_arglist = NULL;
-        newentries[left].func_progn = NULL;
 
         for (i=left+1; i<newob->ob_count; i++)
-            newentries[i] = entries[i-1];
+            _copy(&newentries[i], &entries[i-1]);
 
         _du_write1(frame);
         frame->ob_nodes = newob;
