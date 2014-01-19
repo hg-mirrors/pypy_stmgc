@@ -58,7 +58,7 @@ struct _thread_local2_s {
     struct stm_list_s *new_object_ranges;
     struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
     localchar_t *nursery_current;
-
+    object_t **old_shadow_stack;
     struct stm_list_s *old_objects_to_trace;
     /* pages newly allocated in the current transaction only containing
        uncommitted objects */
@@ -776,6 +776,8 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
     _STM_TL1->jmpbufptr = jmpbufptr;
     _STM_TL2->running_transaction = 1;
     _STM_TL2->need_abort = 0;
+
+    _STM_TL2->old_shadow_stack = _STM_TL1->shadow_stack;
 }
 
 #if 0
@@ -960,6 +962,9 @@ void stm_abort_transaction(void)
     memset((void*)real_address((object_t*)nursery_base), 0x0,
            _STM_TL2->nursery_current - nursery_base);
     _STM_TL2->nursery_current = nursery_base;
+
+    /* reset shadowstack */
+    _STM_TL1->shadow_stack = _STM_TL2->old_shadow_stack;
 
     /* unreserve uncommitted_pages and mark them as SHARED again */
         /* STM_LIST_FOREACH(_STM_TL2->uncommitted_pages, ({ */
