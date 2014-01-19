@@ -181,7 +181,10 @@ void *run_thread(void *thread_id)
         while (__builtin_setjmp(here) == 1) { }
         stm_start_transaction(&here);
         run_transaction(cell);
+        _du_save1(stm_thread_local_obj);
         stm_stop_transaction();
+        _du_restore1(stm_thread_local_obj);
+
     }
 
     return NULL;

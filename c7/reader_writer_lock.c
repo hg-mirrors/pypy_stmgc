@@ -11,7 +11,7 @@
    Shared-Memory Multiprocessors". Converting the algorithm from
    assembly language to C yields:
 */
-
+#include <assert.h>
 #include "reader_writer_lock.h"
 
 
@@ -54,11 +54,13 @@ int rwticket_wrunlock(rwticket *l)
 
 int rwticket_wrtrylock(rwticket *l)
 {
-	unsigned me = l->s.users;
+    unsigned cmp = l->u;
+    
+	unsigned me = cmp & 0xff;//l->s.users;
 	unsigned char menew = me + 1;
-	unsigned read = l->s.read << 8;
-	unsigned cmp = (me << 16) + read + me;
-	unsigned cmpnew = (menew << 16) + read + me;
+    //	unsigned read = (cmp & 0xffff) >> 8;//l->s.read << 8;
+	//unsigned cmp = (me << 16) + read + me;
+	unsigned cmpnew = (menew << 16) | (cmp & 0x0000ffff); //(menew << 16) + read + me;
 
 	if (cmpxchg(&l->u, cmp, cmpnew) == cmp) return 0;
 	
@@ -81,6 +83,8 @@ void rwticket_rdunlock(rwticket *l)
 
 int rwticket_rdtrylock(rwticket *l)
 {
+    assert(0);
+    /* XXX implement like wrtrylock */
 	unsigned me = l->s.users;
 	unsigned write = l->s.write;
 	unsigned char menew = me + 1;

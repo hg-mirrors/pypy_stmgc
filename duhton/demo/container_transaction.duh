@@ -3,11 +3,11 @@
 
 (defun g (thread n)
     (set c (+ (get c) 1))
-    (if (> (get c) 2000)
+    (if (> (get c) 20000)
         (print (quote overflow) (get c))
-      (if (< n 1000)
+      (if (< n 10000)
           (transaction f thread (+ n 1))
-        (if (< (get c) 2000)
+        (if (< (get c) 20000)
             (print (quote not-enough))
           (print (quote ok))))))
 
