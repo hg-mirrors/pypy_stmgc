@@ -19,7 +19,7 @@
 #define NB_PAGES            (256*256)    // 256MB
 #define NB_THREADS          2
 #define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
-#define LARGE_OBJECT_WORDS  232  // XXX was 36
+#define LARGE_OBJECT_WORDS  36
 #define NB_NURSERY_PAGES    1024
 #define LENGTH_SHADOW_STACK   163840
 
@@ -91,7 +91,7 @@ static uint8_t flag_page_private[NB_PAGES];   /* xxx_PAGE constants above */
 static uint8_t write_locks[READMARKER_END - READMARKER_START];
 
 /************************************************************/
-uintptr_t _stm_reserve_page(void);
+uintptr_t _stm_reserve_pages(int num);
 void stm_abort_transaction(void);
 localchar_t *_stm_alloc_next_page(size_t i);
 void mark_page_as_uncommitted(uintptr_t pagenum);
@@ -212,8 +212,9 @@ bool _stm_was_written(object_t *obj)
 
 object_t *_stm_allocate_old(size_t size)
 {
-    assert(size <= 4096);
-    localchar_t* addr = (localchar_t*)(_stm_reserve_page() * 4096);
+    int pages = (size + 4095) / 4096;
+    localchar_t* addr = (localchar_t*)(_stm_reserve_pages(pages) * 4096);
+
     object_t* o = (object_t*)addr;
     o->stm_flags |= GCFLAG_WRITE_BARRIER;
     return o;
@@ -400,16 +401,21 @@ void _stm_write_slowpath(object_t *obj)
 }
 
 
-uintptr_t _stm_reserve_page(void)
+uintptr_t _stm_reserve_pages(int num)
 {
     /* Grab a free page, initially shared between the threads. */
 
     // XXX look in some free list first
 
     /* Return the index'th object page, which is so far never used. */
-    uintptr_t index = __sync_fetch_and_add(&index_page_never_used, 1);
+    uintptr_t index = __sync_fetch_and_add(&index_page_never_used, num);
+
+    int i;
+    for (i = 0; i < num; i++) {
+        assert(flag_page_private[index+i] == SHARED_PAGE);
+    }
     assert(flag_page_private[index] == SHARED_PAGE);
-    if (index >= NB_PAGES) {
+    if (index + num >= NB_PAGES) {
         fprintf(stderr, "Out of mmap'ed memory!\n");
         abort();
     }
@@ -425,17 +431,23 @@ uintptr_t _stm_reserve_page(void)
 
 localchar_t *_stm_alloc_old(size_t size)
 {
-    size_t size_class = size / 8;
-    alloc_for_size_t *alloc = &_STM_TL2->alloc[size_class];
     localchar_t *result;
+    size_t size_class = size / 8;
+    assert(size_class >= 2);
     
-    if ((uint16_t)((uintptr_t)alloc->next) == alloc->stop)
-        result = _stm_alloc_next_page(size_class);
-    else {
-        result = alloc->next;
-        alloc->next += size;
+    if (size_class >= LARGE_OBJECT_WORDS) {
+        result = (localchar_t*)_stm_allocate_old(size);
+        ((object_t*)result)->stm_flags &= ~GCFLAG_WRITE_BARRIER; /* added by _stm_allocate_old... */
+    } else { 
+        alloc_for_size_t *alloc = &_STM_TL2->alloc[size_class];
+        
+        if ((uint16_t)((uintptr_t)alloc->next) == alloc->stop)
+            result = _stm_alloc_next_page(size_class);
+        else {
+            result = alloc->next;
+            alloc->next += size;
+        }
     }
-
     return result;
 }
 
@@ -470,7 +482,7 @@ localchar_t *_stm_alloc_next_page(size_t i)
     /* } */
 
     /* reserve a fresh new page */
-    page = _stm_reserve_page();
+    page = _stm_reserve_pages(1);
 
     /* mark as UNCOMMITTED_... */
     mark_page_as_uncommitted(page);
@@ -557,6 +569,11 @@ void minor_collect()
     _STM_TL2->nursery_current = nursery_base;
 }
 
+void _stm_minor_collect()
+{
+    minor_collect();
+}
+
 localchar_t *collect_and_reserve(size_t size)
 {
     _stm_start_safe_point();
@@ -574,9 +591,7 @@ object_t *stm_allocate(size_t size)
     _stm_stop_safe_point();
     assert(_STM_TL2->running_transaction);
     assert(size % 8 == 0);
-    size_t i = size / 8;
-    assert(2 <= i && i < LARGE_OBJECT_WORDS);//XXX
-    assert(2 <= i && i < NB_NURSERY_PAGES * 4096);//XXX
+    assert(16 <= size && size < NB_NURSERY_PAGES * 4096);//XXX
 
     localchar_t *current = _STM_TL2->nursery_current;
     localchar_t *new_current = current + size;
