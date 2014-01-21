@@ -125,6 +125,8 @@ void _stm_stop_safe_point(void);
 
 void stm_abort_transaction(void);
 
+void _stm_minor_collect();
+
 #define stm_become_inevitable(msg)   /* XXX implement me! */
 
 

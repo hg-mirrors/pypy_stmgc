@@ -332,7 +332,26 @@ class TestBasic(BaseTest):
                 
         assert old
         assert young
-            
+
+    def test_large_obj_alloc(self):
+        # test obj which doesn't fit into the size_classes
+        # for now, we will still allocate it in the nursery.
+        # expects: LARGE_OBJECT_WORDS  36
+        size_class = 1000 # too big
+        obj_size = size_class * 8
+        assert obj_size > 4096 # we want more than 1 page
+        assert obj_size < 4096 * 1024 # in the nursery
+
+        stm_start_transaction()
+        new = stm_allocate(obj_size)
+        assert is_in_nursery(new)
+        stm_push_root(new)
+        stm_minor_collect()
+        stm_minor_collect()
+        new = stm_pop_root()
+
+        assert not is_in_nursery(new)
+        
             
 
 

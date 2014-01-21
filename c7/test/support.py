@@ -66,6 +66,7 @@ object_t *stm_pop_root(void);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
 
+void _stm_minor_collect();
 
 bool _stm_check_abort_transaction(void);
 
@@ -301,6 +302,9 @@ def stm_start_safe_point():
 def stm_stop_safe_point():
     if lib._stm_check_stop_safe_point():
         raise Conflict()
+
+def stm_minor_collect():
+    lib._stm_minor_collect()
 
 
 class BaseTest(object):
