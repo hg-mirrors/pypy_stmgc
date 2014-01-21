@@ -366,7 +366,10 @@ void _stm_write_slowpath(object_t *obj)
     }
 
     /* privatize if SHARED_PAGE */
-    _stm_privatize(pagenum);
+    /* xxx stmcb_size() is probably too slow */
+    int pages = stmcb_size(real_address(obj)) / 4096;
+    for (; pages >= 0; pages--)
+        _stm_privatize(pagenum + pages);
 
     /* claim the write-lock for this object */
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
@@ -433,7 +436,7 @@ localchar_t *_stm_alloc_old(size_t size)
         int pages = (size + 4095) / 4096;
         int i;
         for (i = 0; i < pages; i++) {
-            flag_page_private[page + i] = UNCOMMITTED_SHARED_PAGE;
+            mark_page_as_uncommitted(page + i);
         }
     } else { 
         alloc_for_size_t *alloc = &_STM_TL2->alloc[size_class];
