@@ -373,8 +373,14 @@ class TestBasic(BaseTest):
         stm_stop_transaction()
         new = stm_pop_root()
 
+        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
+                == [lib.SHARED_PAGE]*2)
+
         stm_start_transaction()
         stm_write(new)
+        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
+                == [lib.PRIVATE_PAGE]*2)
+        
         # write to 2nd page of object!!
         wnew = stm_get_real_address(new)
         wnew[4097] = 'x'
