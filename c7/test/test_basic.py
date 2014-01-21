@@ -418,6 +418,11 @@ class TestBasic(BaseTest):
         assert stm_get_flags(newer) & lib.GCFLAG_NOT_COMMITTED
         stm_write(newer) # does not privatize
         assert stm_get_page_flag(stm_get_obj_pages(newer)[0]) == lib.SHARED_PAGE
+        stm_stop_transaction()
+        
+        assert stm_get_page_flag(stm_get_obj_pages(newer)[0]) == lib.SHARED_PAGE
+        assert not (stm_get_flags(newer) & lib.GCFLAG_NOT_COMMITTED)
+        
 
 
     # def test_resolve_write_write_no_conflict(self):

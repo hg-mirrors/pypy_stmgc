@@ -55,7 +55,8 @@ struct _thread_local2_s {
     bool need_abort;
     char *thread_base;
     struct stm_list_s *modified_objects;
-    struct stm_list_s *new_object_ranges;
+    struct stm_list_s *uncommitted_objects;
+    struct stm_list_s *uncommitted_object_ranges;
     struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
     localchar_t *nursery_current;
     object_t **old_shadow_stack;
@@ -345,6 +346,36 @@ static void push_modified_to_other_threads()
     }
 }
 
+static void push_uncommitted_to_other_threads()
+{
+    /* WE HAVE THE EXCLUSIVE LOCK HERE */
+    
+    struct stm_list_s *uncommitted = _STM_TL2->uncommitted_objects;
+    char *local_base = _STM_TL2->thread_base;
+    char *remote_base = get_thread_base(1 - _STM_TL2->thread_num);
+    
+    STM_LIST_FOREACH(
+        uncommitted,
+        ({
+            /* write-lock always cleared for these objects */
+            uintptr_t lock_idx;
+            assert(lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START);
+            assert(!write_locks[lock_idx]);
+
+            /* remove the flag (they are now committed) */
+            item->stm_flags &= ~GCFLAG_NOT_COMMITTED;
+            
+            uintptr_t pagenum = ((uintptr_t)item) / 4096UL;
+            if (flag_page_private[pagenum] == PRIVATE_PAGE) {
+                /* page was privatized... */
+                char *src = REAL_ADDRESS(local_base, item);
+                char *dst = REAL_ADDRESS(remote_base, item);
+                size_t size = stmcb_size((struct object_s*)src);
+                memcpy(dst, src, size);
+            }
+        }));
+}
+
 
 
 
@@ -353,9 +384,8 @@ void _stm_write_slowpath(object_t *obj)
 {
     uintptr_t pagenum = ((uintptr_t)obj) / 4096;
     assert(pagenum < NB_PAGES);
-
-    _STM_TL2->old_objects_to_trace = stm_list_append
-        (_STM_TL2->old_objects_to_trace, obj);
+    
+    LIST_APPEND(_STM_TL2->old_objects_to_trace, obj);
     
     /* for old objects from the same transaction we don't need
        to privatize the page */
@@ -389,8 +419,7 @@ void _stm_write_slowpath(object_t *obj)
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
     stm_read(obj);
 
-    _STM_TL2->modified_objects = stm_list_append
-        (_STM_TL2->modified_objects, obj);
+    LIST_APPEND(_STM_TL2->modified_objects, obj);
 }
 
 
@@ -422,15 +451,15 @@ uintptr_t _stm_reserve_pages(int num)
     ((start) = (uint16_t)(uintptr_t)(range),    \
      (stop) = ((uintptr_t)(range)) >> 16)
 
-localchar_t *_stm_alloc_old(size_t size)
+object_t *_stm_alloc_old(size_t size)
 {
-    localchar_t *result;
+    object_t *result;
     size_t size_class = size / 8;
     assert(size_class >= 2);
     
     if (size_class >= LARGE_OBJECT_WORDS) {
-        result = (localchar_t*)_stm_allocate_old(size);
-        ((object_t*)result)->stm_flags &= ~GCFLAG_WRITE_BARRIER; /* added by _stm_allocate_old... */
+        result = _stm_allocate_old(size);
+        result->stm_flags &= ~GCFLAG_WRITE_BARRIER; /* added by _stm_allocate_old... */
 
         int page = ((uintptr_t)result) / 4096;
         int pages = (size + 4095) / 4096;
@@ -440,18 +469,22 @@ localchar_t *_stm_alloc_old(size_t size)
         }
     } else { 
         alloc_for_size_t *alloc = &_STM_TL2->alloc[size_class];
-        
-        if ((uint16_t)((uintptr_t)alloc->next) == alloc->stop)
-            result = _stm_alloc_next_page(size_class);
-        else {
-            result = alloc->next;
+         
+        if ((uint16_t)((uintptr_t)alloc->next) == alloc->stop) {
+            result = (object_t *)_stm_alloc_next_page(size_class);
+        } else {
+            result = (object_t *)alloc->next;
             alloc->next += size;
+            if (alloc->flag_partial_page) {
+                LIST_APPEND(_STM_TL2->uncommitted_objects, result);
+                result->stm_flags |= GCFLAG_NOT_COMMITTED;
+            }
         }
     }
     return result;
 }
 
-localchar_t *_stm_alloc_next_page(size_t i)
+localchar_t *_stm_alloc_next_page(size_t size_class)
 {
     /* 'alloc->next' points to where the next allocation should go.  The
        present function is called instead when this next allocation is
@@ -459,27 +492,11 @@ localchar_t *_stm_alloc_next_page(size_t i)
        'stop' are always nearby pointers, we play tricks and only store
        the lower 16 bits of 'start' and 'stop', so that the three
        variables plus some flags fit in 16 bytes.
-
-       'flag_partial_page' is *cleared* to mean that the 'alloc'
-       describes a complete page, so that it needs not be listed inside
-       'new_object_ranges'.  In all other cases it is *set*.
     */
     uintptr_t page;
     localchar_t *result;
-    alloc_for_size_t *alloc = &_STM_TL2->alloc[i];
-    size_t size = i * 8;
-
-    /* if (alloc->flag_partial_page) { */
-    /*     /\* record this range in 'new_object_ranges' *\/ */
-    /*     localchar_t *ptr1 = alloc->next - size - 1; */
-    /*     object_t *range; */
-    /*     TO_RANGE(range, alloc->start, alloc->stop); */
-    /*     page = ((uintptr_t)ptr1) / 4096; */
-    /*     _STM_TL2->new_object_ranges = stm_list_append( */
-    /*         _STM_TL2->new_object_ranges, (object_t *)page); */
-    /*     _STM_TL2->new_object_ranges = stm_list_append( */
-    /*         _STM_TL2->new_object_ranges, range); */
-    /* } */
+    alloc_for_size_t *alloc = &_STM_TL2->alloc[size_class];
+    size_t size = size_class * 8;
 
     /* reserve a fresh new page */
     page = _stm_reserve_pages(1);
@@ -499,8 +516,7 @@ localchar_t *_stm_alloc_next_page(size_t i)
 void mark_page_as_uncommitted(uintptr_t pagenum)
 {
     flag_page_private[pagenum] = UNCOMMITTED_SHARED_PAGE;
-    _STM_TL2->uncommitted_pages = stm_list_append
-        (_STM_TL2->uncommitted_pages, (object_t*)pagenum);
+    LIST_APPEND(_STM_TL2->uncommitted_pages, (object_t*)pagenum);
 }
 
 void trace_if_young(object_t **pobj)
@@ -521,6 +537,10 @@ void trace_if_young(object_t **pobj)
     /* move obj to somewhere else */
     size_t size = stmcb_size(real_address(*pobj));
     object_t *moved = (object_t*)_stm_alloc_old(size);
+
+    if (moved->stm_flags & GCFLAG_NOT_COMMITTED)
+        (*pobj)->stm_flags |= GCFLAG_NOT_COMMITTED; /* XXX: memcpy below overwrites this otherwise.
+                                                   find better solution.*/
     
     memcpy((void*)real_address(moved),
            (void*)real_address(*pobj),
@@ -530,8 +550,7 @@ void trace_if_young(object_t **pobj)
     *pforwarded = moved;
     *pobj = moved;
     
-    _STM_TL2->old_objects_to_trace = stm_list_append
-        (_STM_TL2->old_objects_to_trace, moved);
+    LIST_APPEND(_STM_TL2->old_objects_to_trace, moved);
 }
 
 void minor_collect()
@@ -700,6 +719,7 @@ void stm_setup_thread(void)
     _STM_TL2->uncommitted_pages = stm_list_create();
     
     _STM_TL2->modified_objects = stm_list_create();
+    _STM_TL2->uncommitted_objects = stm_list_create();
     assert(!_STM_TL2->running_transaction);
 }
 
@@ -715,6 +735,10 @@ void _stm_teardown_thread(void)
     
     stm_list_free(_STM_TL2->modified_objects);
     _STM_TL2->modified_objects = NULL;
+
+    assert(stm_list_is_empty(_STM_TL2->uncommitted_objects));
+    stm_list_free(_STM_TL2->uncommitted_objects);
+    _STM_TL2->uncommitted_objects = NULL;           
 
     assert(_STM_TL1->shadow_stack == _STM_TL1->shadow_stack_base);
     free(_STM_TL1->shadow_stack);
@@ -831,6 +855,10 @@ void stm_stop_transaction(void)
     push_modified_to_other_threads();
     stm_list_clear(_STM_TL2->modified_objects);
 
+   /* uncommitted objects / partially COMMITTED pages */
+    push_uncommitted_to_other_threads();
+    stm_list_clear(_STM_TL2->uncommitted_objects);
+    
     /* uncommitted_pages */
     long j;
     for (j = 2; j < LARGE_OBJECT_WORDS; j++) {
@@ -841,12 +869,8 @@ void stm_stop_transaction(void)
             continue;
         uintptr_t pagenum = ((uintptr_t)(alloc->next - 1)) / 4096UL;
         if (flag_page_private[pagenum] == UNCOMMITTED_SHARED_PAGE) {
-            /* mark it as empty so it doesn't get used in the next
-               transaction */
-            /* XXX: flag_partial_page!! */
-            alloc->start = 0;
-            alloc->next = 0;
-            alloc->stop = 0;
+            /* becomes a SHARED (s.b.) partially used page */
+            alloc->flag_partial_page = 1;
         }
     }
     
@@ -858,12 +882,14 @@ void stm_stop_transaction(void)
         }));
     stm_list_clear(_STM_TL2->uncommitted_pages);
 
+ 
     
-    /* /\* walk the new_object_ranges and manually copy the new objects */
+    
+    /* /\* walk the uncommitted_object_ranges and manually copy the new objects */
     /*    to the other thread's pages in the (hopefully rare) case that */
     /*    the page they belong to is already unshared *\/ */
     /* long i; */
-    /* struct stm_list_s *lst = _STM_TL2->new_object_ranges; */
+    /* struct stm_list_s *lst = _STM_TL2->uncommitted_object_ranges; */
     /* for (i = stm_list_count(lst); i > 0; ) { */
     /*     i -= 2; */
     /*     uintptr_t pagenum = (uintptr_t)stm_list_item(lst, i); */
@@ -1001,7 +1027,7 @@ void stm_abort_transaction(void)
     /*     uint16_t num_allocated = ((uintptr_t)alloc->next) - alloc->start; */
     /*     alloc->next -= num_allocated; */
     /* } */
-    /* stm_list_clear(_STM_TL2->new_object_ranges); */
+    /* stm_list_clear(_STM_TL2->uncommitted_object_ranges); */
     
     
     assert(_STM_TL1->jmpbufptr != NULL);

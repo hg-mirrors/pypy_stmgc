@@ -33,6 +33,10 @@ stm_list_append(struct stm_list_s *lst, object_t *item)
     return lst;
 }
 
+#define LIST_APPEND(lst, e) {                   \
+        lst = stm_list_append(lst, e);          \
+    }
+
 static inline void stm_list_clear(struct stm_list_s *lst)
 {
     lst->count = 0;
