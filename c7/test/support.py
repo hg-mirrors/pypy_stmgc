@@ -74,13 +74,22 @@ void *memset(void *s, int c, size_t n);
 extern size_t stmcb_size(struct object_s *);
 extern void stmcb_trace(struct object_s *, void (object_t **));
 
+uint8_t _stm_get_flags(object_t *obj);
+uint8_t _stm_get_page_flag(int pagenum);
 enum {
     SHARED_PAGE=0,
     REMAPPING_PAGE,
     PRIVATE_PAGE,
     UNCOMMITTED_SHARED_PAGE,
 };  /* flag_page_private */
-uint8_t _stm_get_page_flag(int pagenum);
+
+enum {
+    GCFLAG_WRITE_BARRIER = 1,
+    GCFLAG_NOT_COMMITTED = 2,
+    GCFLAG_MOVED = 4
+};
+
+
 """)
 
 lib = ffi.verify('''
@@ -98,6 +107,11 @@ typedef TLPREFIX struct myobj_s myobj_t;
 
 size_t stm_object_size_rounded_up(object_t * obj) {
     return 16;
+}
+
+
+uint8_t _stm_get_flags(object_t *obj) {
+    return obj->stm_flags;
 }
 
 
@@ -326,6 +340,9 @@ def stm_get_obj_pages(o):
     start = int(ffi.cast('uintptr_t', o))
     startp = start // 4096
     return range(startp, startp + stm_get_obj_size(o) // 4096 + 1)
+
+def stm_get_flags(o):
+    return lib._stm_get_flags(o)
 
 
 class BaseTest(object):
