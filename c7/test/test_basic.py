@@ -347,11 +347,38 @@ class TestBasic(BaseTest):
         assert is_in_nursery(new)
         stm_push_root(new)
         stm_minor_collect()
-        stm_minor_collect()
         new = stm_pop_root()
 
         assert not is_in_nursery(new)
+
+    def test_large_obj_write(self):
+        # test obj which doesn't fit into the size_classes
+        # expects: LARGE_OBJECT_WORDS  36
+        size_class = 1000 # too big
+        obj_size = size_class * 8
+        assert obj_size > 4096 # we want more than 1 page
+        assert obj_size < 4096 * 1024 # in the nursery
+
+        stm_start_transaction()
+        new = stm_allocate(obj_size)
+        assert is_in_nursery(new)
+        stm_push_root(new)
+        stm_stop_transaction()
+        new = stm_pop_root()
+
+        stm_start_transaction()
+        stm_write(new)
+        # write to 2nd page of object!!
+        wnew = stm_get_real_address(new)
+        wnew[4097] = 'x'
+
+        self.switch(1)
+        stm_start_transaction()
+        stm_read(new)
+        rnew = stm_get_real_address(new)
+        assert rnew[4097] == '\0'
         
+
             
 
 
