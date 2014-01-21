@@ -398,11 +398,26 @@ class TestBasic(BaseTest):
         stm_minor_collect()
         new = stm_pop_root()
         assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.UNCOMMITTED_SHARED_PAGE
-        assert stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED
+        assert not (stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED)
 
         stm_stop_transaction()
         assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.SHARED_PAGE
         assert not (stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED)
+
+        stm_start_transaction()
+        newer = stm_allocate(16)
+        stm_push_root(newer)
+        stm_minor_collect()
+        newer = stm_pop_root()
+        # 'new' is still in shared_page and committed
+        assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.SHARED_PAGE
+        assert not (stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED)
+        # 'newer' is now part of the SHARED page with 'new', but
+        # marked as UNCOMMITTED, so no privatization has to take place:
+        assert stm_get_obj_pages(new) == stm_get_obj_pages(newer)
+        assert stm_get_flags(newer) & lib.GCFLAG_NOT_COMMITTED
+        stm_write(newer) # does not privatize
+        assert stm_get_page_flag(stm_get_obj_pages(newer)[0]) == lib.SHARED_PAGE
 
 
     # def test_resolve_write_write_no_conflict(self):
