@@ -345,9 +345,16 @@ class TestBasic(BaseTest):
         stm_start_transaction()
         new = stm_allocate(obj_size)
         assert is_in_nursery(new)
+        assert len(stm_get_obj_pages(new)) == 2
+        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
+                == [lib.PRIVATE_PAGE]*2)
         stm_push_root(new)
         stm_minor_collect()
         new = stm_pop_root()
+
+        assert len(stm_get_obj_pages(new)) == 2
+        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
+                == [lib.UNCOMMITTED_SHARED_PAGE]*2)
 
         assert not is_in_nursery(new)
 

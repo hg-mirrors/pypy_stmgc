@@ -66,21 +66,6 @@ struct _thread_local2_s {
 };
 #define _STM_TL2            ((_thread_local2_t *)_STM_TL1)
 
-enum {
-    /* unprivatized page seen by all threads */
-    SHARED_PAGE=0,
-
-    /* page being in the process of privatization */
-    REMAPPING_PAGE,
-
-    /* page private for each thread */
-    PRIVATE_PAGE,
-
-    /* set for SHARED pages that only contain objects belonging
-       to the current transaction, so the whole page is not
-       visible yet for other threads */
-    UNCOMMITTED_SHARED_PAGE,
-};  /* flag_page_private */
 
 
 static char *object_pages;
@@ -95,6 +80,11 @@ uintptr_t _stm_reserve_pages(int num);
 void stm_abort_transaction(void);
 localchar_t *_stm_alloc_next_page(size_t i);
 void mark_page_as_uncommitted(uintptr_t pagenum);
+
+uint8_t _stm_get_page_flag(int pagenum)
+{
+    return flag_page_private[pagenum];
+}
 
 static void spin_loop(void)
 {
@@ -438,6 +428,13 @@ localchar_t *_stm_alloc_old(size_t size)
     if (size_class >= LARGE_OBJECT_WORDS) {
         result = (localchar_t*)_stm_allocate_old(size);
         ((object_t*)result)->stm_flags &= ~GCFLAG_WRITE_BARRIER; /* added by _stm_allocate_old... */
+
+        int page = ((uintptr_t)result) / 4096;
+        int pages = (size + 4095) / 4096;
+        int i;
+        for (i = 0; i < pages; i++) {
+            flag_page_private[page + i] = UNCOMMITTED_SHARED_PAGE;
+        }
     } else { 
         alloc_for_size_t *alloc = &_STM_TL2->alloc[size_class];
         
@@ -668,6 +665,10 @@ void stm_setup(void)
         }
     }
 
+    for (i = FIRST_NURSERY_PAGE; i < FIRST_AFTER_NURSERY_PAGE; i++)
+        flag_page_private[i] = PRIVATE_PAGE; /* nursery is private.
+                                                or should it be UNCOMMITTED??? */
+    
     num_threads_started = 0;
     index_page_never_used = FIRST_AFTER_NURSERY_PAGE;
     pending_updates = NULL;

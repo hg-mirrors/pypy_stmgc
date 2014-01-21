@@ -71,6 +71,16 @@ void _stm_minor_collect();
 bool _stm_check_abort_transaction(void);
 
 void *memset(void *s, int c, size_t n);
+extern size_t stmcb_size(struct object_s *);
+extern void stmcb_trace(struct object_s *, void (object_t **));
+
+enum {
+    SHARED_PAGE=0,
+    REMAPPING_PAGE,
+    PRIVATE_PAGE,
+    UNCOMMITTED_SHARED_PAGE,
+};  /* flag_page_private */
+uint8_t _stm_get_page_flag(int pagenum);
 """)
 
 lib = ffi.verify('''
@@ -305,6 +315,17 @@ def stm_stop_safe_point():
 
 def stm_minor_collect():
     lib._stm_minor_collect()
+
+def stm_get_page_flag(pagenum):
+    return lib._stm_get_page_flag(pagenum)
+
+def stm_get_obj_size(o):
+    return lib.stmcb_size(stm_get_real_address(o))
+
+def stm_get_obj_pages(o):
+    start = int(ffi.cast('uintptr_t', o))
+    startp = start // 4096
+    return range(startp, startp + stm_get_obj_size(o) // 4096 + 1)
 
 
 class BaseTest(object):
