@@ -311,6 +311,30 @@ class TestBasic(BaseTest):
         stm_start_transaction()
         assert stm_get_char(lp1) == 'a'
 
+    def test_many_allocs(self):
+        # assumes NB_NURSERY_PAGES    1024
+        obj_size = 1024
+        num = 5000 # more than what fits in the nursery (4MB)
+        
+        stm_start_transaction()
+        for i in range(num):
+            new = stm_allocate(obj_size)
+            stm_push_root(new)
+
+        old = []
+        young = []
+        for _ in range(num):
+            r = stm_pop_root()
+            if is_in_nursery(r):
+                young.append(r)
+            else:
+                old.append(r)
+                
+        assert old
+        assert young
+            
+            
+
 
     # def test_resolve_write_write_no_conflict(self):
     #     stm_start_transaction()
