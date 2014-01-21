@@ -391,8 +391,18 @@ class TestBasic(BaseTest):
         rnew = stm_get_real_address(new)
         assert rnew[4097] == '\0'
         
+    def test_partial_alloced_pages(self):
+        stm_start_transaction()
+        new = stm_allocate(16)
+        stm_push_root(new)
+        stm_minor_collect()
+        new = stm_pop_root()
+        assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.UNCOMMITTED_SHARED_PAGE
+        assert stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED
 
-            
+        stm_stop_transaction()
+        assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.SHARED_PAGE
+        assert not (stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED)
 
 
     # def test_resolve_write_write_no_conflict(self):

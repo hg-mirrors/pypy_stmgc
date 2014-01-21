@@ -39,7 +39,8 @@ enum {
        or PRIVATE), but not committed yet. So only visible from
        this transaction. */
     GCFLAG_NOT_COMMITTED = (1 << 1),
-
+    /* only used during collections to mark an obj as moved out of the
+       generation it was in */
     GCFLAG_MOVED = (1 << 2),
 };
 
@@ -62,7 +63,6 @@ enum {
 
 struct object_s {
     uint8_t stm_flags;            /* reserved for the STM library */
-    uint8_t stm_write_lock;       /* 1 if writeable by some thread */
     /* make sure it doesn't get bigger than 4 bytes for performance
      reasons */
 };
