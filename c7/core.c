@@ -944,7 +944,8 @@ void stm_abort_transaction(void)
     /* reset shadowstack */
     _STM_TL1->shadow_stack = _STM_TL2->old_shadow_stack;
 
-    /* unreserve uncommitted_pages and mark them as SHARED again */
+    /* unreserve uncommitted_pages and mark them as SHARED again
+       IFF they are not in alloc[] */
         /* STM_LIST_FOREACH(_STM_TL2->uncommitted_pages, ({ */
         /*         uintptr_t pagenum = (uintptr_t)item; */
         /*         flag_page_private[pagenum] = SHARED_PAGE; */
