@@ -423,7 +423,23 @@ class TestBasic(BaseTest):
         assert stm_get_page_flag(stm_get_obj_pages(newer)[0]) == lib.SHARED_PAGE
         assert not (stm_get_flags(newer) & lib.GCFLAG_NOT_COMMITTED)
         
+    def test_reset_partial_alloc_pages(self):
+        stm_start_transaction()
+        new = stm_allocate(16)
+        stm_set_char(new, 'a')
+        stm_push_root(new)
+        stm_minor_collect()
+        new = stm_pop_root()
+        stm_abort_transaction()
 
+        stm_start_transaction()
+        newer = stm_allocate(16)
+        stm_push_root(newer)
+        stm_minor_collect()
+        newer = stm_pop_root()
+        assert stm_get_real_address(new) == stm_get_real_address(newer)
+        assert stm_get_char(newer) == '\0'
+        
 
     # def test_resolve_write_write_no_conflict(self):
     #     stm_start_transaction()
