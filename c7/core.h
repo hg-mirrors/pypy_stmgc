@@ -6,29 +6,22 @@
 #include <stdbool.h>
 
 
-#define TLPREFIX __attribute__((address_space(256)))
+#define NB_PAGES            (256*256)    // 256MB
+#define NB_THREADS          2
+#define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
+#define LARGE_OBJECT_WORDS  36
+#define NB_NURSERY_PAGES    1024
+#define LENGTH_SHADOW_STACK   163840
 
-typedef TLPREFIX struct _thread_local1_s _thread_local1_t;
-typedef TLPREFIX struct object_s object_t;
-typedef TLPREFIX struct read_marker_s read_marker_t;
-typedef TLPREFIX char localchar_t;
 
-/* Structure of objects
-   --------------------
+#define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_THREADS)
+#define READMARKER_END        ((NB_PAGES * 4096UL) >> 4)
+#define FIRST_OBJECT_PAGE     ((READMARKER_END + 4095) / 4096UL)
+#define FIRST_NURSERY_PAGE    FIRST_OBJECT_PAGE
+#define READMARKER_START      ((FIRST_OBJECT_PAGE * 4096UL) >> 4)
+#define FIRST_READMARKER_PAGE (READMARKER_START / 4096UL)
+#define FIRST_AFTER_NURSERY_PAGE  (FIRST_OBJECT_PAGE + NB_NURSERY_PAGES)
 
-   Objects manipulated by the user program, and managed by this library,
-   must start with a "struct object_s" field.  Pointers to any user object
-   must use the "TLPREFIX struct foo *" type --- don't forget TLPREFIX.
-   The best is to use typedefs like above.
-
-   The object_s part contains some fields reserved for the STM library,
-   as well as a 32-bit integer field that can be freely used by the user
-   program.  However, right now this field must be read-only --- i.e. it
-   must never be modified on any object that may already belong to a
-   past transaction; you can only set it on just-allocated objects.  The
-   best is to consider it as a field that is written to only once on
-   newly allocated objects.
-*/
 
 enum {
     /* set if the write-barrier slowpath needs to trigger. set on all
@@ -61,6 +54,35 @@ enum {
 };  /* flag_page_private */
 
 
+
+
+#define TLPREFIX __attribute__((address_space(256)))
+
+typedef TLPREFIX struct _thread_local1_s _thread_local1_t;
+typedef TLPREFIX struct object_s object_t;
+typedef TLPREFIX struct read_marker_s read_marker_t;
+typedef TLPREFIX char localchar_t;
+typedef TLPREFIX struct alloc_for_size_s alloc_for_size_t;
+typedef void* jmpbufptr_t[5];  /* for use with __builtin_setjmp() */
+
+/* Structure of objects
+   --------------------
+
+   Objects manipulated by the user program, and managed by this library,
+   must start with a "struct object_s" field.  Pointers to any user object
+   must use the "TLPREFIX struct foo *" type --- don't forget TLPREFIX.
+   The best is to use typedefs like above.
+
+   The object_s part contains some fields reserved for the STM library,
+   as well as a 32-bit integer field that can be freely used by the user
+   program.  However, right now this field must be read-only --- i.e. it
+   must never be modified on any object that may already belong to a
+   past transaction; you can only set it on just-allocated objects.  The
+   best is to consider it as a field that is written to only once on
+   newly allocated objects.
+*/
+
+
 struct object_s {
     uint8_t stm_flags;            /* reserved for the STM library */
     /* make sure it doesn't get bigger than 4 bytes for performance
@@ -71,29 +93,73 @@ struct read_marker_s {
     uint8_t rm;
 };
 
-typedef void* jmpbufptr_t[5];  /* for use with __builtin_setjmp() */
+struct alloc_for_size_s {
+    localchar_t *next;
+    uint16_t start, stop;
+    bool flag_partial_page;
+};
+
 
 struct _thread_local1_s {
     jmpbufptr_t *jmpbufptr;
     uint8_t transaction_read_version;
+    
+    int thread_num;
+    bool running_transaction;
+    bool need_abort;
+    char *thread_base;
+    struct stm_list_s *modified_objects;
+
+    object_t **old_shadow_stack;
     object_t **shadow_stack;
     object_t **shadow_stack_base;
-};
-#define _STM_TL1            ((_thread_local1_t *)4352)
 
+    struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
+    struct stm_list_s *uncommitted_objects;
+    /* pages newly allocated in the current transaction only containing
+       uncommitted objects */
+    struct stm_list_s *uncommitted_pages;
+
+    
+    localchar_t *nursery_current;
+    struct stm_list_s *old_objects_to_trace;
+};
+#define _STM_TL            ((_thread_local1_t *)4352)
+
+
+
+extern uint8_t flag_page_private[NB_PAGES];   /* xxx_PAGE constants above */
+extern char *object_pages;                    /* start of MMAP region */
+extern uint8_t write_locks[READMARKER_END - READMARKER_START];
 
 /* this should use llvm's coldcc calling convention,
    but it's not exposed to C code so far */
 void _stm_write_slowpath(object_t *);
 
+
+/* ==================== HELPERS ==================== */
+
 #define LIKELY(x)   __builtin_expect(x, true)
 #define UNLIKELY(x) __builtin_expect(x, false)
 
+#define REAL_ADDRESS(object_pages, src)   ((object_pages) + (uintptr_t)(src))
 
+static inline struct object_s *real_address(object_t *src)
+{
+    return (struct object_s*)REAL_ADDRESS(_STM_TL->thread_base, src);
+}
+
+static inline char *get_thread_base(long thread_num)
+{
+    return object_pages + thread_num * (NB_PAGES * 4096UL);
+}
+
+
+/* ==================== API ==================== */
 static inline void stm_read(object_t *obj)
 {
     ((read_marker_t *)(((uintptr_t)obj) >> 4))->rm =
-        _STM_TL1->transaction_read_version;
+        _STM_TL->transaction_read_version;
 }
 
 static inline void stm_write(object_t *obj)
@@ -104,12 +170,12 @@ static inline void stm_write(object_t *obj)
 
 static inline void stm_push_root(object_t *obj)
 {
-    *(_STM_TL1->shadow_stack++) = obj;
+    *(_STM_TL->shadow_stack++) = obj;
 }
 
 static inline object_t *stm_pop_root(void)
 {
-    return *(--_STM_TL1->shadow_stack);
+    return *(--_STM_TL->shadow_stack);
 }
 
 /* must be provided by the user of this library */
