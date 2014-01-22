@@ -13,28 +13,20 @@
 #include "core.h"
 #include "list.h"
 #include "nursery.h"
+#include "pages.h"
 
-uintptr_t index_page_never_used;
 
-uintptr_t _stm_reserve_pages(int num)
+void stm_major_collection(void)
 {
-    /* Grab a free page, initially shared between the threads. */
+    assert(_STM_TL->running_transaction);
+    abort();
+}
 
-    // XXX look in some free list first
 
-    /* Return the index'th object page, which is so far never used. */
-    uintptr_t index = __sync_fetch_and_add(&index_page_never_used, num);
-
-    int i;
-    for (i = 0; i < num; i++) {
-        assert(flag_page_private[index+i] == SHARED_PAGE);
-    }
-    assert(flag_page_private[index] == SHARED_PAGE);
-    if (index + num >= NB_PAGES) {
-        fprintf(stderr, "Out of mmap'ed memory!\n");
-        abort();
-    }
-    return index;
+bool _stm_is_young(object_t *o)
+{
+    assert((uintptr_t)o >= FIRST_NURSERY_PAGE * 4096);
+    return (uintptr_t)o < FIRST_AFTER_NURSERY_PAGE * 4096;
 }
 
 
@@ -44,12 +36,10 @@ void mark_page_as_uncommitted(uintptr_t pagenum)
     LIST_APPEND(_STM_TL->uncommitted_pages, (object_t*)pagenum);
 }
 
-
-
 object_t *_stm_allocate_old(size_t size)
 {
     int pages = (size + 4095) / 4096;
-    localchar_t* addr = (localchar_t*)(_stm_reserve_pages(pages) * 4096);
+    localchar_t* addr = (localchar_t*)(stm_pages_reserve(pages) * 4096);
 
     object_t* o = (object_t*)addr;
     o->stm_flags |= GCFLAG_WRITE_BARRIER;
@@ -78,7 +68,7 @@ localchar_t *_stm_alloc_next_page(size_t size_class)
     size_t size = size_class * 8;
 
     /* reserve a fresh new page */
-    page = _stm_reserve_pages(1);
+    page = stm_pages_reserve(1);
 
     /* mark as UNCOMMITTED_... */
     mark_page_as_uncommitted(page);

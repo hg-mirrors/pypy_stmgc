@@ -9,11 +9,11 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 header_files = [os.path.join(parent_dir, _n) for _n in
                 """core.h pagecopy.h list.h
                 reader_writer_lock.h
-                nursery.h""".split()]
+                nursery.h pages.h""".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
                 """core.c pagecopy.c list.c
                 reader_writer_lock.c
-                nursery.c""".split()]
+                nursery.c pages.c""".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):
@@ -101,6 +101,8 @@ lib = ffi.verify('''
 #include <assert.h>
 
 #include "core.h"
+#include "pages.h"
+#include "nursery.h"
 
 struct myobj_s {
     struct object_s hdr;
