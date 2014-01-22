@@ -15,7 +15,7 @@
 #include "pagecopy.h"
 #include "reader_writer_lock.h"
 #include "nursery.h"
-
+#include "pages.h"
 
 
 
@@ -27,18 +27,11 @@
 
 char *object_pages;
 static int num_threads_started;
-
-uint8_t flag_page_private[NB_PAGES];
 uint8_t write_locks[READMARKER_END - READMARKER_START];
 
 
 /************************************************************/
 
-
-uint8_t _stm_get_page_flag(int pagenum)
-{
-    return flag_page_private[pagenum];
-}
 
 static void spin_loop(void)
 {
@@ -179,11 +172,6 @@ static void _stm_privatize(uintptr_t pagenum)
 
 
 
-bool _stm_is_young(object_t *o)
-{
-    assert((uintptr_t)o >= FIRST_NURSERY_PAGE * 4096);
-    return (uintptr_t)o < FIRST_AFTER_NURSERY_PAGE * 4096;
-}
 
 
 char *_stm_real_address(object_t *o)
@@ -288,12 +276,6 @@ void _stm_write_slowpath(object_t *obj)
 
     LIST_APPEND(_STM_TL->modified_objects, obj);
 }
-
-
-
-
-
-
 
 
 
@@ -465,11 +447,6 @@ static void reset_transaction_read_version(void)
     _STM_TL->transaction_read_version = 1;
 }
 
-void stm_major_collection(void)
-{
-    assert(_STM_TL->running_transaction);
-    abort();
-}
 
 void stm_start_transaction(jmpbufptr_t *jmpbufptr)
 {
