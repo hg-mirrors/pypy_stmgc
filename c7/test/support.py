@@ -79,7 +79,7 @@ extern size_t stmcb_size(struct object_s *);
 extern void stmcb_trace(struct object_s *, void (object_t **));
 
 uint8_t _stm_get_flags(object_t *obj);
-uint8_t _stm_get_page_flag(int pagenum);
+uint8_t stm_get_page_flag(int pagenum);
 enum {
     SHARED_PAGE=0,
     REMAPPING_PAGE,
@@ -337,7 +337,7 @@ def stm_minor_collect():
     lib._stm_minor_collect()
 
 def stm_get_page_flag(pagenum):
-    return lib._stm_get_page_flag(pagenum)
+    return lib.stm_get_page_flag(pagenum)
 
 def stm_get_obj_size(o):
     return lib.stmcb_size(stm_get_real_address(o))

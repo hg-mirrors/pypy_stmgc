@@ -138,8 +138,24 @@ static inline char *get_thread_base(long thread_num)
     return object_pages + thread_num * (NB_PAGES * 4096UL);
 }
 
+static inline void spin_loop(void)
+{
+    asm("pause" : : : "memory");
+}
+
+
+static inline void write_fence(void)
+{
+#if defined(__amd64__) || defined(__i386__)
+    asm("" : : : "memory");
+#else
+#  error "Define write_fence() for your architecture"
+#endif
+}
+
 
 /* ==================== API ==================== */
+
 static inline void stm_read(object_t *obj)
 {
     ((read_marker_t *)(((uintptr_t)obj) >> 4))->rm =

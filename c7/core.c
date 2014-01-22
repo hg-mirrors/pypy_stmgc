@@ -12,16 +12,9 @@
 
 #include "core.h"
 #include "list.h"
-#include "pagecopy.h"
 #include "reader_writer_lock.h"
 #include "nursery.h"
 #include "pages.h"
-
-
-
-#if defined(__i386__) || defined(__x86_64__)
-#  define HAVE_FULL_EXCHANGE_INSN
-#endif
 
 
 
@@ -30,25 +23,6 @@ static int num_threads_started;
 uint8_t write_locks[READMARKER_END - READMARKER_START];
 
 
-/************************************************************/
-
-
-static void spin_loop(void)
-{
-    asm("pause" : : : "memory");
-}
-
-
-static void write_fence(void)
-{
-#if defined(__amd64__) || defined(__i386__)
-    asm("" : : : "memory");
-#else
-#  error "Define write_fence() for your architecture"
-#endif
-}
-
-/************************************************************/
 
 
 /* a multi-reader, single-writer lock: transactions normally take a reader
@@ -112,63 +86,6 @@ bool _stm_was_written(object_t *obj)
        and doesn't trigger the write-barrier slowpath */
     return !(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 }
-
-
-
-
-static void _stm_privatize(uintptr_t pagenum)
-{
-    if (flag_page_private[pagenum] == PRIVATE_PAGE)
-        return;
-
-#ifdef HAVE_FULL_EXCHANGE_INSN
-    /* use __sync_lock_test_and_set() as a cheaper alternative to
-       __sync_bool_compare_and_swap(). */
-    int previous = __sync_lock_test_and_set(&flag_page_private[pagenum],
-                                            REMAPPING_PAGE);
-    if (previous == PRIVATE_PAGE) {
-        flag_page_private[pagenum] = PRIVATE_PAGE;
-        return;
-    }
-    bool was_shared = (previous == SHARED_PAGE);
-#else
-    bool was_shared = __sync_bool_compare_and_swap(&flag_page_private[pagenum],
-                                                  SHARED_PAGE, REMAPPING_PAGE);
-#endif
-    if (!was_shared) {
-        while (1) {
-            uint8_t state = ((uint8_t volatile *)flag_page_private)[pagenum];
-            if (state != REMAPPING_PAGE) {
-                assert(state == PRIVATE_PAGE);
-                break;
-            }
-            spin_loop();
-        }
-        return;
-    }
-
-    ssize_t pgoff1 = pagenum;
-    ssize_t pgoff2 = pagenum + NB_PAGES;
-    ssize_t localpgoff = pgoff1 + NB_PAGES * _STM_TL->thread_num;
-    ssize_t otherpgoff = pgoff1 + NB_PAGES * (1 - _STM_TL->thread_num);
-
-    void *localpg = object_pages + localpgoff * 4096UL;
-    void *otherpg = object_pages + otherpgoff * 4096UL;
-
-    // XXX should not use pgoff2, but instead the next unused page in
-    // thread 2, so that after major GCs the next dirty pages are the
-    // same as the old ones
-    int res = remap_file_pages(localpg, 4096, 0, pgoff2, 0);
-    if (res < 0) {
-        perror("remap_file_pages");
-        abort();
-    }
-    pagecopy(localpg, otherpg);
-    write_fence();
-    assert(flag_page_private[pagenum] == REMAPPING_PAGE);
-    flag_page_private[pagenum] = PRIVATE_PAGE;
-}
-
 
 
 
@@ -244,17 +161,18 @@ void _stm_write_slowpath(object_t *obj)
     
     /* for old objects from the same transaction we don't need
        to privatize the page */
-    if ((flag_page_private[pagenum] == UNCOMMITTED_SHARED_PAGE)
+    if ((stm_get_page_flag(pagenum) == UNCOMMITTED_SHARED_PAGE)
         || (obj->stm_flags & GCFLAG_NOT_COMMITTED)) {
         obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
         return;
     }
 
     /* privatize if SHARED_PAGE */
-    /* xxx stmcb_size() is probably too slow */
+    /* xxx stmcb_size() is probably too slow, maybe add a GCFLAG_LARGE for
+       objs with more than 1 page */
     int pages = stmcb_size(real_address(obj)) / 4096;
     for (; pages >= 0; pages--)
-        _stm_privatize(pagenum + pages);
+        stm_pages_privatize(pagenum + pages);
 
     /* claim the write-lock for this object */
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
@@ -341,7 +259,7 @@ void stm_setup(void)
     }
 
     for (i = FIRST_NURSERY_PAGE; i < FIRST_AFTER_NURSERY_PAGE; i++)
-        flag_page_private[i] = PRIVATE_PAGE; /* nursery is private.
+        stm_set_page_flag(i, PRIVATE_PAGE); /* nursery is private.
                                                 or should it be UNCOMMITTED??? */
     
     num_threads_started = 0;
@@ -407,7 +325,7 @@ void _stm_teardown_thread(void)
 void _stm_teardown(void)
 {
     munmap(object_pages, TOTAL_MEMORY);
-    memset(flag_page_private, 0, sizeof(flag_page_private));
+    _stm_reset_page_flags();
     memset(write_locks, 0, sizeof(write_locks));
     object_pages = NULL;
 }
