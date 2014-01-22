@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-
+#include <assert.h>
 
 #define NB_PAGES            (256*256)    // 256MB
 #define NB_THREADS          2
@@ -133,6 +133,26 @@ static inline struct object_s *real_address(object_t *src)
     return (struct object_s*)REAL_ADDRESS(_STM_TL->thread_base, src);
 }
 
+static inline char *_stm_real_address(object_t *o)
+{
+    if (o == NULL)
+        return NULL;
+    assert(FIRST_OBJECT_PAGE * 4096 <= (uintptr_t)o
+           && (uintptr_t)o < NB_PAGES * 4096);
+    return (char*)real_address(o);
+}
+
+static inline object_t *_stm_tl_address(char *ptr)
+{
+    if (ptr == NULL)
+        return NULL;
+    
+    uintptr_t res = ptr - _STM_TL->thread_base;
+    assert(FIRST_OBJECT_PAGE * 4096 <= res
+           && res < NB_PAGES * 4096);
+    return (object_t*)res;
+}
+
 static inline char *get_thread_base(long thread_num)
 {
     return object_pages + thread_num * (NB_PAGES * 4096UL);
@@ -195,15 +215,11 @@ void stm_setup(void);
 void stm_setup_thread(void);
 void stm_start_transaction(jmpbufptr_t *jmpbufptr);
 void stm_stop_transaction(void);
-char *_stm_real_address(object_t *o);
-object_t *_stm_tl_address(char *ptr);
+
 
 object_t *_stm_allocate_old(size_t size);
 
 object_t *stm_allocate_prebuilt(size_t size);
-
-void _stm_start_safe_point(void);
-void _stm_stop_safe_point(void);
 
 void stm_abort_transaction(void);
 

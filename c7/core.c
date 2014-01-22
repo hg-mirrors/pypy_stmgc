@@ -15,6 +15,7 @@
 #include "reader_writer_lock.h"
 #include "nursery.h"
 #include "pages.h"
+#include "stmsync.h"
 
 
 
@@ -24,46 +25,6 @@ uint8_t write_locks[READMARKER_END - READMARKER_START];
 
 
 
-
-/* a multi-reader, single-writer lock: transactions normally take a reader
-   lock, so don't conflict with each other; when we need to do a global GC,
-   we take a writer lock to "stop the world". */
-
-rwticket rw_shared_lock;        /* the "GIL" */
-
-void stm_start_shared_lock(void)
-{
-    rwticket_rdlock(&rw_shared_lock);
-}
-
-void stm_stop_shared_lock(void)
-{
-    rwticket_rdunlock(&rw_shared_lock);
-}
-
-void stm_stop_exclusive_lock(void)
-{
-    rwticket_wrunlock(&rw_shared_lock);
-}
-
-void stm_start_exclusive_lock(void)
-{
-    rwticket_wrlock(&rw_shared_lock);
-}
-
-void _stm_start_safe_point(void)
-{
-    assert(!_STM_TL->need_abort);
-    stm_stop_shared_lock();
-}
-
-void _stm_stop_safe_point(void)
-{
-    stm_start_shared_lock();
-    if (_STM_TL->need_abort)
-        stm_abort_transaction();
-}
-
 bool _stm_was_read_remote(char *base, object_t *obj)
 {
     struct read_marker_s *marker = (struct read_marker_s *)
@@ -72,7 +33,6 @@ bool _stm_was_read_remote(char *base, object_t *obj)
         (base + (uintptr_t)_STM_TL);
     return (marker->rm == other_TL1->transaction_read_version);
 }
-
 
 bool _stm_was_read(object_t *obj)
 {
@@ -85,30 +45,6 @@ bool _stm_was_written(object_t *obj)
     /* if the obj was written to in the current transaction
        and doesn't trigger the write-barrier slowpath */
     return !(obj->stm_flags & GCFLAG_WRITE_BARRIER);
-}
-
-
-
-
-
-char *_stm_real_address(object_t *o)
-{
-    if (o == NULL)
-        return NULL;
-    assert(FIRST_OBJECT_PAGE * 4096 <= (uintptr_t)o
-           && (uintptr_t)o < NB_PAGES * 4096);
-    return (char*)real_address(o);
-}
-
-object_t *_stm_tl_address(char *ptr)
-{
-    if (ptr == NULL)
-        return NULL;
-    
-    uintptr_t res = ptr - _STM_TL->thread_base;
-    assert(FIRST_OBJECT_PAGE * 4096 <= res
-           && res < NB_PAGES * 4096);
-    return (object_t*)res;
 }
 
 
@@ -145,10 +81,6 @@ static void push_modified_to_other_threads()
         remote_TL->need_abort = 1;
     }
 }
-
-
-
-
 
 
 
@@ -200,7 +132,7 @@ void _stm_write_slowpath(object_t *obj)
 
 void stm_setup(void)
 {
-    memset(&rw_shared_lock, 0, sizeof(rwticket));
+    _stm_reset_shared_lock();
 
     /* Check that some values are acceptable */
     assert(4096 <= ((uintptr_t)_STM_TL));
@@ -300,8 +232,7 @@ bool _stm_is_in_transaction(void)
 
 void _stm_teardown_thread(void)
 {
-    assert(!rwticket_wrtrylock(&rw_shared_lock));
-    assert(!rwticket_wrunlock(&rw_shared_lock));
+    _stm_reset_shared_lock();
     
     stm_list_free(_STM_TL->modified_objects);
     _STM_TL->modified_objects = NULL;
