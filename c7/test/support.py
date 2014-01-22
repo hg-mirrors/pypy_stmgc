@@ -7,9 +7,13 @@ os.environ['CC'] = 'clang'
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 header_files = [os.path.join(parent_dir, _n) for _n in
-                "core.h pagecopy.h list.h reader_writer_lock.h".split()]
+                """core.h pagecopy.h list.h
+                reader_writer_lock.h
+                nursery.h""".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
-                "core.c pagecopy.c list.c reader_writer_lock.c".split()]
+                """core.c pagecopy.c list.c
+                reader_writer_lock.c
+                nursery.c""".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):
@@ -118,52 +122,52 @@ uint8_t _stm_get_flags(object_t *obj) {
 bool _checked_stm_write(object_t *object) {
     jmpbufptr_t here;
     if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(_STM_TL1->jmpbufptr == (jmpbufptr_t*)-1);
-         _STM_TL1->jmpbufptr = &here;
+         assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
+         _STM_TL->jmpbufptr = &here;
          stm_write(object);
-         _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+         _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
-    _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+    _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
 
 bool _stm_stop_transaction(void) {
     jmpbufptr_t here;
     if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(_STM_TL1->jmpbufptr == (jmpbufptr_t*)-1);
-         _STM_TL1->jmpbufptr = &here;
+         assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
+         _STM_TL->jmpbufptr = &here;
          stm_stop_transaction();
-         _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+         _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
-    _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+    _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
 
 bool _stm_check_stop_safe_point(void) {
     jmpbufptr_t here;
     if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(_STM_TL1->jmpbufptr == (jmpbufptr_t*)-1);
-         _STM_TL1->jmpbufptr = &here;
+         assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
+         _STM_TL->jmpbufptr = &here;
          _stm_stop_safe_point();
-         _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+         _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
-    _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+    _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
 
 bool _stm_check_abort_transaction(void) {
     jmpbufptr_t here;
     if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(_STM_TL1->jmpbufptr == (jmpbufptr_t*)-1);
-         _STM_TL1->jmpbufptr = &here;
+         assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
+         _STM_TL->jmpbufptr = &here;
          stm_abort_transaction();
-         _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+         _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
-    _STM_TL1->jmpbufptr = (jmpbufptr_t*)-1;
+    _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
 
