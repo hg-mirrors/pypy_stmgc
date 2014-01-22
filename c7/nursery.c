@@ -32,7 +32,7 @@ bool _stm_is_young(object_t *o)
 
 void mark_page_as_uncommitted(uintptr_t pagenum)
 {
-    flag_page_private[pagenum] = UNCOMMITTED_SHARED_PAGE;
+    stm_set_page_flag(pagenum, UNCOMMITTED_SHARED_PAGE);
     LIST_APPEND(_STM_TL->uncommitted_pages, (object_t*)pagenum);
 }
 
@@ -253,7 +253,7 @@ void push_uncommitted_to_other_threads()
             item->stm_flags &= ~GCFLAG_NOT_COMMITTED;
             
             uintptr_t pagenum = ((uintptr_t)item) / 4096UL;
-            if (flag_page_private[pagenum] == PRIVATE_PAGE) {
+            if (stm_get_page_flag(pagenum) == PRIVATE_PAGE) {
                 /* page was privatized... */
                 char *src = REAL_ADDRESS(local_base, item);
                 char *dst = REAL_ADDRESS(remote_base, item);
@@ -293,7 +293,7 @@ void nursery_on_commit()
                                    reset in case of an abort */
         
         uintptr_t pagenum = ((uintptr_t)(alloc->next - 1)) / 4096UL;
-        if (flag_page_private[pagenum] == UNCOMMITTED_SHARED_PAGE) {
+        if (stm_get_page_flag(pagenum) == UNCOMMITTED_SHARED_PAGE) {
             /* becomes a SHARED (done below) partially used page */
             alloc->flag_partial_page = 1;
         }
@@ -303,7 +303,7 @@ void nursery_on_commit()
         _STM_TL->uncommitted_pages,
         ({
             uintptr_t pagenum = (uintptr_t)item;
-            flag_page_private[pagenum] = SHARED_PAGE;
+            stm_set_page_flag(pagenum, SHARED_PAGE);
         }));
     stm_list_clear(_STM_TL->uncommitted_pages);
 }

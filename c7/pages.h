@@ -15,9 +15,12 @@ enum {
 };  /* flag_page_private */
 
 
+void stm_pages_privatize(uintptr_t pagenum);
 uintptr_t stm_pages_reserve(int num);
-uint8_t _stm_get_page_flag(int pagenum);
+uint8_t stm_get_page_flag(int pagenum);
+void stm_set_page_flag(int pagenum, uint8_t flag);
+void _stm_reset_page_flags(void);
 
-extern uint8_t flag_page_private[NB_PAGES];
+
 
 
