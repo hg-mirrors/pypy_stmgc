@@ -453,6 +453,7 @@ uintptr_t _stm_reserve_pages(int num)
 
 object_t *_stm_alloc_old(size_t size)
 {
+    /* may return uninitialized objects */
     object_t *result;
     size_t size_class = size / 8;
     assert(size_class >= 2);
@@ -486,6 +487,8 @@ object_t *_stm_alloc_old(size_t size)
 
 localchar_t *_stm_alloc_next_page(size_t size_class)
 {
+    /* may return uninitialized pages */
+    
     /* 'alloc->next' points to where the next allocation should go.  The
        present function is called instead when this next allocation is
        equal to 'alloc->stop'.  As we know that 'start', 'next' and
@@ -867,6 +870,8 @@ void stm_stop_transaction(void)
         uint16_t cur = (uintptr_t)alloc->next;
         if (start == cur)
             continue;
+
+        alloc->start = cur;     /* next transaction starts there */
         uintptr_t pagenum = ((uintptr_t)(alloc->next - 1)) / 4096UL;
         if (flag_page_private[pagenum] == UNCOMMITTED_SHARED_PAGE) {
             /* becomes a SHARED (s.b.) partially used page */
@@ -1021,13 +1026,12 @@ void stm_abort_transaction(void)
 
     /* XXX: forget about GCFLAG_UNCOMMITTED objects  */
     
-    /* long j; */
-    /* for (j = 2; j < LARGE_OBJECT_WORDS; j++) { */
-    /*     alloc_for_size_t *alloc = &_STM_TL2->alloc[j]; */
-    /*     uint16_t num_allocated = ((uintptr_t)alloc->next) - alloc->start; */
-    /*     alloc->next -= num_allocated; */
-    /* } */
-    /* stm_list_clear(_STM_TL2->uncommitted_object_ranges); */
+    long j;
+    for (j = 2; j < LARGE_OBJECT_WORDS; j++) {
+        alloc_for_size_t *alloc = &_STM_TL2->alloc[j];
+        uint16_t num_allocated = ((uintptr_t)alloc->next) - alloc->start;
+        alloc->next -= num_allocated;
+    }
     
     
     assert(_STM_TL1->jmpbufptr != NULL);
