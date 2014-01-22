@@ -5,7 +5,7 @@
 #include <semaphore.h>
 
 #include "core.h"
-
+#include "stmsync.h"
 
 #define LIST_LENGTH 6000
 #define BUNCH       400
