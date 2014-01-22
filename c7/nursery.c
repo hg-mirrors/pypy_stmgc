@@ -322,24 +322,36 @@ void nursery_on_abort()
     _STM_TL->nursery_current = nursery_base;
 
 
-    /* unreserve uncommitted_pages and mark them as SHARED again
-       IFF they are not in alloc[] */
-        /* STM_LIST_FOREACH(_STM_TL->uncommitted_pages, ({ */
-        /*         uintptr_t pagenum = (uintptr_t)item; */
-        /*         flag_page_private[pagenum] = SHARED_PAGE; */
-        /*     })); */
-    stm_list_clear(_STM_TL->uncommitted_pages);
-
-
     /* forget about GCFLAG_NOT_COMMITTED objects by
        resetting alloc-pages */
     long j;
     for (j = 2; j < LARGE_OBJECT_WORDS; j++) {
         alloc_for_size_t *alloc = &_STM_TL->alloc[j];
         uint16_t num_allocated = ((uintptr_t)alloc->next) - alloc->start;
-        /* forget about all non-committed objects */
-        alloc->next -= num_allocated;
+        uintptr_t next = (uintptr_t)alloc->next;
+        
+        if (num_allocated) {
+            /* forget about all non-committed objects */
+            alloc->next -= num_allocated;
+            
+            uintptr_t pagenum = ((uintptr_t)(next - 1)) / 4096UL;
+            if (stm_get_page_flag(pagenum) == UNCOMMITTED_SHARED_PAGE) {
+                /* the page will be freed below, we need a new one for the
+                   next allocation */
+                alloc->next = 0;
+                alloc->stop = 0;
+                alloc->start = 0;
+            }
+        }
     }
+    
+    /* unreserve uncommitted_pages and mark them as SHARED again
+       IFF they are not in alloc[] */
+    STM_LIST_FOREACH(_STM_TL->uncommitted_pages, ({
+                stm_pages_unreserve((uintptr_t)item);
+            }));
+    stm_list_clear(_STM_TL->uncommitted_pages);
+
 }
 
 

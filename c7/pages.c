@@ -22,12 +22,23 @@
 #endif
 
 
-
-uint8_t flag_page_private[NB_PAGES];
 uintptr_t index_page_never_used;
+uint8_t flag_page_private[NB_PAGES];
 
-void _stm_reset_page_flags()
+uint8_t list_lock = 0;
+struct stm_list_s *single_page_list;
+
+
+void _stm_reset_pages()
 {
+    assert(!list_lock);
+    if (!single_page_list)
+        single_page_list = stm_list_create();
+    else
+        stm_list_clear(single_page_list);
+
+    index_page_never_used = FIRST_AFTER_NURSERY_PAGE;
+    
     memset(flag_page_private, 0, sizeof(flag_page_private));
 }
 
@@ -41,7 +52,6 @@ void stm_set_page_flag(int pagenum, uint8_t flag)
     assert(flag_page_private[pagenum] != flag);
     flag_page_private[pagenum] = flag;
 }
-
 
 
 void stm_pages_privatize(uintptr_t pagenum)
@@ -98,11 +108,23 @@ void stm_pages_privatize(uintptr_t pagenum)
 }
 
 
+
 uintptr_t stm_pages_reserve(int num)
 {
     /* grab free, possibly uninitialized pages */
-
-    // XXX look in some free list first
+    if (!stm_list_is_empty(single_page_list)) {
+        uint8_t previous;
+        while ((previous = __sync_lock_test_and_set(&list_lock, 1)))
+            spin_loop();
+        
+        if (!stm_list_is_empty(single_page_list)) {
+            uintptr_t res = (uintptr_t)stm_list_pop_item(single_page_list);
+            list_lock = 0;
+            return res;
+        }
+        
+        list_lock = 0;
+    }
 
     /* Return the index'th object page, which is so far never used. */
     uintptr_t index = __sync_fetch_and_add(&index_page_never_used, num);
@@ -111,7 +133,7 @@ uintptr_t stm_pages_reserve(int num)
     for (i = 0; i < num; i++) {
         assert(flag_page_private[index+i] == SHARED_PAGE);
     }
-    assert(flag_page_private[index] == SHARED_PAGE);
+
     if (index + num >= NB_PAGES) {
         fprintf(stderr, "Out of mmap'ed memory!\n");
         abort();
@@ -119,6 +141,17 @@ uintptr_t stm_pages_reserve(int num)
     return index;
 }
 
+void stm_pages_unreserve(uintptr_t pagenum)
+{
+    uint8_t previous;
+    while ((previous = __sync_lock_test_and_set(&list_lock, 1)))
+        spin_loop();
+    
+    flag_page_private[pagenum] = SHARED_PAGE;
+    LIST_APPEND(single_page_list, (object_t*)pagenum);
+
+    list_lock = 0;
+}
 
 
 
