@@ -14,7 +14,7 @@
 #include "list.h"
 #include "nursery.h"
 #include "pages.h"
-
+#include "stmsync.h"
 
 void stm_major_collection(void)
 {
