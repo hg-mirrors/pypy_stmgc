@@ -453,14 +453,18 @@ uintptr_t _stm_reserve_pages(int num)
 
 object_t *_stm_alloc_old(size_t size)
 {
-    /* may return uninitialized objects */
+    /* may return uninitialized objects. except for the
+       GCFLAG_NOT_COMMITTED, it is set exactly if
+       we allocated the object in a SHARED and partially
+       committed page. (XXX: add the flag in some other place)
+     */
     object_t *result;
     size_t size_class = size / 8;
     assert(size_class >= 2);
     
     if (size_class >= LARGE_OBJECT_WORDS) {
         result = _stm_allocate_old(size);
-        result->stm_flags &= ~GCFLAG_WRITE_BARRIER; /* added by _stm_allocate_old... */
+        result->stm_flags &= ~GCFLAG_NOT_COMMITTED; /* page may be non-zeroed */
 
         int page = ((uintptr_t)result) / 4096;
         int pages = (size + 4095) / 4096;
@@ -468,6 +472,8 @@ object_t *_stm_alloc_old(size_t size)
         for (i = 0; i < pages; i++) {
             mark_page_as_uncommitted(page + i);
         }
+        /* make sure the flag is not set (page is not zeroed!) */
+                result->stm_flags &= ~GCFLAG_NOT_COMMITTED;
     } else { 
         alloc_for_size_t *alloc = &_STM_TL2->alloc[size_class];
          
@@ -479,6 +485,9 @@ object_t *_stm_alloc_old(size_t size)
             if (alloc->flag_partial_page) {
                 LIST_APPEND(_STM_TL2->uncommitted_objects, result);
                 result->stm_flags |= GCFLAG_NOT_COMMITTED;
+            } else {
+                /* make sure the flag is not set (page is not zeroed!) */
+                result->stm_flags &= ~GCFLAG_NOT_COMMITTED;
             }
         }
     }
@@ -826,23 +835,6 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
     _STM_TL2->old_shadow_stack = _STM_TL1->shadow_stack;
 }
 
-#if 0
-static void update_new_objects_in_other_threads(uintptr_t pagenum,
-                                                uint16_t start, uint16_t stop)
-{
-    size_t size = (uint16_t)(stop - start);
-    assert(size <= 4096 - (start & 4095));
-    assert((start & ~4095) == (uint16_t)(pagenum * 4096));
-
-    int thread_num = _STM_TL2->thread_num;
-    uintptr_t local_src = (pagenum * 4096UL) + (start & 4095);
-    char *dst = REAL_ADDRESS(get_thread_base(1 - thread_num), local_src);
-    char *src = REAL_ADDRESS(_STM_TL2->thread_base,           local_src);
-
-    memcpy(dst, src, size);
-    abort();
-}
-#endif
 
 void stm_stop_transaction(void)
 {
@@ -868,13 +860,16 @@ void stm_stop_transaction(void)
         alloc_for_size_t *alloc = &_STM_TL2->alloc[j];
         uint16_t start = alloc->start;
         uint16_t cur = (uintptr_t)alloc->next;
+        
         if (start == cur)
-            continue;
+            continue;           /* page full -> will be replaced automatically */
 
-        alloc->start = cur;     /* next transaction starts there */
+        alloc->start = cur;     /* next transaction has different 'start' to
+                                   reset in case of an abort */
+        
         uintptr_t pagenum = ((uintptr_t)(alloc->next - 1)) / 4096UL;
         if (flag_page_private[pagenum] == UNCOMMITTED_SHARED_PAGE) {
-            /* becomes a SHARED (s.b.) partially used page */
+            /* becomes a SHARED (done below) partially used page */
             alloc->flag_partial_page = 1;
         }
     }
@@ -888,73 +883,6 @@ void stm_stop_transaction(void)
     stm_list_clear(_STM_TL2->uncommitted_pages);
 
  
-    
-    
-    /* /\* walk the uncommitted_object_ranges and manually copy the new objects */
-    /*    to the other thread's pages in the (hopefully rare) case that */
-    /*    the page they belong to is already unshared *\/ */
-    /* long i; */
-    /* struct stm_list_s *lst = _STM_TL2->uncommitted_object_ranges; */
-    /* for (i = stm_list_count(lst); i > 0; ) { */
-    /*     i -= 2; */
-    /*     uintptr_t pagenum = (uintptr_t)stm_list_item(lst, i); */
-
-    /*     /\* NB. the read next line should work even against a parallel */
-    /*        thread, thanks to the lock acquisition we do earlier (see the */
-    /*        beginning of this function).  Indeed, if this read returns */
-    /*        SHARED_PAGE, then we know that the real value in memory was */
-    /*        actually SHARED_PAGE at least at the time of the */
-    /*        acquire_lock().  It may have been modified afterwards by a */
-    /*        compare_and_swap() in the other thread, but then we know for */
-    /*        sure that the other thread is seeing the last, up-to-date */
-    /*        version of our data --- this is the reason of the */
-    /*        write_fence() just before the acquire_lock(). */
-    /*     *\/ */
-    /*     if (flag_page_private[pagenum] != SHARED_PAGE) { */
-    /*         object_t *range = stm_list_item(lst, i + 1); */
-    /*         uint16_t start, stop; */
-    /*         FROM_RANGE(start, stop, range); */
-    /*         update_new_objects_in_other_threads(pagenum, start, stop); */
-    /*     } */
-    /* } */
-    
-    /* /\* do the same for the partially-allocated pages *\/ */
-    /* long j; */
-    /* for (j = 2; j < LARGE_OBJECT_WORDS; j++) { */
-    /*     alloc_for_size_t *alloc = &_STM_TL2->alloc[j]; */
-    /*     uint16_t start = alloc->start; */
-    /*     uint16_t cur = (uintptr_t)alloc->next; */
-
-    /*     if (start == cur) { */
-    /*         /\* nothing to do: this page (or fraction thereof) was left */
-    /*            empty by the previous transaction, and starts empty as */
-    /*            well in the new transaction.  'flag_partial_page' is */
-    /*            unchanged. *\/ */
-    /*     } */
-    /*     else { */
-    /*         uintptr_t pagenum = ((uintptr_t)(alloc->next - 1)) / 4096UL; */
-    /*         /\* for the new transaction, it will start here: *\/ */
-    /*         alloc->start = cur; */
-
-    /*         if (alloc->flag_partial_page) { */
-    /*             if (flag_page_private[pagenum] != SHARED_PAGE) { */
-    /*                 update_new_objects_in_other_threads(pagenum, start, cur); */
-    /*             } */
-    /*         } */
-    /*         else { */
-    /*             /\* we can skip checking flag_page_private[] in non-debug */
-    /*                builds, because the whole page can only contain */
-    /*                objects made by the just-finished transaction. *\/ */
-    /*             assert(flag_page_private[pagenum] == SHARED_PAGE); */
-
-    /*             /\* the next transaction will start with this page */
-    /*                containing objects that are now committed, so */
-    /*                we need to set this flag now *\/ */
-    /*             alloc->flag_partial_page = true; */
-    /*         } */
-    /*     } */
-    /* } */
-
     _STM_TL2->running_transaction = 0;
     stm_stop_exclusive_lock();
     fprintf(stderr, "%c", 'C'+_STM_TL2->thread_num*32);
@@ -974,7 +902,7 @@ static void reset_modified_from_other_threads()
         modified,
         ({
             /* note: same as push_modified_to... but src/dst swapped
-               XXX: unify both... */
+               TODO: unify both... */
             
             char *dst = REAL_ADDRESS(local_base, item);
             char *src = REAL_ADDRESS(remote_base, item);
@@ -1024,12 +952,13 @@ void stm_abort_transaction(void)
     stm_list_clear(_STM_TL2->uncommitted_pages);
 
 
-    /* XXX: forget about GCFLAG_UNCOMMITTED objects  */
-    
+    /* forget about GCFLAG_NOT_COMMITTED objects by
+       resetting alloc-pages */
     long j;
     for (j = 2; j < LARGE_OBJECT_WORDS; j++) {
         alloc_for_size_t *alloc = &_STM_TL2->alloc[j];
         uint16_t num_allocated = ((uintptr_t)alloc->next) - alloc->start;
+        /* forget about all non-committed objects */
         alloc->next -= num_allocated;
     }
     
