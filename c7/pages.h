@@ -19,8 +19,8 @@ void stm_pages_privatize(uintptr_t pagenum);
 uintptr_t stm_pages_reserve(int num);
 uint8_t stm_get_page_flag(int pagenum);
 void stm_set_page_flag(int pagenum, uint8_t flag);
-void _stm_reset_page_flags(void);
-
+void _stm_reset_pages(void);
+void stm_pages_unreserve(uintptr_t num);
 
 
 

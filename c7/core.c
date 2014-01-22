@@ -133,7 +133,8 @@ void _stm_write_slowpath(object_t *obj)
 void stm_setup(void)
 {
     _stm_reset_shared_lock();
-
+    _stm_reset_pages();
+    
     /* Check that some values are acceptable */
     assert(4096 <= ((uintptr_t)_STM_TL));
     assert(((uintptr_t)_STM_TL) == ((uintptr_t)_STM_TL));
@@ -195,7 +196,6 @@ void stm_setup(void)
                                                 or should it be UNCOMMITTED??? */
     
     num_threads_started = 0;
-    index_page_never_used = FIRST_AFTER_NURSERY_PAGE;
 }
 
 #define INVALID_GS_VALUE  0x6D6D6D6D
@@ -256,7 +256,7 @@ void _stm_teardown_thread(void)
 void _stm_teardown(void)
 {
     munmap(object_pages, TOTAL_MEMORY);
-    _stm_reset_page_flags();
+    _stm_reset_pages();
     memset(write_locks, 0, sizeof(write_locks));
     object_pages = NULL;
 }
