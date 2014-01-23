@@ -273,7 +273,9 @@ void nursery_on_start()
 
 void nursery_on_commit()
 {
-    minor_collect();
+    /* DON'T do a minor_collect. This is already done in
+       the caller (optimization) */
+    /* minor_collect(); */
     
     /* uncommitted objects / partially COMMITTED pages */
     push_uncommitted_to_other_threads();
