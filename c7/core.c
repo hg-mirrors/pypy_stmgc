@@ -321,13 +321,19 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
 void stm_stop_transaction(void)
 {
     assert(_STM_TL->running_transaction);
+
+    /* do the minor_collection here and not in nursery_on_commit,
+       since here we can still run concurrently with other threads
+       as we don't hold the exclusive lock yet. */
+    _stm_minor_collect();
+
+    /* Some operations require us to have the EXCLUSIVE lock */
     stm_stop_shared_lock();
     stm_start_exclusive_lock();
 
     _STM_TL->jmpbufptr = NULL;          /* cannot abort any more */
 
-    /* do a minor_collection,
-       push uncommitted objects to other threads,
+    /* push uncommitted objects to other threads,
        make completely uncommitted pages SHARED,
     */
     nursery_on_commit();
