@@ -34,6 +34,7 @@ bool _stm_is_young(object_t *o)
 object_t *_stm_allocate_old(size_t size)
 {
     object_t* o = stm_large_malloc(size);
+    memset(real_address(o), 0, size);
     o->stm_flags |= GCFLAG_WRITE_BARRIER;
     return o;
 }
@@ -166,8 +167,9 @@ void push_uncommitted_to_other_threads()
             /* remove the flag (they are now committed) */
             item->stm_flags &= ~GCFLAG_NOT_COMMITTED;
 
-            _stm_move_object(REAL_ADDRESS(local_base, item),
-                             REAL_ADDRESS(remote_base, item));
+            _stm_move_object(item,
+                REAL_ADDRESS(local_base, item),
+                REAL_ADDRESS(remote_base, item));
         }));
 }
 

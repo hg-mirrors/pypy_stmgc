@@ -104,7 +104,7 @@ void stm_large_free(object_t *data);
 void _stm_large_dump(void);
 char *_stm_largemalloc_data_start(void);
 
-void _stm_move_object(char *src, char *dst);
+void _stm_move_object(object_t* obj, char *src, char *dst);
 size_t _stm_data_size(struct object_s *data);
 void _stm_chunk_pages(struct object_s *data, uintptr_t *start, uintptr_t *num);
 
