@@ -10,12 +10,12 @@ header_files = [os.path.join(parent_dir, _n) for _n in
                 """core.h pagecopy.h list.h
                 reader_writer_lock.h
                 nursery.h pages.h
-                stmsync.h""".split()]
+                stmsync.h largemalloc.h""".split()]
 source_files = [os.path.join(parent_dir, _n) for _n in
                 """core.c pagecopy.c list.c
                 reader_writer_lock.c
                 nursery.c pages.c
-                stmsync.c""".split()]
+                stmsync.c largemalloc.c""".split()]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):
@@ -96,6 +96,17 @@ enum {
 };
 
 
+void stm_largemalloc_init(char *data_start, size_t data_size);
+int stm_largemalloc_resize_arena(size_t new_size);
+
+object_t *stm_large_malloc(size_t request_size);
+void stm_large_free(object_t *data);
+
+void _stm_large_dump(void);
+void _stm_chunk_pages(object_t *tldata, intptr_t *start, intptr_t *num);
+size_t _stm_data_size(object_t *tldata);
+char *_stm_largemalloc_data_start(void);
+
 """)
 
 lib = ffi.verify('''
@@ -106,6 +117,7 @@ lib = ffi.verify('''
 #include "pages.h"
 #include "nursery.h"
 #include "stmsync.h"
+#include "largemalloc.h"
 
 struct myobj_s {
     struct object_s hdr;

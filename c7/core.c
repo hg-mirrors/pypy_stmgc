@@ -16,7 +16,7 @@
 #include "nursery.h"
 #include "pages.h"
 #include "stmsync.h"
-
+#include "largemalloc.h"
 
 
 char *object_pages;
@@ -196,6 +196,14 @@ void stm_setup(void)
                                                 or should it be UNCOMMITTED??? */
     
     num_threads_started = 0;
+
+    assert(HEAP_PAGES < NB_PAGES - FIRST_AFTER_NURSERY_PAGE);
+    assert(HEAP_PAGES > 10);
+
+    uintptr_t first_heap = stm_pages_reserve(HEAP_PAGES);
+    char *heap = REAL_ADDRESS(get_thread_base(0), first_heap * 4096UL); 
+    assert(memset(heap, 0xcd, HEAP_PAGES * 4096)); // testing
+    stm_largemalloc_init(heap, HEAP_PAGES * 4096UL);
 }
 
 #define INVALID_GS_VALUE  0x6D6D6D6D
