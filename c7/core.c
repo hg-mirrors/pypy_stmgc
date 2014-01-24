@@ -69,7 +69,8 @@ static void push_modified_to_other_threads()
             assert(write_locks[lock_idx]);
             write_locks[lock_idx] = 0;
 
-            _stm_move_object(REAL_ADDRESS(local_base, item),
+            _stm_move_object(item,
+                             REAL_ADDRESS(local_base, item),
                              REAL_ADDRESS(remote_base, item));
         }));
     
@@ -102,6 +103,7 @@ void _stm_write_slowpath(object_t *obj)
     _stm_chunk_pages((struct object_s*)REAL_ADDRESS(get_thread_base(0), obj),
                      &pagenum2, &pages);
     assert(pagenum == pagenum2);
+    assert(pages == (stmcb_size(real_address(obj)) +4095) / 4096);
     for (pagenum2 += pages - 1; pagenum2 >= pagenum; pagenum2--)
         stm_pages_privatize(pagenum2);
 

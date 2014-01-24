@@ -90,9 +90,11 @@ static mchunk_t *next_chunk_u(mchunk_t *p)
 
 static dlist_t largebins[N_BINS];
 static mchunk_t *first_chunk, *last_chunk;
+uint8_t alloc_lock = 0;
 
 void _stm_chunk_pages(struct object_s *data, uintptr_t *start, uintptr_t *num)
 {
+    /* expects object_s in thread0-space */
     /* returns the start page and number of pages that the *payload*
        spans over. the CHUNK_HEADER is not included in the calculations */
     mchunk_t *chunk = data2chunk((char*)data);
@@ -107,13 +109,15 @@ size_t _stm_data_size(struct object_s *data)
     return chunk->size & ~FLAG_SORTED;
 }
 
-void _stm_move_object(char *src, char *dst)
+void _stm_move_object(object_t* obj, char *src, char *dst)
 {
+    /* XXX: should be thread-safe... */
+    
     /* only copies if page is PRIVATE
        XXX: various optimizations for objects with
        multiple pages. E.g. using pagecopy or
        memcpy over multiple PRIVATE pages. */
-    char *end = src + _stm_data_size((struct object_s*)src);
+    char *end = src + _stm_data_size((struct object_s*)REAL_ADDRESS(get_thread_base(0), obj));
     uintptr_t pagenum, num;
     struct object_s *t0_obj = (struct object_s*)REAL_ADDRESS(get_thread_base(0), _stm_tl_address(src));
     _stm_chunk_pages(t0_obj, &pagenum, &num);
@@ -218,6 +222,9 @@ static void sort_bin(size_t index)
 
 object_t *stm_large_malloc(size_t request_size)
 {
+    while (__sync_lock_test_and_set(&alloc_lock, 1))
+        spin_loop();
+    
     /* 'request_size' should already be a multiple of the word size here */
     assert((request_size & (sizeof(char *)-1)) == 0);
 
@@ -254,6 +261,8 @@ object_t *stm_large_malloc(size_t request_size)
     }
 
     /* not enough memory. */
+    alloc_lock = 0;
+    abort();
     return NULL;
 
  found:
@@ -283,11 +292,16 @@ object_t *stm_large_malloc(size_t request_size)
     }
     mscan->size = request_size;
     mscan->prev_size = BOTH_CHUNKS_USED;
+    
+    alloc_lock = 0;
     return (object_t *)(((char *)&mscan->d) - get_thread_base(0));
 }
 
 void stm_large_free(object_t *tldata)
 {
+    while (__sync_lock_test_and_set(&alloc_lock, 1))
+        spin_loop();
+    
     char *data = _stm_real_address(tldata);
     mchunk_t *chunk = data2chunk(data);
     assert((chunk->size & (sizeof(char *) - 1)) == 0);
@@ -346,6 +360,8 @@ void stm_large_free(object_t *tldata)
     }
 
     insert_unsorted(chunk);
+
+    alloc_lock = 0;
 }
 
 
@@ -411,6 +427,8 @@ void stm_largemalloc_init(char *data_start, size_t data_size)
 
 int stm_largemalloc_resize_arena(size_t new_size)
 {
+    /* XXX not thread-safe regarding all functions here... */
+    
     assert(new_size >= 2 * sizeof(struct malloc_chunk));
     assert((new_size & 31) == 0);
 
