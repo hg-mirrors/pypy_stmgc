@@ -68,11 +68,9 @@ static void push_modified_to_other_threads()
             uintptr_t lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START;
             assert(write_locks[lock_idx]);
             write_locks[lock_idx] = 0;
-            
-            char *src = REAL_ADDRESS(local_base, item);
-            char *dst = REAL_ADDRESS(remote_base, item);
-            size_t size = stmcb_size((struct object_s*)src);
-            memcpy(dst, src, size);
+
+            _stm_move_object(REAL_ADDRESS(local_base, item),
+                             REAL_ADDRESS(remote_base, item));
         }));
     
     if (conflicted) {
@@ -88,23 +86,24 @@ void _stm_write_slowpath(object_t *obj)
 {
     uintptr_t pagenum = ((uintptr_t)obj) / 4096;
     assert(pagenum < NB_PAGES);
+    assert(!_stm_is_young(obj));
     
     LIST_APPEND(_STM_TL->old_objects_to_trace, obj);
     
     /* for old objects from the same transaction we don't need
-       to privatize the page */
-    if ((stm_get_page_flag(pagenum) == UNCOMMITTED_SHARED_PAGE)
-        || (obj->stm_flags & GCFLAG_NOT_COMMITTED)) {
+       to privatize the pages */
+    if (obj->stm_flags & GCFLAG_NOT_COMMITTED) {
         obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
         return;
     }
 
     /* privatize if SHARED_PAGE */
-    /* xxx stmcb_size() is probably too slow, maybe add a GCFLAG_LARGE for
-       objs with more than 1 page */
-    int pages = stmcb_size(real_address(obj)) / 4096;
-    for (; pages >= 0; pages--)
-        stm_pages_privatize(pagenum + pages);
+    uintptr_t pagenum2, pages;
+    _stm_chunk_pages((struct object_s*)REAL_ADDRESS(get_thread_base(0), obj),
+                     &pagenum2, &pages);
+    assert(pagenum == pagenum2);
+    for (pagenum2 += pages - 1; pagenum2 >= pagenum; pagenum2--)
+        stm_pages_privatize(pagenum2);
 
     /* claim the write-lock for this object */
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
@@ -226,7 +225,6 @@ void stm_setup_thread(void)
     _STM_TL->shadow_stack_base = _STM_TL->shadow_stack;
 
     _STM_TL->old_objects_to_trace = stm_list_create();
-    _STM_TL->uncommitted_pages = stm_list_create();
     
     _STM_TL->modified_objects = stm_list_create();
     _STM_TL->uncommitted_objects = stm_list_create();
@@ -247,7 +245,6 @@ void _stm_teardown_thread(void)
 
     assert(stm_list_is_empty(_STM_TL->uncommitted_objects));
     stm_list_free(_STM_TL->uncommitted_objects);
-    _STM_TL->uncommitted_objects = NULL;           
 
     assert(_STM_TL->shadow_stack == _STM_TL->shadow_stack_base);
     free(_STM_TL->shadow_stack);
@@ -255,9 +252,6 @@ void _stm_teardown_thread(void)
     assert(_STM_TL->old_objects_to_trace->count == 0);
     stm_list_free(_STM_TL->old_objects_to_trace);
     
-    assert(_STM_TL->uncommitted_pages->count == 0);
-    stm_list_free(_STM_TL->uncommitted_pages);
-
     set_gs_register(INVALID_GS_VALUE);
 }
 
@@ -341,9 +335,7 @@ void stm_stop_transaction(void)
 
     _STM_TL->jmpbufptr = NULL;          /* cannot abort any more */
 
-    /* push uncommitted objects to other threads,
-       make completely uncommitted pages SHARED,
-    */
+    /* push uncommitted objects to other threads */
     nursery_on_commit();
     
     /* copy modified object versions to other threads */

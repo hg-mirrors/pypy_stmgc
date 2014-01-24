@@ -7,11 +7,6 @@ enum {
 
     /* page private for each thread */
     PRIVATE_PAGE,
-
-    /* set for SHARED pages that only contain objects belonging
-       to the current transaction, so the whole page is not
-       visible yet for other threads */
-    UNCOMMITTED_SHARED_PAGE,
 };  /* flag_page_private */
 
 
