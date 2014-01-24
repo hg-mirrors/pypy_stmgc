@@ -5,11 +5,13 @@
    or medium-block support that are also present in the GNU C Library.
 */
 
+#include <string.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <assert.h>
 #include "largemalloc.h"
-
+#include "pages.h"
+#include "pagecopy.h"
 
 #define MMAP_LIMIT    (1280*1024)
 
@@ -89,20 +91,45 @@ static mchunk_t *next_chunk_u(mchunk_t *p)
 static dlist_t largebins[N_BINS];
 static mchunk_t *first_chunk, *last_chunk;
 
-void _stm_chunk_pages(object_t *tldata, intptr_t *start, intptr_t *num)
+void _stm_chunk_pages(struct object_s *data, uintptr_t *start, uintptr_t *num)
 {
-    char *data = _stm_real_address(tldata);
-    mchunk_t *chunk = data2chunk(data);
-    *start = (((char*)chunk) - get_thread_base(0)) / 4096UL;
-    size_t offset_into_page = ((uintptr_t)chunk) & 4095UL; // % 4096
-    *num = ((chunk->size & ~CHUNK_HEADER_SIZE) + CHUNK_HEADER_SIZE + offset_into_page + 4095) / 4096UL;
+    /* returns the start page and number of pages that the *payload*
+       spans over. the CHUNK_HEADER is not included in the calculations */
+    mchunk_t *chunk = data2chunk((char*)data);
+    *start = (((char*)data) - get_thread_base(0)) / 4096UL;
+    size_t offset_into_page = ((uintptr_t)data) & 4095UL; // % 4096
+    *num = ((chunk->size & ~FLAG_SORTED) + offset_into_page + 4095) / 4096UL;
 }
 
-size_t _stm_data_size(object_t *tldata)
+size_t _stm_data_size(struct object_s *data)
 {
-    char *data = _stm_real_address(tldata);
-    mchunk_t *chunk = data2chunk(data);
-    return chunk->size & ~CHUNK_HEADER_SIZE;
+    mchunk_t *chunk = data2chunk((char*)data);
+    return chunk->size & ~FLAG_SORTED;
+}
+
+void _stm_move_object(char *src, char *dst)
+{
+    /* only copies if page is PRIVATE
+       XXX: various optimizations for objects with
+       multiple pages. E.g. using pagecopy or
+       memcpy over multiple PRIVATE pages. */
+    char *end = src + _stm_data_size((struct object_s*)src);
+    uintptr_t pagenum, num;
+    struct object_s *t0_obj = (struct object_s*)REAL_ADDRESS(get_thread_base(0), _stm_tl_address(src));
+    _stm_chunk_pages(t0_obj, &pagenum, &num);
+
+    while (src < end) {
+        size_t to_copy = 4096UL - ((uintptr_t)src & 4095UL);
+        if (to_copy > end - src)
+            to_copy = end - src;
+        if (stm_get_page_flag(pagenum) == PRIVATE_PAGE) {
+            memcpy(dst, src, to_copy);
+        }
+        
+        pagenum++;
+        src += to_copy;
+        dst += to_copy;
+    }
 }
 
 static void insert_unsorted(mchunk_t *new)

@@ -49,7 +49,6 @@ typedef TLPREFIX struct _thread_local1_s _thread_local1_t;
 typedef TLPREFIX struct object_s object_t;
 typedef TLPREFIX struct read_marker_s read_marker_t;
 typedef TLPREFIX char localchar_t;
-typedef TLPREFIX struct alloc_for_size_s alloc_for_size_t;
 typedef void* jmpbufptr_t[5];  /* for use with __builtin_setjmp() */
 
 /* Structure of objects
@@ -80,12 +79,6 @@ struct read_marker_s {
     uint8_t rm;
 };
 
-struct alloc_for_size_s {
-    localchar_t *next;
-    uint16_t start, stop;
-    bool flag_partial_page;
-};
-
 
 struct _thread_local1_s {
     jmpbufptr_t *jmpbufptr;
@@ -101,13 +94,8 @@ struct _thread_local1_s {
     object_t **shadow_stack;
     object_t **shadow_stack_base;
 
-    struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
     struct stm_list_s *uncommitted_objects;
-    /* pages newly allocated in the current transaction only containing
-       uncommitted objects */
-    struct stm_list_s *uncommitted_pages;
 
-    
     localchar_t *nursery_current;
     struct stm_list_s *old_objects_to_trace;
 };
