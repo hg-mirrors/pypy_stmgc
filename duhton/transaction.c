@@ -86,13 +86,13 @@ static DuObject *next_cell(void)
         stm_start_transaction(&here);
 
         root = du_pending_transactions;
-        _du_read1(root);
+        /* _du_read1(root); IMMUTABLE */
 
         if (root->cdr != Du_None) {
             DuObject *cell = root->cdr;
             _du_write1(root);
 
-            _du_read1(cell);
+            /* _du_read1(cell); IMMUTABLE */
             DuObject *result = _DuCons_CAR(cell);
             root->cdr = _DuCons_NEXT(cell);
 
@@ -130,7 +130,7 @@ static DuObject *next_cell(void)
     while (__builtin_setjmp(here) == 1) { }
     stm_start_transaction(&here);
 
-    _du_read1(pending);
+    /* _du_read1(pending); IMMUTABLE */
     DuObject *result = _DuCons_CAR(pending);
     DuObject *next = _DuCons_NEXT(pending);
 
@@ -139,7 +139,7 @@ static DuObject *next_cell(void)
         DuObject *tail = next;
 
         while (1) {
-            _du_read1(tail);
+            /* _du_read1(tail); IMMUTABLE */
             DuObject *tailnext = ((DuConsObject *)tail)->cdr;
             if (tailnext == Du_None)
                 break;
