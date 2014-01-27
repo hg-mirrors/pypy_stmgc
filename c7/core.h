@@ -37,6 +37,9 @@ enum {
     /* only used during collections to mark an obj as moved out of the
        generation it was in */
     GCFLAG_MOVED = (1 << 2),
+    /* objects smaller than one page and even smaller than
+       LARGE_OBJECT_WORDS * 8 bytes */
+    GCFLAG_SMALL = (1 << 3),
 };
 
 
@@ -47,6 +50,7 @@ enum {
 
 typedef TLPREFIX struct _thread_local1_s _thread_local1_t;
 typedef TLPREFIX struct object_s object_t;
+typedef TLPREFIX struct alloc_for_size_s alloc_for_size_t;
 typedef TLPREFIX struct read_marker_s read_marker_t;
 typedef TLPREFIX char localchar_t;
 typedef void* jmpbufptr_t[5];  /* for use with __builtin_setjmp() */
@@ -79,6 +83,11 @@ struct read_marker_s {
     uint8_t rm;
 };
 
+struct alloc_for_size_s {
+    localchar_t *next;
+    uint16_t start, stop;
+    bool flag_partial_page;
+};
 
 struct _thread_local1_s {
     jmpbufptr_t *jmpbufptr;
@@ -94,6 +103,7 @@ struct _thread_local1_s {
     object_t **shadow_stack;
     object_t **shadow_stack_base;
 
+    struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
     struct stm_list_s *uncommitted_objects;
 
     localchar_t *nursery_current;

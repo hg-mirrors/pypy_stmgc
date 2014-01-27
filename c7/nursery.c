@@ -44,6 +44,58 @@ object_t *stm_allocate_prebuilt(size_t size)
     return _stm_allocate_old(size);  /* XXX */
 }
 
+localchar_t *_stm_alloc_next_page(size_t size_class)
+{
+    /* may return uninitialized pages */
+    
+    /* 'alloc->next' points to where the next allocation should go.  The
+       present function is called instead when this next allocation is
+       equal to 'alloc->stop'.  As we know that 'start', 'next' and
+       'stop' are always nearby pointers, we play tricks and only store
+       the lower 16 bits of 'start' and 'stop', so that the three
+       variables plus some flags fit in 16 bytes.
+    */
+    uintptr_t page;
+    localchar_t *result;
+    alloc_for_size_t *alloc = &_STM_TL->alloc[size_class];
+    size_t size = size_class * 8;
+
+    /* reserve a fresh new page (XXX: from the end!) */
+    page = stm_pages_reserve(1);
+
+    result = (localchar_t *)(page * 4096UL);
+    alloc->start = (uintptr_t)result;
+    alloc->stop = alloc->start + (4096 / size) * size;
+    alloc->next = result + size;
+    alloc->flag_partial_page = false;
+    return result;
+}
+
+object_t *stm_big_small_alloc_old(size_t size, bool *is_small)
+{
+    /* may return uninitialized objects */
+    object_t *result;
+    size_t size_class = size / 8;
+    assert(size_class >= 2);
+    
+    if (size_class >= LARGE_OBJECT_WORDS) {
+        result = stm_large_malloc(size);
+        *is_small = 0;
+    } else {
+        *is_small = 1;
+        alloc_for_size_t *alloc = &_STM_TL->alloc[size_class];
+        
+        if ((uint16_t)((uintptr_t)alloc->next) == alloc->stop) {
+            result = (object_t *)_stm_alloc_next_page(size_class);
+        } else {
+            result = (object_t *)alloc->next;
+            alloc->next += size;
+        }
+    }
+    return result;
+}
+
+
 
 void trace_if_young(object_t **pobj)
 {
@@ -62,7 +114,8 @@ void trace_if_young(object_t **pobj)
 
     /* move obj to somewhere else */
     size_t size = stmcb_size(real_address(*pobj));
-    object_t *moved = stm_large_malloc(size);
+    bool is_small;
+    object_t *moved = stm_big_small_alloc_old(size, &is_small);
 
     memcpy((void*)real_address(moved),
            (void*)real_address(*pobj),
@@ -70,6 +123,8 @@ void trace_if_young(object_t **pobj)
 
     /* object is not committed yet */
     moved->stm_flags |= GCFLAG_NOT_COMMITTED;
+    if (is_small)              /* means, not allocated by large-malloc */
+        moved->stm_flags |= GCFLAG_SMALL;
     LIST_APPEND(_STM_TL->uncommitted_objects, moved);
     
     (*pobj)->stm_flags |= GCFLAG_MOVED;
@@ -189,6 +244,21 @@ void nursery_on_commit()
     /* uncommitted objects */
     push_uncommitted_to_other_threads();
     stm_list_clear(_STM_TL->uncommitted_objects);
+
+    /* for small alloc classes, set the partial flag */
+    long j;
+    for (j = 2; j < LARGE_OBJECT_WORDS; j++) {
+        alloc_for_size_t *alloc = &_STM_TL->alloc[j];
+        uint16_t start = alloc->start;
+        uint16_t cur = (uintptr_t)alloc->next;
+        
+        if (start == cur)
+            continue;           /* page full -> will be replaced automatically */
+        
+        alloc->start = cur;     /* next transaction has different 'start' to
+                                   reset in case of an abort */
+        alloc->flag_partial_page = 1;
+    }
 }
 
 void nursery_on_abort()
@@ -205,13 +275,26 @@ void nursery_on_abort()
     _STM_TL->nursery_current = nursery_base;
 
 
+    /* reset the alloc-pages to the state at the start of the transaction */
+    long j;
+    for (j = 2; j < LARGE_OBJECT_WORDS; j++) {
+        alloc_for_size_t *alloc = &_STM_TL->alloc[j];
+        uint16_t num_allocated = ((uintptr_t)alloc->next) - alloc->start;
+        
+        if (num_allocated) {
+            /* forget about all non-committed objects */
+            alloc->next -= num_allocated;
+        }
+    }
+    
     /* free uncommitted objects */
     struct stm_list_s *uncommitted = _STM_TL->uncommitted_objects;
     
     STM_LIST_FOREACH(
         uncommitted,
         ({
-            stm_large_free(item);
+            if (!(item->stm_flags & GCFLAG_SMALL))
+                stm_large_free(item);
         }));
     
     stm_list_clear(uncommitted);
