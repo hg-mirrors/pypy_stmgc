@@ -112,7 +112,7 @@ void stm_pages_privatize(uintptr_t pagenum)
 uintptr_t stm_pages_reserve(int num)
 {
     /* grab free, possibly uninitialized pages */
-    if (!stm_list_is_empty(single_page_list)) {
+    if (num == 1 && !stm_list_is_empty(single_page_list)) {
         uint8_t previous;
         while ((previous = __sync_lock_test_and_set(&list_lock, 1)))
             spin_loop();
