@@ -21,7 +21,7 @@ void symbol_trace(struct DuSymbolObject_s *ob, void visit(object_t **))
 
 void symbol_print(DuSymbolObject *ob)
 {
-    _du_read1(ob);
+    /* _du_read1(ob); IMMUTABLE name */
     printf("'%s'", ob->name);
 }
 
@@ -66,6 +66,7 @@ void init_prebuilt_symbol_objects(void)
 DuObject *DuSymbol_FromString(const char *name)
 {
     DuSymbolObject *p, *head = _Du_AllSymbols;
+    _du_read1(head);
     for (p=head; p != NULL; p=p->next) {
         _du_read1(p);
         if (strcmp(name, p->name) == 0) {
@@ -86,7 +87,7 @@ DuObject *DuSymbol_FromString(const char *name)
 char *DuSymbol_AsString(DuObject *ob)
 {
     DuSymbol_Ensure("DuSymbol_AsString", ob);
-    _du_read1(ob);
+    /* _du_read1(ob); IMMUTABLE name */
     return ((DuSymbolObject *)ob)->name;
 }
 
