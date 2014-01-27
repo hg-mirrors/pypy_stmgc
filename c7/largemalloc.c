@@ -105,6 +105,9 @@ void _stm_chunk_pages(struct object_s *data, uintptr_t *start, uintptr_t *num)
 
 size_t _stm_data_size(struct object_s *data)
 {
+    if (data->stm_flags & GCFLAG_SMALL)
+        return stmcb_size(data); /* XXX: inefficient */
+    
     mchunk_t *chunk = data2chunk((char*)data);
     return chunk->size & ~FLAG_SORTED;
 }
@@ -120,7 +123,13 @@ void _stm_move_object(object_t* obj, char *src, char *dst)
     char *end = src + _stm_data_size((struct object_s*)REAL_ADDRESS(get_thread_base(0), obj));
     uintptr_t pagenum, num;
     struct object_s *t0_obj = (struct object_s*)REAL_ADDRESS(get_thread_base(0), _stm_tl_address(src));
-    _stm_chunk_pages(t0_obj, &pagenum, &num);
+
+    if (obj->stm_flags & GCFLAG_SMALL) {
+        pagenum = (uintptr_t)obj / 4096UL;
+        num = 1;
+    } else { 
+        _stm_chunk_pages(t0_obj, &pagenum, &num);
+    }
 
     while (src < end) {
         size_t to_copy = 4096UL - ((uintptr_t)src & 4095UL);
@@ -299,6 +308,8 @@ object_t *stm_large_malloc(size_t request_size)
 
 void stm_large_free(object_t *tldata)
 {
+    assert(!(tldata->stm_flags & GCFLAG_SMALL));
+    
     while (__sync_lock_test_and_set(&alloc_lock, 1))
         spin_loop();
     

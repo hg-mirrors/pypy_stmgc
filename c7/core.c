@@ -100,10 +100,15 @@ void _stm_write_slowpath(object_t *obj)
 
     /* privatize if SHARED_PAGE */
     uintptr_t pagenum2, pages;
-    _stm_chunk_pages((struct object_s*)REAL_ADDRESS(get_thread_base(0), obj),
-                     &pagenum2, &pages);
-    assert(pagenum == pagenum2);
-    assert(pages == (stmcb_size(real_address(obj)) +4095) / 4096);
+    if (obj->stm_flags & GCFLAG_SMALL) {
+        pagenum2 = pagenum;
+        pages = 1;
+    } else {
+        _stm_chunk_pages((struct object_s*)REAL_ADDRESS(get_thread_base(0), obj),
+                         &pagenum2, &pages);
+        assert(pagenum == pagenum2);
+        assert(pages == (stmcb_size(real_address(obj)) +4095) / 4096);
+    }
     for (pagenum2 += pages - 1; pagenum2 >= pagenum; pagenum2--)
         stm_pages_privatize(pagenum2);
 
