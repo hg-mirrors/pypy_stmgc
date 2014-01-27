@@ -1,8 +1,9 @@
 syntax: glob
 *.pyc
 *~
-c4/build-demo*
-c4/debug-demo*
-c4/release-demo*
+*/build-demo*
+*/debug-demo*
+*/release-demo*
 *.orig
-c4/test/__pycache__
+*/__pycache__
+*.out.*
