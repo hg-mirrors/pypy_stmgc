@@ -11,7 +11,7 @@ static void _du_getargs1(const char *name, DuObject *cons, DuObject *locals,
 
     if (cons == Du_None) goto error;
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     expr1 = _DuCons_CAR(cons);
     cons = _DuCons_NEXT(cons);
     if (cons != Du_None) goto error;
@@ -31,12 +31,12 @@ static void _du_getargs2(const char *name, DuObject *cons, DuObject *locals,
 
     if (cons == Du_None) goto error;
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     expr1 = _DuCons_CAR(cons);
     cons = _DuCons_NEXT(cons);
     if (cons == Du_None) goto error;
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     expr2 = _DuCons_CAR(cons);
     cons = _DuCons_NEXT(cons);
     if (cons != Du_None) goto error;
@@ -64,7 +64,7 @@ DuObject *Du_Progn(DuObject *cons, DuObject *locals)
 {
     DuObject *result = Du_None;
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
         _du_save2(next, locals);
@@ -79,12 +79,12 @@ DuObject *du_setq(DuObject *cons, DuObject *locals)
 {
     DuObject *result = Du_None;
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *symbol = _DuCons_CAR(cons);
         cons = _DuCons_NEXT(cons);
         if (cons == Du_None)
             Du_FatalError("setq: number of arguments is odd");
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -109,7 +109,7 @@ DuObject *du_print(DuObject *cons, DuObject *locals)
     _du_restore2(cons, locals);
 
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -144,7 +144,7 @@ DuObject *du_add(DuObject *cons, DuObject *locals)
 {
     int result = 0;
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -163,7 +163,7 @@ DuObject *du_sub(DuObject *cons, DuObject *locals)
     int result = 0;
     int sign = 1;
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -182,7 +182,7 @@ DuObject *du_mul(DuObject *cons, DuObject *locals)
 {
     int result = 1;
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -202,7 +202,7 @@ DuObject *du_div(DuObject *cons, DuObject *locals)
     int first = 1;
 
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -263,7 +263,7 @@ DuObject *du_type(DuObject *cons, DuObject *locals)
 
 DuObject *du_quote(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
         Du_FatalError("quote: expected one argument");
     return _DuCons_CAR(cons);
@@ -275,7 +275,7 @@ DuObject *du_list(DuObject *cons, DuObject *locals)
     DuObject *list = DuList_New();
     _du_restore2(cons, locals);
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -313,7 +313,7 @@ DuObject *du_get(DuObject *cons, DuObject *locals)
     if (cons == Du_None)
         Du_FatalError("get: expected at least one argument");
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     DuObject *expr = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
 
@@ -322,7 +322,7 @@ DuObject *du_get(DuObject *cons, DuObject *locals)
     _du_restore2(next, locals);
 
     if (DuList_Check(obj)) {
-        _du_read1(next);
+        /* _du_read1(next); IMMUTABLE */
         if (next == Du_None || _DuCons_NEXT(next) != Du_None)
             Du_FatalError("get with a list: expected two arguments");
 
@@ -344,7 +344,7 @@ DuObject *du_get(DuObject *cons, DuObject *locals)
 
 DuObject *du_set(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     if (cons == Du_None || _DuCons_NEXT(cons) == Du_None)
         Du_FatalError("set: expected at least two arguments");
 
@@ -355,12 +355,12 @@ DuObject *du_set(DuObject *cons, DuObject *locals)
     DuObject *obj = Du_Eval(expr, locals);
     _du_restore2(next, locals);
 
-    _du_read1(next);
+    /* _du_read1(next); IMMUTABLE */
     DuObject *expr2 = _DuCons_CAR(next);
     DuObject *next2 = _DuCons_NEXT(next);
 
     if (DuList_Check(obj)) {
-        _du_read1(next2);
+        /* _du_read1(next2); IMMUTABLE */
         if (next2 == Du_None || _DuCons_NEXT(next2) != Du_None)
             Du_FatalError("set with a list: expected three arguments");
 
@@ -404,7 +404,7 @@ DuObject *du_pop(DuObject *cons, DuObject *locals)
     if (cons == Du_None)
         Du_FatalError("pop: expected at least one argument");
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     DuObject *expr = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
 
@@ -419,7 +419,7 @@ DuObject *du_pop(DuObject *cons, DuObject *locals)
             Du_FatalError("pop: empty list");
     }
     else {
-        _du_read1(next);
+        /* _du_read1(next); IMMUTABLE */
         DuObject *expr2 = _DuCons_CAR(next);
         DuObject *next2 = _DuCons_NEXT(next);
 
@@ -447,7 +447,7 @@ DuObject *du_len(DuObject *cons, DuObject *locals)
 
 DuObject *du_if(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     if (cons == Du_None || _DuCons_NEXT(cons) == Du_None)
         Du_FatalError("if: expected at least two arguments");
 
@@ -458,7 +458,7 @@ DuObject *du_if(DuObject *cons, DuObject *locals)
     DuObject *cond = Du_Eval(expr, locals);
     _du_restore2(next, locals);
 
-    _du_read1(next);
+    /* _du_read1(next); IMMUTABLE */
     if (DuObject_IsTrue(cond) != 0) {
         /* true path */
         return Du_Eval(_DuCons_CAR(next), locals);
@@ -474,7 +474,7 @@ DuObject *du_while(DuObject *cons, DuObject *locals)
     if (cons == Du_None)
         Du_FatalError("while: expected at least one argument");
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     DuObject *expr = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
 
@@ -495,14 +495,14 @@ DuObject *du_while(DuObject *cons, DuObject *locals)
 
 DuObject *du_defun(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     if (cons == Du_None || _DuCons_NEXT(cons) == Du_None)
         Du_FatalError("defun: expected at least two arguments");
 
     DuObject *name = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
 
-    _du_read1(next);
+    /* _du_read1(next); IMMUTABLE */
     DuObject *arglist = _DuCons_CAR(next);
     DuObject *progn = _DuCons_NEXT(next);
 
@@ -549,7 +549,7 @@ DuObject *du_transaction(DuObject *cons, DuObject *locals)
     if (cons == Du_None)
         Du_FatalError("transaction: expected at least one argument");
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     DuObject *sym = _DuCons_CAR(cons);
     DuObject *rest = _DuCons_NEXT(cons);
     _DuFrame_EvalCall(locals, sym, rest, 0);
@@ -573,7 +573,7 @@ DuObject *du_sleepms(DuObject *cons, DuObject *locals)
 
 DuObject *du_defined(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
         Du_FatalError("defined?: expected one argument");
     DuObject *ob = _DuCons_CAR(cons);
@@ -602,7 +602,7 @@ DuObject *du_assert(DuObject *cons, DuObject *locals)
 
     if (!DuInt_AsInt(obj)) {
         printf("assert failed: ");
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         Du_Print(_DuCons_CAR(cons), 1);
         Du_FatalError("assert failed");
     }

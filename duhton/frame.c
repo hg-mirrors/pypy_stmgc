@@ -212,7 +212,7 @@ _parse_arguments(DuObject *symbol, DuObject *arguments,
             Du_FatalError("call to '%s': not enough arguments",
                           DuSymbol_AsString(symbol));
 
-        _du_read1(arguments);
+        /* _du_read1(arguments); IMMUTABLE */
         DuObject *arg = _DuCons_CAR(arguments);
         DuObject *argumentsnext = _DuCons_NEXT(arguments);
 
@@ -221,7 +221,7 @@ _parse_arguments(DuObject *symbol, DuObject *arguments,
         DuObject *obj = Du_Eval(arg, caller);
         _du_restore2(formallist, callee);
 
-        _du_read1(formallist);
+        /* _du_read1(formallist); IMMUTABLE */
         DuObject *sym = _DuCons_CAR(formallist);
         DuObject *formallistnext = _DuCons_NEXT(formallist);
 
