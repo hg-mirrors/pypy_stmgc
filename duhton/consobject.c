@@ -12,7 +12,7 @@ void cons_print(DuConsObject *ob)
     DuObject *p;
     printf("( ");
     while (1) {
-        _du_read1(ob);
+        /* _du_read1(ob); IMMUTABLE */
         _du_save1(ob);
         Du_Print(ob->car, 0);
         _du_restore1(ob);
@@ -33,7 +33,7 @@ void cons_print(DuConsObject *ob)
 
 DuObject *cons_eval(DuConsObject *ob, DuObject *locals)
 {
-    _du_read1(ob);
+    /* _du_read1(ob); IMMUTABLE */
     return _DuFrame_EvalCall(locals, ob->car, ob->cdr, 1);
 }
 
@@ -59,14 +59,14 @@ DuObject *DuCons_New(DuObject *car, DuObject *cdr)
 DuObject *DuCons_Car(DuObject *cons)
 {
     DuCons_Ensure("DuCons_Car", cons);
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     return ((DuConsObject *)cons)->car;
 }
 
 DuObject *DuCons_Cdr(DuObject *cons)
 {
     DuCons_Ensure("DuCons_Cdr", cons);
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     return ((DuConsObject *)cons)->cdr;
 }
 

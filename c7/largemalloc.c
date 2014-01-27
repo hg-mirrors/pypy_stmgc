@@ -99,8 +99,10 @@ void _stm_chunk_pages(struct object_s *data, uintptr_t *start, uintptr_t *num)
        spans over. the CHUNK_HEADER is not included in the calculations */
     mchunk_t *chunk = data2chunk((char*)data);
     *start = (((char*)data) - get_thread_base(0)) / 4096UL;
+    assert(*start < NB_PAGES);
     size_t offset_into_page = ((uintptr_t)data) & 4095UL; // % 4096
     *num = ((chunk->size & ~FLAG_SORTED) + offset_into_page + 4095) / 4096UL;
+    assert(*num < NB_PAGES);
 }
 
 size_t _stm_data_size(struct object_s *data)
