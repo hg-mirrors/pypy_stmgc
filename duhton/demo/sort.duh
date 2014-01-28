@@ -1,0 +1,162 @@
+
+
+
+
+(setq c (container (list 1 2 3 4)))
+
+
+(setq _rand (container (list 133542157 362436069 521288629 88675123)))
+(defun xor128 ()
+  (setq lst (get _rand))
+  (setq x (get lst 0))
+  (setq y (get lst 1))
+  (setq z (get lst 2))
+  (setq w (get lst 3))
+  
+  (setq t (^ x (<< x 11)))
+  (setq x y)
+  (setq y z)
+  (setq z w)
+
+  (setq w (^ w (^ (>> w 19) (^ t (>> t 8)))))
+  (set lst 0 x)
+  (set lst 1 y)
+  (set lst 2 z)
+  (set lst 3 w)
+  w
+  )
+
+
+(defun random_list (n)
+  (if (> n 0)
+      (progn
+        (setq res (random_list (- n 1)))
+        (append res (% (xor128) 10))
+        res
+        )
+    (list )
+    )
+  )
+
+
+
+(defun merge_lists (as bs res)
+  ;; empties the two lists and merges the result to res
+  (setq len_as (len as))
+  (setq len_bs (len bs))
+  (if (< 0 len_as)
+      (if (< 0 len_bs)
+          (if (> (get as 0) (get bs 0))
+              (append res (pop bs 0))
+            (append res (pop as 0))
+            )
+        (append res (pop as 0))
+        )
+    (if (< 0 len_bs)
+        (append res (pop bs 0))
+      )
+    )
+  (if (|| (< 0 len_as) (< 0 len_bs))
+      (merge_lists as bs res)
+    )
+  )
+
+
+(defun append_to_correct_half (xs first second half_len)
+  (if (< 0 (len xs))
+      (progn
+        (setq elem (pop xs 0))
+        (if (< 0 half_len)
+            (append_to_correct_half xs
+                                    (append first elem)
+                                    second
+                                    (- half_len 1))
+          
+          (append_to_correct_half xs
+                                  first
+                                  (append second elem)
+                                  (- half_len 1))
+          )
+        )
+    )
+  )
+
+(defun split_list (xs)
+  ;; empties xs and fills 2 new lists to be returned
+  (setq half_len (/ (len xs) 2))
+
+  (setq first (list))
+  (setq second (list))
+
+  (append_to_correct_half xs first second half_len)
+  (list first second)
+  )
+
+
+(defun merge_sort (xs)
+  (if (<= (len xs) 1)                   ; 1 elem
+      xs
+    (progn                              ; many elems
+      (setq lists (split_list xs))
+      (setq left (merge_sort (get lists 0)))
+      (setq right (merge_sort (get lists 1)))
+      ;; (print left right)
+      (setq merged (list))
+      (merge_lists left right merged)
+      ;; (print (quote >) merged)
+      merged
+      )
+    )
+  )
+
+
+(defun copy_list_helper (xs res idx)
+  (if (< idx (len xs))
+      (progn
+        (append res (get xs idx))
+        (copy_list_helper xs res (+ idx 1))
+        )
+    )
+  )
+(defun copy_list (xs)
+  (setq res (list))
+  (copy_list_helper xs res 0)
+  res
+  )
+(defun print_list (xs)
+  (print (quote len:) (len xs) (quote ->) xs)
+  )
+;; (defun rotate (tree)
+;;   (if (pair? tree)
+;;       (progn
+;;         (setq left (car tree))
+;;         (print left)
+;;         (print (cdr tree))
+;;         )
+;;     (print 111111)
+;;     )
+;;   )
+
+;; (defun create-tree (n)
+;;   (if (== n 0) 
+;;       (progn
+;;         (set c (+ (get c) 1))
+;;         (get c))
+;;     (cons (create-tree (- n 1)) (create-tree (- n 1))))
+;;   )
+
+
+
+(setq as (random_list 20))
+(setq bs (random_list 20))
+(print as)
+(print bs)
+(print (split_list as))
+
+(setq cs (random_list 200))
+(print_list cs)
+(print_list (merge_sort (copy_list cs)))
+
+
+
+
