@@ -113,14 +113,15 @@ void _stm_write_slowpath(object_t *obj)
         _stm_chunk_pages((struct object_s*)REAL_ADDRESS(get_thread_base(0), obj),
                          &pagenum2, &pages);
         assert(pagenum == pagenum2);
-        assert(pages == (stmcb_size(real_address(obj)) +4095) / 4096);
+        assert(pages == (stmcb_size(real_address(obj)) + 4095) / 4096);
     }
     
     for (pagenum2 += pages - 1; pagenum2 >= pagenum; pagenum2--)
         stm_pages_privatize(pagenum2);
 
     
-    /* claim the write-lock for this object */
+    /* claim the write-lock for this object (XXX: maybe a fastpath
+       for prev_owner == lock_num?) */
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
     uint8_t lock_num = _STM_TL->thread_num + 1;
     uint8_t prev_owner;
