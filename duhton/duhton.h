@@ -155,6 +155,11 @@ void Du_TransactionRun(void);
 #define _du_save3(p1,p2,p3)     (_push_root((DuObject *)(p1)),  \
                                  _push_root((DuObject *)(p2)),  \
                                  _push_root((DuObject *)(p3)))
+#define _du_save4(p1,p2,p3,p4)  (_push_root((DuObject *)(p1)), \
+                                 _push_root((DuObject *)(p2)),          \
+                                 _push_root((DuObject *)(p3)),          \
+                                 _push_root((DuObject *)(p4)))
+
 
 #define _du_restore1(p1)        (p1 = (typeof(p1))_pop_root())
 #define _du_restore2(p1,p2)     (p2 = (typeof(p2))_pop_root(),  \
@@ -162,6 +167,11 @@ void Du_TransactionRun(void);
 #define _du_restore3(p1,p2,p3)  (p3 = (typeof(p3))_pop_root(),  \
                                  p2 = (typeof(p2))_pop_root(),  \
                                  p1 = (typeof(p1))_pop_root())
+#define _du_restore4(p1,p2,p3,p4)(p4 = (typeof(p4))_pop_root(), \
+                                  p3 = (typeof(p3))_pop_root(),         \
+                                  p2 = (typeof(p2))_pop_root(),         \
+                                  p1 = (typeof(p1))_pop_root())
+
 
 #define _du_read1(p1)           stm_read((object_t *)(p1))
 #define _du_write1(p1)          stm_write((object_t *)(p1))

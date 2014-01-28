@@ -118,6 +118,7 @@ static void _clear(dictentry_t *dst)
 static dictentry_t *
 find_entry(DuFrameObject *frame, DuObject *symbol, int write_mode)
 {
+    /* only allocates if write_mode = 1 */
     _du_read1(frame);
     DuFrameNodeObject *ob = frame->ob_nodes;
 
@@ -259,13 +260,14 @@ DuObject *_DuFrame_EvalCall(DuObject *frame, DuObject *symbol,
     }
     if (e->func_progn) {
         DuObject *func = e->func_progn;
+        DuObject *func_arglist = e->func_arglist;
         _du_save1(func);
-        _du_save3(frame, symbol, rest);
+        _du_save4(frame, symbol, rest, func_arglist);
         DuObject *callee_frame = DuFrame_New();
-        _du_restore3(frame, symbol, rest);
+        _du_restore4(frame, symbol, rest, func_arglist);
 
         _du_save1(callee_frame);
-        _parse_arguments(symbol, rest, e->func_arglist, frame, callee_frame);
+        _parse_arguments(symbol, rest, func_arglist, frame, callee_frame);
         _du_restore1(callee_frame);
         _du_restore1(func);
 
