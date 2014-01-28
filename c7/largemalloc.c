@@ -124,7 +124,7 @@ void _stm_move_object(object_t* obj, char *src, char *dst)
        memcpy over multiple PRIVATE pages. */
     char *end = src + _stm_data_size((struct object_s*)REAL_ADDRESS(get_thread_base(0), obj));
     uintptr_t pagenum, num;
-    struct object_s *t0_obj = (struct object_s*)REAL_ADDRESS(get_thread_base(0), _stm_tl_address(src));
+    struct object_s *t0_obj = (struct object_s*)REAL_ADDRESS(get_thread_base(0), obj);
 
     if (obj->stm_flags & GCFLAG_SMALL) {
         pagenum = (uintptr_t)obj / 4096UL;

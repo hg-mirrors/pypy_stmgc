@@ -126,24 +126,7 @@
 (defun print_list (xs)
   (print (quote len:) (len xs) (quote ->) xs)
   )
-;; (defun rotate (tree)
-;;   (if (pair? tree)
-;;       (progn
-;;         (setq left (car tree))
-;;         (print left)
-;;         (print (cdr tree))
-;;         )
-;;     (print 111111)
-;;     )
-;;   )
 
-;; (defun create-tree (n)
-;;   (if (== n 0) 
-;;       (progn
-;;         (set c (+ (get c) 1))
-;;         (get c))
-;;     (cons (create-tree (- n 1)) (create-tree (- n 1))))
-;;   )
 
 
 
@@ -153,7 +136,7 @@
 (print bs)
 (print (split_list as))
 
-(setq cs (random_list 200))
+(setq cs (random_list 1000))
 (print_list cs)
 (print_list (merge_sort (copy_list cs)))
 

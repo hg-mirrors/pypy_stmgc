@@ -72,7 +72,7 @@ static void push_modified_to_other_threads()
 
             /* clear the write-lock */
             uintptr_t lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START;
-            assert(write_locks[lock_idx]);
+            assert(write_locks[lock_idx] == _STM_TL->thread_num + 1);
             write_locks[lock_idx] = 0;
 
             _stm_move_object(item,
@@ -103,7 +103,7 @@ void _stm_write_slowpath(object_t *obj)
         obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
         return;
     }
-
+    
     /* privatize if SHARED_PAGE */
     uintptr_t pagenum2, pages;
     if (obj->stm_flags & GCFLAG_SMALL) {
@@ -115,28 +115,38 @@ void _stm_write_slowpath(object_t *obj)
         assert(pagenum == pagenum2);
         assert(pages == (stmcb_size(real_address(obj)) +4095) / 4096);
     }
+    
     for (pagenum2 += pages - 1; pagenum2 >= pagenum; pagenum2--)
         stm_pages_privatize(pagenum2);
 
+    
     /* claim the write-lock for this object */
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
-    uint8_t previous;
-    while ((previous = __sync_lock_test_and_set(&write_locks[lock_idx], 1))) {
+    uint8_t lock_num = _STM_TL->thread_num + 1;
+    uint8_t prev_owner;
+    do {
+        prev_owner = __sync_val_compare_and_swap(&write_locks[lock_idx],
+                                               0, lock_num);
+        
+        /* if there was no lock-holder or we already have the lock */
+        if ((!prev_owner) || (prev_owner == lock_num))
+            break;
+        
         /* XXXXXX */
         //_stm_start_semi_safe_point();
-        usleep(1);
+        //usleep(1);
         //_stm_stop_semi_safe_point();
-        //if (!(previous = __sync_lock_test_and_set(&write_locks[lock_idx], 1))) 
-        //    break;
+        // try again.... XXX
         stm_abort_transaction();
         /* XXX: only abort if we are younger */
         spin_loop();
-    }
-
+    } while (1);
+    
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-    stm_read(obj);
-
-    LIST_APPEND(_STM_TL->modified_objects, obj);
+    if (prev_owner == 0) {
+        stm_read(obj);
+        LIST_APPEND(_STM_TL->modified_objects, obj);
+    }
 }
 
 
@@ -380,11 +390,13 @@ static void reset_modified_from_other_threads()
             /* note: same as push_modified_to... but src/dst swapped
                TODO: unify both... */
             
-            char *dst = REAL_ADDRESS(local_base, item);
-            char *src = REAL_ADDRESS(remote_base, item);
-            size_t size = stmcb_size((struct object_s*)src);
-            memcpy(dst, src, size);
-
+             /* check at least the first page (required by move_obj() */
+            assert(stm_get_page_flag((uintptr_t)item / 4096) == PRIVATE_PAGE);
+            
+            _stm_move_object(item,
+                             REAL_ADDRESS(remote_base, item),
+                             REAL_ADDRESS(local_base, item));
+            
             /* copying from the other thread re-added the
                WRITE_BARRIER flag */
             assert(item->stm_flags & GCFLAG_WRITE_BARRIER);
