@@ -456,6 +456,23 @@ class TestBasic(BaseTest):
         newer = stm_pop_root()
         assert new == newer
 
+    def test_write_to_old_after_minor(self):
+        stm_start_transaction()
+        new = stm_allocate(16)
+        stm_push_root(new)
+        stm_minor_collect()
+        old = stm_pop_root()
+        stm_stop_transaction()
+
+        stm_start_transaction()
+        stm_write(old) # old objs to trace
+        stm_set_char(old, 'x')
+        stm_minor_collect()
+        stm_write(old) # old objs to trace
+        stm_set_char(old, 'y')
+        stm_stop_transaction()
+        
+
         
     # def test_resolve_write_write_no_conflict(self):
     #     stm_start_transaction()
