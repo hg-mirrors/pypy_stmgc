@@ -142,9 +142,13 @@ void _stm_write_slowpath(object_t *obj)
         /* XXX: only abort if we are younger */
         spin_loop();
     } while (1);
-    
+
+    /* remove the write-barrier ONLY if we have the write-lock */
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+    
     if (prev_owner == 0) {
+        /* otherwise, we have the lock and already added it to
+           modified_objects / read-marker */
         stm_read(obj);
         LIST_APPEND(_STM_TL->modified_objects, obj);
     }

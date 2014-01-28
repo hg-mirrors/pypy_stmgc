@@ -200,7 +200,11 @@ void DuFrame_SetBuiltinMacro(DuObject *frame, char *name, eval_fn func)
     DuObject *sym = DuSymbol_FromString(name);
     _du_restore1(frame);
 
+    _du_save1(frame);
     dictentry_t *e = find_entry((DuFrameObject *)frame, sym, 1);
+    _du_restore1(frame);
+    
+    _du_write1(frame);          /* e is part of frame or a new object */
     e->builtin_macro = func;
 }
 
@@ -245,6 +249,7 @@ DuObject *_DuFrame_EvalCall(DuObject *frame, DuObject *symbol,
     dictentry_t *e;
     DuFrame_Ensure("_DuFrame_EvalCall", frame);
 
+    /* find_entry not in write_mode will not collect */
     e = find_entry((DuFrameObject *)frame, symbol, 0);
     if (!e) {
         e = find_entry((DuFrameObject *)Du_Globals, symbol, 0);
@@ -296,6 +301,7 @@ DuObject *DuFrame_GetSymbol(DuObject *frame, DuObject *symbol)
     DuFrame_Ensure("DuFrame_GetSymbol", frame);
 
     e = find_entry((DuFrameObject *)frame, symbol, 0);
+    /* find_entry does the read_barrier */
     return e ? e->value : NULL;
 }
 
@@ -304,10 +310,11 @@ void DuFrame_SetSymbol(DuObject *frame, DuObject *symbol, DuObject *value)
     dictentry_t *e;
     DuFrame_Ensure("DuFrame_SetSymbol", frame);
 
-    _du_save1(value);
+    _du_save2(value, frame);
     e = find_entry((DuFrameObject *)frame, symbol, 1);
-    _du_restore1(value);
+    _du_restore2(value, frame);
 
+    _du_write1(frame);          /* e is new or part of frame */
     e->value = value;
 }
 
@@ -326,10 +333,11 @@ void DuFrame_SetUserFunction(DuObject *frame, DuObject *symbol,
     dictentry_t *e;
     DuFrame_Ensure("DuFrame_SetUserFunction", frame);
 
-    _du_save2(arglist, progn);
+    _du_save3(arglist, progn, frame);
     e = find_entry((DuFrameObject *)frame, symbol, 1);
-    _du_restore2(arglist, progn);
+    _du_restore3(arglist, progn, frame);
 
+    _du_write1(frame);          /* e is part of frame or new */
     e->func_arglist = arglist;
     e->func_progn = progn;
 }
