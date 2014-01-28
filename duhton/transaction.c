@@ -23,6 +23,7 @@ static void *run_thread(void *);   /* forward */
 
 static void run_all_threads(void)
 {
+    thread_sleeping = 0;
     int i;
     for (i = 0; i < all_threads_count; i++) {
         int status = pthread_create(&all_threads[i], NULL, run_thread,
@@ -34,6 +35,7 @@ static void run_all_threads(void)
     }
     for (i = 0; i < all_threads_count; i++) {
         pthread_join(all_threads[i], NULL);
+        all_threads[i] = (pthread_t)NULL;
     }
 }
 

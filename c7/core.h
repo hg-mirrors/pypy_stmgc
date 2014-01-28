@@ -227,6 +227,7 @@ void stm_abort_transaction(void);
 
 void _stm_minor_collect();
 #define stm_become_inevitable(msg)   /* XXX implement me! */
+#define stm_start_inevitable_transaction() stm_start_transaction(NULL)   /* XXX implement me! */
 
 struct _thread_local1_s* _stm_dbg_get_tl(int thread); /* -1 is current thread */
 

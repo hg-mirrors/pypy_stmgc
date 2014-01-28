@@ -679,6 +679,21 @@ DuObject *du_transaction(DuObject *cons, DuObject *locals)
     return Du_None;
 }
 
+DuObject *du_run_transactions(DuObject *cons, DuObject *locals)
+{
+    if (cons != Du_None)
+        Du_FatalError("run-transactions: expected no argument");
+
+    _du_save1(stm_thread_local_obj);
+    stm_stop_transaction();
+    _du_restore1(stm_thread_local_obj);
+    
+    Du_TransactionRun();
+    
+    stm_start_inevitable_transaction();
+    return Du_None;
+}
+
 DuObject *du_sleepms(DuObject *cons, DuObject *locals)
 {
     DuObject *obj;
@@ -793,6 +808,7 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "cons", du_cons);
     DuFrame_SetBuiltinMacro(Du_Globals, "not", du_not);
     DuFrame_SetBuiltinMacro(Du_Globals, "transaction", du_transaction);
+    DuFrame_SetBuiltinMacro(Du_Globals, "run-transactions", du_run_transactions);
     DuFrame_SetBuiltinMacro(Du_Globals, "sleepms", du_sleepms);
     DuFrame_SetBuiltinMacro(Du_Globals, "defined?", du_defined);
     DuFrame_SetBuiltinMacro(Du_Globals, "pair?", du_pair);

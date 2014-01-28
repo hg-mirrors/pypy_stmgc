@@ -136,7 +136,7 @@
 (print bs)
 (print (split_list as))
 
-(setq cs (random_list 1000))
+(setq cs (random_list 10000))
 (print_list cs)
 (print_list (merge_sort (copy_list cs)))
 
