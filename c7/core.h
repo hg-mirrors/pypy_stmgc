@@ -128,6 +128,7 @@ void _stm_write_slowpath(object_t *);
 
 #define REAL_ADDRESS(object_pages, src)   ((object_pages) + (uintptr_t)(src))
 
+
 static inline struct object_s *real_address(object_t *src)
 {
     return (struct object_s*)REAL_ADDRESS(_STM_TL->thread_base, src);
@@ -157,6 +158,7 @@ static inline char *get_thread_base(long thread_num)
 {
     return object_pages + thread_num * (NB_PAGES * 4096UL);
 }
+
 
 static inline void spin_loop(void)
 {
@@ -225,6 +227,8 @@ void stm_abort_transaction(void);
 
 void _stm_minor_collect();
 #define stm_become_inevitable(msg)   /* XXX implement me! */
+
+struct _thread_local1_s* _stm_dbg_get_tl(int thread); /* -1 is current thread */
 
 
 #endif
