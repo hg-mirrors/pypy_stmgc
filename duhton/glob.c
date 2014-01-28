@@ -140,6 +140,96 @@ DuObject *du_print(DuObject *cons, DuObject *locals)
     return Du_None;
 }
 
+DuObject *du_xor(DuObject *cons, DuObject *locals)
+{
+    int result = 0;
+    /* _du_read1(cons); IMMUTABLE */
+    DuObject *expr = _DuCons_CAR(cons);
+    DuObject *next = _DuCons_NEXT(cons);
+        
+    _du_save2(next, locals);
+    DuObject *obj = Du_Eval(expr, locals);
+    result = DuInt_AsInt(obj);
+    _du_restore2(next, locals);
+    
+    cons = next;
+
+    while (cons != Du_None) {
+        /* _du_read1(cons); IMMUTABLE */
+        expr = _DuCons_CAR(cons);
+        next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        obj = Du_Eval(expr, locals);
+        result ^= DuInt_AsInt(obj);
+        _du_restore2(next, locals);
+
+        cons = next;
+    }
+    
+    return DuInt_FromInt(result);
+}
+
+DuObject *du_lshift(DuObject *cons, DuObject *locals)
+{
+    int result = 0;
+    /* _du_read1(cons); IMMUTABLE */
+    DuObject *expr = _DuCons_CAR(cons);
+    DuObject *next = _DuCons_NEXT(cons);
+        
+    _du_save2(next, locals);
+    DuObject *obj = Du_Eval(expr, locals);
+    result = DuInt_AsInt(obj);
+    _du_restore2(next, locals);
+    
+    cons = next;
+
+    while (cons != Du_None) {
+        /* _du_read1(cons); IMMUTABLE */
+        expr = _DuCons_CAR(cons);
+        next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        obj = Du_Eval(expr, locals);
+        result <<= DuInt_AsInt(obj);
+        _du_restore2(next, locals);
+
+        cons = next;
+    }
+    
+    return DuInt_FromInt(result);
+}
+
+DuObject *du_rshift(DuObject *cons, DuObject *locals)
+{
+    int result = 0;
+    /* _du_read1(cons); IMMUTABLE */
+    DuObject *expr = _DuCons_CAR(cons);
+    DuObject *next = _DuCons_NEXT(cons);
+        
+    _du_save2(next, locals);
+    DuObject *obj = Du_Eval(expr, locals);
+    result = DuInt_AsInt(obj);
+    _du_restore2(next, locals);
+    
+    cons = next;
+
+    while (cons != Du_None) {
+        /* _du_read1(cons); IMMUTABLE */
+        expr = _DuCons_CAR(cons);
+        next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        obj = Du_Eval(expr, locals);
+        result >>= DuInt_AsInt(obj);
+        _du_restore2(next, locals);
+
+        cons = next;
+    }
+    
+    return DuInt_FromInt(result);
+}
+
 DuObject *du_add(DuObject *cons, DuObject *locals)
 {
     int result = 0;
@@ -221,6 +311,32 @@ DuObject *du_div(DuObject *cons, DuObject *locals)
     return DuInt_FromInt(result);
 }
 
+DuObject *du_mod(DuObject *cons, DuObject *locals)
+{
+    int result = 0;
+    int first = 1;
+
+    while (cons != Du_None) {
+        /* _du_read1(cons); IMMUTABLE */
+        DuObject *expr = _DuCons_CAR(cons);
+        DuObject *next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        DuObject *obj = Du_Eval(expr, locals);
+        if (first) {
+            result = DuInt_AsInt(obj);
+            first = 0;
+        } else {
+            result %= DuInt_AsInt(obj);
+        }
+        _du_restore2(next, locals);
+
+        cons = next;
+    }
+    return DuInt_FromInt(result);
+}
+
+
 static DuObject *_du_intcmp(DuObject *cons, DuObject *locals, int mode)
 {
     DuObject *obj_a, *obj_b;
@@ -236,6 +352,8 @@ static DuObject *_du_intcmp(DuObject *cons, DuObject *locals, int mode)
     case 3: r = a != b; break;
     case 4: r = a > b; break;
     case 5: r = a >= b; break;
+    case 6: r = a && b; break;
+    case 7: r = a || b; break;
     }
     return DuInt_FromInt(r);
 }
@@ -252,6 +370,12 @@ DuObject *du_gt(DuObject *cons, DuObject *locals)
 { return _du_intcmp(cons, locals, 4); }
 DuObject *du_ge(DuObject *cons, DuObject *locals)
 { return _du_intcmp(cons, locals, 5); }
+DuObject *du_and(DuObject *cons, DuObject *locals)
+{ return _du_intcmp(cons, locals, 6); }
+DuObject *du_or(DuObject *cons, DuObject *locals)
+{ return _du_intcmp(cons, locals, 7); }
+
+
 
 DuObject *du_type(DuObject *cons, DuObject *locals)
 {
@@ -396,7 +520,7 @@ DuObject *du_append(DuObject *cons, DuObject *locals)
     _du_getargs2("append", cons, locals, &lst, &newobj);
 
     DuList_Append(lst, newobj);
-    return newobj;
+    return lst;
 }
 
 DuObject *du_pop(DuObject *cons, DuObject *locals)
@@ -638,9 +762,15 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "setq", du_setq);
     DuFrame_SetBuiltinMacro(Du_Globals, "print", du_print);
     DuFrame_SetBuiltinMacro(Du_Globals, "+", du_add);
+    DuFrame_SetBuiltinMacro(Du_Globals, "^", du_xor);
+    DuFrame_SetBuiltinMacro(Du_Globals, "<<", du_lshift);
+    DuFrame_SetBuiltinMacro(Du_Globals, ">>", du_rshift);
+    DuFrame_SetBuiltinMacro(Du_Globals, "%", du_mod);
     DuFrame_SetBuiltinMacro(Du_Globals, "-", du_sub);
     DuFrame_SetBuiltinMacro(Du_Globals, "*", du_mul);
     DuFrame_SetBuiltinMacro(Du_Globals, "/", du_div);
+    DuFrame_SetBuiltinMacro(Du_Globals, "||", du_or);
+    DuFrame_SetBuiltinMacro(Du_Globals, "&&", du_and);
     DuFrame_SetBuiltinMacro(Du_Globals, "<", du_lt);
     DuFrame_SetBuiltinMacro(Du_Globals, "<=", du_le);
     DuFrame_SetBuiltinMacro(Du_Globals, "==", du_eq);
