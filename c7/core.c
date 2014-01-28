@@ -24,6 +24,12 @@ static int num_threads_started;
 uint8_t write_locks[READMARKER_END - READMARKER_START];
 
 
+struct _thread_local1_s* _stm_dbg_get_tl(int thread)
+{
+    if (thread == -1)
+        return (struct _thread_local1_s*)real_address((object_t*)_STM_TL);
+    return (struct _thread_local1_s*)REAL_ADDRESS(get_thread_base(thread), _STM_TL);
+}
 
 bool _stm_was_read_remote(char *base, object_t *obj)
 {
@@ -228,6 +234,9 @@ void stm_setup_thread(void)
     _stm_restore_local_state(thread_num);
 
     _STM_TL->nursery_current = (localchar_t*)(FIRST_NURSERY_PAGE * 4096);
+    memset((void*)real_address((object_t*)_STM_TL->nursery_current), 0x0,
+           (FIRST_AFTER_NURSERY_PAGE - FIRST_NURSERY_PAGE) * 4096); /* clear nursery */
+    
     _STM_TL->shadow_stack = (object_t**)malloc(LENGTH_SHADOW_STACK * sizeof(void*));
     _STM_TL->shadow_stack_base = _STM_TL->shadow_stack;
 
@@ -397,10 +406,6 @@ void stm_abort_transaction(void)
     /* here we hold the shared lock as a reader or writer */
     assert(_STM_TL->running_transaction);
     
-
-    /* reset shadowstack */
-    _STM_TL->shadow_stack = _STM_TL->old_shadow_stack;
-
     nursery_on_abort();
     
     assert(_STM_TL->jmpbufptr != NULL);

@@ -63,6 +63,8 @@ localchar_t *_stm_alloc_next_page(size_t size_class)
     /* reserve a fresh new page (XXX: from the end!) */
     page = stm_pages_reserve(1);
 
+    assert(memset(real_address((object_t*)(page * 4096)), 0xdd, 4096));
+    
     result = (localchar_t *)(page * 4096UL);
     alloc->start = (uintptr_t)result;
     alloc->stop = alloc->start + (4096 / size) * size;
@@ -99,6 +101,7 @@ object_t *stm_big_small_alloc_old(size_t size, bool *is_small)
 
 void trace_if_young(object_t **pobj)
 {
+    /* takes a normal pointer to a thread-local pointer to an object */
     if (*pobj == NULL)
         return;
     if (!_stm_is_young(*pobj))
@@ -125,6 +128,7 @@ void trace_if_young(object_t **pobj)
     moved->stm_flags |= GCFLAG_NOT_COMMITTED;
     if (is_small)              /* means, not allocated by large-malloc */
         moved->stm_flags |= GCFLAG_SMALL;
+    assert(size == _stm_data_size((struct object_s*)REAL_ADDRESS(get_thread_base(0), moved)));
     LIST_APPEND(_STM_TL->uncommitted_objects, moved);
     
     (*pobj)->stm_flags |= GCFLAG_MOVED;
@@ -195,6 +199,7 @@ object_t *stm_allocate(size_t size)
     _STM_TL->nursery_current = new_current;
     assert((uintptr_t)new_current < (1L << 32));
     if ((uintptr_t)new_current > FIRST_AFTER_NURSERY_PAGE * 4096) {
+        _STM_TL->nursery_current = current; /* reset for nursery-clearing in minor_collect!! */
         current = collect_and_reserve(size);
     }
 
@@ -263,7 +268,9 @@ void nursery_on_commit()
 
 void nursery_on_abort()
 {
-    
+    /* reset shadowstack */
+    _STM_TL->shadow_stack = _STM_TL->old_shadow_stack;
+
     /* clear old_objects_to_trace (they will have the WRITE_BARRIER flag
        set because the ones we care about are also in modified_objects) */
     stm_list_clear(_STM_TL->old_objects_to_trace);
