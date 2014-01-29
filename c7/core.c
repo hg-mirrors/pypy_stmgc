@@ -22,7 +22,7 @@
 char *object_pages;
 static int num_threads_started;
 uint8_t write_locks[READMARKER_END - READMARKER_START];
-volatile uint8_t inevitable_lock;
+volatile uint8_t inevitable_lock __attribute__((aligned(64))); /* cache-line alignment */
 
 struct _thread_local1_s* _stm_dbg_get_tl(int thread)
 {
@@ -113,7 +113,8 @@ void _stm_write_slowpath(object_t *obj)
         _stm_chunk_pages((struct object_s*)REAL_ADDRESS(get_thread_base(0), obj),
                          &pagenum2, &pages);
         assert(pagenum == pagenum2);
-        assert(pages == (stmcb_size(real_address(obj)) + 4095) / 4096);
+        /* assert(pages == (stmcb_size(real_address(obj)) + 4095) / 4096);
+           not true if obj spans two pages, but is itself smaller than 1 */
     }
     
     for (pagenum2 += pages - 1; pagenum2 >= pagenum; pagenum2--)
@@ -348,6 +349,7 @@ void stm_become_inevitable(char* msg)
     if (_STM_TL->active == 2)
         return;
     assert(_STM_TL->active == 1);
+    fprintf(stderr, "%c", 'I'+_STM_TL->thread_num*32);
 
     uint8_t our_lock = _STM_TL->thread_num + 1;
     do {

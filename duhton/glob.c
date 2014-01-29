@@ -1,5 +1,6 @@
 #include "duhton.h"
 #include <sys/select.h>
+#include <sys/time.h>
 
 pthread_t *all_threads;
 int all_threads_count;
@@ -709,6 +710,18 @@ DuObject *du_sleepms(DuObject *cons, DuObject *locals)
     return Du_None;
 }
 
+DuObject *du_time(DuObject *cons, DuObject *locals)
+{
+    struct timeval current;
+    long mtime;
+
+    gettimeofday(&current, NULL);
+    
+    mtime = ((current.tv_sec) * 1000 + current.tv_usec/1000.0) + 0.5;
+    return DuInt_FromInt(mtime & 0x7fffffff); /* make it always positive 32bit */
+}
+
+
 DuObject *du_defined(DuObject *cons, DuObject *locals)
 {
     /* _du_read1(cons); IMMUTABLE */
@@ -810,6 +823,7 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "transaction", du_transaction);
     DuFrame_SetBuiltinMacro(Du_Globals, "run-transactions", du_run_transactions);
     DuFrame_SetBuiltinMacro(Du_Globals, "sleepms", du_sleepms);
+    DuFrame_SetBuiltinMacro(Du_Globals, "time", du_time);
     DuFrame_SetBuiltinMacro(Du_Globals, "defined?", du_defined);
     DuFrame_SetBuiltinMacro(Du_Globals, "pair?", du_pair);
     DuFrame_SetBuiltinMacro(Du_Globals, "assert", du_assert);

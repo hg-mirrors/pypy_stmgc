@@ -39,27 +39,37 @@
 
 
 
-(defun merge_lists (as bs res)
-  ;; empties the two lists and merges the result to res
-  (setq len_as (len as))
-  (setq len_bs (len bs))
-  (if (< 0 len_as)
-      (if (< 0 len_bs)
-          (if (> (get as 0) (get bs 0))
-              (append res (pop bs 0))
-            (append res (pop as 0))
-            )
-        (append res (pop as 0))
-        )
-    (if (< 0 len_bs)
-        (append res (pop bs 0))
+(defun merge_lists (as bs)
+  ;; merges the two lists and returns a new one
+  (setq res (list))
+  (setq idxa 0)
+  (setq idxb 0)
+  (while (&& (< idxa (len as))
+             (< idxb (len bs)))
+    (if (> (get as idxa) (get bs idxb))
+        (progn
+          (append res (get bs idxb))
+          (setq idxb (+ idxb 1))
+          )
+      (append res (get as idxa))
+      (setq idxa (+ idxa 1))
       )
     )
-  (if (|| (< 0 len_as) (< 0 len_bs))
-      (merge_lists as bs res)
-    )
-  )
 
+  (if (< idxa (len as))
+      (progn
+        (setq xs as)
+        (setq idxx idxa)
+        )
+    (setq xs bs)
+    (setq idxx idxb))
+  
+  (while (< idxx (len xs))
+    (append res (get xs idxx))
+    (setq idxx (+ idxx 1)))
+  
+  res
+  )
 
 
 (defun split_list (xs)
@@ -80,18 +90,47 @@
   )
 
 
+
 (defun merge_sort (xs)
   (if (<= (len xs) 1)                   ; 1 elem
       xs
     (progn                              ; many elems
       (setq lists (split_list xs))
+      
       (setq left (merge_sort (get lists 0)))
       (setq right (merge_sort (get lists 1)))
       ;; (print left right)
-      (setq merged (list))
-      (merge_lists left right merged)
-      ;; (print (quote >) merged)
-      merged
+      (merge_lists left right)
+      )
+    )
+  )
+
+(defun merge_sort_transaction (xs res-cont)
+  (set res-cont (merge_sort xs))
+  )
+
+(defun merge_sort_parallel (xs)
+  (if (<= (len xs) 1)                   ; 1 elem
+      xs
+    (progn                              ; many elems
+      (setq lists (split_list xs))
+      (setq left-c (container None))
+      (setq right-c (container None))
+      
+      (transaction merge_sort_transaction
+                   (get lists 0) left-c)
+      (transaction merge_sort_transaction
+                   (get lists 1) right-c)
+      (print (quote start-transactions))
+      (run-transactions)
+      (print (quote finished-transactions))
+      
+      (setq left (get left-c))
+      (setq right (get right-c))
+      (assert (<= (len left) (+ (len right) 2)))
+      (assert (<= (len right) (+ (len left) 2)))
+      ;; (print left right)
+      (merge_lists left right)
       )
     )
   )
@@ -111,7 +150,16 @@
   (print (quote len:) (len xs) (quote ->) xs)
   )
 
-
+(defun is_sorted (xs)
+  (setq idx 0)
+  (while (< idx (- (len xs) 1))
+    (assert (<=
+             (get xs idx)
+             (get xs (+ idx 1))))
+    (setq idx (+ idx 1))
+    )
+  (quote true)
+  )
 
 
 ;; (setq as (random_list 20))
@@ -120,10 +168,22 @@
 ;; (print bs)
 ;; (print (split_list as))
 
-(setq cs (random_list 10000))
-(print_list cs)
-(print_list (merge_sort (copy_list cs)))
+(setq cs (random_list 50000))
+;; (print_list cs)
 
+;; (setq res (container None))
+;; (transaction merge_sort_transaction cs res)
+;; (run-transactions)
+;; (print (is_sorted (get res)))
+
+(setq current (time))
+(print (quote before-sorting:) current)
+
+(setq sorted (merge_sort_parallel cs))
+
+(print (quote after-sorting:) (time))
+(print (quote difference:) (- (time) current))
+(print (quote sorted:) (is_sorted sorted))
 
 
 
