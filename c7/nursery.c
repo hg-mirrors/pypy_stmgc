@@ -176,9 +176,14 @@ void _stm_minor_collect()
 
 localchar_t *collect_and_reserve(size_t size)
 {
-    _stm_start_safe_point();
+    _stm_start_safe_point(0);    /* don't release the COLLECT lock,
+                                   that needs to be done afterwards if
+                                   we want a major collection */
     minor_collect();
-    _stm_stop_safe_point();
+    _stm_stop_safe_point(0);
+
+    /* XXX: if we_want_major_collect: acquire EXCLUSIVE & COLLECT lock
+       and do it */
 
     localchar_t *current = _STM_TL->nursery_current;
     _STM_TL->nursery_current = current + size;
@@ -188,8 +193,10 @@ localchar_t *collect_and_reserve(size_t size)
 
 object_t *stm_allocate(size_t size)
 {
-    _stm_start_safe_point();
-    _stm_stop_safe_point();
+    _stm_start_safe_point(LOCK_COLLECT);
+    /* all collections may happen here */
+    _stm_stop_safe_point(LOCK_COLLECT);
+    
     assert(_STM_TL->active);
     assert(size % 8 == 0);
     assert(16 <= size && size < NB_NURSERY_PAGES * 4096);//XXX

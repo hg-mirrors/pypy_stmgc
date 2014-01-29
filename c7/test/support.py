@@ -58,8 +58,8 @@ object_t *_stm_tl_address(char *ptr);
 bool _stm_is_young(object_t *o);
 object_t *_stm_allocate_old(size_t size);
 
-void _stm_start_safe_point(void);
-void _stm_stop_safe_point(void);
+void _stm_start_safe_point(uint8_t);
+void _stm_stop_safe_point(uint8_t);
 bool _stm_check_stop_safe_point(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
@@ -91,7 +91,12 @@ enum {
 enum {
     GCFLAG_WRITE_BARRIER = 1,
     GCFLAG_NOT_COMMITTED = 2,
-    GCFLAG_MOVED = 4
+    GCFLAG_MOVED = 4,
+};
+
+enum {
+    LOCK_COLLECT = 1,
+    LOCK_EXCLUSIVE = 2,
 };
 
 
@@ -185,7 +190,7 @@ bool _stm_check_stop_safe_point(void) {
     if (__builtin_setjmp(here) == 0) { // returned directly
          assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
          _STM_TL->jmpbufptr = &here;
-         _stm_stop_safe_point();
+         _stm_stop_safe_point(LOCK_COLLECT);
          _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
@@ -360,7 +365,7 @@ def stm_abort_transaction():
 
 
 def stm_start_safe_point():
-    lib._stm_start_safe_point()
+    lib._stm_start_safe_point(lib.LOCK_COLLECT)
 
 def stm_stop_safe_point():
     if lib._stm_check_stop_safe_point():

@@ -314,7 +314,7 @@ class TestBasic(BaseTest):
     def test_many_allocs(self):
         # assumes NB_NURSERY_PAGES    1024
         obj_size = 1024
-        num = 5000 # more than what fits in the nursery (4MB)
+        num = 9000 # more than what fits in the nursery (4MB)
         
         stm_start_transaction()
         for i in range(num):
