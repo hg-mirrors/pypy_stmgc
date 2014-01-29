@@ -6,11 +6,11 @@
 #include <stdbool.h>
 #include <assert.h>
 
-#define NB_PAGES            (256*256)    // 256MB
+#define NB_PAGES            (6*256*256)    // 6*256MB
 #define NB_THREADS          2
 #define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
 #define LARGE_OBJECT_WORDS  36
-#define NB_NURSERY_PAGES    1024
+#define NB_NURSERY_PAGES    2048 // 8MB
 #define LENGTH_SHADOW_STACK   163840
 
 
@@ -21,7 +21,7 @@
 #define READMARKER_START      ((FIRST_OBJECT_PAGE * 4096UL) >> 4)
 #define FIRST_READMARKER_PAGE (READMARKER_START / 4096UL)
 #define FIRST_AFTER_NURSERY_PAGE  (FIRST_OBJECT_PAGE + NB_NURSERY_PAGES)
-#define HEAP_PAGES            (((NB_PAGES - FIRST_AFTER_NURSERY_PAGE) * 2) / 3)
+#define HEAP_PAGES            (((NB_PAGES - FIRST_AFTER_NURSERY_PAGE) * 3) / 4)
 
 
 

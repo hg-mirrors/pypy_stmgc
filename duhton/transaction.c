@@ -85,7 +85,10 @@ static DuObject *next_cell(void)
 
         while (__builtin_setjmp(here) == 1) { }
       restart:
-        stm_start_transaction(&here);
+        // stm_start_transaction(&here);
+        /* this code is critical enough so that we want it to
+           be serialized perfectly using inevitable transactions */
+        stm_start_inevitable_transaction();
 
         root = du_pending_transactions;
         /* _du_read1(root); IMMUTABLE */
