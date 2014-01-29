@@ -19,7 +19,7 @@
 
 void stm_major_collection(void)
 {
-    assert(_STM_TL->running_transaction);
+    assert(_STM_TL->active);
     abort();
 }
 
@@ -190,7 +190,7 @@ object_t *stm_allocate(size_t size)
 {
     _stm_start_safe_point();
     _stm_stop_safe_point();
-    assert(_STM_TL->running_transaction);
+    assert(_STM_TL->active);
     assert(size % 8 == 0);
     assert(16 <= size && size < NB_NURSERY_PAGES * 4096);//XXX
 

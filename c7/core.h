@@ -44,8 +44,6 @@ enum {
 
 
 
-
-
 #define TLPREFIX __attribute__((address_space(256)))
 
 typedef TLPREFIX struct _thread_local1_s _thread_local1_t;
@@ -94,7 +92,7 @@ struct _thread_local1_s {
     uint8_t transaction_read_version;
     
     int thread_num;
-    bool running_transaction;
+    uint8_t active;                /* 1 normal, 2 inevitable, 0 no trans. */
     bool need_abort;
     char *thread_base;
     struct stm_list_s *modified_objects;
@@ -226,8 +224,8 @@ object_t *stm_allocate_prebuilt(size_t size);
 void stm_abort_transaction(void);
 
 void _stm_minor_collect();
-#define stm_become_inevitable(msg)   /* XXX implement me! */
-#define stm_start_inevitable_transaction() stm_start_transaction(NULL)   /* XXX implement me! */
+void stm_become_inevitable(char* msg);
+void stm_start_inevitable_transaction();
 
 struct _thread_local1_s* _stm_dbg_get_tl(int thread); /* -1 is current thread */
 

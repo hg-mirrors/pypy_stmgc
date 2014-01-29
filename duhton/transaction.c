@@ -61,7 +61,7 @@ void Du_TransactionRun(void)
     if (stm_thread_local_obj == NULL)
         return;
 
-    stm_start_transaction(NULL);
+    stm_start_inevitable_transaction();
     DuConsObject *root = du_pending_transactions;
     _du_write1(root);
     root->cdr = stm_thread_local_obj;

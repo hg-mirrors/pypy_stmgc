@@ -42,7 +42,7 @@ int main(int argc, char **argv)
             printf("))) ");
             fflush(stdout);
         }
-        stm_start_transaction(NULL);
+        stm_start_inevitable_transaction();
         DuObject *code = Du_Compile(filename, interactive);
         _du_save1(code);
         stm_stop_transaction();
@@ -53,7 +53,7 @@ int main(int argc, char **argv)
         }
         /*Du_Print(code, 1);
           printf("\n");*/
-        stm_start_transaction(NULL);
+        stm_start_inevitable_transaction();
         DuObject *res = Du_Eval(code, Du_Globals);
         if (interactive) {
             Du_Print(res, 1);

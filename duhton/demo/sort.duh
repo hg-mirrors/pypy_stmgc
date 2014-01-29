@@ -28,14 +28,13 @@
 
 
 (defun random_list (n)
-  (if (> n 0)
-      (progn
-        (setq res (random_list (- n 1)))
-        (append res (% (xor128) 10))
-        res
-        )
-    (list )
+  (setq i n)
+  (setq res (list))
+  (while (> i 0)
+    (append res (% (xor128) 10))
+    (setq i (- i 1))
     )
+  res
   )
 
 
@@ -62,33 +61,21 @@
   )
 
 
-(defun append_to_correct_half (xs first second half_len)
-  (if (< 0 (len xs))
-      (progn
-        (setq elem (pop xs 0))
-        (if (< 0 half_len)
-            (append_to_correct_half xs
-                                    (append first elem)
-                                    second
-                                    (- half_len 1))
-          
-          (append_to_correct_half xs
-                                  first
-                                  (append second elem)
-                                  (- half_len 1))
-          )
-        )
-    )
-  )
 
 (defun split_list (xs)
   ;; empties xs and fills 2 new lists to be returned
   (setq half_len (/ (len xs) 2))
-
   (setq first (list))
   (setq second (list))
 
-  (append_to_correct_half xs first second half_len)
+  (while (< 0 (len xs))
+    (if (< 0 half_len)
+        (append first (pop xs 0))
+      (append second (pop xs 0))
+      )
+    (setq half_len (- half_len 1))
+    )
+
   (list first second)
   )
 
@@ -110,19 +97,16 @@
   )
 
 
-(defun copy_list_helper (xs res idx)
-  (if (< idx (len xs))
-      (progn
-        (append res (get xs idx))
-        (copy_list_helper xs res (+ idx 1))
-        )
-    )
-  )
 (defun copy_list (xs)
   (setq res (list))
-  (copy_list_helper xs res 0)
+  (setq idx 0)
+  (while (< idx (len xs))
+    (append res (get xs idx))
+    (setq idx (+ idx 1))
+    )
   res
   )
+
 (defun print_list (xs)
   (print (quote len:) (len xs) (quote ->) xs)
   )
@@ -130,11 +114,11 @@
 
 
 
-(setq as (random_list 20))
-(setq bs (random_list 20))
-(print as)
-(print bs)
-(print (split_list as))
+;; (setq as (random_list 20))
+;; (setq bs (random_list 20))
+;; (print as)
+;; (print bs)
+;; (print (split_list as))
 
 (setq cs (random_list 10000))
 (print_list cs)

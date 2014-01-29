@@ -771,7 +771,7 @@ void Du_Initialize(int num_threads)
     all_threads_count = num_threads;
     all_threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);
 
-    stm_start_transaction(NULL);
+    stm_start_inevitable_transaction();
     DuFrame_SetBuiltinMacro(Du_Globals, "progn", Du_Progn);
     DuFrame_SetBuiltinMacro(Du_Globals, "setq", du_setq);
     DuFrame_SetBuiltinMacro(Du_Globals, "print", du_print);
