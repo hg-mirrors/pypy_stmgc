@@ -138,10 +138,10 @@ void _stm_write_slowpath(object_t *obj)
         if (_STM_TL->active == 2) {
             /* we must succeed! */
             _stm_dbg_get_tl(prev_owner - 1)->need_abort = 1;
-            _stm_start_no_collect_safe_point();
-            /* XXX: not good */
+            _stm_start_safe_point(0);
+            /* XXX: not good, maybe should be signalled by other thread */
             usleep(1);
-            _stm_stop_no_collect_safe_point();
+            _stm_stop_safe_point(0);
             goto retry;
         }
         /* XXXXXX */
@@ -353,27 +353,21 @@ void stm_become_inevitable(char* msg)
 
     uint8_t our_lock = _STM_TL->thread_num + 1;
     do {
-        _stm_start_safe_point();
-
-        stm_start_exclusive_lock();
-        if (_STM_TL->need_abort) {
-            stm_stop_exclusive_lock();
-            stm_start_shared_lock();
-            stm_abort_transaction();
-        }
+        _stm_start_safe_point(LOCK_COLLECT);
+        _stm_stop_safe_point(LOCK_COLLECT|LOCK_EXCLUSIVE);
 
         if (!inevitable_lock)
             break;
 
-        stm_stop_exclusive_lock();
-        _stm_stop_safe_point();
+        _stm_start_safe_point(LOCK_EXCLUSIVE|LOCK_COLLECT);
+        _stm_stop_safe_point(LOCK_COLLECT);
     } while (1);
 
     inevitable_lock = our_lock;
     _STM_TL->active = 2;
-    stm_stop_exclusive_lock();
     
-    _stm_stop_safe_point();
+    _stm_start_safe_point(LOCK_EXCLUSIVE|LOCK_COLLECT);
+    _stm_stop_safe_point(LOCK_COLLECT);
 }
 
 void stm_start_inevitable_transaction()
@@ -385,8 +379,8 @@ void stm_start_inevitable_transaction()
 void stm_start_transaction(jmpbufptr_t *jmpbufptr)
 {
     assert(!_STM_TL->active);
-
-    stm_start_shared_lock();
+    
+    _stm_stop_safe_point(LOCK_COLLECT);
     
     uint8_t old_rv = _STM_TL->transaction_read_version;
     _STM_TL->transaction_read_version = old_rv + 1;
@@ -415,28 +409,23 @@ void stm_stop_transaction(void)
     /* Some operations require us to have the EXCLUSIVE lock */
     if (_STM_TL->active == 1) {
         while (1) {
-            _stm_start_safe_point();
+            _stm_start_safe_point(LOCK_COLLECT);
             usleep(1);          /* XXX: better algorithm that allows
                                    for waiting on a mutex */
-            stm_start_exclusive_lock();
-            if (_STM_TL->need_abort) {
-                stm_stop_exclusive_lock();
-                stm_start_shared_lock();
-                stm_abort_transaction();
-            }
+            _stm_stop_safe_point(LOCK_COLLECT|LOCK_EXCLUSIVE);
             
             if (!inevitable_lock)
                 break;
-            stm_stop_exclusive_lock();
-            _stm_stop_safe_point();
+
+            _stm_start_safe_point(LOCK_COLLECT|LOCK_EXCLUSIVE);
+            _stm_stop_safe_point(LOCK_COLLECT);
         }
         /* we have the exclusive lock */
     } else {
         /* inevitable! no other transaction could have committed
            or aborted us */
-        stm_stop_shared_lock();
-        stm_start_exclusive_lock();
-        assert(!_STM_TL->need_abort);
+        _stm_start_safe_point(LOCK_COLLECT);
+        _stm_stop_safe_point(LOCK_EXCLUSIVE|LOCK_COLLECT);
         inevitable_lock = 0;
     }
 
@@ -451,7 +440,7 @@ void stm_stop_transaction(void)
 
  
     _STM_TL->active = 0;
-    stm_stop_exclusive_lock();
+    _stm_start_safe_point(LOCK_EXCLUSIVE|LOCK_COLLECT);
     fprintf(stderr, "%c", 'C'+_STM_TL->thread_num*32);
 }
 
@@ -504,13 +493,15 @@ void stm_abort_transaction(void)
     assert(_STM_TL->jmpbufptr != NULL);
     assert(_STM_TL->jmpbufptr != (jmpbufptr_t *)-1);   /* for tests only */
     _STM_TL->active = 0;
-    stm_stop_shared_lock();
+    /* _STM_TL->need_abort = 0; */
+
+    _stm_start_safe_point(LOCK_COLLECT);
+
     fprintf(stderr, "%c", 'A'+_STM_TL->thread_num*32);
 
     /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
     reset_modified_from_other_threads();
     stm_list_clear(_STM_TL->modified_objects);
 
-    
     __builtin_longjmp(*_STM_TL->jmpbufptr, 1);
 }
