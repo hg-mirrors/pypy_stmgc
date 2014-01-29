@@ -108,6 +108,10 @@ void _stm_move_object(object_t* obj, char *src, char *dst);
 size_t _stm_data_size(struct object_s *data);
 void _stm_chunk_pages(struct object_s *data, uintptr_t *start, uintptr_t *num);
 
+void stm_become_inevitable(char* msg);
+void stm_start_inevitable_transaction();
+bool _checked_stm_become_inevitable();
+
 """)
 
 lib = ffi.verify('''
@@ -136,6 +140,19 @@ uint8_t _stm_get_flags(object_t *obj) {
     return obj->stm_flags;
 }
 
+
+bool _checked_stm_become_inevitable() {
+    jmpbufptr_t here;
+    if (__builtin_setjmp(here) == 0) { // returned directly
+         assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
+         _STM_TL->jmpbufptr = &here;
+         stm_become_inevitable("TEST");
+         _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
+         return 0;
+    }
+    _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
+    return 1;
+}
 
 bool _checked_stm_write(object_t *object) {
     jmpbufptr_t here;
@@ -347,6 +364,10 @@ def stm_start_safe_point():
 
 def stm_stop_safe_point():
     if lib._stm_check_stop_safe_point():
+        raise Conflict()
+
+def stm_become_inevitable():
+    if lib._checked_stm_become_inevitable():
         raise Conflict()
 
 def stm_minor_collect():

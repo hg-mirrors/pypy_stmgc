@@ -22,7 +22,7 @@
 char *object_pages;
 static int num_threads_started;
 uint8_t write_locks[READMARKER_END - READMARKER_START];
-
+volatile uint8_t inevitable_lock;
 
 struct _thread_local1_s* _stm_dbg_get_tl(int thread)
 {
@@ -125,6 +125,7 @@ void _stm_write_slowpath(object_t *obj)
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
     uint8_t lock_num = _STM_TL->thread_num + 1;
     uint8_t prev_owner;
+ retry:
     do {
         prev_owner = __sync_val_compare_and_swap(&write_locks[lock_idx],
                                                0, lock_num);
@@ -132,7 +133,16 @@ void _stm_write_slowpath(object_t *obj)
         /* if there was no lock-holder or we already have the lock */
         if ((!prev_owner) || (prev_owner == lock_num))
             break;
-        
+
+        if (_STM_TL->active == 2) {
+            /* we must succeed! */
+            _stm_dbg_get_tl(prev_owner - 1)->need_abort = 1;
+            _stm_start_no_collect_safe_point();
+            /* XXX: not good */
+            usleep(1);
+            _stm_stop_no_collect_safe_point();
+            goto retry;
+        }
         /* XXXXXX */
         //_stm_start_semi_safe_point();
         //usleep(1);
@@ -161,6 +171,8 @@ void stm_setup(void)
 {
     _stm_reset_shared_lock();
     _stm_reset_pages();
+
+    inevitable_lock = 0;
     
     /* Check that some values are acceptable */
     assert(4096 <= ((uintptr_t)_STM_TL));
@@ -259,12 +271,12 @@ void stm_setup_thread(void)
     
     _STM_TL->modified_objects = stm_list_create();
     _STM_TL->uncommitted_objects = stm_list_create();
-    assert(!_STM_TL->running_transaction);
+    assert(!_STM_TL->active);
 }
 
 bool _stm_is_in_transaction(void)
 {
-    return _STM_TL->running_transaction;
+    return _STM_TL->active;
 }
 
 void _stm_teardown_thread(void)
@@ -288,6 +300,7 @@ void _stm_teardown_thread(void)
 
 void _stm_teardown(void)
 {
+    assert(inevitable_lock == 0);
     munmap(object_pages, TOTAL_MEMORY);
     _stm_reset_pages();
     memset(write_locks, 0, sizeof(write_locks));
@@ -330,9 +343,46 @@ static void reset_transaction_read_version(void)
 }
 
 
+void stm_become_inevitable(char* msg)
+{
+    if (_STM_TL->active == 2)
+        return;
+    assert(_STM_TL->active == 1);
+
+    uint8_t our_lock = _STM_TL->thread_num + 1;
+    do {
+        _stm_start_safe_point();
+
+        stm_start_exclusive_lock();
+        if (_STM_TL->need_abort) {
+            stm_stop_exclusive_lock();
+            stm_start_shared_lock();
+            stm_abort_transaction();
+        }
+
+        if (!inevitable_lock)
+            break;
+
+        stm_stop_exclusive_lock();
+        _stm_stop_safe_point();
+    } while (1);
+
+    inevitable_lock = our_lock;
+    _STM_TL->active = 2;
+    stm_stop_exclusive_lock();
+    
+    _stm_stop_safe_point();
+}
+
+void stm_start_inevitable_transaction()
+{
+    stm_start_transaction(NULL);
+    stm_become_inevitable("stm_start_inevitable_transaction");
+}
+
 void stm_start_transaction(jmpbufptr_t *jmpbufptr)
 {
-    assert(!_STM_TL->running_transaction);
+    assert(!_STM_TL->active);
 
     stm_start_shared_lock();
     
@@ -346,14 +396,14 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
     nursery_on_start();
     
     _STM_TL->jmpbufptr = jmpbufptr;
-    _STM_TL->running_transaction = 1;
+    _STM_TL->active = 1;
     _STM_TL->need_abort = 0;
 }
 
 
 void stm_stop_transaction(void)
 {
-    assert(_STM_TL->running_transaction);
+    assert(_STM_TL->active);
 
     /* do the minor_collection here and not in nursery_on_commit,
        since here we can still run concurrently with other threads
@@ -361,8 +411,32 @@ void stm_stop_transaction(void)
     _stm_minor_collect();
 
     /* Some operations require us to have the EXCLUSIVE lock */
-    stm_stop_shared_lock();
-    stm_start_exclusive_lock();
+    if (_STM_TL->active == 1) {
+        while (1) {
+            _stm_start_safe_point();
+            usleep(1);          /* XXX: better algorithm that allows
+                                   for waiting on a mutex */
+            stm_start_exclusive_lock();
+            if (_STM_TL->need_abort) {
+                stm_stop_exclusive_lock();
+                stm_start_shared_lock();
+                stm_abort_transaction();
+            }
+            
+            if (!inevitable_lock)
+                break;
+            stm_stop_exclusive_lock();
+            _stm_stop_safe_point();
+        }
+        /* we have the exclusive lock */
+    } else {
+        /* inevitable! no other transaction could have committed
+           or aborted us */
+        stm_stop_shared_lock();
+        stm_start_exclusive_lock();
+        assert(!_STM_TL->need_abort);
+        inevitable_lock = 0;
+    }
 
     _STM_TL->jmpbufptr = NULL;          /* cannot abort any more */
 
@@ -374,7 +448,7 @@ void stm_stop_transaction(void)
     stm_list_clear(_STM_TL->modified_objects);
 
  
-    _STM_TL->running_transaction = 0;
+    _STM_TL->active = 0;
     stm_stop_exclusive_lock();
     fprintf(stderr, "%c", 'C'+_STM_TL->thread_num*32);
 }
@@ -421,13 +495,13 @@ static void reset_modified_from_other_threads()
 void stm_abort_transaction(void)
 {
     /* here we hold the shared lock as a reader or writer */
-    assert(_STM_TL->running_transaction);
+    assert(_STM_TL->active == 1);
     
     nursery_on_abort();
     
     assert(_STM_TL->jmpbufptr != NULL);
     assert(_STM_TL->jmpbufptr != (jmpbufptr_t *)-1);   /* for tests only */
-    _STM_TL->running_transaction = 0;
+    _STM_TL->active = 0;
     stm_stop_shared_lock();
     fprintf(stderr, "%c", 'A'+_STM_TL->thread_num*32);
 

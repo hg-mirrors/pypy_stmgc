@@ -473,6 +473,25 @@ class TestBasic(BaseTest):
         stm_stop_transaction()
         
 
+    def test_inevitable_transaction(self):
+        py.test.skip("stm_write and stm_stop_transaction"
+                     " of an inevitable tr. is not testable"
+                     " since they wait for the other thread"
+                     " to synchronize and possibly abort")
+
+        old = stm_allocate_old(16)
+        stm_start_transaction()
+
+        self.switch(1)
+        stm_start_transaction()
+        stm_write(old)
+
+        self.switch(0)
+        stm_become_inevitable()
+        stm_write(old) # t1 needs to abort, not us
+        stm_stop_transaction()
+
+        py.test.raises(Conflict, self.switch, 1)
         
     # def test_resolve_write_write_no_conflict(self):
     #     stm_start_transaction()
