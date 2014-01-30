@@ -312,9 +312,8 @@ class TestBasic(BaseTest):
         assert stm_get_char(lp1) == 'a'
 
     def test_many_allocs(self):
-        # assumes NB_NURSERY_PAGES    1024
         obj_size = 1024
-        num = 9000 # more than what fits in the nursery (4MB)
+        num = (lib.NB_NURSERY_PAGES * 4096) / obj_size + 100 # more than what fits in the nursery
         
         stm_start_transaction()
         for i in range(num):
@@ -332,6 +331,14 @@ class TestBasic(BaseTest):
                 
         assert old
         assert young
+
+    def test_larger_than_section(self):
+        obj_size = lib.NURSERY_SECTION + 16
+        
+        stm_start_transaction()
+        new = stm_allocate(obj_size)
+        assert not is_in_nursery(new)
+        
 
     def test_large_obj_alloc(self):
         # test obj which doesn't fit into the size_classes

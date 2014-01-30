@@ -193,24 +193,48 @@ localchar_t *collect_and_reserve(size_t size)
 
 object_t *stm_allocate(size_t size)
 {
+    object_t *result;
+    
     _stm_start_safe_point(LOCK_COLLECT);
     /* all collections may happen here */
     _stm_stop_safe_point(LOCK_COLLECT);
     
     assert(_STM_TL->active);
     assert(size % 8 == 0);
-    assert(16 <= size && size < NB_NURSERY_PAGES * 4096);//XXX
+    assert(16 <= size);
 
+    /* XXX move out of fastpath */
+    if (size >= NURSERY_SECTION) {
+        /* allocate large objects outside the nursery immediately,
+           otherwise they may trigger too many minor collections
+           and degrade performance */
+        bool is_small;
+        result = stm_big_small_alloc_old(size, &is_small);
+
+        memset((void*)real_address(result), 0, size);
+
+        /* object is not committed yet */
+        result->stm_flags |= GCFLAG_NOT_COMMITTED;
+        if (is_small)              /* means, not allocated by large-malloc */
+            result->stm_flags |= GCFLAG_SMALL;
+        assert(size == _stm_data_size((struct object_s*)REAL_ADDRESS(get_thread_base(0), result)));
+
+        LIST_APPEND(_STM_TL->uncommitted_objects, result);
+        LIST_APPEND(_STM_TL->old_objects_to_trace, result);
+        return result;
+    }
+    
     localchar_t *current = _STM_TL->nursery_current;
     localchar_t *new_current = current + size;
     _STM_TL->nursery_current = new_current;
     assert((uintptr_t)new_current < (1L << 32));
+
     if ((uintptr_t)new_current > FIRST_AFTER_NURSERY_PAGE * 4096) {
         _STM_TL->nursery_current = current; /* reset for nursery-clearing in minor_collect!! */
         current = collect_and_reserve(size);
     }
 
-    object_t *result = (object_t *)current;
+    result = (object_t *)current;
     return result;
 }
 
