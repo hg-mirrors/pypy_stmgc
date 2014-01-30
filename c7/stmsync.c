@@ -33,6 +33,12 @@ void stm_acquire_collection_lock()
 {
     /* we must have the exclusive lock here and
        not the colletion lock!! */
+    /* XXX: for more than 2 threads, need a way
+       to signal other threads with need_major_collect
+       so that they don't leave COLLECT-safe-points
+       when this flag is set. Otherwise we simply
+       wait arbitrarily long until all threads reach
+       COLLECT-safe-points by chance at the same time. */
     while (1) {
         if (!rwticket_wrtrylock(&rw_collection_lock))
             break;              /* acquired! */

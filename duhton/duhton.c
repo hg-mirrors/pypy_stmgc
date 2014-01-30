@@ -1,7 +1,6 @@
 #include <string.h>
 #include "duhton.h"
 
-#define DEFAULT_NUM_THREADS 2
 
 int main(int argc, char **argv)
 {
