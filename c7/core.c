@@ -394,6 +394,8 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
     _STM_TL->jmpbufptr = jmpbufptr;
     _STM_TL->active = 1;
     _STM_TL->need_abort = 0;
+    
+    fprintf(stderr, "%c", 'S'+_STM_TL->thread_num*32);
 }
 
 
