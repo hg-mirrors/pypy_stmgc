@@ -8,6 +8,7 @@
 typedef TLPREFIX struct DuTupleObject_s {
     DuOBJECT_HEAD1
     int ob_count;
+    int ob_capacity;
     DuObject *ob_items[1];
 } DuTupleObject;
 
@@ -27,13 +28,14 @@ void tuple_trace(struct DuTupleObject_s *ob, void visit(object_t **))
 
 size_t tuple_bytesize(struct DuTupleObject_s *ob)
 {
-    return sizeof(DuTupleObject) + (ob->ob_count - 1) * sizeof(DuObject *);
+    return sizeof(DuTupleObject) + (ob->ob_capacity - 1) * sizeof(DuObject *);
 }
 
 void list_trace(struct DuListObject_s *ob, void visit(object_t **))
 {
     visit((object_t **)&ob->ob_tuple);
 }
+
 
 void list_print(DuListObject *ob)
 {
@@ -71,7 +73,13 @@ DuTupleObject *DuTuple_New(int length)
     ob = (DuTupleObject *)stm_allocate(size);
     ob->ob_base.type_id = DUTYPE_TUPLE;
     ob->ob_count = length;
+    ob->ob_capacity = length;
     return ob;
+}
+
+int overallocated_size(int size)
+{
+    return size + (size >> 3) + (size < 9 ? 3 : 6);
 }
 
 void _list_append(DuListObject *ob, DuObject *x)
@@ -82,17 +90,24 @@ void _list_append(DuListObject *ob, DuObject *x)
     _du_read1(olditems);
     int i, newcount = olditems->ob_count + 1;
 
-    _du_save3(ob, x, olditems);
-    DuTupleObject *newitems = DuTuple_New(newcount);
-    _du_restore3(ob, x, olditems);
+    if (newcount <= olditems->ob_capacity) {
+        _du_write1(olditems);
+        olditems->ob_items[newcount-1] = x;
+        olditems->ob_count = newcount;
+    } else {                    /* allocate new one */
+        _du_save3(ob, x, olditems);
+        DuTupleObject *newitems = DuTuple_New(overallocated_size(newcount));
+        newitems->ob_count = newcount;
+        _du_restore3(ob, x, olditems);
+        
+        _du_write1(ob);
 
-    _du_write1(ob);
+        for (i=0; i<newcount-1; i++)
+            newitems->ob_items[i] = olditems->ob_items[i];
+        newitems->ob_items[newcount-1] = x;
 
-    for (i=0; i<newcount-1; i++)
-        newitems->ob_items[i] = olditems->ob_items[i];
-    newitems->ob_items[newcount-1] = x;
-
-    ob->ob_tuple = newitems;
+        ob->ob_tuple = newitems;
+    } 
 }
 
 void DuList_Append(DuObject *ob, DuObject *item)
@@ -194,6 +209,7 @@ void init_prebuilt_list_objects(void)
         stm_allocate_prebuilt(sizeof(DuTupleObject));
     du_empty_tuple->ob_base.type_id = DUTYPE_TUPLE;
     du_empty_tuple->ob_count = 0;
+    du_empty_tuple->ob_capacity = 0;
 }
 
 DuObject *DuList_New()
