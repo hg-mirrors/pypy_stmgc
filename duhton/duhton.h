@@ -1,10 +1,16 @@
 #ifndef _DUHTON_H_
 #define _DUHTON_H_
 
-#include "../c7/core.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include "../c7/core.h"
+#include "../c7/list.h"
+
+#define STM 1                   /* hackish removal of all read/write
+                                   barriers. synchronization is up to
+                                   the program */
+#define DEFAULT_NUM_THREADS 2   /* required by stm-c7 */
 
 
 struct DuObject_s {
@@ -173,8 +179,17 @@ void Du_TransactionRun(void);
                                   p1 = (typeof(p1))_pop_root())
 
 
+#if STM
 #define _du_read1(p1)           stm_read((object_t *)(p1))
 #define _du_write1(p1)          stm_write((object_t *)(p1))
+#else
+#define _du_read1(p1)
+#define _du_write1(p1)          {                                       \
+    if (UNLIKELY(((object_t *)(p1))->stm_flags & GCFLAG_WRITE_BARRIER)) { \
+        LIST_APPEND(_STM_TL->old_objects_to_trace, ((object_t *)(p1))); \
+        ((object_t *)(p1))->stm_flags &= ~GCFLAG_WRITE_BARRIER;         \
+    }}
+#endif
 
 
 #ifdef NDEBUG
