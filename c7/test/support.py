@@ -36,6 +36,9 @@ typedef ... object_t;
 typedef ... jmpbufptr_t;
 #define SIZEOF_MYOBJ ...
 
+#define NB_NURSERY_PAGES ...
+#define NURSERY_SECTION ...
+
 void stm_setup(void);
 void stm_setup_thread(void);
 
@@ -244,13 +247,13 @@ object_t * _get_ptr(object_t *obj, int n)
 size_t stmcb_size(struct object_s *obj)
 {
     struct myobj_s *myobj = (struct myobj_s*)obj;
-    if (myobj->type_id < 42142) {
+    if (myobj->type_id < 421420) {
         /* basic case: tid equals 42 plus the size of the object */
         assert(myobj->type_id >= 42 + sizeof(struct myobj_s));
         return myobj->type_id - 42;
     }
     else {
-        int nrefs = myobj->type_id - 42142;
+        int nrefs = myobj->type_id - 421420;
         assert(nrefs < 100);
         if (nrefs == 0)   /* weakrefs */
             nrefs = 1;
@@ -262,11 +265,11 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 {
     int i;
     struct myobj_s *myobj = (struct myobj_s*)obj;
-    if (myobj->type_id < 42142) {
+    if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
     }
-    for (i=0; i < myobj->type_id - 42142; i++) {
+    for (i=0; i < myobj->type_id - 421420; i++) {
         object_t **ref = ((object_t **)(myobj + 1)) + i;
         visit(ref);
     }
@@ -308,7 +311,7 @@ def stm_allocate(size):
 
 def stm_allocate_refs(n):
     o = lib.stm_allocate(HDR + n * WORD)
-    tid = 42142 + n
+    tid = 421420 + n
     lib._set_type_id(o, tid)
     return o
 
