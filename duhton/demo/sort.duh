@@ -121,9 +121,11 @@
                    (get lists 0) left-c)
       (transaction merge_sort_transaction
                    (get lists 1) right-c)
-      (print (quote start-transactions))
+      
+      (setq current (time))
+      (print (quote before-parallel))
       (run-transactions)
-      (print (quote finished-transactions))
+      (print (quote time-parallel:) (- (time) current))
       
       (setq left (get left-c))
       (setq right (get right-c))
@@ -168,7 +170,11 @@
 ;; (print bs)
 ;; (print (split_list as))
 
-(setq cs (random_list 50000))
+(setq current (time))
+(print (quote before-random))
+(setq cs (random_list 100000))
+(print (quote time-random:) (- (time) current))
+
 ;; (print_list cs)
 
 ;; (setq res (container None))
@@ -177,13 +183,14 @@
 ;; (print (is_sorted (get res)))
 
 (setq current (time))
-(print (quote before-sorting:) current)
-
+(print (quote before-sorting))
 (setq sorted (merge_sort_parallel cs))
+(print (quote time-sorting:) (- (time) current))
 
-(print (quote after-sorting:) (time))
-(print (quote difference:) (- (time) current))
+
+(setq current (time))
+(print (quote before-check))
 (print (quote sorted:) (is_sorted sorted))
-
+(print (quote time-check:) (- (time) current))
 
 
