@@ -686,8 +686,10 @@ DuObject *du_run_transactions(DuObject *cons, DuObject *locals)
         Du_FatalError("run-transactions: expected no argument");
 
     _du_save1(stm_thread_local_obj);
-    stm_stop_transaction();
+    _stm_minor_collect();       /* hack... */
     _du_restore1(stm_thread_local_obj);
+    
+    stm_stop_transaction();
     
     Du_TransactionRun();
     
@@ -771,9 +773,9 @@ void Du_Initialize(int num_threads)
     assert(num_threads == 2);
 
     stm_setup();
-    stm_setup_thread();
-    stm_setup_thread();
-    _stm_restore_local_state(0);
+    stm_setup_pthread();
+
+    stm_start_inevitable_transaction();
 
     init_prebuilt_object_objects();
     init_prebuilt_symbol_objects();
@@ -784,7 +786,6 @@ void Du_Initialize(int num_threads)
     all_threads_count = num_threads;
     all_threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);
 
-    stm_start_inevitable_transaction();
     DuFrame_SetBuiltinMacro(Du_Globals, "progn", Du_Progn);
     DuFrame_SetBuiltinMacro(Du_Globals, "setq", du_setq);
     DuFrame_SetBuiltinMacro(Du_Globals, "print", du_print);
@@ -833,11 +834,5 @@ void Du_Initialize(int num_threads)
 
 void Du_Finalize(void)
 {
-    _stm_restore_local_state(1);
-    _stm_teardown_thread();
-
-    _stm_restore_local_state(0);
-    _stm_teardown_thread();
-
-    _stm_teardown();
+    stm_teardown();
 }

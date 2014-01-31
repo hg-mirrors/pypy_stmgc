@@ -5,9 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include <sys/syscall.h>
-#include <asm/prctl.h>
-#include <sys/prctl.h>
+
 #include <pthread.h>
 
 #include "core.h"
@@ -165,8 +163,27 @@ void _stm_write_slowpath(object_t *obj)
     }
 }
 
+void _stm_setup_static_thread(void)
+{
+    int thread_num = __sync_fetch_and_add(&num_threads_started, 1);
+    assert(thread_num < 2);  /* only 2 threads for now */
 
+    _stm_restore_local_state(thread_num);
 
+    _STM_TL->nursery_current = (localchar_t*)(FIRST_NURSERY_PAGE * 4096);
+    memset((void*)real_address((object_t*)_STM_TL->nursery_current), 0x0,
+           (FIRST_AFTER_NURSERY_PAGE - FIRST_NURSERY_PAGE) * 4096); /* clear nursery */
+    
+    _STM_TL->shadow_stack = NULL;
+    _STM_TL->shadow_stack_base = NULL;
+
+    _STM_TL->old_objects_to_trace = stm_list_create();
+    
+    _STM_TL->modified_objects = stm_list_create();
+    _STM_TL->uncommitted_objects = stm_list_create();
+    assert(!_STM_TL->active);
+    _stm_assert_clean_tl();
+}
 
 void stm_setup(void)
 {
@@ -244,44 +261,19 @@ void stm_setup(void)
     char *heap = REAL_ADDRESS(get_thread_base(0), first_heap * 4096UL); 
     assert(memset(heap, 0xcd, HEAP_PAGES * 4096)); // testing
     stm_largemalloc_init(heap, HEAP_PAGES * 4096UL);
+
+    for (i = 0; i < NB_THREADS; i++) {
+        _stm_setup_static_thread();
+    }
 }
 
-#define INVALID_GS_VALUE  0x6D6D6D6D
 
-static void set_gs_register(uint64_t value)
+
+void _stm_teardown_static_thread(int thread_num)
 {
-    int result = syscall(SYS_arch_prctl, ARCH_SET_GS, value);
-    assert(result == 0);
-}
-
-void stm_setup_thread(void)
-{
-    int thread_num = __sync_fetch_and_add(&num_threads_started, 1);
-    assert(thread_num < 2);  /* only 2 threads for now */
-
     _stm_restore_local_state(thread_num);
-
-    _STM_TL->nursery_current = (localchar_t*)(FIRST_NURSERY_PAGE * 4096);
-    memset((void*)real_address((object_t*)_STM_TL->nursery_current), 0x0,
-           (FIRST_AFTER_NURSERY_PAGE - FIRST_NURSERY_PAGE) * 4096); /* clear nursery */
     
-    _STM_TL->shadow_stack = (object_t**)malloc(LENGTH_SHADOW_STACK * sizeof(void*));
-    _STM_TL->shadow_stack_base = _STM_TL->shadow_stack;
-
-    _STM_TL->old_objects_to_trace = stm_list_create();
-    
-    _STM_TL->modified_objects = stm_list_create();
-    _STM_TL->uncommitted_objects = stm_list_create();
-    assert(!_STM_TL->active);
-}
-
-bool _stm_is_in_transaction(void)
-{
-    return _STM_TL->active;
-}
-
-void _stm_teardown_thread(void)
-{
+    _stm_assert_clean_tl();
     _stm_reset_shared_lock();
     
     stm_list_free(_STM_TL->modified_objects);
@@ -295,12 +287,16 @@ void _stm_teardown_thread(void)
 
     assert(_STM_TL->old_objects_to_trace->count == 0);
     stm_list_free(_STM_TL->old_objects_to_trace);
-    
-    set_gs_register(INVALID_GS_VALUE);
+
+    _stm_restore_local_state(-1); // invalid
 }
 
-void _stm_teardown(void)
+void stm_teardown(void)
 {
+    for (; num_threads_started > 0; num_threads_started--) {
+        _stm_teardown_static_thread(num_threads_started - 1);
+    }
+    
     assert(inevitable_lock == 0);
     munmap(object_pages, TOTAL_MEMORY);
     _stm_reset_pages();
@@ -308,14 +304,7 @@ void _stm_teardown(void)
     object_pages = NULL;
 }
 
-void _stm_restore_local_state(int thread_num)
-{
-    char *thread_base = get_thread_base(thread_num);
-    set_gs_register((uintptr_t)thread_base);
 
-    assert(_STM_TL->thread_num == thread_num);
-    assert(_STM_TL->thread_base == thread_base);
-}
 
 static void reset_transaction_read_version(void)
 {
@@ -378,9 +367,10 @@ void stm_start_inevitable_transaction()
 
 void stm_start_transaction(jmpbufptr_t *jmpbufptr)
 {
-    assert(!_STM_TL->active);
+    /* GS invalid before this point! */
+    _stm_stop_safe_point(LOCK_COLLECT|THREAD_YIELD);
     
-    _stm_stop_safe_point(LOCK_COLLECT);
+    assert(!_STM_TL->active);
     
     uint8_t old_rv = _STM_TL->transaction_read_version;
     _STM_TL->transaction_read_version = old_rv + 1;
@@ -442,8 +432,11 @@ void stm_stop_transaction(void)
 
  
     _STM_TL->active = 0;
-    _stm_start_safe_point(LOCK_EXCLUSIVE|LOCK_COLLECT);
+
     fprintf(stderr, "%c", 'C'+_STM_TL->thread_num*32);
+    
+    _stm_start_safe_point(LOCK_EXCLUSIVE|LOCK_COLLECT|THREAD_YIELD);
+    /* GS invalid after this point! */
 }
 
 
@@ -495,15 +488,17 @@ void stm_abort_transaction(void)
     assert(_STM_TL->jmpbufptr != NULL);
     assert(_STM_TL->jmpbufptr != (jmpbufptr_t *)-1);   /* for tests only */
     _STM_TL->active = 0;
-    /* _STM_TL->need_abort = 0; */
-
-    _stm_start_safe_point(LOCK_COLLECT);
-
-    fprintf(stderr, "%c", 'A'+_STM_TL->thread_num*32);
+    _STM_TL->need_abort = 0;
 
     /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
     reset_modified_from_other_threads();
     stm_list_clear(_STM_TL->modified_objects);
 
-    __builtin_longjmp(*_STM_TL->jmpbufptr, 1);
+    jmpbufptr_t *buf = _STM_TL->jmpbufptr; /* _STM_TL not valid during safe-point */
+    fprintf(stderr, "%c", 'A'+_STM_TL->thread_num*32);
+    
+    _stm_start_safe_point(LOCK_COLLECT|THREAD_YIELD);
+    /* GS invalid after this point! */
+    
+    __builtin_longjmp(*buf, 1);
 }

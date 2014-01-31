@@ -93,21 +93,25 @@ struct alloc_for_size_s {
 struct _thread_local1_s {
     jmpbufptr_t *jmpbufptr;
     uint8_t transaction_read_version;
-    
+
+    /* static threads, not pthreads */
     int thread_num;
+    char *thread_base;
+    
     uint8_t active;                /* 1 normal, 2 inevitable, 0 no trans. */
     bool need_abort;
-    char *thread_base;
-    struct stm_list_s *modified_objects;
-
+    
     object_t **old_shadow_stack;
     object_t **shadow_stack;
     object_t **shadow_stack_base;
 
+    localchar_t *nursery_current;
+    
+    struct stm_list_s *modified_objects;
+    
     struct alloc_for_size_s alloc[LARGE_OBJECT_WORDS];
     struct stm_list_s *uncommitted_objects;
 
-    localchar_t *nursery_current;
     struct stm_list_s *old_objects_to_trace;
 };
 #define _STM_TL            ((_thread_local1_t *)4352)
@@ -126,6 +130,7 @@ void _stm_write_slowpath(object_t *);
 
 #define LIKELY(x)   __builtin_expect(x, true)
 #define UNLIKELY(x) __builtin_expect(x, false)
+#define IMPLY(a, b) (!(a) || (b))
 
 #define REAL_ADDRESS(object_pages, src)   ((object_pages) + (uintptr_t)(src))
 
@@ -177,6 +182,7 @@ static inline void write_fence(void)
 }
 
 
+
 /* ==================== API ==================== */
 
 static inline void stm_read(object_t *obj)
@@ -206,16 +212,17 @@ extern size_t stmcb_size(struct object_s *);
 extern void stmcb_trace(struct object_s *, void (object_t **));
 
 void _stm_restore_local_state(int thread_num);
-void _stm_teardown(void);
-void _stm_teardown_thread(void);
+void stm_teardown(void);
 bool _stm_is_in_transaction(void);
+void _stm_assert_clean_tl(void);
 
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 
 object_t *stm_allocate(size_t size);
 void stm_setup(void);
-void stm_setup_thread(void);
+void stm_setup_pthread(void);
+
 void stm_start_transaction(jmpbufptr_t *jmpbufptr);
 void stm_stop_transaction(void);
 
