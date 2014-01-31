@@ -15,9 +15,9 @@
 
 (transaction f (quote t1) 10000)
 (transaction f (quote t2) 20000)
-(transaction f (quote t2) 10002)
+(transaction f (quote t3) 10002)
 (run-transactions)
-(transaction f (quote t2) 15)
+(transaction f (quote t1) 15)
 (transaction f (quote t2) 15)
 (run-transactions)
 (print (quote result) (get c))

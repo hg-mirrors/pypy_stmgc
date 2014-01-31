@@ -770,8 +770,6 @@ extern void init_prebuilt_transaction_objects(void);
 
 void Du_Initialize(int num_threads)
 {
-    assert(num_threads == 2);
-
     stm_setup();
     stm_setup_pthread();
 
@@ -834,5 +832,6 @@ void Du_Initialize(int num_threads)
 
 void Du_Finalize(void)
 {
+    stm_teardown_pthread();
     stm_teardown();
 }

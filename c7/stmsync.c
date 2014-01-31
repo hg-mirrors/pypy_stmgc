@@ -153,6 +153,14 @@ void stm_setup_pthread(void)
 }
 
 
+void stm_teardown_pthread(void)
+{
+    free(pthread_tl->shadow_stack_base);
+    
+    free(pthread_tl);
+    pthread_tl = NULL;
+}
+
 
 
 
