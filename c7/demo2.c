@@ -58,8 +58,8 @@ long check_sorted()
             stm_read((objptr_t)r_n);
             sum += r_n->value;
 
-            _stm_start_safe_point();
-            _stm_stop_safe_point();
+            _stm_start_safe_point(0);
+            _stm_stop_safe_point(0);
             if (prev >= r_n->value) {
                 stm_stop_transaction();
                 return -1;
@@ -109,8 +109,8 @@ nodeptr_t swap_nodes(nodeptr_t initial)
                 current->next = next->next;
                 next->next = current;
 
-                _stm_start_safe_point();
-                _stm_stop_safe_point();
+                _stm_start_safe_point(0);
+                _stm_stop_safe_point(0);
             }
             prev = current;
         }
@@ -163,9 +163,12 @@ void setup_list()
         w_prev = w_newnode;
     }
 
+    _stm_minor_collect();       /* hack.. */
+    global_chained_list = (nodeptr_t)stm_pop_root();
+    
     stm_stop_transaction();
 
-    global_chained_list = (nodeptr_t)stm_pop_root();
+    
     
     printf("setup ok\n");
 }
@@ -182,7 +185,7 @@ void *demo2(void *arg)
     int status;
     if (arg != NULL) {
         /* we still need to initialize */
-        stm_setup_thread();
+        stm_setup_pthread();
         sem_post(&initialized);
         status = sem_wait(&go);
         assert(status == 0);
@@ -195,7 +198,9 @@ void *demo2(void *arg)
     if (arg != NULL) {
         status = sem_post(&done);
         assert(status == 0);
+        stm_teardown_pthread();
     }
+    
     return NULL;
 }
 
@@ -208,9 +213,10 @@ void final_check(void)
     sum = check_sorted();
     
     // little Gauss:
-    assert(sum == (1 + LIST_LENGTH) * (LIST_LENGTH / 2));
-    
-    printf("check ok\n");
+    if (sum == (1 + LIST_LENGTH) * (LIST_LENGTH / 2))
+        printf("check ok\n");
+    else
+        printf("check ERROR\n");
 }
 
 
@@ -236,7 +242,7 @@ int main(void)
     assert(status == 0);
     
     stm_setup();
-    stm_setup_thread();
+    stm_setup_pthread();
     
     newthread(demo2, (void*)1);
 
@@ -252,8 +258,11 @@ int main(void)
     
     status = sem_wait(&done);
     assert(status == 0);
-        
+    
     final_check();
+
+    stm_teardown_pthread();
+    stm_teardown();
 
     return 0;
 }
