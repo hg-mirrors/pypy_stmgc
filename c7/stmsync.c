@@ -18,10 +18,10 @@
    lock, so don't conflict with each other; when we need to do a global GC,
    we take a writer lock to "stop the world". */
 
-rwticket rw_shared_lock;        /* the "GIL" */
-rwticket rw_collection_lock;    /* for major collections */
+rwticket rw_shared_lock __attribute__((aligned(64)));        /* the "GIL" */
+rwticket rw_collection_lock __attribute__((aligned(64)));    /* for major collections */
 
-sem_t static_thread_semaphore;
+sem_t static_thread_semaphore __attribute__((aligned(64)));
 uint8_t static_threads[NB_THREADS]; /* 1 if running a pthread */
 __thread struct _thread_local1_s *pthread_tl = NULL;
 

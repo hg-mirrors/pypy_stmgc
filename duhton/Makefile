@@ -11,10 +11,14 @@ C7SOURCES = ../c7/core.c \
 C7HEADERS = ../c7/*.h
 
 
-all: duhton_debug duhton
+all: duhton_debug duhton 
 
 duhton: *.c *.h $(C7SOURCES) $(C7HEADERS)
 	clang -pthread -g -O2 -o duhton *.c $(C7SOURCES) -Wall
+
+duhton_release: *.c *.h $(C7SOURCES) $(C7HEADERS)
+	clang -pthread -g -DNDEBUG -O2 -o duhton_release *.c $(C7SOURCES) -Wall
+
 
 duhton_debug: *.c *.h $(C7SOURCES) $(C7HEADERS)
 	clang -pthread -g -DDu_DEBUG -o duhton_debug *.c $(C7SOURCES) -Wall
