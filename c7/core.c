@@ -282,9 +282,6 @@ void _stm_teardown_static_thread(int thread_num)
     assert(stm_list_is_empty(_STM_TL->uncommitted_objects));
     stm_list_free(_STM_TL->uncommitted_objects);
 
-    assert(_STM_TL->shadow_stack == _STM_TL->shadow_stack_base);
-    free(_STM_TL->shadow_stack);
-
     assert(_STM_TL->old_objects_to_trace->count == 0);
     stm_list_free(_STM_TL->old_objects_to_trace);
 

@@ -198,5 +198,7 @@ void *run_thread(void *thread_id)
 
     }
 
+    stm_teardown_pthread();
+
     return NULL;
 }

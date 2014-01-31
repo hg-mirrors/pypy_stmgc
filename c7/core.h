@@ -213,6 +213,7 @@ extern void stmcb_trace(struct object_s *, void (object_t **));
 
 void _stm_restore_local_state(int thread_num);
 void stm_teardown(void);
+void stm_teardown_pthread(void);
 bool _stm_is_in_transaction(void);
 void _stm_assert_clean_tl(void);
 

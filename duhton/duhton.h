@@ -10,7 +10,7 @@
 #define STM 1                   /* hackish removal of all read/write
                                    barriers. synchronization is up to
                                    the program */
-#define DEFAULT_NUM_THREADS 2   /* required by stm-c7 */
+#define DEFAULT_NUM_THREADS 2
 
 
 struct DuObject_s {
