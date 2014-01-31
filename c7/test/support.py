@@ -40,7 +40,7 @@ typedef ... jmpbufptr_t;
 #define NURSERY_SECTION ...
 
 void stm_setup(void);
-void stm_setup_thread(void);
+void stm_setup_pthread(void);
 
 void stm_start_transaction(jmpbufptr_t *);
 bool _stm_stop_transaction(void);
@@ -53,8 +53,8 @@ _Bool _stm_was_read(object_t *object);
 _Bool _stm_was_written(object_t *object);
 
 void _stm_restore_local_state(int thread_num);
-void _stm_teardown(void);
-void _stm_teardown_thread(void);
+void stm_teardown(void);
+void stm_teardown_pthread(void);
 
 char *_stm_real_address(object_t *o);
 object_t *_stm_tl_address(char *ptr);
@@ -100,6 +100,7 @@ enum {
 enum {
     LOCK_COLLECT = 1,
     LOCK_EXCLUSIVE = 2,
+    THREAD_YIELD = 4,
 };
 
 

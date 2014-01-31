@@ -182,8 +182,6 @@ void _stm_reset_shared_lock()
         assert(static_threads[i] == 0);
     memset(static_threads, 0, sizeof(static_threads));
     sem_init(&static_thread_semaphore, 0, NB_THREADS);
-    sem_getvalue(&static_thread_semaphore, &i);
-    assert(i == NB_THREADS);
 }
 
 /* void stm_acquire_collection_lock() */
