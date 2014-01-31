@@ -43,23 +43,22 @@ int main(int argc, char **argv)
         }
         stm_start_inevitable_transaction();
         DuObject *code = Du_Compile(filename, interactive);
-        _du_save1(code);
-        stm_stop_transaction();
-        _du_restore1(code);
+
         if (code == NULL) {
             printf("\n");
             break;
         }
-        /*Du_Print(code, 1);
-          printf("\n");*/
-        stm_start_inevitable_transaction();
+        
         DuObject *res = Du_Eval(code, Du_Globals);
         if (interactive) {
             Du_Print(res, 1);
         }
+
         _du_save1(stm_thread_local_obj);
-        stm_stop_transaction();
+        _stm_minor_collect();   /* hack... */
         _du_restore1(stm_thread_local_obj);
+        
+        stm_stop_transaction();
 
         Du_TransactionRun();
         if (!interactive)

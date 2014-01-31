@@ -41,7 +41,8 @@ object_t *_stm_allocate_old(size_t size)
 
 object_t *stm_allocate_prebuilt(size_t size)
 {
-    return _stm_allocate_old(size);  /* XXX */
+    object_t* res = _stm_allocate_old(size);  /* XXX */
+    return res;
 }
 
 localchar_t *_stm_alloc_next_page(size_t size_class)

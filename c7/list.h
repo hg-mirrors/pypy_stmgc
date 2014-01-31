@@ -2,7 +2,7 @@
 #define _STM_LIST_H
 
 #include "core.h"
-
+#include <stdlib.h>
 
 struct stm_list_s {
     uintptr_t count;

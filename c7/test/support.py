@@ -151,6 +151,7 @@ uint8_t _stm_get_flags(object_t *obj) {
 
 bool _checked_stm_become_inevitable() {
     jmpbufptr_t here;
+    int tn = _STM_TL->thread_num;
     if (__builtin_setjmp(here) == 0) { // returned directly
          assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
          _STM_TL->jmpbufptr = &here;
@@ -158,12 +159,13 @@ bool _checked_stm_become_inevitable() {
          _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
-    _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
+    _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
 
 bool _checked_stm_write(object_t *object) {
     jmpbufptr_t here;
+    int tn = _STM_TL->thread_num;
     if (__builtin_setjmp(here) == 0) { // returned directly
          assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
          _STM_TL->jmpbufptr = &here;
@@ -171,25 +173,27 @@ bool _checked_stm_write(object_t *object) {
          _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
-    _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
+    _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
 
 bool _stm_stop_transaction(void) {
     jmpbufptr_t here;
+    int tn = _STM_TL->thread_num;
     if (__builtin_setjmp(here) == 0) { // returned directly
          assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
          _STM_TL->jmpbufptr = &here;
          stm_stop_transaction();
-         _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
+         _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
-    _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
+    _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
 
 bool _stm_check_stop_safe_point(void) {
     jmpbufptr_t here;
+    int tn = _STM_TL->thread_num;
     if (__builtin_setjmp(here) == 0) { // returned directly
          assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
          _STM_TL->jmpbufptr = &here;
@@ -197,20 +201,21 @@ bool _stm_check_stop_safe_point(void) {
          _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
-    _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
+    _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
 
 bool _stm_check_abort_transaction(void) {
     jmpbufptr_t here;
+    int tn = _STM_TL->thread_num;
     if (__builtin_setjmp(here) == 0) { // returned directly
          assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
          _STM_TL->jmpbufptr = &here;
          stm_abort_transaction();
-         _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
+         _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
          return 0;
     }
-    _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
+    _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
 

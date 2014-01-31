@@ -62,9 +62,11 @@ void Du_TransactionRun(void)
         return;
 
     stm_start_inevitable_transaction();
+    
     DuConsObject *root = du_pending_transactions;
     _du_write1(root);
     root->cdr = stm_thread_local_obj;
+    
     stm_stop_transaction();
     
     stm_thread_local_obj = NULL;
@@ -173,8 +175,8 @@ void run_transaction(DuObject *cell)
 void *run_thread(void *thread_id)
 {
     jmpbufptr_t here;
-    int thread_num = (uintptr_t)thread_id;
-    _stm_restore_local_state(thread_num);
+    stm_setup_pthread();
+
     stm_thread_local_obj = NULL;
 
     while (1) {
@@ -185,10 +187,14 @@ void *run_thread(void *thread_id)
 
         while (__builtin_setjmp(here) == 1) { }
         stm_start_transaction(&here);
+        
         run_transaction(cell);
+        
         _du_save1(stm_thread_local_obj);
-        stm_stop_transaction();
+        _stm_minor_collect();   /* hack.. */
         _du_restore1(stm_thread_local_obj);
+        
+        stm_stop_transaction();
 
     }
 
