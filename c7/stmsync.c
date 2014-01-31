@@ -43,11 +43,11 @@ bool _stm_is_in_transaction(void)
 }
 
 
-void _stm_restore_local_state(int thread_num)
+char* _stm_restore_local_state(int thread_num)
 {
     if (thread_num == -1) {     /* mostly for debugging */
         set_gs_register(INVALID_GS_VALUE);
-        return;
+        return (char*)1;
     }
     
     char *thread_base = get_thread_base(thread_num);
@@ -55,6 +55,7 @@ void _stm_restore_local_state(int thread_num)
 
     assert(_STM_TL->thread_num == thread_num);
     assert(_STM_TL->thread_base == thread_base);
+    return thread_base;
 }
 
 
@@ -66,7 +67,7 @@ void _stm_yield_thread_segment()
     static_threads[_STM_TL->thread_num] = 0;
     sem_post(&static_thread_semaphore);
     
-    _stm_restore_local_state(-1); /* invalid */
+    assert(_stm_restore_local_state(-1)); /* invalid */
 }
 
 void _stm_grab_thread_segment()
