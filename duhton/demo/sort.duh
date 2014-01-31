@@ -77,13 +77,14 @@
   (setq half_len (/ (len xs) 2))
   (setq first (list))
   (setq second (list))
-
-  (while (< 0 (len xs))
-    (if (< 0 half_len)
-        (append first (pop xs 0))
-      (append second (pop xs 0))
+  (setq xidx 0)
+  
+  (while (< xidx (len xs))
+    (if (< xidx half_len)
+        (append first (get xs xidx))
+      (append second (get xs xidx))
       )
-    (setq half_len (- half_len 1))
+    (setq xidx (+ xidx 1))
     )
 
   (list first second)
@@ -172,7 +173,7 @@
 
 (setq current (time))
 (print (quote before-random))
-(setq cs (random_list 100000))
+(setq cs (random_list 200000))
 (print (quote time-random:) (- (time) current))
 
 ;; (print_list cs)
