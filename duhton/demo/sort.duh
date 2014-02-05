@@ -173,7 +173,7 @@
 
 (setq current (time))
 (print (quote before-random))
-(setq cs (random_list 200000))
+(setq cs (random_list 300000))
 (print (quote time-random:) (- (time) current))
 
 ;; (print_list cs)
