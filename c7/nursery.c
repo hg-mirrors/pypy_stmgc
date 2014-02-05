@@ -177,6 +177,13 @@ void _stm_minor_collect()
 
 localchar_t *collect_and_reserve(size_t size)
 {
+    /* reset nursery_current (left invalid by the caller) */
+    _STM_TL->nursery_current -= size;
+
+    /* XXX: check for requested safe-point (by setting nursery_current
+       too high or similar) */
+    
+    
     _stm_start_safe_point(0);    /* don't release the COLLECT lock,
                                    that needs to be done afterwards if
                                    we want a major collection */
@@ -196,16 +203,12 @@ object_t *stm_allocate(size_t size)
 {
     object_t *result;
     
-    _stm_start_safe_point(LOCK_COLLECT);
-    /* all collections may happen here */
-    _stm_stop_safe_point(LOCK_COLLECT);
-    
     assert(_STM_TL->active);
     assert(size % 8 == 0);
     assert(16 <= size);
 
     /* XXX move out of fastpath */
-    if (size >= NURSERY_SECTION) {
+    if (UNLIKELY(size >= NURSERY_SECTION)) {
         /* allocate large objects outside the nursery immediately,
            otherwise they may trigger too many minor collections
            and degrade performance */
@@ -231,7 +234,6 @@ object_t *stm_allocate(size_t size)
     assert((uintptr_t)new_current < (1L << 32));
 
     if ((uintptr_t)new_current > FIRST_AFTER_NURSERY_PAGE * 4096) {
-        _STM_TL->nursery_current = current; /* reset for nursery-clearing in minor_collect!! */
         current = collect_and_reserve(size);
     }
 
