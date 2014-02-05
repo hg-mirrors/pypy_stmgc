@@ -21,6 +21,7 @@ char *object_pages;
 static int num_threads_started;
 uint8_t write_locks[READMARKER_END - READMARKER_START];
 volatile uint8_t inevitable_lock __attribute__((aligned(64))); /* cache-line alignment */
+long global_age = 0;
 
 struct _thread_local1_s* _stm_dbg_get_tl(int thread)
 {
@@ -134,18 +135,16 @@ void _stm_write_slowpath(object_t *obj)
         if ((!prev_owner) || (prev_owner == lock_num))
             break;
 
-        if (_STM_TL->active == 2) {
+        struct _thread_local1_s* other_tl = _stm_dbg_get_tl(prev_owner - 1);
+        if ((_STM_TL->age < other_tl->age) || (_STM_TL->active == 2)) {
             /* we must succeed! */
-            _stm_dbg_get_tl(prev_owner - 1)->need_abort = 1;
+            other_tl->need_abort = 1;
             _stm_start_safe_point(0);
             /* XXX: not good, maybe should be signalled by other thread */
             usleep(1);
             _stm_stop_safe_point(0);
             goto retry;
-        }
-
-
-        if (retries < 1) {
+        } else if (retries < 1) {
             _stm_start_safe_point(0);
             usleep(1);
             _stm_stop_safe_point(0);
@@ -176,8 +175,8 @@ void _stm_setup_static_thread(void)
     _stm_restore_local_state(thread_num);
 
     _STM_TL->nursery_current = (localchar_t*)(FIRST_NURSERY_PAGE * 4096);
-    memset((void*)real_address((object_t*)_STM_TL->nursery_current), 0x0,
-           (FIRST_AFTER_NURSERY_PAGE - FIRST_NURSERY_PAGE) * 4096); /* clear nursery */
+    memset((void*)real_address((object_t*)CLEAR_SYNC_REQUEST(_STM_TL->nursery_current)),
+           0x0, (FIRST_AFTER_NURSERY_PAGE - FIRST_NURSERY_PAGE) * 4096); /* clear nursery */
     
     _STM_TL->shadow_stack = NULL;
     _STM_TL->shadow_stack_base = NULL;
@@ -386,6 +385,8 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
     _STM_TL->jmpbufptr = jmpbufptr;
     _STM_TL->active = 1;
     _STM_TL->need_abort = 0;
+    /* global_age is approximate -> no synchronization required */
+    _STM_TL->age = global_age++;
     
     fprintf(stderr, "%c", 'S'+_STM_TL->thread_num*32);
 }

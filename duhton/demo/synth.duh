@@ -62,8 +62,10 @@
 
 
 
-(setq N 800)
-(setq RAND_MAX 10)
+(setq N 1000)
+;; CONFL_IF_BELOW / RAND_MAX == ratio of conflicting transactions
+;;                              to non conflicting ones
+(setq RAND_MAX 8)
 (setq CONFL_IF_BELOW 1)
 
 
