@@ -93,7 +93,7 @@ static DuObject *next_cell(void)
         stm_start_inevitable_transaction();
 
         root = du_pending_transactions;
-        /* _du_read1(root); IMMUTABLE */
+        _du_read1(root);        /* not immutable... */
 
         if (root->cdr != Du_None) {
             DuObject *cell = root->cdr;
@@ -135,8 +135,9 @@ static DuObject *next_cell(void)
     stm_thread_local_obj = NULL;
 
     while (__builtin_setjmp(here) == 1) { }
-    stm_start_transaction(&here);
-
+    //stm_start_transaction(&here);
+    stm_start_inevitable_transaction();
+    
     /* _du_read1(pending); IMMUTABLE */
     DuObject *result = _DuCons_CAR(pending);
     DuObject *next = _DuCons_NEXT(pending);

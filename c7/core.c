@@ -124,6 +124,7 @@ void _stm_write_slowpath(object_t *obj)
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
     uint8_t lock_num = _STM_TL->thread_num + 1;
     uint8_t prev_owner;
+    uint8_t retries = 0;
  retry:
     do {
         prev_owner = __sync_val_compare_and_swap(&write_locks[lock_idx],
@@ -142,14 +143,18 @@ void _stm_write_slowpath(object_t *obj)
             _stm_stop_safe_point(0);
             goto retry;
         }
-        /* XXXXXX */
-        //_stm_start_semi_safe_point();
-        //usleep(1);
-        //_stm_stop_semi_safe_point();
-        // try again.... XXX
+
+
+        if (retries < 1) {
+            _stm_start_safe_point(0);
+            usleep(1);
+            _stm_stop_safe_point(0);
+            retries++;
+            goto retry;
+        }
+
         stm_abort_transaction();
         /* XXX: only abort if we are younger */
-        spin_loop();
     } while (1);
 
     /* remove the write-barrier ONLY if we have the write-lock */
