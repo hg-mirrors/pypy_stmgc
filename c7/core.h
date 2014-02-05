@@ -94,6 +94,10 @@ struct _thread_local1_s {
     jmpbufptr_t *jmpbufptr;
     uint8_t transaction_read_version;
 
+    /* unsynchronized/inaccurate start age of transaction
+       XXX: may be replaced with size_of(read/write-set) */
+    long age;
+
     /* static threads, not pthreads */
     int thread_num;
     char *thread_base;
@@ -105,7 +109,10 @@ struct _thread_local1_s {
     object_t **shadow_stack;
     object_t **shadow_stack_base;
 
-    localchar_t *nursery_current;
+    union {
+        localchar_t *nursery_current;
+        uint32_t nursery_current_halfwords[2];
+    };
     
     struct stm_list_s *modified_objects;
     

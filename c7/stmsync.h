@@ -17,3 +17,8 @@ enum {
     THREAD_YIELD = (1 << 2),
 };
 
+
+void stm_request_safe_point(int thread_num);
+
+#define CLEAR_SYNC_REQUEST(nursery_current) ((localchar_t*)(((uintptr_t)(nursery_current)) & 0xffffffff))
+
