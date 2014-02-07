@@ -388,6 +388,9 @@ void stm_start_transaction(jmpbufptr_t *jmpbufptr)
     _STM_TL->need_abort = 0;
     /* global_age is approximate -> no synchronization required */
     _STM_TL->age = global_age++;
+    /* XXX: only increment our age on commit, not abort? that way we
+       are more likely to succeed next time, thus prevent starvation
+       (may be fairer, but should probably be done per pthread??) */
     
     fprintf(stderr, "%c", 'S'+_STM_TL->thread_num*32);
 }

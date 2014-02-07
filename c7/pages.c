@@ -25,7 +25,7 @@
 uintptr_t index_page_never_used;
 uint8_t flag_page_private[NB_PAGES];
 
-uint8_t list_lock = 0;
+volatile uint8_t list_lock = 0;
 struct stm_list_s *single_page_list;
 
 
