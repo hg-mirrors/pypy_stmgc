@@ -5,6 +5,20 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <limits.h>
+
+#if LONG_MAX == 2147483647
+# error "Requires a 64-bit environment"
+#endif
+
+#if BYTE_ORDER == 1234
+# define LENDIAN  1    // little endian
+#elif BYTE_ORDER == 4321
+# define LENDIAN  0    // big endian
+#else
+# error "Unsupported endianness"
+#endif
+
 
 #define NB_PAGES            (6*256*256)    // 6*256MB
 #define NB_THREADS          2

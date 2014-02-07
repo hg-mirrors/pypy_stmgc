@@ -166,8 +166,8 @@ void minor_collect()
     /* clear nursery */
     localchar_t *nursery_base = (localchar_t*)(FIRST_NURSERY_PAGE * 4096);
     memset((void*)real_address((object_t*)nursery_base), 0x0,
-           CLEAR_SYNC_REQUEST(_STM_TL->nursery_current) - nursery_base);
-    _STM_TL->nursery_current = nursery_base;
+           NURSERY_CURRENT(_STM_TL) - nursery_base);
+    SET_NURSERY_CURRENT(_STM_TL, nursery_base);
 }
 
 void _stm_minor_collect()
@@ -180,9 +180,9 @@ localchar_t *collect_and_reserve(size_t size)
     localchar_t *new_current = _STM_TL->nursery_current;
 
     while (((uintptr_t)new_current > FIRST_AFTER_NURSERY_PAGE * 4096)
-           && _STM_TL->nursery_current_halfwords[1]) {
+           && _STM_TL->nursery_current_halfwords[LENDIAN]) {
         
-        _STM_TL->nursery_current_halfwords[1] = 0;
+        _STM_TL->nursery_current_halfwords[LENDIAN] = 0;
         _stm_start_safe_point(0);
         /* no collect, it would mess with nursery_current */
         _stm_stop_safe_point(0);
@@ -196,15 +196,16 @@ localchar_t *collect_and_reserve(size_t size)
     }
     
     /* reset nursery_current (left invalid by the caller) */
-    _STM_TL->nursery_current -= size;
+    SET_NURSERY_CURRENT(_STM_TL, new_current - size);
 
     minor_collect();
 
     /* XXX: if we_want_major_collect: acquire EXCLUSIVE & COLLECT lock
        and do it */
 
-    localchar_t *current = CLEAR_SYNC_REQUEST(_STM_TL->nursery_current);
-    _STM_TL->nursery_current = current + size;
+    localchar_t *current = NURSERY_CURRENT(_STM_TL);
+    assert((uintptr_t)current + size <= FIRST_AFTER_NURSERY_PAGE * 4096);
+    SET_NURSERY_CURRENT(_STM_TL, current + size);
     return current;
 }
 
@@ -240,7 +241,7 @@ object_t *stm_allocate(size_t size)
     
     localchar_t *current = _STM_TL->nursery_current;
     localchar_t *new_current = current + size;
-    _STM_TL->nursery_current = new_current;
+    SET_NURSERY_CURRENT(_STM_TL, new_current);
 
     if ((uintptr_t)new_current > FIRST_AFTER_NURSERY_PAGE * 4096) {
         current = collect_and_reserve(size);
@@ -321,8 +322,8 @@ void nursery_on_abort()
     /* clear the nursery */
     localchar_t *nursery_base = (localchar_t*)(FIRST_NURSERY_PAGE * 4096);
     memset((void*)real_address((object_t*)nursery_base), 0x0,
-           CLEAR_SYNC_REQUEST(_STM_TL->nursery_current) - nursery_base);
-    _STM_TL->nursery_current = nursery_base;
+           NURSERY_CURRENT(_STM_TL) - nursery_base);
+    SET_NURSERY_CURRENT(_STM_TL, nursery_base);
 
 
     /* reset the alloc-pages to the state at the start of the transaction */

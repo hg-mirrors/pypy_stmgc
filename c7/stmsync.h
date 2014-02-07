@@ -20,5 +20,11 @@ enum {
 
 void stm_request_safe_point(int thread_num);
 
-#define CLEAR_SYNC_REQUEST(nursery_current) ((localchar_t*)(((uintptr_t)(nursery_current)) & 0xffffffff))
 
+#define NURSERY_CURRENT(tls)                                            \
+            ((localchar_t *)(uintptr_t)(                                \
+                (tls)->nursery_current_halfwords[1-LENDIAN]))
+
+#define SET_NURSERY_CURRENT(tls, new_value)                             \
+            ((tls)->nursery_current_halfwords[1-LENDIAN] =              \
+                (uintptr_t)(new_value))
