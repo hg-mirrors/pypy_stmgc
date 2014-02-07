@@ -134,7 +134,11 @@ void _stm_write_slowpath(object_t *);
 
 
 /* ==================== HELPERS ==================== */
-
+#ifdef NDEBUG
+#define OPT_ASSERT(cond) do { if (!(cond)) __builtin_unreachable(); } while (0)
+#else
+#define OPT_ASSERT(cond) assert(cond)
+#endif
 #define LIKELY(x)   __builtin_expect(x, true)
 #define UNLIKELY(x) __builtin_expect(x, false)
 #define IMPLY(a, b) (!(a) || (b))

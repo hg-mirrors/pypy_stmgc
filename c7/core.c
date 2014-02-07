@@ -205,6 +205,7 @@ void stm_setup(void)
     assert(READMARKER_START < READMARKER_END);
     assert(READMARKER_END <= 4096UL * FIRST_OBJECT_PAGE);
     assert(FIRST_OBJECT_PAGE < NB_PAGES);
+    assert((NB_NURSERY_PAGES * 4096) % NURSERY_SECTION == 0);
 
     object_pages = mmap(NULL, TOTAL_MEMORY,
                         PROT_READ | PROT_WRITE,
