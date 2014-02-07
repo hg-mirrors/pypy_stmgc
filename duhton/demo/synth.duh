@@ -68,9 +68,14 @@
 (setq RAND_MAX 8)
 (setq CONFL_IF_BELOW 1)
 
+(print (quote N:) N)
+(print (quote RAND_MAX:) RAND_MAX)
+(print (quote CONFL_IF_BELOW:) CONFL_IF_BELOW)
+
+(setq timer (time))
+(print (quote setup-transactions:) timer)
 
 (setq shared (container 0))
-
 (setq rand-list (random_list N RAND_MAX))
 (setq i 0)
 (while (< i N)
@@ -85,6 +90,9 @@
   (setq i (+ i 1))
   )
 
+(print (quote setup-time-diff:) (- (time) timer))
+(setq timer (time))
 (run-transactions)
+(print (quote run-time-diff:) (- (time) timer))
 (print (quote shared) (get shared))
 
