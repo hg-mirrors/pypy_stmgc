@@ -175,7 +175,7 @@ void _stm_setup_static_thread(void)
     _stm_restore_local_state(thread_num);
 
     _STM_TL->nursery_current = (localchar_t*)(FIRST_NURSERY_PAGE * 4096);
-    memset((void*)real_address((object_t*)CLEAR_SYNC_REQUEST(_STM_TL->nursery_current)),
+    memset((void*)real_address((object_t*)NURSERY_CURRENT(_STM_TL)),
            0x0, (FIRST_AFTER_NURSERY_PAGE - FIRST_NURSERY_PAGE) * 4096); /* clear nursery */
     
     _STM_TL->shadow_stack = NULL;

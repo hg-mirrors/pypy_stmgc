@@ -108,7 +108,7 @@ void _stm_assert_clean_tl()
     assert(!_STM_TL->active);
     /* assert(!_STM_TL->need_abort); may happen, but will be cleared by
        start_transaction() */ 
-    assert(CLEAR_SYNC_REQUEST(_STM_TL->nursery_current) == (localchar_t*)(FIRST_NURSERY_PAGE * 4096));
+    assert(NURSERY_CURRENT(_STM_TL) == (localchar_t*)(FIRST_NURSERY_PAGE * 4096));
 }
 
 void _stm_acquire_tl_segment()
@@ -301,6 +301,6 @@ void _stm_stop_safe_point(uint8_t flags)
 void stm_request_safe_point(int thread_num)
 {
     struct _thread_local1_s* other_tl = _stm_dbg_get_tl(thread_num);
-    other_tl->nursery_current_halfwords[1] = 1;    
+    other_tl->nursery_current_halfwords[LENDIAN] = 1;    
 }
 
