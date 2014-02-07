@@ -200,6 +200,10 @@ static inline void spin_loop(void)
 static inline void write_fence(void)
 {
 #if defined(__amd64__) || defined(__i386__)
+    /* this is only a compiler barrier
+       use __sync_synchronize(...) or other __sync_OPs that
+       are locked by the CPU if you need to prevent
+       loads to be moved before stores to different locations */
     asm("" : : : "memory");
 #else
 #  error "Define write_fence() for your architecture"
