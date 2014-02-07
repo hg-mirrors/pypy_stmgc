@@ -199,14 +199,18 @@ static inline void spin_loop(void)
 
 static inline void write_fence(void)
 {
+    /* This function inserts a "write fence".  The goal is to make
+       sure that past writes are really pushed to memory before
+       the future writes.  We assume that the corresponding "read
+       fence" effect is done automatically by a corresponding
+       __sync_bool_compare_and_swap(). */
 #if defined(__amd64__) || defined(__i386__)
-    /* this is only a compiler barrier
-       use __sync_synchronize(...) or other __sync_OPs that
-       are locked by the CPU if you need to prevent
-       loads to be moved before stores to different locations */
+    /* this is only a compiler barrier, which is enough on x86 */
     asm("" : : : "memory");
 #else
-#  error "Define write_fence() for your architecture"
+    /* general fall-back, but we might have more efficient
+       alternative on some other platforms too */
+    __sync_synchronize();
 #endif
 }
 
