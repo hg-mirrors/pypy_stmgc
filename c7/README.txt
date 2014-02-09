@@ -45,6 +45,11 @@ different ranges of addresses can map to the same physical page of
 memory, which gives a zero-cost way to share data at different
 addresses.
 
+NOTE: this functionality is only available on Linux.  There are
+potential ideas for other OSes, like a Windows device driver that would
+tweak the OS' page tables.  But it would need serious research to know
+if it is feasible.
+
 
 Memory organization
 -------------------
