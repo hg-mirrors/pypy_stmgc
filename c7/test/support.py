@@ -1,21 +1,16 @@
 import os
 import cffi
+import sys
+assert sys.maxint == 9223372036854775807, "requires a 64-bit environment"
 
 # ----------
 os.environ['CC'] = 'clang'
 
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-header_files = [os.path.join(parent_dir, _n) for _n in
-                """core.h pagecopy.h list.h
-                reader_writer_lock.h
-                nursery.h pages.h
-                stmsync.h largemalloc.h""".split()]
-source_files = [os.path.join(parent_dir, _n) for _n in
-                """core.c pagecopy.c list.c
-                reader_writer_lock.c
-                nursery.c pages.c
-                stmsync.c largemalloc.c""".split()]
+source_files = [os.path.join(parent_dir, "stmgc.c")]
+all_files = [os.path.join(parent_dir, _n) for _n in os.listdir(parent_dir)
+             if _n.endswith('.h') or _n.endswith('.c')]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):
@@ -23,8 +18,7 @@ if os.path.exists(_pycache_):
     if _fs:
         _fsmtime = min(os.stat(os.path.join(_pycache_, _f)).st_mtime
                        for _f in _fs)
-        if any(os.stat(src).st_mtime >= _fsmtime
-               for src in header_files + source_files):
+        if any(os.stat(src).st_mtime >= _fsmtime for src in all_files):
             import shutil
             shutil.rmtree(_pycache_)
 
@@ -36,31 +30,40 @@ typedef ... object_t;
 typedef ... jmpbufptr_t;
 #define SIZEOF_MYOBJ ...
 
-#define NB_NURSERY_PAGES ...
-#define NURSERY_SECTION ...
+typedef struct {
+    object_t **shadowstack, **shadowstack_base;
+    stm_jmpbufptr_t jmpbuf;
+    ...;
+} stm_thread_local_t;
+
+void stm_read(object_t *obj);
+void stm_write(object_t *obj);
+object_t *stm_allocate(ssize_t size_rounded_up);
+object_t *stm_allocate_prebuilt(ssize_t size_rounded_up);
 
 void stm_setup(void);
-void stm_setup_pthread(void);
-
-void stm_start_transaction(jmpbufptr_t *);
-bool _stm_stop_transaction(void);
-object_t *stm_allocate(size_t size);
-
-void stm_read(object_t *object);
-void stm_write(object_t *object);
-bool _checked_stm_write(object_t *object);
-_Bool _stm_was_read(object_t *object);
-_Bool _stm_was_written(object_t *object);
-
-void _stm_restore_local_state(int thread_num);
 void stm_teardown(void);
-void stm_teardown_pthread(void);
+void stm_register_thread_local(stm_thread_local_t *tl);
+void stm_unregister_thread_local(stm_thread_local_t *tl);
+
+void stm_start_transaction(stm_thread_local_t *tl);
+void stm_start_inevitable_transaction(stm_thread_local_t *tl);
+void stm_commit_transaction(void);
+void stm_abort_transaction(void);
+void stm_become_inevitable(char* msg);
+
+bool _checked_stm_write(object_t *object);
+bool _stm_was_read(object_t *object);
+bool _stm_was_written(object_t *object);
+stm_thread_local_t *_stm_test_switch(stm_thread_local_t *);
 
 char *_stm_real_address(object_t *o);
-object_t *_stm_tl_address(char *ptr);
+object_t *_stm_region_address(char *ptr);
 bool _stm_is_young(object_t *o);
-object_t *_stm_allocate_old(size_t size);
+""")
 
+
+TEMPORARILY_DISABLED = """
 void _stm_start_safe_point(uint8_t);
 void _stm_stop_safe_point(uint8_t);
 bool _stm_check_stop_safe_point(void);
@@ -120,18 +123,14 @@ void _stm_chunk_pages(struct object_s *data, uintptr_t *start, uintptr_t *num);
 void stm_become_inevitable(char* msg);
 void stm_start_inevitable_transaction();
 bool _checked_stm_become_inevitable();
+"""
 
-""")
 
 lib = ffi.verify('''
 #include <string.h>
 #include <assert.h>
 
-#include "core.h"
-#include "pages.h"
-#include "nursery.h"
-#include "stmsync.h"
-#include "largemalloc.h"
+#include "../stmgc.h"
 
 struct myobj_s {
     struct object_s hdr;
@@ -139,10 +138,6 @@ struct myobj_s {
 };
 typedef TLPREFIX struct myobj_s myobj_t;
 #define SIZEOF_MYOBJ sizeof(struct myobj_s)
-
-size_t stm_object_size_rounded_up(object_t * obj) {
-    return 16;
-}
 
 
 uint8_t _stm_get_flags(object_t *obj) {
@@ -250,12 +245,14 @@ object_t * _get_ptr(object_t *obj, int n)
 }
 
 
-size_t stmcb_size(struct object_s *obj)
+ssize_t stmcb_size_rounded_up(struct object_s *obj)
 {
     struct myobj_s *myobj = (struct myobj_s*)obj;
     if (myobj->type_id < 421420) {
         /* basic case: tid equals 42 plus the size of the object */
         assert(myobj->type_id >= 42 + sizeof(struct myobj_s));
+        assert((myobj->type_id - 42) >= 16);
+        assert(((myobj->type_id - 42) & 7) == 0);
         return myobj->type_id - 42;
     }
     else {
@@ -289,13 +286,9 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
      force_generic_engine=True)
 
 
-import sys
-if sys.maxint > 2**32:
-    WORD = 8
-else:
-    WORD = 4
-
+WORD = 8
 HDR = lib.SIZEOF_MYOBJ
+assert HDR == 8
 
 class Conflict(Exception):
     pass
