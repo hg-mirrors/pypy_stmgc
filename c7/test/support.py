@@ -27,43 +27,40 @@ if os.path.exists(_pycache_):
 ffi = cffi.FFI()
 ffi.cdef("""
 typedef ... object_t;
-typedef ... jmpbufptr_t;
 #define SIZEOF_MYOBJ ...
 
 typedef struct {
     object_t **shadowstack, **shadowstack_base;
-    stm_jmpbufptr_t jmpbuf;
     ...;
 } stm_thread_local_t;
 
 void stm_read(object_t *obj);
-void stm_write(object_t *obj);
+/*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_prebuilt(ssize_t size_rounded_up);
 
 void stm_setup(void);
-void stm_teardown(void);
-void stm_register_thread_local(stm_thread_local_t *tl);
-void stm_unregister_thread_local(stm_thread_local_t *tl);
 
-void stm_start_transaction(stm_thread_local_t *tl);
-void stm_start_inevitable_transaction(stm_thread_local_t *tl);
-void stm_commit_transaction(void);
-void stm_abort_transaction(void);
-void stm_become_inevitable(char* msg);
-
-bool _checked_stm_write(object_t *object);
-bool _stm_was_read(object_t *object);
-bool _stm_was_written(object_t *object);
-stm_thread_local_t *_stm_test_switch(stm_thread_local_t *);
-
-char *_stm_real_address(object_t *o);
-object_t *_stm_region_address(char *ptr);
-bool _stm_is_young(object_t *o);
+bool _checked_stm_write(object_t *obj);
+bool _stm_was_read(object_t *obj);
+bool _stm_was_written(object_t *obj);
 """)
 
 
 TEMPORARILY_DISABLED = """
+void stm_teardown(void);
+void stm_register_thread_local(stm_thread_local_t *tl);
+void stm_unregister_thread_local(stm_thread_local_t *tl);
+
+void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
+void stm_start_inevitable_transaction(stm_thread_local_t *tl);
+void stm_commit_transaction(void);
+void stm_abort_transaction(void);
+void stm_become_inevitable(char* msg);
+bool _stm_in_nursery(object_t *obj);
+char *_stm_real_address(object_t *obj);
+object_t *_stm_region_address(char *ptr);
+
 void _stm_start_safe_point(uint8_t);
 void _stm_stop_safe_point(uint8_t);
 bool _stm_check_stop_safe_point(void);
@@ -130,7 +127,7 @@ lib = ffi.verify('''
 #include <string.h>
 #include <assert.h>
 
-#include "../stmgc.h"
+#include "stmgc.h"
 
 struct myobj_s {
     struct object_s hdr;
@@ -144,7 +141,7 @@ uint8_t _stm_get_flags(object_t *obj) {
     return obj->stm_flags;
 }
 
-
+#if 0
 bool _checked_stm_become_inevitable() {
     jmpbufptr_t here;
     int tn = _STM_TL->thread_num;
@@ -158,21 +155,23 @@ bool _checked_stm_become_inevitable() {
     _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
+#endif
 
 bool _checked_stm_write(object_t *object) {
-    jmpbufptr_t here;
-    int tn = _STM_TL->thread_num;
+    stm_jmpbuf_t here;
+    stm_region_info_t *region = STM_REGION;
     if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
-         _STM_TL->jmpbufptr = &here;
-         stm_write(object);
-         _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
-         return 0;
+        assert(region->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
+        region->jmpbuf_ptr = &here;
+        stm_write(object);
+        region->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
+        return 0;
     }
-    _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
+    region->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
     return 1;
 }
 
+#if 0
 bool _stm_stop_transaction(void) {
     jmpbufptr_t here;
     int tn = _STM_TL->thread_num;
@@ -214,6 +213,7 @@ bool _stm_check_abort_transaction(void) {
     _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
+#endif
 
 
 void _set_type_id(object_t *obj, uint32_t h)
@@ -228,7 +228,7 @@ uint32_t _get_type_id(object_t *obj) {
 
 void _set_ptr(object_t *obj, int n, object_t *v)
 {
-    localchar_t *field_addr = ((localchar_t*)obj);
+    stm_char *field_addr = ((stm_char*)obj);
     field_addr += SIZEOF_MYOBJ; /* header */
     field_addr += n * sizeof(void*); /* field */
     object_t * TLPREFIX * field = (object_t * TLPREFIX *)field_addr;
@@ -237,7 +237,7 @@ void _set_ptr(object_t *obj, int n, object_t *v)
 
 object_t * _get_ptr(object_t *obj, int n)
 {
-    localchar_t *field_addr = ((localchar_t*)obj);
+    stm_char *field_addr = ((stm_char*)obj);
     field_addr += SIZEOF_MYOBJ; /* header */
     field_addr += n * sizeof(void*); /* field */
     object_t * TLPREFIX * field = (object_t * TLPREFIX *)field_addr;
@@ -294,7 +294,7 @@ class Conflict(Exception):
     pass
 
 def is_in_nursery(o):
-    return lib._stm_is_young(o)
+    return lib._stm_in_nursery(o)
 
 def stm_allocate_old(size):
     o = lib._stm_allocate_old(size)
@@ -333,8 +333,8 @@ def stm_get_char(obj):
 def stm_get_real_address(obj):
     return lib._stm_real_address(ffi.cast('object_t*', obj))
     
-def stm_get_tl_address(ptr):
-    return int(ffi.cast('uintptr_t', lib._stm_tl_address(ptr)))
+def stm_get_region_address(ptr):
+    return int(ffi.cast('uintptr_t', lib._stm_region_address(ptr)))
 
 def stm_read(o):
     lib.stm_read(o)
