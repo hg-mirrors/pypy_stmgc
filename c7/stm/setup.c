@@ -84,3 +84,7 @@ void stm_setup(void)
     }
 #endif
 }
+
+void stm_teardown(void)
+{
+}
