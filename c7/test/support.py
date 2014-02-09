@@ -40,6 +40,7 @@ object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_prebuilt(ssize_t size_rounded_up);
 
 void stm_setup(void);
+void stm_teardown(void);
 
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
@@ -48,7 +49,6 @@ bool _stm_was_written(object_t *obj);
 
 
 TEMPORARILY_DISABLED = """
-void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
 
@@ -399,26 +399,26 @@ class BaseTest(object):
 
     def setup_method(self, meth):
         lib.stm_setup()
-        lib.stm_setup_thread()
-        lib.stm_setup_thread()
-        lib._stm_restore_local_state(0)
-        self.current_thread = 0
+##        lib.stm_setup_thread()
+##        lib.stm_setup_thread()
+##        lib._stm_restore_local_state(0)
+##        self.current_thread = 0
 
     def teardown_method(self, meth):
-        if self.current_thread != 1:
-            self.switch(1)
-        if lib._stm_is_in_transaction():
-            stm_stop_transaction()
+##        if self.current_thread != 1:
+##            self.switch(1)
+##        if lib._stm_is_in_transaction():
+##            stm_stop_transaction()
 
-        self.switch(0)
-        if lib._stm_is_in_transaction():
-            stm_stop_transaction()
+##        self.switch(0)
+##        if lib._stm_is_in_transaction():
+##            stm_stop_transaction()
 
-        lib._stm_restore_local_state(1)
-        lib._stm_teardown_thread()
-        lib._stm_restore_local_state(0)
-        lib._stm_teardown_thread()
-        lib._stm_teardown()
+##        lib._stm_restore_local_state(1)
+##        lib._stm_teardown_thread()
+##        lib._stm_restore_local_state(0)
+##        lib._stm_teardown_thread()
+        lib.stm_teardown()
 
     def switch(self, thread_num):
         assert thread_num != self.current_thread
