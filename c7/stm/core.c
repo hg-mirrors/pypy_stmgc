@@ -51,7 +51,6 @@ void stm_commit_transaction(void)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     release_thread_segment(tl);
-    abort();
 }
 
 void stm_abort_transaction(void)
