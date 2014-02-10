@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <errno.h>
 
 
 #define NB_PAGES            (1500*256)    // 1500MB
@@ -12,16 +13,14 @@
 #define LARGE_OBJECT_WORDS  36
 #define NB_NURSERY_PAGES    1024          // 4MB
 
-#define NURSERY_SECTION_SIZE  (24*4096)
-
-
 #define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_SEGMENTS)
 #define READMARKER_END        ((NB_PAGES * 4096UL) >> 4)
 #define FIRST_OBJECT_PAGE     ((READMARKER_END + 4095) / 4096UL)
 #define FIRST_NURSERY_PAGE    FIRST_OBJECT_PAGE
+#define END_NURSERY_PAGE      (FIRST_NURSERY_PAGE + NB_NURSERY_PAGES)
 #define READMARKER_START      ((FIRST_OBJECT_PAGE * 4096UL) >> 4)
 #define FIRST_READMARKER_PAGE (READMARKER_START / 4096UL)
-#define END_NURSERY_PAGE      (FIRST_NURSERY_PAGE + NB_NURSERY_PAGES)
+#define NB_READMARKER_PAGES   (FIRST_OBJECT_PAGE - FIRST_READMARKER_PAGE)
 
 
 enum {

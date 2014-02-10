@@ -24,6 +24,17 @@ object_t *_stm_segment_address(char *ptr)
     return (object_t*)res;
 }
 
+struct stm_priv_segment_info_s *_stm_segment(void)
+{
+    char *info = REAL_ADDRESS(STM_SEGMENT->segment_base, STM_PSEGMENT);
+    return (struct stm_priv_segment_info_s *)info;
+}
+
+stm_thread_local_t *_stm_thread(void)
+{
+    return STM_SEGMENT->running_thread;
+}
+
 bool _stm_was_read(object_t *obj)
 {
     return ((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm ==
