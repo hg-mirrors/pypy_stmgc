@@ -64,7 +64,7 @@ void stm_abort_transaction(void);
 void stm_become_inevitable(char* msg);
 bool _stm_in_nursery(object_t *obj);
 char *_stm_real_address(object_t *obj);
-object_t *_stm_region_address(char *ptr);
+object_t *_stm_segment_address(char *ptr);
 
 void _stm_start_safe_point(uint8_t);
 void _stm_stop_safe_point(uint8_t);
@@ -164,15 +164,15 @@ bool _checked_stm_become_inevitable() {
 
 bool _checked_stm_write(object_t *object) {
     stm_jmpbuf_t here;
-    stm_region_info_t *region = STM_REGION;
+    stm_segment_info_t *segment = STM_SEGMENT;
     if (__builtin_setjmp(here) == 0) { // returned directly
-        assert(region->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
-        region->jmpbuf_ptr = &here;
+        assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
+        segment->jmpbuf_ptr = &here;
         stm_write(object);
-        region->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
+        segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
         return 0;
     }
-    region->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
+    segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
     return 1;
 }
 
@@ -338,8 +338,8 @@ def stm_get_char(obj):
 def stm_get_real_address(obj):
     return lib._stm_real_address(ffi.cast('object_t*', obj))
     
-def stm_get_region_address(ptr):
-    return int(ffi.cast('uintptr_t', lib._stm_region_address(ptr)))
+def stm_get_segment_address(ptr):
+    return int(ffi.cast('uintptr_t', lib._stm_segment_address(ptr)))
 
 def stm_read(o):
     lib.stm_read(o)

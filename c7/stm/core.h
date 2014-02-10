@@ -7,7 +7,7 @@
 
 
 #define NB_PAGES            (1500*256)    // 1500MB
-#define NB_REGIONS          2
+#define NB_SEGMENTS         2
 #define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
 #define LARGE_OBJECT_WORDS  36
 #define NB_NURSERY_PAGES    1024          // 4MB
@@ -15,7 +15,7 @@
 #define NURSERY_SECTION_SIZE  (24*4096)
 
 
-#define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_REGIONS)
+#define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_SEGMENTS)
 #define READMARKER_END        ((NB_PAGES * 4096UL) >> 4)
 #define FIRST_OBJECT_PAGE     ((READMARKER_END + 4095) / 4096UL)
 #define FIRST_NURSERY_PAGE    FIRST_OBJECT_PAGE
@@ -42,30 +42,32 @@ enum {
 };
 
 
-#define STM_PREGION          ((stm_priv_region_info_t *)STM_REGION)
+#define STM_PSEGMENT          ((stm_priv_segment_info_t *)STM_SEGMENT)
 
-typedef TLPREFIX struct stm_priv_region_info_s stm_priv_region_info_t;
+typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 
-struct stm_priv_region_info_s {
-    struct stm_region_info_s pub;
+struct stm_priv_segment_info_s {
+    struct stm_segment_info_s pub;
 };
 
 static char *stm_object_pages;
 static stm_thread_local_t *stm_thread_locals = NULL;
 
 
-#define REAL_ADDRESS(region_base, src)   ((region_base) + (uintptr_t)(src))
+#define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
 
-static inline char *get_region_base(long region_num) {
-    return stm_object_pages + region_num * (NB_PAGES * 4096UL);
+static inline char *get_segment_base(long segment_num) {
+    return stm_object_pages + segment_num * (NB_PAGES * 4096UL);
 }
 
-static inline struct stm_region_info_s *get_region(long region_num) {
-    return (struct stm_region_info_s *)REAL_ADDRESS(
-        get_region_base(region_num), STM_PREGION);
+static inline
+struct stm_segment_info_s *get_segment(long segment_num) {
+    return (struct stm_segment_info_s *)REAL_ADDRESS(
+        get_segment_base(segment_num), STM_PSEGMENT);
 }
 
-static inline struct stm_priv_region_info_s *get_priv_region(long region_num) {
-    return (struct stm_priv_region_info_s *)REAL_ADDRESS(
-        get_region_base(region_num), STM_PREGION);
+static inline
+struct stm_priv_segment_info_s *get_priv_segment(long segment_num) {
+    return (struct stm_priv_segment_info_s *)REAL_ADDRESS(
+        get_segment_base(segment_num), STM_PSEGMENT);
 }
