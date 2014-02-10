@@ -10,15 +10,15 @@ char *_stm_real_address(object_t *o)
 
     assert(FIRST_OBJECT_PAGE * 4096UL <= (uintptr_t)o
            && (uintptr_t)o < NB_PAGES * 4096UL);
-    return REAL_ADDRESS(STM_REGION->region_base, o);
+    return REAL_ADDRESS(STM_SEGMENT->segment_base, o);
 }
 
-object_t *_stm_region_address(char *ptr)
+object_t *_stm_segment_address(char *ptr)
 {
     if (ptr == NULL)
         return NULL;
 
-    uintptr_t res = ptr - STM_REGION->region_base;
+    uintptr_t res = ptr - STM_SEGMENT->segment_base;
     assert(FIRST_OBJECT_PAGE * 4096UL <= res
            && res < NB_PAGES * 4096UL);
     return (object_t*)res;
@@ -27,7 +27,7 @@ object_t *_stm_region_address(char *ptr)
 bool _stm_was_read(object_t *obj)
 {
     return ((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm ==
-        STM_REGION->transaction_read_version;
+        STM_SEGMENT->transaction_read_version;
 }
 
 bool _stm_was_written(object_t *obj)

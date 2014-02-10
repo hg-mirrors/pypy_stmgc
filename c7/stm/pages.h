@@ -1,10 +1,10 @@
 
 enum {
-    /* The page is not in use.  Assume that each region sees its own copy. */
+    /* The page is not in use.  Assume that each segment sees its own copy. */
     FREE_PAGE=0,
 
-    /* The page is shared by all threads.  Each region sees the same
-       physical page (the one that is within the region 0 mmap address). */
+    /* The page is shared by all threads.  Each segment sees the same
+       physical page (the one that is within the segment 0 mmap address). */
     SHARED_PAGE,
 
     /* Page being in the process of privatization */

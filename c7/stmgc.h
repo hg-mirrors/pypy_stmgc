@@ -31,7 +31,7 @@
 #define TLPREFIX __attribute__((address_space(256)))
 
 typedef TLPREFIX struct object_s object_t;
-typedef TLPREFIX struct stm_region_info_s stm_region_info_t;
+typedef TLPREFIX struct stm_segment_info_s stm_segment_info_t;
 typedef TLPREFIX struct stm_read_marker_s stm_read_marker_t;
 typedef TLPREFIX char stm_char;
 typedef void* stm_jmpbuf_t[5];  /* for use with __builtin_setjmp() */
@@ -40,22 +40,22 @@ struct stm_read_marker_s {
     uint8_t rm;
 };
 
-struct stm_region_info_s {
+struct stm_segment_info_s {
     uint8_t transaction_read_version;
-    int region_num;
-    char *region_base;
+    int segment_num;
+    char *segment_base;
     stm_char *nursery_current;
     uintptr_t nursery_section_end;
     struct stm_thread_local_s *running_thread;
     stm_jmpbuf_t *jmpbuf_ptr;
 };
-#define STM_REGION           ((stm_region_info_t *)4352)
+#define STM_SEGMENT           ((stm_segment_info_t *)4352)
 
 typedef struct stm_thread_local_s {
     /* every thread should handle the shadow stack itself */
     object_t **shadowstack, **shadowstack_base;
     /* the next fields are handled automatically by the library */
-    struct stm_region_info_s *associated_region;
+    struct stm_segment_info_s *associated_segment;
     struct stm_thread_local_s *prev, *next;
 } stm_thread_local_t;
 
@@ -70,7 +70,7 @@ bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 bool _stm_in_nursery(object_t *obj);
 char *_stm_real_address(object_t *o);
-object_t *_stm_region_address(char *ptr);
+object_t *_stm_segment_address(char *ptr);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER  0x01
@@ -108,7 +108,7 @@ struct object_s {
 static inline void stm_read(object_t *obj)
 {
     ((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm =
-        STM_REGION->transaction_read_version;
+        STM_SEGMENT->transaction_read_version;
 }
 
 static inline void stm_write(object_t *obj)
@@ -128,10 +128,10 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
     OPT_ASSERT(size_rounded_up >= 16);
     OPT_ASSERT((size_rounded_up & 7) == 0);
 
-    stm_char *p = STM_REGION->nursery_current;
+    stm_char *p = STM_SEGMENT->nursery_current;
     stm_char *end = p + size_rounded_up;
-    STM_REGION->nursery_current = end;
-    if (UNLIKELY((uintptr_t)end > STM_REGION->nursery_section_end))
+    STM_SEGMENT->nursery_current = end;
+    if (UNLIKELY((uintptr_t)end > STM_SEGMENT->nursery_section_end))
         p = _stm_allocate_slowpath(size_rounded_up);
     return (object_t *)p;
 }
@@ -155,7 +155,7 @@ void stm_abort_transaction(void);
 })
 
 static inline void stm_become_inevitable(char* msg) {
-    if (STM_REGION->jmpbuf_ptr != NULL)
+    if (STM_SEGMENT->jmpbuf_ptr != NULL)
         _stm_become_inevitable(msg);
 }
 

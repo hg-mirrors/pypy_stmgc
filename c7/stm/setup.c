@@ -13,9 +13,9 @@ void stm_setup(void)
 #endif
 
     /* Check that some values are acceptable */
-    assert(4096 <= ((uintptr_t)STM_REGION));
-    assert((uintptr_t)STM_REGION == (uintptr_t)STM_PREGION);
-    assert(((uintptr_t)STM_PREGION) + sizeof(*STM_PREGION) <= 8192);
+    assert(4096 <= ((uintptr_t)STM_SEGMENT));
+    assert((uintptr_t)STM_SEGMENT == (uintptr_t)STM_PSEGMENT);
+    assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= 8192);
     assert(2 <= FIRST_READMARKER_PAGE);
     assert(FIRST_READMARKER_PAGE * 4096UL <= READMARKER_START);
     assert(READMARKER_START < READMARKER_END);
@@ -31,27 +31,27 @@ void stm_setup(void)
     }
 
     long i;
-    for (i = 0; i < NB_REGIONS; i++) {
-        char *region_base = get_region_base(i);
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        char *segment_base = get_segment_base(i);
 
-        /* In each region, the first page is where TLPREFIX'ed
+        /* In each segment, the first page is where TLPREFIX'ed
            NULL accesses land.  We mprotect it so that accesses fail. */
-        mprotect(region_base, 4096, PROT_NONE);
+        mprotect(segment_base, 4096, PROT_NONE);
 
         /* Fill the TLS page (page 1) with 0xDD, for debugging */
-        memset(REAL_ADDRESS(region_base, 4096), 0xDD, 4096);
-        /* Make a "hole" at STM_PREGION */
-        memset(REAL_ADDRESS(region_base, STM_PREGION), 0,
-               sizeof(*STM_PREGION));
+        memset(REAL_ADDRESS(segment_base, 4096), 0xDD, 4096);
+        /* Make a "hole" at STM_PSEGMENT */
+        memset(REAL_ADDRESS(segment_base, STM_PSEGMENT), 0,
+               sizeof(*STM_PSEGMENT));
 
         /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
         if (FIRST_READMARKER_PAGE > 2)
-            mprotect(region_base + 8192, (FIRST_READMARKER_PAGE - 2) * 4096UL,
+            mprotect(segment_base + 8192, (FIRST_READMARKER_PAGE - 2) * 4096UL,
                      PROT_NONE);
 
-        struct stm_priv_region_info_s *pr = get_priv_region(i);
-        pr->pub.region_num = i;
-        pr->pub.region_base = region_base;
+        struct stm_priv_segment_info_s *pr = get_priv_segment(i);
+        pr->pub.segment_num = i;
+        pr->pub.segment_base = segment_base;
     }
 
     /* Make the nursery pages shared.  The other pages are
@@ -85,7 +85,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
         stm_thread_locals->prev->next = tl;
         stm_thread_locals->prev = tl;
     }
-    tl->associated_region = get_region(0);
+    tl->associated_segment = get_segment(0);
 }
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)
