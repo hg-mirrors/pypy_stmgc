@@ -69,6 +69,7 @@ void _stm_become_inevitable(char*);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 bool _stm_in_nursery(object_t *obj);
+bool _stm_in_transaction(void);
 char *_stm_real_address(object_t *o);
 object_t *_stm_segment_address(char *ptr);
 #endif

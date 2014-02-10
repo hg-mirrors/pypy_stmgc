@@ -80,3 +80,8 @@ static void release_thread_segment(stm_thread_local_t *tl)
     __sync_lock_release(&segments_ctl.in_use[num]);
     sem_post(&segments_ctl.semaphore);
 }
+
+bool _stm_in_transaction(void)
+{
+    return STM_SEGMENT->running_thread != NULL;
+}
