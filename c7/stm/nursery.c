@@ -4,6 +4,7 @@
 
 /************************************************************/
 
+#define NURSERY_START         (FIRST_NURSERY_PAGE * 4096UL)
 #define NURSERY_SIZE          (NB_NURSERY_PAGES * 4096UL)
 
 /* an object larger than LARGE_OBJECT will never be allocated in
@@ -36,6 +37,12 @@ static void setup_nursery(void)
     nursery_ctl.used = 0;
 }
 
+bool _stm_in_nursery(object_t *obj)
+{
+    uint64_t p = (uint64_t)obj;
+    return (p - NURSERY_START) < NURSERY_SIZE;
+}
+
 
 static stm_char *allocate_from_nursery(uint64_t bytes)
 {
@@ -45,7 +52,7 @@ static stm_char *allocate_from_nursery(uint64_t bytes)
         //major_collection();
         abort();
     }
-    return (stm_char *)(FIRST_NURSERY_PAGE * 4096UL + p);
+    return (stm_char *)(NURSERY_START + p);
 }
 
 
@@ -53,8 +60,10 @@ stm_char *_stm_allocate_slowpath(ssize_t size_rounded_up)
 {
     if (size_rounded_up < MEDIUM_OBJECT) {
         /* This is a small object.  The current section is simply full.
-           Allocate the next section. */
+           Allocate the next section and initialize it with zeroes. */
         stm_char *p = allocate_from_nursery(NURSERY_SECTION_SIZE);
+        memset(REAL_ADDRESS(STM_SEGMENT->segment_base, p), 0,
+               NURSERY_SECTION_SIZE);
         STM_SEGMENT->nursery_current = p + size_rounded_up;
         STM_SEGMENT->nursery_section_end = (uintptr_t)p + NURSERY_SECTION_SIZE;
         return p;

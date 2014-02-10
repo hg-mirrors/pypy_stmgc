@@ -49,11 +49,18 @@ void stm_teardown(void);
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
+bool _stm_in_nursery(object_t *obj);
+char *_stm_real_address(object_t *obj);
+object_t *_stm_segment_address(char *ptr);
+bool _stm_in_transaction(void);
 
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
 
 void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
+
+void _set_type_id(object_t *obj, uint32_t h);
+uint32_t _get_type_id(object_t *obj);
 """)
 
 
@@ -62,17 +69,10 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
 void stm_abort_transaction(void);
 void stm_become_inevitable(char* msg);
-bool _stm_in_nursery(object_t *obj);
-char *_stm_real_address(object_t *obj);
-object_t *_stm_segment_address(char *ptr);
 
 void _stm_start_safe_point(uint8_t);
 void _stm_stop_safe_point(uint8_t);
 bool _stm_check_stop_safe_point(void);
-
-void _set_type_id(object_t *obj, uint32_t h);
-uint32_t _get_type_id(object_t *obj);
-bool _stm_is_in_transaction(void);
 
 void stm_push_root(object_t *obj);
 object_t *stm_pop_root(void);
@@ -426,10 +426,14 @@ class BaseTest(object):
         self.running_transaction.add(n)
 
     def switch(self, thread_num):
+        tr = lib._stm_in_transaction()
+        assert tr == (self.current_thread in self.running_transaction)
         assert thread_num != self.current_thread
-        self.current_thread = thread_num
-        if lib._stm_is_in_transaction():
+        if tr:
             stm_start_safe_point()
+        self.current_thread = thread_num
         lib._stm_restore_local_state(thread_num)
-        if lib._stm_is_in_transaction():
+        tr = lib._stm_in_transaction()
+        assert tr == (self.current_thread in self.running_transaction)
+        if tr:
             stm_stop_safe_point() # can raise Conflict
