@@ -19,6 +19,9 @@
    then they might be allocted outside sections but still in the nursery. */
 #define MEDIUM_OBJECT         (9*1024)
 
+/* size in bytes of the alignment of any section requested */
+#define NURSERY_ALIGNMENT     64
+
 /************************************************************/
 
 static union {
@@ -44,9 +47,13 @@ bool _stm_in_nursery(object_t *obj)
 }
 
 
+#define NURSERY_ALIGN(bytes)  \
+    (((bytes) + NURSERY_ALIGNMENT - 1) & ~(NURSERY_ALIGNMENT - 1))
+
 static stm_char *allocate_from_nursery(uint64_t bytes)
 {
     /* thread-safe; allocate a chunk of memory from the nursery */
+    bytes = NURSERY_ALIGN(bytes);
     uint64_t p = __sync_fetch_and_add(&nursery_ctl.used, bytes);
     if (p + bytes > NURSERY_SIZE) {
         //major_collection();
