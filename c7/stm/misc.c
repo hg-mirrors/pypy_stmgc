@@ -1,4 +1,6 @@
-#include <stdlib.h>
+#ifndef _STM_CORE_H_
+# error "must be compiled via stmgc.c"
+#endif
 
 
 char *_stm_real_address(object_t *o)
@@ -6,7 +8,7 @@ char *_stm_real_address(object_t *o)
     if (o == NULL)
         return NULL;
 
-    assert(START_OBJECT_PAGE * 4096UL <= (uintptr_t)o
+    assert(FIRST_OBJECT_PAGE * 4096UL <= (uintptr_t)o
            && (uintptr_t)o < NB_PAGES * 4096UL);
     return REAL_ADDRESS(STM_REGION->region_base, o);
 }
@@ -17,7 +19,7 @@ object_t *_stm_region_address(char *ptr)
         return NULL;
 
     uintptr_t res = ptr - STM_REGION->region_base;
-    assert(START_OBJECT_PAGE * 4096UL <= res
+    assert(FIRST_OBJECT_PAGE * 4096UL <= res
            && res < NB_PAGES * 4096UL);
     return (object_t*)res;
 }

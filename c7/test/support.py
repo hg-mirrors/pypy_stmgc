@@ -9,8 +9,11 @@ os.environ['CC'] = 'clang'
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 source_files = [os.path.join(parent_dir, "stmgc.c")]
-all_files = [os.path.join(parent_dir, _n) for _n in os.listdir(parent_dir)
-             if _n.endswith('.h') or _n.endswith('.c')]
+all_files = [os.path.join(parent_dir, "stmgc.h"),
+             os.path.join(parent_dir, "stmgc.c")] + [
+    os.path.join(parent_dir, 'stm', _n)
+        for _n in os.listdir(os.path.join(parent_dir, 'stm'))
+            if _n.endswith('.h') or _n.endswith('.c')]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):
@@ -27,6 +30,7 @@ if os.path.exists(_pycache_):
 ffi = cffi.FFI()
 ffi.cdef("""
 typedef ... object_t;
+typedef ... stm_jmpbuf_t;
 #define SIZEOF_MYOBJ ...
 
 typedef struct {
@@ -45,14 +49,15 @@ void stm_teardown(void);
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
-""")
 
-
-TEMPORARILY_DISABLED = """
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
 
 void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
+""")
+
+
+TEMPORARILY_DISABLED = """
 void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
 void stm_abort_transaction(void);
@@ -355,9 +360,6 @@ def stm_push_root(o):
 def stm_pop_root():
     return lib.stm_pop_root()
 
-def stm_start_transaction():
-    lib.stm_start_transaction(ffi.cast("jmpbufptr_t*", -1))
-
 def stm_stop_transaction():
     if lib._stm_stop_transaction():
         raise Conflict()
@@ -394,31 +396,34 @@ def stm_get_obj_pages(o):
 def stm_get_flags(o):
     return lib._stm_get_flags(o)
 
+def _allocate_thread_local():
+    tl = ffi.new("stm_thread_local_t *")
+    lib.stm_register_thread_local(tl)
+    return tl
+
 
 class BaseTest(object):
 
     def setup_method(self, meth):
         lib.stm_setup()
-##        lib.stm_setup_thread()
-##        lib.stm_setup_thread()
-##        lib._stm_restore_local_state(0)
-##        self.current_thread = 0
+        self.tls = [_allocate_thread_local(), _allocate_thread_local()]
+        self.current_thread = 0
+        self.running_transaction = set()
 
     def teardown_method(self, meth):
-##        if self.current_thread != 1:
-##            self.switch(1)
-##        if lib._stm_is_in_transaction():
-##            stm_stop_transaction()
-
-##        self.switch(0)
-##        if lib._stm_is_in_transaction():
-##            stm_stop_transaction()
-
-##        lib._stm_restore_local_state(1)
-##        lib._stm_teardown_thread()
-##        lib._stm_restore_local_state(0)
-##        lib._stm_teardown_thread()
+        for n in sorted(self.running_transaction):
+            self.switch(n)
+            self.abort_transaction()
+        for tl in self.tls:
+            lib.stm_unregister_thread_local(tl)
         lib.stm_teardown()
+
+    def start_transaction(self):
+        n = self.current_thread
+        assert n not in self.running_transaction
+        tl = self.tls[n]
+        lib.stm_start_transaction(tl, ffi.cast("stm_jmpbuf_t *", -1))
+        self.running_transaction.add(n)
 
     def switch(self, thread_num):
         assert thread_num != self.current_thread
@@ -428,5 +433,3 @@ class BaseTest(object):
         lib._stm_restore_local_state(thread_num)
         if lib._stm_is_in_transaction():
             stm_stop_safe_point() # can raise Conflict
-
-        

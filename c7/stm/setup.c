@@ -1,3 +1,6 @@
+#ifndef _STM_CORE_H_
+# error "must be compiled via stmgc.c"
+#endif
 
 
 void stm_setup(void)
@@ -7,84 +10,93 @@ void stm_setup(void)
     _stm_reset_pages();
 
     inevitable_lock = 0;
-    
+#endif
+
     /* Check that some values are acceptable */
-    assert(4096 <= ((uintptr_t)_STM_TL));
-    assert(((uintptr_t)_STM_TL) == ((uintptr_t)_STM_TL));
-    assert(((uintptr_t)_STM_TL) + sizeof(*_STM_TL) <= 8192);
+    assert(4096 <= ((uintptr_t)STM_REGION));
+    assert((uintptr_t)STM_REGION == (uintptr_t)STM_PREGION);
+    assert(((uintptr_t)STM_PREGION) + sizeof(*STM_PREGION) <= 8192);
     assert(2 <= FIRST_READMARKER_PAGE);
     assert(FIRST_READMARKER_PAGE * 4096UL <= READMARKER_START);
     assert(READMARKER_START < READMARKER_END);
     assert(READMARKER_END <= 4096UL * FIRST_OBJECT_PAGE);
     assert(FIRST_OBJECT_PAGE < NB_PAGES);
-    assert((NB_NURSERY_PAGES * 4096) % NURSERY_SECTION == 0);
 
-    object_pages = mmap(NULL, TOTAL_MEMORY,
-                        PROT_READ | PROT_WRITE,
-                        MAP_PAGES_FLAGS, -1, 0);
-    if (object_pages == MAP_FAILED) {
-        perror("object_pages mmap");
+    stm_object_pages = mmap(NULL, TOTAL_MEMORY,
+                            PROT_READ | PROT_WRITE,
+                            MAP_PAGES_FLAGS, -1, 0);
+    if (stm_object_pages == MAP_FAILED) {
+        perror("stm_object_pages mmap");
         abort();
     }
 
     long i;
-    for (i = 0; i < NB_THREADS; i++) {
-        char *thread_base = get_thread_base(i);
+    for (i = 0; i < NB_REGIONS; i++) {
+        char *region_base = get_region_base(i);
 
-        /* In each thread's section, the first page is where TLPREFIX'ed
+        /* In each region, the first page is where TLPREFIX'ed
            NULL accesses land.  We mprotect it so that accesses fail. */
-        mprotect(thread_base, 4096, PROT_NONE);
+        mprotect(region_base, 4096, PROT_NONE);
 
-        /* Fill the TLS page (page 1) with 0xDD */
-        memset(REAL_ADDRESS(thread_base, 4096), 0xDD, 4096);
-        /* Make a "hole" at _STM_TL / _STM_TL */
-        memset(REAL_ADDRESS(thread_base, _STM_TL), 0, sizeof(*_STM_TL));
+        /* Fill the TLS page (page 1) with 0xDD, for debugging */
+        memset(REAL_ADDRESS(region_base, 4096), 0xDD, 4096);
+        /* Make a "hole" at STM_PREGION */
+        memset(REAL_ADDRESS(region_base, STM_PREGION), 0,
+               sizeof(*STM_PREGION));
 
         /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
         if (FIRST_READMARKER_PAGE > 2)
-            mprotect(thread_base + 8192, (FIRST_READMARKER_PAGE - 2) * 4096UL,
-                         PROT_NONE);
+            mprotect(region_base + 8192, (FIRST_READMARKER_PAGE - 2) * 4096UL,
+                     PROT_NONE);
 
-        struct _thread_local1_s *th =
-            (struct _thread_local1_s *)REAL_ADDRESS(thread_base, _STM_TL);
-
-        th->thread_num = i;
-        th->thread_base = thread_base;
-
-        if (i > 0) {
-            int res;
-            res = remap_file_pages(
-                    thread_base + FIRST_AFTER_NURSERY_PAGE * 4096UL,
-                    (NB_PAGES - FIRST_AFTER_NURSERY_PAGE) * 4096UL,
-                    0, FIRST_AFTER_NURSERY_PAGE, 0);
-
-            if (res != 0) {
-                perror("remap_file_pages");
-                abort();
-            }
-        }
+        struct stm_priv_region_info_s *pr = get_priv_region(i);
+        pr->pub.region_num = i;
+        pr->pub.region_base = region_base;
     }
 
-    for (i = FIRST_NURSERY_PAGE; i < FIRST_AFTER_NURSERY_PAGE; i++)
-        stm_set_page_flag(i, PRIVATE_PAGE); /* nursery is private.
-                                                or should it be UNCOMMITTED??? */
-    
-    num_threads_started = 0;
+    /* Make the nursery pages shared.  The other pages are
+       shared lazily, as remap_file_pages() takes a relatively
+       long time for each page. */
+    pages_initialize_shared(FIRST_NURSERY_PAGE, NB_NURSERY_PAGES);
 
-    assert(HEAP_PAGES < NB_PAGES - FIRST_AFTER_NURSERY_PAGE);
-    assert(HEAP_PAGES > 10);
-
-    uintptr_t first_heap = stm_pages_reserve(HEAP_PAGES);
-    char *heap = REAL_ADDRESS(get_thread_base(0), first_heap * 4096UL); 
-    assert(memset(heap, 0xcd, HEAP_PAGES * 4096)); // testing
+#if 0
     stm_largemalloc_init(heap, HEAP_PAGES * 4096UL);
-
-    for (i = 0; i < NB_THREADS; i++) {
-        _stm_setup_static_thread();
-    }
 #endif
 }
 
 void stm_teardown(void)
 {
+    /* This function is called during testing, but normal programs don't
+       need to call it. */
+    munmap(stm_object_pages, TOTAL_MEMORY);
+    stm_object_pages = NULL;
+
+    memset(flag_page_private, 0, sizeof(flag_page_private));
+}
+
+void stm_register_thread_local(stm_thread_local_t *tl)
+{
+    if (stm_thread_locals == NULL) {
+        stm_thread_locals = tl->next = tl->prev = tl;
+    }
+    else {
+        tl->next = stm_thread_locals;
+        tl->prev = stm_thread_locals->prev;
+        stm_thread_locals->prev->next = tl;
+        stm_thread_locals->prev = tl;
+    }
+    tl->associated_region = get_region(0);
+}
+
+void stm_unregister_thread_local(stm_thread_local_t *tl)
+{
+    if (tl == stm_thread_locals) {
+        stm_thread_locals = stm_thread_locals->next;
+        if (tl == stm_thread_locals) {
+            stm_thread_locals = NULL;
+            return;
+        }
+    }
+    tl->prev->next = tl->next;
+    tl->next->prev = tl->prev;
 }
