@@ -7,7 +7,7 @@
 static union {
     struct {
         sem_t semaphore;
-        uint8_t in_use[NB_SEGMENTS];   /* 1 if running a pthread */
+        uint8_t in_use[NB_SEGMENTS + 1];   /* 1 if running a pthread */
     };
     char reserved[64];
 } segments_ctl __attribute__((aligned(64)));
@@ -16,6 +16,7 @@ static union {
 static void setup_sync(void)
 {
     memset(segments_ctl.in_use, 0, sizeof(segments_ctl.in_use));
+    segments_ctl.in_use[NB_SEGMENTS] = 0xff;
     if (sem_init(&segments_ctl.semaphore, 0, NB_SEGMENTS) != 0) {
         perror("sem_init");
         abort();
@@ -48,13 +49,12 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
             abort();
         }
     }
+    assert(_is_tl_registered(tl));
     int num = tl->associated_segment_num;
-    if (num >= 0) {
-        if (__sync_lock_test_and_set(&segments_ctl.in_use[num], 1) == 0) {
-            /* fast-path: reacquired the same segment number than the one
-               we had.  The value stored in GS is still valid. */
-            goto exit;
-        }
+    if (__sync_lock_test_and_set(&segments_ctl.in_use[num], 1) == 0) {
+        /* fast-path: reacquired the same segment number than the one
+           we had before.  The value stored in GS is still valid. */
+        goto exit;
     }
     /* Look for the next free segment.  There must be one, because we
        acquired the semaphore above. */
@@ -84,4 +84,22 @@ static void release_thread_segment(stm_thread_local_t *tl)
 bool _stm_in_transaction(void)
 {
     return STM_SEGMENT->running_thread != NULL;
+}
+
+void _stm_test_switch(stm_thread_local_t *tl)
+{
+    int num = tl->associated_segment_num;
+    assert(segments_ctl.in_use[num] == 1);
+    set_gs_register(get_segment_base(num));
+    assert(STM_SEGMENT->running_thread == tl);
+}
+
+void stm_start_safe_point(int flags)
+{
+    //...
+}
+
+void stm_stop_safe_point(int flags)
+{
+    //...
 }

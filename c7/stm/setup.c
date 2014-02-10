@@ -90,7 +90,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
         stm_thread_locals->prev->next = tl;
         stm_thread_locals->prev = tl;
     }
-    tl->associated_segment_num = -1;
+    tl->associated_segment_num = NB_SEGMENTS;
 }
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)
@@ -106,5 +106,9 @@ void stm_unregister_thread_local(stm_thread_local_t *tl)
     tl->next->prev = tl->prev;
     tl->prev = NULL;
     tl->next = NULL;
-    tl->associated_segment_num = -1;
+}
+
+static bool _is_tl_registered(stm_thread_local_t *tl)
+{
+    return tl->next != NULL;
 }

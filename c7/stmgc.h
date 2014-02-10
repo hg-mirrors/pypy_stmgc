@@ -72,6 +72,7 @@ bool _stm_in_nursery(object_t *obj);
 bool _stm_in_transaction(void);
 char *_stm_real_address(object_t *o);
 object_t *_stm_segment_address(char *ptr);
+void _stm_test_switch(stm_thread_local_t *tl);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER  0x01
@@ -160,6 +161,8 @@ static inline void stm_become_inevitable(char* msg) {
         _stm_become_inevitable(msg);
 }
 
+void stm_start_safe_point(int flags);
+void stm_stop_safe_point(int flags);
 
 /* ==================== END ==================== */
 
