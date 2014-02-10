@@ -42,6 +42,7 @@ void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_prebuilt(ssize_t size_rounded_up);
+object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
 void stm_setup(void);
 void stm_teardown(void);
