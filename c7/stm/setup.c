@@ -61,6 +61,7 @@ void stm_setup(void)
 
     setup_sync();
     setup_nursery();
+    setup_gcpage();
 
 #if 0
     stm_largemalloc_init(heap, HEAP_PAGES * 4096UL);

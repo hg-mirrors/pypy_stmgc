@@ -1,19 +1,13 @@
+#ifndef _STM_CORE_H_
+# error "must be compiled via stmgc.c"
+#endif
+
 /* This contains a lot of inspiration from malloc() in the GNU C Library.
    More precisely, this is (a subset of) the part that handles large
    blocks, which in our case means at least 288 bytes.  It is actually
    a general allocator, although it doesn't contain any of the small-
    or medium-block support that are also present in the GNU C Library.
 */
-
-#include <string.h>
-#include <stdio.h>
-#include <stddef.h>
-#include <assert.h>
-#include "largemalloc.h"
-#include "pages.h"
-#include "pagecopy.h"
-
-#define MMAP_LIMIT    (1280*1024)
 
 #define largebin_index(sz)                                      \
     (((sz) < (48 <<  6)) ?      ((sz) >>  6):  /*  0 - 47 */    \
@@ -82,7 +76,7 @@ static mchunk_t *next_chunk_u(mchunk_t *p)
    list are some unsorted chunks.  All unsorted chunks are after all
    sorted chunks.  The flag 'FLAG_SORTED' distinguishes them.
 
-   Note that if the user always calls stm_large_malloc() with a large
+   Note that if the user always calls large_malloc() with a large
    enough argument, then the few bins corresponding to smaller values
    will never be sorted at all.  They are still populated with the
    fragments of space between bigger allocations.
@@ -90,62 +84,7 @@ static mchunk_t *next_chunk_u(mchunk_t *p)
 
 static dlist_t largebins[N_BINS];
 static mchunk_t *first_chunk, *last_chunk;
-uint8_t alloc_lock = 0;
 
-void _stm_chunk_pages(struct object_s *data, uintptr_t *start, uintptr_t *num)
-{
-    /* expects object_s in thread0-space */
-    /* returns the start page and number of pages that the *payload*
-       spans over. the CHUNK_HEADER is not included in the calculations */
-    mchunk_t *chunk = data2chunk((char*)data);
-    *start = (((char*)data) - get_thread_base(0)) / 4096UL;
-    assert(*start < NB_PAGES);
-    size_t offset_into_page = ((uintptr_t)data) & 4095UL; // % 4096
-    *num = ((chunk->size & ~FLAG_SORTED) + offset_into_page + 4095) / 4096UL;
-    assert(*num < NB_PAGES);
-}
-
-size_t _stm_data_size(struct object_s *data)
-{
-    if (data->stm_flags & GCFLAG_SMALL)
-        return stmcb_size(data); /* XXX: inefficient */
-    
-    mchunk_t *chunk = data2chunk((char*)data);
-    return chunk->size & ~FLAG_SORTED;
-}
-
-void _stm_move_object(object_t* obj, char *src, char *dst)
-{
-    /* XXX: should be thread-safe... */
-    
-    /* only copies if page is PRIVATE
-       XXX: various optimizations for objects with
-       multiple pages. E.g. using pagecopy or
-       memcpy over multiple PRIVATE pages. */
-    char *end = src + _stm_data_size((struct object_s*)REAL_ADDRESS(get_thread_base(0), obj));
-    uintptr_t pagenum, num;
-    struct object_s *t0_obj = (struct object_s*)REAL_ADDRESS(get_thread_base(0), obj);
-
-    if (obj->stm_flags & GCFLAG_SMALL) {
-        pagenum = (uintptr_t)obj / 4096UL;
-        num = 1;
-    } else { 
-        _stm_chunk_pages(t0_obj, &pagenum, &num);
-    }
-
-    while (src < end) {
-        size_t to_copy = 4096UL - ((uintptr_t)src & 4095UL);
-        if (to_copy > end - src)
-            to_copy = end - src;
-        if (stm_get_page_flag(pagenum) == PRIVATE_PAGE) {
-            memcpy(dst, src, to_copy);
-        }
-        
-        pagenum++;
-        src += to_copy;
-        dst += to_copy;
-    }
-}
 
 static void insert_unsorted(mchunk_t *new)
 {
@@ -231,11 +170,8 @@ static void sort_bin(size_t index)
         really_sort_bin(index);
 }
 
-object_t *stm_large_malloc(size_t request_size)
+static char *large_malloc(size_t request_size)
 {
-    while (__sync_lock_test_and_set(&alloc_lock, 1))
-        spin_loop();
-    
     /* 'request_size' should already be a multiple of the word size here */
     assert((request_size & (sizeof(char *)-1)) == 0);
 
@@ -272,7 +208,7 @@ object_t *stm_large_malloc(size_t request_size)
     }
 
     /* not enough memory. */
-    alloc_lock = 0;
+    fprintf(stderr, "not enough memory!\n");
     abort();
     return NULL;
 
@@ -303,19 +239,12 @@ object_t *stm_large_malloc(size_t request_size)
     }
     mscan->size = request_size;
     mscan->prev_size = BOTH_CHUNKS_USED;
-    
-    alloc_lock = 0;
-    return (object_t *)(((char *)&mscan->d) - get_thread_base(0));
+
+    return (char *)&mscan->d;
 }
 
-void stm_large_free(object_t *tldata)
+static void large_free(char *data)
 {
-    assert(!(tldata->stm_flags & GCFLAG_SMALL));
-    
-    while (__sync_lock_test_and_set(&alloc_lock, 1))
-        spin_loop();
-    
-    char *data = _stm_real_address(tldata);
     mchunk_t *chunk = data2chunk(data);
     assert((chunk->size & (sizeof(char *) - 1)) == 0);
     assert(chunk->prev_size != THIS_CHUNK_FREE);
@@ -373,8 +302,6 @@ void stm_large_free(object_t *tldata)
     }
 
     insert_unsorted(chunk);
-
-    alloc_lock = 0;
 }
 
 
@@ -414,16 +341,13 @@ void _stm_large_dump(void)
     assert(data - 16 == (char *)last_chunk);
 }
 
-char *_stm_largemalloc_data_start()
-{
-    return (char*)first_chunk;
-}
-
-void stm_largemalloc_init(char *data_start, size_t data_size)
+static void largemalloc_init_arena(char *data_start, size_t data_size)
 {
     int i;
-    for (i = 0; i < N_BINS; i++)
-        largebins[i].prev = largebins[i].next = &largebins[i];
+    for (i = 0; i < N_BINS; i++) {
+        largebins[i].prev = &largebins[i];
+        largebins[i].next = &largebins[i];
+    }
 
     assert(data_size >= 2 * sizeof(struct malloc_chunk));
     assert((data_size & 31) == 0);
@@ -438,10 +362,8 @@ void stm_largemalloc_init(char *data_start, size_t data_size)
     insert_unsorted(first_chunk);
 }
 
-int stm_largemalloc_resize_arena(size_t new_size)
+static int largemalloc_resize_arena(size_t new_size)
 {
-    /* XXX not thread-safe regarding all functions here... */
-    
     assert(new_size >= 2 * sizeof(struct malloc_chunk));
     assert((new_size & 31) == 0);
 
@@ -490,7 +412,7 @@ int stm_largemalloc_resize_arena(size_t new_size)
         assert(last_chunk == next_chunk_u(old_last_chunk));
 
         /* then free the last_chunk (turn it from "used" to "free) */
-        stm_large_free((object_t *)(((char *)&old_last_chunk->d) - get_thread_base(0)));
+        large_free((char *)&old_last_chunk->d);
     }
     return 1;
 }

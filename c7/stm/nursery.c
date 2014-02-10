@@ -42,8 +42,8 @@ static void setup_nursery(void)
 
 bool _stm_in_nursery(object_t *obj)
 {
-    uint64_t p = (uint64_t)obj;
-    return (p - NURSERY_START) < NURSERY_SIZE;
+    assert((uintptr_t)obj >= NURSERY_START);
+    return (uintptr_t)obj < NURSERY_START + NURSERY_SIZE;
 }
 
 

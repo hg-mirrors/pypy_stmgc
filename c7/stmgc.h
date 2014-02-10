@@ -73,6 +73,8 @@ bool _stm_in_transaction(stm_thread_local_t *tl);
 char *_stm_real_address(object_t *o);
 object_t *_stm_segment_address(char *ptr);
 void _stm_test_switch(stm_thread_local_t *tl);
+object_t *_stm_allocate_old(ssize_t size_rounded_up);
+void _stm_large_dump(void);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER  0x01
