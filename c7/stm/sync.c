@@ -81,16 +81,19 @@ static void release_thread_segment(stm_thread_local_t *tl)
     sem_post(&segments_ctl.semaphore);
 }
 
-bool _stm_in_transaction(void)
+bool _stm_in_transaction(stm_thread_local_t *tl)
 {
-    return STM_SEGMENT->running_thread != NULL;
+    int num = tl->associated_segment_num;
+    if (num < NB_SEGMENTS)
+        return get_segment(num)->running_thread == tl;
+    else
+        return false;
 }
 
 void _stm_test_switch(stm_thread_local_t *tl)
 {
-    int num = tl->associated_segment_num;
-    assert(segments_ctl.in_use[num] == 1);
-    set_gs_register(get_segment_base(num));
+    assert(_stm_in_transaction(tl));
+    set_gs_register(get_segment_base(tl->associated_segment_num));
     assert(STM_SEGMENT->running_thread == tl);
 }
 
