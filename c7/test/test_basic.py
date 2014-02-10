@@ -7,7 +7,7 @@ class TestBasic(BaseTest):
         pass
 
     def test_thread_local_allocations(self):
-        stm_start_transaction()
+        self.start_transaction()
         lp1 = stm_allocate(16)
         lp2 = stm_allocate(16)
         assert is_in_nursery(lp1)

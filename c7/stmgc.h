@@ -42,9 +42,10 @@ struct stm_read_marker_s {
 
 struct stm_region_info_s {
     uint8_t transaction_read_version;
+    int region_num;
+    char *region_base;
     stm_char *nursery_current;
     uintptr_t nursery_section_end;
-    char *region_base;
     struct stm_thread_local_s *running_thread;
     stm_jmpbuf_t *jmpbuf_ptr;
 };
@@ -54,7 +55,7 @@ typedef struct stm_thread_local_s {
     /* every thread should handle the shadow stack itself */
     object_t **shadowstack, **shadowstack_base;
     /* the next fields are handled automatically by the library */
-    stm_region_info_t *running_in_region;
+    struct stm_region_info_s *associated_region;
     struct stm_thread_local_s *prev, *next;
 } stm_thread_local_t;
 
@@ -147,10 +148,9 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
 void stm_abort_transaction(void);
 
-#define STM_START_TRANSACTION(tl)  ({                   \
-    stm_jmpbuf_t _buf;                                  \
-    int _restart = __builtin_setjmp(_buf);              \
-    stm_start_transaction(tl, _buf);                    \
+#define STM_START_TRANSACTION(tl, jmpbuf)  ({           \
+    int _restart = __builtin_setjmp(jmpbuf);            \
+    stm_start_transaction(tl, jmpbuf);                  \
    _restart;                                            \
 })
 
