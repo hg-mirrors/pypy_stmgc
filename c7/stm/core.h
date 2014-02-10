@@ -70,3 +70,5 @@ struct stm_priv_segment_info_s *get_priv_segment(long segment_num) {
     return (struct stm_priv_segment_info_s *)REAL_ADDRESS(
         get_segment_base(segment_num), STM_PSEGMENT);
 }
+
+static bool _is_tl_registered(stm_thread_local_t *tl);

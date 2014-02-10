@@ -18,7 +18,7 @@ class TestBasic(BaseTest):
         assert p3 - stm_get_real_address(lp2) == 16
         #
         self.switch(1)
-        stm_start_transaction()
+        self.start_transaction()
         lp1s = stm_allocate(16)
         assert is_in_nursery(lp1s)
         assert abs(stm_get_real_address(lp1s) - p3) >= 4000

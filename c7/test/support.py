@@ -53,6 +53,7 @@ bool _stm_in_nursery(object_t *obj);
 char *_stm_real_address(object_t *obj);
 object_t *_stm_segment_address(char *ptr);
 bool _stm_in_transaction(void);
+void _stm_test_switch(stm_thread_local_t *tl);
 
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
@@ -61,6 +62,13 @@ void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
+
+#define LOCK_COLLECT   ...
+#define LOCK_EXCLUSIVE ...
+#define THREAD_YIELD   ...
+
+void stm_start_safe_point(int);
+bool _check_stop_safe_point(int);
 """)
 
 
@@ -69,10 +77,6 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
 void stm_abort_transaction(void);
 void stm_become_inevitable(char* msg);
-
-void _stm_start_safe_point(uint8_t);
-void _stm_stop_safe_point(uint8_t);
-bool _stm_check_stop_safe_point(void);
 
 void stm_push_root(object_t *obj);
 object_t *stm_pop_root(void);
@@ -101,13 +105,6 @@ enum {
     GCFLAG_NOT_COMMITTED = 2,
     GCFLAG_MOVED = 4,
 };
-
-enum {
-    LOCK_COLLECT = 1,
-    LOCK_EXCLUSIVE = 2,
-    THREAD_YIELD = 4,
-};
-
 
 void stm_largemalloc_init(char *data_start, size_t data_size);
 int stm_largemalloc_resize_arena(size_t new_size);
@@ -140,6 +137,12 @@ struct myobj_s {
 };
 typedef TLPREFIX struct myobj_s myobj_t;
 #define SIZEOF_MYOBJ sizeof(struct myobj_s)
+
+enum {
+    LOCK_COLLECT = 1,
+    LOCK_EXCLUSIVE = 2,
+    THREAD_YIELD = 4,
+};
 
 
 uint8_t _stm_get_flags(object_t *obj) {
@@ -190,21 +193,23 @@ bool _stm_stop_transaction(void) {
     _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
     return 1;
 }
+#endif
 
-bool _stm_check_stop_safe_point(void) {
-    jmpbufptr_t here;
-    int tn = _STM_TL->thread_num;
+bool _check_stop_safe_point(int flags) {
+    stm_jmpbuf_t here;
+    stm_segment_info_t *segment = STM_SEGMENT;
     if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
-         _STM_TL->jmpbufptr = &here;
-         _stm_stop_safe_point(LOCK_COLLECT);
-         _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
+         assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
+         segment->jmpbuf_ptr = &here;
+         stm_stop_safe_point(flags);
+         segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
          return 0;
     }
-    _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
+    segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
     return 1;
 }
 
+#if 0
 bool _stm_check_abort_transaction(void) {
     jmpbufptr_t here;
     int tn = _STM_TL->thread_num;
@@ -369,10 +374,10 @@ def stm_abort_transaction():
 
 
 def stm_start_safe_point():
-    lib._stm_start_safe_point(lib.LOCK_COLLECT)
+    lib.stm_start_safe_point(lib.LOCK_COLLECT)
 
 def stm_stop_safe_point():
-    if lib._stm_check_stop_safe_point():
+    if lib._check_stop_safe_point(lib.LOCK_COLLECT):
         raise Conflict()
 
 def stm_become_inevitable():
@@ -412,7 +417,8 @@ class BaseTest(object):
 
     def teardown_method(self, meth):
         for n in sorted(self.running_transaction):
-            self.switch(n)
+            if self.current_thread != n:
+                self.switch(n)
             self.abort_transaction()
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
@@ -432,8 +438,7 @@ class BaseTest(object):
         if tr:
             stm_start_safe_point()
         self.current_thread = thread_num
-        lib._stm_restore_local_state(thread_num)
-        tr = lib._stm_in_transaction()
-        assert tr == (self.current_thread in self.running_transaction)
-        if tr:
+        if thread_num in self.running_transaction:
+            tl = self.tls[thread_num]
+            lib._stm_test_switch(tl)
             stm_stop_safe_point() # can raise Conflict
