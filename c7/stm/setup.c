@@ -59,6 +59,9 @@ void stm_setup(void)
        long time for each page. */
     pages_initialize_shared(FIRST_NURSERY_PAGE, NB_NURSERY_PAGES);
 
+    setup_sync();
+    setup_nursery();
+
 #if 0
     stm_largemalloc_init(heap, HEAP_PAGES * 4096UL);
 #endif
@@ -72,6 +75,8 @@ void stm_teardown(void)
     stm_object_pages = NULL;
 
     memset(flag_page_private, 0, sizeof(flag_page_private));
+
+    teardown_sync();
 }
 
 void stm_register_thread_local(stm_thread_local_t *tl)
@@ -85,7 +90,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
         stm_thread_locals->prev->next = tl;
         stm_thread_locals->prev = tl;
     }
-    tl->associated_segment = get_segment(0);
+    tl->associated_segment_num = -1;
 }
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)
@@ -99,4 +104,7 @@ void stm_unregister_thread_local(stm_thread_local_t *tl)
     }
     tl->prev->next = tl->next;
     tl->next->prev = tl->prev;
+    tl->prev = NULL;
+    tl->next = NULL;
+    tl->associated_segment_num = -1;
 }

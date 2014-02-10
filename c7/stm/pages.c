@@ -19,9 +19,8 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
             abort();
         }
     }
-    for (; count > 0; count--) {
-        flag_page_private[pagenum++] = SHARED_PAGE;
-    }
+    for (i = 0; i < count; i++)
+        flag_page_private[pagenum + i] = SHARED_PAGE;
 }
 
 static void _pages_privatize(uintptr_t pagenum, uintptr_t count)
