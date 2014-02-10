@@ -53,3 +53,14 @@ void stm_commit_transaction(void)
     release_thread_segment(tl);
     abort();
 }
+
+void stm_abort_transaction(void)
+{
+    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+    stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
+    release_thread_segment(tl);
+
+    assert(jmpbuf_ptr != NULL);
+    assert(jmpbuf_ptr != (stm_jmpbuf_t *)-1);    /* for tests only */
+    __builtin_longjmp(*jmpbuf_ptr, 1);
+}

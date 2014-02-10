@@ -69,7 +69,7 @@ void _stm_become_inevitable(char*);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 bool _stm_in_nursery(object_t *obj);
-bool _stm_in_transaction(void);
+bool _stm_in_transaction(stm_thread_local_t *tl);
 char *_stm_real_address(object_t *o);
 object_t *_stm_segment_address(char *ptr);
 void _stm_test_switch(stm_thread_local_t *tl);
@@ -148,7 +148,7 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
 void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
-void stm_abort_transaction(void);
+void stm_abort_transaction(void) __attribute__((noreturn));
 
 #define STM_START_TRANSACTION(tl, jmpbuf)  ({           \
     int _restart = __builtin_setjmp(jmpbuf);            \

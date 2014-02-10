@@ -52,13 +52,15 @@ bool _stm_was_written(object_t *obj);
 bool _stm_in_nursery(object_t *obj);
 char *_stm_real_address(object_t *obj);
 object_t *_stm_segment_address(char *ptr);
-bool _stm_in_transaction(void);
+bool _stm_in_transaction(stm_thread_local_t *tl);
 void _stm_test_switch(stm_thread_local_t *tl);
 
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
 
 void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
+void stm_commit_transaction(void);
+bool _check_abort_transaction(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
@@ -74,8 +76,6 @@ bool _check_stop_safe_point(int);
 
 TEMPORARILY_DISABLED = """
 void stm_start_inevitable_transaction(stm_thread_local_t *tl);
-void stm_commit_transaction(void);
-void stm_abort_transaction(void);
 void stm_become_inevitable(char* msg);
 
 void stm_push_root(object_t *obj);
@@ -85,8 +85,6 @@ void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
 
 void _stm_minor_collect();
-
-bool _stm_check_abort_transaction(void);
 
 void *memset(void *s, int c, size_t n);
 extern size_t stmcb_size(struct object_s *);
@@ -126,6 +124,7 @@ bool _checked_stm_become_inevitable();
 
 
 lib = ffi.verify('''
+#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 
@@ -209,21 +208,19 @@ bool _check_stop_safe_point(int flags) {
     return 1;
 }
 
-#if 0
-bool _stm_check_abort_transaction(void) {
-    jmpbufptr_t here;
-    int tn = _STM_TL->thread_num;
+int _check_abort_transaction(void) {
+    stm_jmpbuf_t here;
+    stm_segment_info_t *segment = STM_SEGMENT;
     if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
-         _STM_TL->jmpbufptr = &here;
+         assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
+         segment->jmpbuf_ptr = &here;
          stm_abort_transaction();
-         _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
-         return 0;
+         segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
+         return 0;   // but should be unreachable in this case
     }
-    _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
+    segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
     return 1;
 }
-#endif
 
 
 void _set_type_id(object_t *obj, uint32_t h)
@@ -369,9 +366,6 @@ def stm_stop_transaction():
     if lib._stm_stop_transaction():
         raise Conflict()
 
-def stm_abort_transaction():
-    return lib._stm_check_abort_transaction()
-
 
 def stm_start_safe_point():
     lib.stm_start_safe_point(lib.LOCK_COLLECT)
@@ -413,32 +407,45 @@ class BaseTest(object):
         lib.stm_setup()
         self.tls = [_allocate_thread_local(), _allocate_thread_local()]
         self.current_thread = 0
-        self.running_transaction = set()
 
     def teardown_method(self, meth):
-        for n in sorted(self.running_transaction):
-            if self.current_thread != n:
-                self.switch(n)
-            self.abort_transaction()
+        for n, tl in enumerate(self.tls):
+            if lib._stm_in_transaction(tl):
+                if self.current_thread != n:
+                    self.switch(n)
+                self.abort_transaction()
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
         lib.stm_teardown()
 
     def start_transaction(self):
-        n = self.current_thread
-        assert n not in self.running_transaction
-        tl = self.tls[n]
+        tl = self.tls[self.current_thread]
+        assert not lib._stm_in_transaction(tl)
         lib.stm_start_transaction(tl, ffi.cast("stm_jmpbuf_t *", -1))
-        self.running_transaction.add(n)
+        assert lib._stm_in_transaction(tl)
+
+    def commit_transaction(self):
+        tl = self.tls[self.current_thread]
+        assert lib._stm_in_transaction(tl)
+        lib.stm_commit_transaction()
+        assert not lib._stm_in_transaction(tl)
+
+    def abort_transaction(self):
+        tl = self.tls[self.current_thread]
+        assert lib._stm_in_transaction(tl)
+        res = lib._check_abort_transaction()
+        assert res   # abort_transaction() didn't abort!
+        assert not lib._stm_in_transaction(tl)
 
     def switch(self, thread_num):
-        tr = lib._stm_in_transaction()
-        assert tr == (self.current_thread in self.running_transaction)
         assert thread_num != self.current_thread
-        if tr:
+        tl = self.tls[self.current_thread]
+        if lib._stm_in_transaction(tl):
             stm_start_safe_point()
+        #
         self.current_thread = thread_num
-        if thread_num in self.running_transaction:
-            tl = self.tls[thread_num]
-            lib._stm_test_switch(tl)
+        tl2 = self.tls[thread_num]
+        #
+        if lib._stm_in_transaction(tl2):
+            lib._stm_test_switch(tl2)
             stm_stop_safe_point() # can raise Conflict
