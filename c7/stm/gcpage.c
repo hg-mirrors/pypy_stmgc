@@ -9,11 +9,6 @@ static void setup_gcpage(void)
                            (NB_PAGES - END_NURSERY_PAGE) * 4096UL);
 }
 
-object_t *stm_allocate_prebuilt(ssize_t size_rounded_up)
-{
-    abort();
-}
-
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
     char *addr = large_malloc(size_rounded_up);

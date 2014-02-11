@@ -41,11 +41,13 @@ typedef struct {
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
-object_t *stm_allocate_prebuilt(ssize_t size_rounded_up);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
 void stm_setup(void);
 void stm_teardown(void);
+void stm_register_thread_local(stm_thread_local_t *tl);
+void stm_unregister_thread_local(stm_thread_local_t *tl);
+void stm_copy_prebuilt_objects(object_t *target, char *source, ssize_t size);
 
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
@@ -55,9 +57,6 @@ char *_stm_real_address(object_t *obj);
 object_t *_stm_segment_address(char *ptr);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 void _stm_test_switch(stm_thread_local_t *tl);
-
-void stm_register_thread_local(stm_thread_local_t *tl);
-void stm_unregister_thread_local(stm_thread_local_t *tl);
 
 void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 void stm_commit_transaction(void);

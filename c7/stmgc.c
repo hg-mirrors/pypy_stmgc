@@ -7,6 +7,7 @@
 
 #include "stm/misc.c"
 #include "stm/pages.c"
+#include "stm/prebuilt.c"
 #include "stm/gcpage.c"
 #include "stm/largemalloc.c"
 #include "stm/nursery.c"
