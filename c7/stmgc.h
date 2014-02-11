@@ -78,6 +78,7 @@ void _stm_large_dump(void);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER  0x01
+#define STM_FLAGS_PREBUILT         _STM_GCFLAG_WRITE_BARRIER
 
 
 /* ==================== HELPERS ==================== */
@@ -140,12 +141,11 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
     return (object_t *)p;
 }
 
-object_t *stm_allocate_prebuilt(ssize_t size_rounded_up);
-
 void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
+void stm_copy_prebuilt_objects(object_t *target, char *source, ssize_t size);
 
 void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 void stm_start_inevitable_transaction(stm_thread_local_t *tl);
