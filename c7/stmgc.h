@@ -33,11 +33,16 @@
 typedef TLPREFIX struct object_s object_t;
 typedef TLPREFIX struct stm_segment_info_s stm_segment_info_t;
 typedef TLPREFIX struct stm_read_marker_s stm_read_marker_t;
+typedef TLPREFIX struct stm_current_transaction_s stm_current_transaction_t;
 typedef TLPREFIX char stm_char;
 typedef void* stm_jmpbuf_t[5];  /* for use with __builtin_setjmp() */
 
 struct stm_read_marker_s {
     uint8_t rm;
+};
+
+struct stm_current_transaction_s {
+    uint8_t ct;
 };
 
 struct stm_segment_info_s {
@@ -77,8 +82,8 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up);
 void _stm_large_dump(void);
 #endif
 
-#define _STM_GCFLAG_WRITE_BARRIER  0x01
-#define STM_FLAGS_PREBUILT         _STM_GCFLAG_WRITE_BARRIER
+#define _STM_GCFLAG_WRITE_BARRIER_CALLED  0x80
+#define STM_FLAGS_PREBUILT                0
 
 
 /* ==================== HELPERS ==================== */
@@ -118,7 +123,12 @@ static inline void stm_read(object_t *obj)
 
 static inline void stm_write(object_t *obj)
 {
-    if (UNLIKELY(obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER))
+    /* this is:
+           'if (ct == 0 && (stm_flags & WRITE_BARRIER_CALLED) == 0)'
+         assuming that 'ct' is either 0 (no, not current transaction)
+           or 0xff (yes) */
+    if (UNLIKELY(!(((stm_current_transaction_t *)(((uintptr_t)obj) >> 8)->ct |
+                    obj->stm_flags) & _STM_GCFLAG_WRITE_BARRIER_CALLED)))
         _stm_write_slowpath(obj);
 }
 

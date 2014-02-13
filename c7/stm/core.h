@@ -24,20 +24,20 @@
 
 
 enum {
-    /* set if the write-barrier slowpath needs to trigger. set on all
-       old objects if there was no write-barrier on it in the same
-       transaction and no collection inbetween. */
-    GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
-    /* set on objects which are in pages visible to others (SHARED
-       or PRIVATE), but not committed yet. So only visible from
-       this transaction. */
-    //GCFLAG_NOT_COMMITTED = _STM_GCFLAG_WRITE_BARRIER << 1,
+    /* this flag is not set on most objects.  when stm_write() is called
+       on an object that is not from the current transaction, then
+       _stm_write_slowpath() is called, and then the flag is set to
+       say "called once already, no need to call again". */
+    GCFLAG_WRITE_BARRIER_CALLED = _STM_GCFLAG_WRITE_BARRIER_CALLED,
+    /* set if the object can be seen by all threads.  If unset, we know
+       it is only visible from the current thread. */
+    //GCFLAG_ALL_THREADS = 0x04,
     /* only used during collections to mark an obj as moved out of the
        generation it was in */
-    //GCFLAG_MOVED = _STM_GCFLAG_WRITE_BARRIER << 2,
+    //GCFLAG_MOVED = 0x01,
     /* objects smaller than one page and even smaller than
        LARGE_OBJECT_WORDS * 8 bytes */
-    //GCFLAG_SMALL = _STM_GCFLAG_WRITE_BARRIER << 3,
+    //GCFLAG_SMALL = 0x02,
 };
 
 
