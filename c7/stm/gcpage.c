@@ -12,9 +12,9 @@ static void setup_gcpage(void)
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
     char *addr = large_malloc(size_rounded_up);
-    memset(addr, 0, size_rounded_up);
-
     object_t* o = (object_t *)(addr - stm_object_pages);
+
+    memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
     return o;
 }

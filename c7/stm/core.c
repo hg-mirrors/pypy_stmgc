@@ -30,6 +30,7 @@ static void reset_transaction_read_version(void)
         perror("madvise");
         abort();
     }
+    reset_transaction_read_version_prebuilt();
     STM_SEGMENT->transaction_read_version = 1;
 }
 
