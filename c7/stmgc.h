@@ -33,16 +33,27 @@
 typedef TLPREFIX struct object_s object_t;
 typedef TLPREFIX struct stm_segment_info_s stm_segment_info_t;
 typedef TLPREFIX struct stm_read_marker_s stm_read_marker_t;
-typedef TLPREFIX struct stm_current_transaction_s stm_current_transaction_t;
+typedef TLPREFIX struct stm_creation_marker_s stm_creation_marker_t;
 typedef TLPREFIX char stm_char;
 typedef void* stm_jmpbuf_t[5];  /* for use with __builtin_setjmp() */
 
 struct stm_read_marker_s {
+    /* In every segment, every object has a corresponding read marker.
+       We assume that objects are at least 16 bytes long, and use
+       their address divided by 16.  The read marker is equal to
+       'STM_SEGMENT->transaction_read_version' if and only if the
+       object was read in the current transaction. */
     uint8_t rm;
 };
 
-struct stm_current_transaction_s {
-    uint8_t ct;
+struct stm_creation_marker_s {
+    /* In addition to read markers, every group of 256 bytes has one
+       extra byte, the creation marker, located at the address divided
+       by 256.  The creation marker is either 0xff if all objects in
+       this group come have been allocated by the current transaction,
+       or 0x00 if none of them have been.  Groups cannot contain a
+       mixture of both. */
+    uint8_t cm;
 };
 
 struct stm_segment_info_s {
@@ -125,9 +136,9 @@ static inline void stm_write(object_t *obj)
 {
     /* this is:
            'if (ct == 0 && (stm_flags & WRITE_BARRIER_CALLED) == 0)'
-         assuming that 'ct' is either 0 (no, not current transaction)
-           or 0xff (yes) */
-    if (UNLIKELY(!(((stm_current_transaction_t *)(((uintptr_t)obj) >> 8)->ct |
+         assuming that 'cm' is either 0 (not created in current transaction)
+                                or 0xff (created in current transaction) */
+    if (UNLIKELY(!(((stm_creation_marker_t *)(((uintptr_t)obj) >> 8)->cm |
                     obj->stm_flags) & _STM_GCFLAG_WRITE_BARRIER_CALLED)))
         _stm_write_slowpath(obj);
 }

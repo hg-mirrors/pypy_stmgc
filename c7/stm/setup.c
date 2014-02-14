@@ -21,6 +21,10 @@ void stm_setup(void)
     assert(READMARKER_START < READMARKER_END);
     assert(READMARKER_END <= 4096UL * FIRST_OBJECT_PAGE);
     assert(FIRST_OBJECT_PAGE < NB_PAGES);
+    assert(CURTRANS_START >= 8192);
+    assert((NB_PAGES * 4096UL) >> 8 <= (FIRST_OBJECT_PAGE * 4096UL) >> 4);
+    assert((END_NURSERY_PAGE * 4096UL) >> 8 <=
+           (FIRST_READMARKER_PAGE * 4096UL));
 
     stm_object_pages = mmap(NULL, TOTAL_MEMORY,
                             PROT_READ | PROT_WRITE,
@@ -59,13 +63,19 @@ void stm_setup(void)
        long time for each page. */
     pages_initialize_shared(FIRST_NURSERY_PAGE, NB_NURSERY_PAGES);
 
+    /* The read markers are initially zero, which is correct:
+       STM_SEGMENT->transaction_read_version never contains zero,
+       so a null read marker means "not read" whatever the
+       current transaction_read_version is.
+
+       The creation markers are initially zero, which is correct:
+       it means "objects of this group of 256 bytes have not been
+       allocated by the current transaction."
+    */
+
     setup_sync();
     setup_nursery();
     setup_gcpage();
-
-#if 0
-    stm_largemalloc_init(heap, HEAP_PAGES * 4096UL);
-#endif
 }
 
 void stm_teardown(void)
