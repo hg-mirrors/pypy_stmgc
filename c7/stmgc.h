@@ -130,10 +130,12 @@ struct object_s {
 };
 
 /* The read barrier must be called whenever the object 'obj' is read.
-   It is not required to call it before reading: it can be called
-   during or after too, as long as we are in the same transaction.
-   If we might have finished the transaction and started the next
-   one, then stm_read() needs to be called again.
+   It is not required to call it before reading: it can be delayed for a
+   bit, but we must still be in the same "scope": no allocation, no
+   transaction commit, nothing that can potentially collect or do a safe
+   point (like stm_write() on a different object).  Also, if we might
+   have finished the transaction and started the next one, then
+   stm_read() needs to be called again.
 */
 static inline void stm_read(object_t *obj)
 {
@@ -150,7 +152,7 @@ static inline void stm_read(object_t *obj)
 static inline void stm_write(object_t *obj)
 {
     /* this is:
-           'if (ct == 0 && (stm_flags & WRITE_BARRIER_CALLED) == 0)'
+           'if (cm == 0 && (stm_flags & WRITE_BARRIER_CALLED) == 0)'
          assuming that 'cm' is either 0 (not created in current transaction)
                                 or 0xff (created in current transaction) */
     if (UNLIKELY(!((((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm |

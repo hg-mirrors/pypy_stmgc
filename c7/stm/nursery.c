@@ -71,11 +71,14 @@ static void reset_all_creation_markers(void)
        We reset the markers 8 at a time, by writing null integers
        until we reach a place that is already null.
     */
-    LIST_FOREACH_R(STM_PSEGMENT->creation_markers, uintptr_t, ({
-        uint64_t *p = (uint64_t *)(item & ~7);
-        while (*p != 0)
-            *p++ = 0;
-    }));
+    LIST_FOREACH_R(
+        STM_PSEGMENT->creation_markers,
+        uintptr_t /*item*/,
+        ({
+            uint64_t *p = (uint64_t *)(item & ~7);
+            while (*p != 0)
+                *p++ = 0;
+        }));
 
     list_clear(STM_PSEGMENT->creation_markers);
 }
