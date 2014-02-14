@@ -20,7 +20,7 @@ static void contention_management(uint8_t current_lock_owner)
        lock on the same object. */
 
     /* By construction it should not be possible that the owner
-       of the object is precisely us */
+       of the object is already us */
     assert(current_lock_owner != STM_PSEGMENT->write_lock_num);
 
     /* Who should abort here: this thread, or the other thread? */
@@ -31,6 +31,8 @@ static void contention_management(uint8_t current_lock_owner)
     if ((STM_PSEGMENT->approximate_start_time <
             other_pseg->approximate_start_time) || is_inevitable()) {
         /* we are the thread that must succeed */
+        XXX  /* don't go here if the other thread is inevitable! */
+        ...                           
         other_pseg->need_abort = 1;
         _stm_start_safe_point(0);
         /* XXX: not good, maybe should be signalled by other thread */
@@ -68,6 +70,10 @@ void _stm_write_slowpath(object_t *obj)
         pages_privatize(((uintptr_t)obj) / 4096UL, 1);
     }
 
+    /* do a read-barrier *before* the safepoints that may be issued in
+       contention_management() */
+    stm_read(obj);
+
     /* claim the write-lock for this object */
     do {
         uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
@@ -86,7 +92,6 @@ void _stm_write_slowpath(object_t *obj)
 
     /* add the write-barrier-already-called flag ONLY if we succeeded in
        getting the write-lock */
-    stm_read(obj);
     obj->stm_flags |= GCFLAG_WRITE_BARRIER_CALLED;
     LIST_APPEND(STM_PSEGMENT->modified_objects, obj);
 }
@@ -135,9 +140,53 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 }
 
 
+static void push_modified_to_other_threads()
+{
+    long remote_num = 1 - STM_SEGMENT->segment_num;
+    char *local_base = STM_SEGMENT->segment_base;
+    char *remote_base = get_segment_base(remote_num);
+    bool conflicted = false;
+    uint8_t remote_version = get_segment(remote_num)->transaction_read_version;
+
+    LIST_FOREACH_R(
+        STM_PSEGMENT->modified_objects,
+        object_t * /*item*/,
+        ({
+            if (!conflicted)
+                conflicted = was_read_remote(remote_base, item,
+                                             remote_version);
+
+            /* clear the write-lock */
+            uintptr_t lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START;
+            assert(write_locks[lock_idx] == _STM_TL->thread_num + 1);
+            write_locks[lock_idx] = 0;
+
+            _stm_move_object(item,
+                             REAL_ADDRESS(local_base, item),
+                             REAL_ADDRESS(remote_base, item));
+        }));
+
+    list_clear(STM_PSEGMENT->modified_objects);
+
+    if (conflicted) {
+        struct _thread_local1_s *remote_TL = (struct _thread_local1_s *)
+            REAL_ADDRESS(remote_base, _STM_TL);
+        remote_TL->need_abort = 1;
+    }
+}
+
 void stm_commit_transaction(void)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+
+    /* cannot abort any more */
+    STM_SEGMENT->jmpbuf_ptr = NULL;
+
+    ...
+
+    /* copy modified object versions to other threads */
+    push_modified_to_other_threads();
+
     release_thread_segment(tl);
     reset_all_creation_markers();
 }
@@ -146,6 +195,7 @@ void stm_abort_transaction(void)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
+    STM_SEGMENT->need_abort = 0;
     release_thread_segment(tl);
     reset_all_creation_markers();
 
