@@ -58,11 +58,11 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count)
 
     ssize_t pgoff1 = pagenum;
     ssize_t pgoff2 = pagenum + NB_PAGES;
-    ssize_t localpgoff = pgoff1 + NB_PAGES * _STM_TL->thread_num;
-    ssize_t otherpgoff = pgoff1 + NB_PAGES * (1 - _STM_TL->thread_num);
+    ssize_t localpgoff = pgoff1 + NB_PAGES * STM_SEGMENT->segment_num;
+    ssize_t otherpgoff = pgoff1 + NB_PAGES * (1 - STM_SEGMENT->segment_num);
 
-    void *localpg = object_pages + localpgoff * 4096UL;
-    void *otherpg = object_pages + otherpgoff * 4096UL;
+    void *localpg = stm_object_pages + localpgoff * 4096UL;
+    void *otherpg = stm_object_pages + otherpgoff * 4096UL;
 
     // XXX should not use pgoff2, but instead the next unused page in
     // thread 2, so that after major GCs the next dirty pages are the
