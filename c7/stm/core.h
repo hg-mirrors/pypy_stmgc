@@ -6,6 +6,8 @@
 #include <sys/mman.h>
 #include <errno.h>
 
+/************************************************************/
+
 
 #define NB_PAGES            (1500*256)    // 1500MB
 #define NB_SEGMENTS         2
@@ -33,16 +35,16 @@ enum {
        _stm_write_slowpath() is called, and then the flag is set to
        say "called once already, no need to call again". */
     GCFLAG_WRITE_BARRIER_CALLED = _STM_GCFLAG_WRITE_BARRIER_CALLED,
-    /* set if the object can be seen by all threads.  If unset, we know
-       it is only visible from the current thread. */
-    //GCFLAG_ALL_THREADS = 0x04,
-    /* only used during collections to mark an obj as moved out of the
-       generation it was in */
-    //GCFLAG_MOVED = 0x01,
-    /* objects smaller than one page and even smaller than
-       LARGE_OBJECT_WORDS * 8 bytes */
-    //GCFLAG_SMALL = 0x02,
+    /* objects that are allocated crossing a page boundary have this
+       flag set */
+    GCFLAG_CROSS_PAGE = 0x02,
 };
+
+#define CROSS_PAGE_BOUNDARY(start, stop)                                \
+    (((uintptr_t)(start)) / 4096UL != ((uintptr_t)(stop)) / 4096UL)
+
+
+/************************************************************/
 
 
 #define STM_PSEGMENT          ((stm_priv_segment_info_t *)STM_SEGMENT)
@@ -82,3 +84,7 @@ struct stm_priv_segment_info_s *get_priv_segment(long segment_num) {
 
 static bool _is_tl_registered(stm_thread_local_t *tl);
 static bool _running_transaction(void);
+
+static inline bool obj_from_same_transaction(object_t *obj) {
+    return ((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm != 0;
+}
