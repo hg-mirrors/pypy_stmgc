@@ -29,12 +29,12 @@ class TestBasic(BaseTest):
 
     def test_transaction_start_stop(self):
         self.start_transaction()
-        
+
         self.switch(1)
         self.start_transaction()
         self.commit_transaction()
         self.switch(0)
-        
+
         self.commit_transaction()
 
     def test_simple_read(self):
@@ -57,22 +57,21 @@ class TestBasic(BaseTest):
         self.switch(1)
         lp2 = stm_allocate_old(16)
         assert lp1 != lp2
-        
+
     def test_write_on_old(self):
         lp1 = stm_allocate_old(16)
         self.start_transaction()
         stm_write(lp1)
         assert stm_was_written(lp1)
         stm_set_char(lp1, 'a')
-        
+
         self.switch(1)
         self.start_transaction()
         stm_read(lp1)
         assert stm_was_read(lp1)
         assert stm_get_char(lp1) == '\0'
         self.commit_transaction()
-        
-        
+
     def test_read_write_1(self):
         lp1 = stm_allocate_old(16)
         stm_get_real_address(lp1)[HDR] = 'a' #setchar
