@@ -39,6 +39,9 @@ void stm_setup(void)
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
+#ifdef STM_TESTS
+        stm_other_pages = segment_base;
+#endif
 
         /* In each segment, the first page is where TLPREFIX'ed
            NULL accesses land.  We mprotect it so that accesses fail. */
@@ -59,6 +62,7 @@ void stm_setup(void)
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
+        pr->old_objects_to_trace = list_create();
     }
 
     /* Make the nursery pages shared.  The other pages are
@@ -85,6 +89,12 @@ void stm_teardown(void)
 {
     /* This function is called during testing, but normal programs don't
        need to call it. */
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pr = get_priv_segment(i);
+        list_free(pr->old_objects_to_trace);
+    }
+
     munmap(stm_object_pages, TOTAL_MEMORY);
     stm_object_pages = NULL;
 

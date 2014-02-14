@@ -14,6 +14,8 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
     char *addr = large_malloc(size_rounded_up);
     object_t* o = (object_t *)(addr - stm_object_pages);
 
-    memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++)
+        memset(REAL_ADDRESS(get_segment_base(i), o), 0, size_rounded_up);
     return o;
 }

@@ -5,7 +5,14 @@
 
 void _stm_write_slowpath(object_t *obj)
 {
-    abort();
+    assert(_running_transaction());
+
+    LIST_APPEND(STM_PSEGMENT->old_objects_to_trace, obj);
+
+    obj->stm_flags |= GCFLAG_WRITE_BARRIER_CALLED;
+    stm_read(obj);
+
+    //...
 }
 
 static void reset_transaction_read_version(void)
@@ -45,6 +52,8 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     STM_SEGMENT->transaction_read_version = old_rv + 1;
     if (UNLIKELY(old_rv == 0xff))
         reset_transaction_read_version();
+
+    assert(list_is_empty(STM_PSEGMENT->old_objects_to_trace));
 }
 
 

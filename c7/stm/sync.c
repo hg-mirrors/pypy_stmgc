@@ -81,6 +81,11 @@ static void release_thread_segment(stm_thread_local_t *tl)
     sem_post(&segments_ctl.semaphore);
 }
 
+static bool _running_transaction(void)
+{
+    return (STM_SEGMENT->running_thread != NULL);
+}
+
 bool _stm_in_transaction(stm_thread_local_t *tl)
 {
     int num = tl->associated_segment_num;
