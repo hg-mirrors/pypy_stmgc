@@ -19,8 +19,10 @@
    then they might be allocted outside sections but still in the nursery. */
 #define MEDIUM_OBJECT         (8*1024)
 
-/* size in bytes of the alignment of any section requested */
-#define NURSERY_ALIGNMENT     256
+/* size in bytes of the "line".  Should be equal to the line used by
+   stm_creation_marker_t. */
+#define NURSERY_LINE_SHIFT    8
+#define NURSERY_LINE          (1 << NURSERY_LINE_SHIFT)
 
 /************************************************************/
 
@@ -35,6 +37,7 @@ static union {
 
 static void setup_nursery(void)
 {
+    assert((NURSERY_SECTION_SIZE % NURSERY_LINE) == 0);
     assert(MEDIUM_OBJECT < LARGE_OBJECT);
     assert(LARGE_OBJECT < NURSERY_SECTION_SIZE);
     nursery_ctl.used = 0;
@@ -48,7 +51,7 @@ bool _stm_in_nursery(object_t *obj)
 
 
 #define NURSERY_ALIGN(bytes)  \
-    (((bytes) + NURSERY_ALIGNMENT - 1) & ~(NURSERY_ALIGNMENT - 1))
+    (((bytes) + NURSERY_LINE - 1) & ~(NURSERY_LINE - 1))
 
 static stm_char *allocate_from_nursery(uint64_t bytes)
 {
@@ -73,6 +76,10 @@ stm_char *_stm_allocate_slowpath(ssize_t size_rounded_up)
                NURSERY_SECTION_SIZE);
         STM_SEGMENT->nursery_current = p + size_rounded_up;
         STM_SEGMENT->nursery_section_end = (uintptr_t)p + NURSERY_SECTION_SIZE;
+        /* Also fill the corresponding creation markers with 0xff. */
+        memset(REAL_ADDRESS(STM_SEGMENT->segment_base,
+                            ((uintptr_t)p) >> NURSERY_LINE_SHIFT),
+               0xff, NURSERY_SECTION_SIZE >> NURSERY_LINE_SHIFT);
         return p;
     }
     abort();

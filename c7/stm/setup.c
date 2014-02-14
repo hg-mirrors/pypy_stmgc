@@ -21,7 +21,9 @@ void stm_setup(void)
     assert(READMARKER_START < READMARKER_END);
     assert(READMARKER_END <= 4096UL * FIRST_OBJECT_PAGE);
     assert(FIRST_OBJECT_PAGE < NB_PAGES);
-    assert(CURTRANS_START >= 8192);
+    assert(CREATMARKER_START >= 8192);
+    assert(2 <= FIRST_CREATMARKER_PAGE);
+    assert(FIRST_CREATMARKER_PAGE <= FIRST_READMARKER_PAGE);
     assert((NB_PAGES * 4096UL) >> 8 <= (FIRST_OBJECT_PAGE * 4096UL) >> 4);
     assert((END_NURSERY_PAGE * 4096UL) >> 8 <=
            (FIRST_READMARKER_PAGE * 4096UL));
@@ -48,9 +50,10 @@ void stm_setup(void)
         memset(REAL_ADDRESS(segment_base, STM_PSEGMENT), 0,
                sizeof(*STM_PSEGMENT));
 
-        /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
-        if (FIRST_READMARKER_PAGE > 2)
-            mprotect(segment_base + 8192, (FIRST_READMARKER_PAGE - 2) * 4096UL,
+        /* Pages in range(2, FIRST_CREATMARKER_PAGE) are never used */
+        if (FIRST_CREATMARKER_PAGE > 2)
+            mprotect(segment_base + 8192,
+                     (FIRST_CREATMARKER_PAGE - 2) * 4096UL,
                      PROT_NONE);
 
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
