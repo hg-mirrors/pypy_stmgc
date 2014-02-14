@@ -130,6 +130,8 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
         reset_transaction_read_version();
 
     assert(list_is_empty(STM_PSEGMENT->old_objects_to_trace));
+    assert(list_is_empty(STM_PSEGMENT->modified_objects));
+    assert(list_is_empty(STM_PSEGMENT->creation_markers));
 }
 
 
@@ -137,6 +139,7 @@ void stm_commit_transaction(void)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     release_thread_segment(tl);
+    reset_all_creation_markers();
 }
 
 void stm_abort_transaction(void)
@@ -144,6 +147,7 @@ void stm_abort_transaction(void)
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
     release_thread_segment(tl);
+    reset_all_creation_markers();
 
     assert(jmpbuf_ptr != NULL);
     assert(jmpbuf_ptr != (stm_jmpbuf_t *)-1);    /* for tests only */
