@@ -5,17 +5,38 @@
 
 static void setup_gcpage(void)
 {
-    largemalloc_init_arena(stm_object_pages + END_NURSERY_PAGE * 4096UL,
-                           (NB_PAGES - END_NURSERY_PAGE) * 4096UL);
+    char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL;
+    uintptr_t length = (NB_PAGES - END_NURSERY_PAGE) * 4096UL;
+    largemalloc_init_arena(base, length);
+
+    uninitialized_page_start = (stm_char *)(END_NURSERY_PAGE * 4096UL);
+    uninitialized_page_stop = (stm_char *)(NB_PAGES * 4096UL);
 }
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
+    /* XXX not thread-safe! */
     char *addr = large_malloc(size_rounded_up);
-    object_t* o = (object_t *)(addr - stm_object_pages);
+    stm_char* o = (stm_char *)(addr - stm_object_pages);
 
-    long i;
-    for (i = 0; i < NB_SEGMENTS; i++)
-        memset(REAL_ADDRESS(get_segment_base(i), o), 0, size_rounded_up);
-    return o;
+    if (o + size_rounded_up > uninitialized_page_start) {
+        uintptr_t pagenum =
+            ((uint64_t)uninitialized_page_start) / 4096UL;
+        uintptr_t pagecount =
+            (o + size_rounded_up - uninitialized_page_start) / 4096UL + 20;
+        uintptr_t pagemax =
+            (uninitialized_page_stop - uninitialized_page_start) / 4096UL;
+        if (pagecount > pagemax)
+            pagecount = pagemax;
+        pages_initialize_shared(pagenum, pagecount);
+
+        uninitialized_page_start += pagecount * 4096UL;
+    }
+
+    memset(addr, 0, size_rounded_up);
+
+    if (CROSS_PAGE_BOUNDARY(o, o + size_rounded_up))
+        ((object_t *)o)->stm_flags = GCFLAG_CROSS_PAGE;
+
+    return (object_t *)o;
 }

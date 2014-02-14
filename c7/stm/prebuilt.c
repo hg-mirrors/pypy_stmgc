@@ -8,6 +8,8 @@ static uint64_t prebuilt_readmarkers_end   = 0;
 static uint64_t prebuilt_objects_start     = 0;
 
 
+/* XXX NOT TESTED, AND NOT WORKING RIGHT NOW */
+
 void stm_copy_prebuilt_objects(object_t *target, char *source, ssize_t size)
 {
     /* Initialize a region of 'size' bytes at the 'target' address,

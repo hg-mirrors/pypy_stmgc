@@ -3,16 +3,33 @@
 #endif
 
 
+static uint8_t write_locks[READMARKER_END - READMARKER_START];
+
+
 void _stm_write_slowpath(object_t *obj)
 {
     assert(_running_transaction());
 
     LIST_APPEND(STM_PSEGMENT->old_objects_to_trace, obj);
-
     obj->stm_flags |= GCFLAG_WRITE_BARRIER_CALLED;
-    stm_read(obj);
 
-    //...
+    /* for old objects from the same transaction, we are done now */
+    if (obj_from_same_transaction(obj))
+        return;
+
+    /* otherwise, we need to privatize the pages containing the object,
+       if they are still SHARED_PAGE.  The common case is that there is
+       only one page in total. */
+    if (UNLIKELY((obj->stm_flags & GCFLAG_CROSS_PAGE) != 0)) {
+        abort();
+        //...
+    }
+    else {
+        pages_privatize(((uintptr_t)obj) / 4096UL, 1);
+    }
+
+    //... write_locks
+    stm_read(obj);
 }
 
 static void reset_transaction_read_version(void)
