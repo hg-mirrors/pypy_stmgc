@@ -61,13 +61,16 @@ class TestBasic(BaseTest):
     def test_write_on_old(self):
         lp1 = stm_allocate_old(16)
         self.start_transaction()
+        assert stm_get_char(lp1) == '\0'
         stm_write(lp1)
         assert stm_was_written(lp1)
         stm_set_char(lp1, 'a')
+        assert stm_get_char(lp1) == 'a'
 
         self.switch(1)
         self.start_transaction()
-        stm_read(lp1)
+        assert not stm_was_read(lp1)
+        assert stm_get_char(lp1) == '\0'
         assert stm_was_read(lp1)
         assert stm_get_char(lp1) == '\0'
         self.commit_transaction()

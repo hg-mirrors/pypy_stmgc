@@ -35,6 +35,7 @@ typedef ... stm_jmpbuf_t;
 
 typedef struct {
     object_t **shadowstack, **shadowstack_base;
+    int associated_segment_num;
     ...;
 } stm_thread_local_t;
 
@@ -339,7 +340,7 @@ def stm_get_char(obj):
 
 def stm_get_real_address(obj):
     return lib._stm_real_address(ffi.cast('object_t*', obj))
-    
+
 def stm_get_segment_address(ptr):
     return int(ffi.cast('uintptr_t', lib._stm_segment_address(ptr)))
 
@@ -423,6 +424,12 @@ class BaseTest(object):
         assert not lib._stm_in_transaction(tl)
         lib._stm_start_transaction(tl, ffi.cast("stm_jmpbuf_t *", -1))
         assert lib._stm_in_transaction(tl)
+        #
+        seen = set()
+        for tl1 in self.tls:
+            if lib._stm_in_transaction(tl1):
+                assert tl1.associated_segment_num not in seen
+                seen.add(tl1.associated_segment_num)
 
     def commit_transaction(self):
         tl = self.tls[self.current_thread]

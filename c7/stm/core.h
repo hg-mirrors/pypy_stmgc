@@ -51,10 +51,15 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
+    struct list_s *old_objects_to_trace;
 };
 
 static char *stm_object_pages;
 static stm_thread_local_t *stm_thread_locals = NULL;
+
+#ifdef STM_TESTS
+static char *stm_other_pages;
+#endif
 
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
@@ -76,3 +81,4 @@ struct stm_priv_segment_info_s *get_priv_segment(long segment_num) {
 }
 
 static bool _is_tl_registered(stm_thread_local_t *tl);
+static bool _running_transaction(void);

@@ -1,11 +1,13 @@
 #define _GNU_SOURCE
 #include "stmgc.h"
+#include "stm/list.h"
 #include "stm/core.h"
 #include "stm/pages.h"
 #include "stm/sync.h"
 #include "stm/largemalloc.h"
 
 #include "stm/misc.c"
+#include "stm/list.c"
 #include "stm/pages.c"
 #include "stm/prebuilt.c"
 #include "stm/gcpage.c"
