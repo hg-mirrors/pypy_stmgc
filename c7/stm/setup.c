@@ -60,9 +60,12 @@ void stm_setup(void)
                      PROT_NONE);
 
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
+        assert(i + 1 < 256);
+        pr->write_lock_num = i + 1;
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
         pr->old_objects_to_trace = list_create();
+        pr->modified_objects = list_create();
     }
 
     /* Make the nursery pages shared.  The other pages are
@@ -100,6 +103,7 @@ void stm_teardown(void)
 
     memset(flag_page_private, 0, sizeof(flag_page_private));
 
+    teardown_core();
     teardown_sync();
 }
 

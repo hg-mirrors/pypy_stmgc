@@ -54,6 +54,10 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
     struct list_s *old_objects_to_trace;
+    struct list_s *modified_objects;
+    uint64_t approximate_start_time;
+    uint8_t write_lock_num;
+    uint8_t need_abort;
 };
 
 static char *stm_object_pages;
@@ -88,3 +92,9 @@ static bool _running_transaction(void);
 static inline bool obj_from_same_transaction(object_t *obj) {
     return ((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm != 0;
 }
+
+static inline bool is_inevitable(void) {
+    return STM_SEGMENT->jmpbuf_ptr == NULL;
+}
+
+static void teardown_core(void);
