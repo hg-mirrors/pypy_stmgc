@@ -66,6 +66,7 @@ void stm_setup(void)
         pr->pub.segment_base = segment_base;
         pr->old_objects_to_trace = list_create();
         pr->modified_objects = list_create();
+        pr->creation_markers = list_create();
     }
 
     /* Make the nursery pages shared.  The other pages are

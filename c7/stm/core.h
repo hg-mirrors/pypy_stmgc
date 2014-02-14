@@ -55,6 +55,7 @@ struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
     struct list_s *old_objects_to_trace;
     struct list_s *modified_objects;
+    struct list_s *creation_markers;
     uint64_t approximate_start_time;
     uint8_t write_lock_num;
     uint8_t need_abort;

@@ -8,6 +8,7 @@
 #include "stm/gcpage.h"
 #include "stm/sync.h"
 #include "stm/largemalloc.h"
+#include "stm/nursery.h"
 
 #include "stm/misc.c"
 #include "stm/list.c"
