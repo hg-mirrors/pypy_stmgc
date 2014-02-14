@@ -43,5 +43,6 @@ bool _stm_was_read(object_t *obj)
 
 bool _stm_was_written(object_t *obj)
 {
-    return !(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    return !!((((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm |
+               obj->stm_flags) & _STM_GCFLAG_WRITE_BARRIER_CALLED);
 }

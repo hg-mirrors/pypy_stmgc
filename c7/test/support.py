@@ -47,7 +47,7 @@ void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
-void stm_copy_prebuilt_objects(object_t *target, char *source, ssize_t size);
+//void stm_copy_prebuilt_objects(object_t *target, char *source, ssize_t size);
 
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
@@ -58,7 +58,7 @@ object_t *_stm_segment_address(char *ptr);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 void _stm_test_switch(stm_thread_local_t *tl);
 
-void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
+void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 void stm_commit_transaction(void);
 bool _check_abort_transaction(void);
 
@@ -69,7 +69,7 @@ uint32_t _get_type_id(object_t *obj);
 #define LOCK_EXCLUSIVE ...
 #define THREAD_YIELD   ...
 
-void stm_start_safe_point(int);
+void _stm_start_safe_point(int);
 bool _check_stop_safe_point(int);
 """)
 
@@ -200,7 +200,7 @@ bool _check_stop_safe_point(int flags) {
     if (__builtin_setjmp(here) == 0) { // returned directly
          assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
          segment->jmpbuf_ptr = &here;
-         stm_stop_safe_point(flags);
+         _stm_stop_safe_point(flags);
          segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
          return 0;
     }
@@ -368,7 +368,7 @@ def stm_stop_transaction():
 
 
 def stm_start_safe_point():
-    lib.stm_start_safe_point(lib.LOCK_COLLECT)
+    lib._stm_start_safe_point(lib.LOCK_COLLECT)
 
 def stm_stop_safe_point():
     if lib._check_stop_safe_point(lib.LOCK_COLLECT):
@@ -421,7 +421,7 @@ class BaseTest(object):
     def start_transaction(self):
         tl = self.tls[self.current_thread]
         assert not lib._stm_in_transaction(tl)
-        lib.stm_start_transaction(tl, ffi.cast("stm_jmpbuf_t *", -1))
+        lib._stm_start_transaction(tl, ffi.cast("stm_jmpbuf_t *", -1))
         assert lib._stm_in_transaction(tl)
 
     def commit_transaction(self):
