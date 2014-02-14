@@ -69,7 +69,7 @@ void stm_setup(void)
        current transaction_read_version is.
 
        The creation markers are initially zero, which is correct:
-       it means "objects of this group of 256 bytes have not been
+       it means "objects of this line of 256 bytes have not been
        allocated by the current transaction."
     */
 

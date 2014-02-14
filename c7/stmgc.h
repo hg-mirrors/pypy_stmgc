@@ -47,11 +47,11 @@ struct stm_read_marker_s {
 };
 
 struct stm_creation_marker_s {
-    /* In addition to read markers, every group of 256 bytes has one
+    /* In addition to read markers, every "line" of 256 bytes has one
        extra byte, the creation marker, located at the address divided
        by 256.  The creation marker is either 0xff if all objects in
-       this group come have been allocated by the current transaction,
-       or 0x00 if none of them have been.  Groups cannot contain a
+       this line come have been allocated by the current transaction,
+       or 0x00 if none of them have been.  Lines cannot contain a
        mixture of both. */
     uint8_t cm;
 };
@@ -80,6 +80,9 @@ typedef struct stm_thread_local_s {
 void _stm_write_slowpath(object_t *);
 stm_char *_stm_allocate_slowpath(ssize_t);
 void _stm_become_inevitable(char*);
+void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *);
+void _stm_start_safe_point(int flags);
+void _stm_stop_safe_point(int flags);
 
 #ifdef STM_TESTS
 bool _stm_was_read(object_t *obj);
@@ -108,7 +111,7 @@ void _stm_large_dump(void);
 #define IMPLY(a, b) (!(a) || (b))
 
 
-/* ==================== API ==================== */
+/* ==================== PUBLIC API ==================== */
 
 /* Structure of objects
    --------------------
@@ -126,12 +129,24 @@ struct object_s {
     uint8_t stm_flags;            /* reserved for the STM library */
 };
 
+/* The read barrier must be called whenever the object 'obj' is read.
+   It is not required to call it before reading: it can be called
+   during or after too, as long as we are in the same transaction.
+   If we might have finished the transaction and started the next
+   one, then stm_read() needs to be called again.
+*/
 static inline void stm_read(object_t *obj)
 {
     ((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm =
         STM_SEGMENT->transaction_read_version;
 }
 
+/* The write barrier must be called *before* doing any change to the
+   object 'obj'.  If we might have finished the transaction and started
+   the next one, then stm_write() needs to be called again.
+   If stm_write() is called, it is not necessary to also call stm_read()
+   on the same object.
+*/
 static inline void stm_write(object_t *obj)
 {
     /* this is:
@@ -144,11 +159,18 @@ static inline void stm_write(object_t *obj)
 }
 
 /* Must be provided by the user of this library.
-   The "size rounded up" must be a multiple of 8 and at least 16. */
+   The "size rounded up" must be a multiple of 8 and at least 16.
+   "Tracing" an object means enumerating all GC references in it,
+   by invoking the callback passed as argument.
+*/
 extern ssize_t stmcb_size_rounded_up(struct object_s *);
 extern void stmcb_trace(struct object_s *, void (object_t **));
 
 
+/* Allocate an object of the given size, which must be a multiple
+   of 8 and at least 16.  In the fast-path, this is inlined to just
+   a few assembler instructions.
+*/
 static inline object_t *stm_allocate(ssize_t size_rounded_up)
 {
     OPT_ASSERT(size_rounded_up >= 16);
@@ -162,30 +184,53 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
     return (object_t *)p;
 }
 
+
+/* stm_setup() needs to be called once at the beginning of the program.
+   stm_teardown() can be called at the end, but that's not necessary
+   and rather meant for tests.
+ */
 void stm_setup(void);
 void stm_teardown(void);
+
+/* Every thread needs to have a corresponding stm_thread_local_t
+   structure.  It may be a "__thread" global variable or something else.
+   Use the following functions at the start and at the end of a thread.
+   The user of this library needs to maintain the two shadowstack fields;
+   at any call to stm_allocate(), these fields should point to a range
+   of memory that can be walked in order to find the stack roots.
+*/
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
-void stm_copy_prebuilt_objects(object_t *target, char *source, ssize_t size);
 
-void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
-void stm_start_inevitable_transaction(stm_thread_local_t *tl);
-void stm_commit_transaction(void);
-void stm_abort_transaction(void) __attribute__((noreturn));
-
+/* Starting and ending transactions.  You should only call stm_read(),
+   stm_write() and stm_allocate() from within a transaction.  Use
+   the macro STM_START_TRANSACTION() to start a transaction that
+   can be restarted using the 'jmpbuf' (a pointer to a local variable
+   of type stm_jmpbuf_t). */
 #define STM_START_TRANSACTION(tl, jmpbuf)  ({           \
     int _restart = __builtin_setjmp(jmpbuf);            \
-    stm_start_transaction(tl, jmpbuf);                  \
+    _stm_start_transaction(tl, jmpbuf);                 \
    _restart;                                            \
 })
 
+/* Start an inevitable transaction, if it's going to return from the
+   current function immediately. */
+void stm_start_inevitable_transaction(stm_thread_local_t *tl);
+
+/* Commit a transaction. */
+void stm_commit_transaction(void);
+
+/* Abort the currently running transaction. */
+void stm_abort_transaction(void) __attribute__((noreturn));
+
+/* Turn the current transaction inevitable.  The 'jmpbuf' passed to
+   STM_START_TRANSACTION() is not going to be used any more after
+   this call (but the stm_become_inevitable() itself may still abort). */
 static inline void stm_become_inevitable(char* msg) {
     if (STM_SEGMENT->jmpbuf_ptr != NULL)
         _stm_become_inevitable(msg);
 }
 
-void stm_start_safe_point(int flags);
-void stm_stop_safe_point(int flags);
 
 /* ==================== END ==================== */
 
