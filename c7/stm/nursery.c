@@ -17,10 +17,10 @@
 
 /* if objects are larger than this limit but smaller than LARGE_OBJECT,
    then they might be allocted outside sections but still in the nursery. */
-#define MEDIUM_OBJECT         (9*1024)
+#define MEDIUM_OBJECT         (8*1024)
 
 /* size in bytes of the alignment of any section requested */
-#define NURSERY_ALIGNMENT     64
+#define NURSERY_ALIGNMENT     256
 
 /************************************************************/
 
