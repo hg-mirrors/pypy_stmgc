@@ -8,6 +8,7 @@ static union {
     struct {
         sem_t semaphore;
         uint8_t in_use[NB_SEGMENTS + 1];   /* 1 if running a pthread */
+        uint64_t global_time;     /* approximate */
     };
     char reserved[64];
 } segments_ctl __attribute__((aligned(64)));
@@ -69,6 +70,9 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
  exit:
     assert(STM_SEGMENT->running_thread == NULL);
     STM_SEGMENT->running_thread = tl;
+
+    /* global_time is approximate -> no synchronization required */
+    STM_PSEGMENT->approximate_start_time = ++segments_ctl.global_time;
 }
 
 static void release_thread_segment(stm_thread_local_t *tl)
