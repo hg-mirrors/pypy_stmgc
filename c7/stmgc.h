@@ -153,7 +153,7 @@ static inline void stm_write(object_t *obj)
            'if (ct == 0 && (stm_flags & WRITE_BARRIER_CALLED) == 0)'
          assuming that 'cm' is either 0 (not created in current transaction)
                                 or 0xff (created in current transaction) */
-    if (UNLIKELY(!(((stm_creation_marker_t *)(((uintptr_t)obj) >> 8)->cm |
+    if (UNLIKELY(!((((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm |
                     obj->stm_flags) & _STM_GCFLAG_WRITE_BARRIER_CALLED)))
         _stm_write_slowpath(obj);
 }
