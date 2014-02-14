@@ -97,12 +97,12 @@ void _stm_test_switch(stm_thread_local_t *tl)
     assert(STM_SEGMENT->running_thread == tl);
 }
 
-void stm_start_safe_point(int flags)
+void _stm_start_safe_point(int flags)
 {
     //...
 }
 
-void stm_stop_safe_point(int flags)
+void _stm_stop_safe_point(int flags)
 {
     //...
 }

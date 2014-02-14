@@ -34,7 +34,7 @@ static void reset_transaction_read_version(void)
     STM_SEGMENT->transaction_read_version = 1;
 }
 
-void stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
+void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 {
     /* GS invalid before this point! */
     acquire_thread_segment(tl);
