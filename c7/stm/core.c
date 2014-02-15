@@ -7,72 +7,11 @@
 
 static uint8_t write_locks[READMARKER_END - READMARKER_START];
 
+static void abort_with_mutex(void) __attribute__((noreturn));
+
 static void teardown_core(void)
 {
     memset(write_locks, 0, sizeof(write_locks));
-}
-
-
-static void contention_management(uint8_t current_lock_owner)
-{
-    /* A simple contention manager.  Called when we do stm_write()
-       on an object, but some other thread already holds the write
-       lock on the same object. */
-
-    /* By construction it should not be possible that the owner
-       of the object is already us */
-    assert(current_lock_owner != STM_PSEGMENT->write_lock_num);
-
-    /* Who should abort here: this thread, or the other thread? */
-    struct stm_priv_segment_info_s* other_pseg;
-    other_pseg = get_priv_segment(current_lock_owner - 1);
-    assert(other_pseg->write_lock_num == current_lock_owner);
-
-    /* note: other_pseg is currently running a transaction, and it cannot
-       commit or abort unexpectedly, because to do that it would need to
-       suspend us.  So the reading of other_pseg->start_time and
-       other_pseg->transaction_state is stable, with one exception: the
-       'transaction_state' can go from TS_REGULAR to TS_INEVITABLE under
-       our feet. */
-    if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
-        /* I'm inevitable, so the other is not. */
-        assert(other_pseg->transaction_state != TS_INEVITABLE);
-        other_pseg->transaction_state = TS_MUST_ABORT;
-    }
-    else if (STM_PSEGMENT->start_time >= other_pseg->start_time) {
-        /* The other thread started before us, so I should abort, as I'm
-           the least long-running transaction. */
-    }
-    else {
-        /* The other thread started strictly after us.  We try to tell
-           it to abort, using compare_and_swap().  This fails if its
-           'transaction_state' is already TS_INEVITABLE. */
-        __sync_bool_compare_and_swap(
-                    &other_pseg->transaction_state, TS_REGULAR, TS_MUST_ABORT);
-    }
-
-    if (other_pseg->transaction_state != TS_MUST_ABORT) {
-        /* if the other thread is not in aborting-soon mode, then we must
-           abort. */
-        stm_abort_transaction();
-    }
-    else {
-        /* otherwise, we will issue a safe point and wait: */
-        mutex_lock();
-        STM_PSEGMENT->safe_point = SP_SAFE_POINT;
-
-        /* signal the other thread; it must abort */
-        cond_broadcast();
-
-        /* then wait, hopefully until the other thread broadcasts "I'm
-           done aborting" (spurious wake-ups are ok) */
-        cond_wait();
-
-        /* now we return into _stm_write_slowpath() and will try again
-           to acquire the write lock on our object. */
-        STM_PSEGMENT->safe_point = SP_RUNNING;
-        mutex_unlock();
-    }
 }
 
 
@@ -115,8 +54,12 @@ void _stm_write_slowpath(object_t *obj)
         if (LIKELY(prev_owner == 0))
             break;
 
-        /* otherwise, call the contention manager, and then possibly retry */
-        contention_management(prev_owner);
+        /* otherwise, call the contention manager, and then possibly retry.
+           By construction it should not be possible that the owner
+           of the object is already us */
+        mutex_lock();
+        contention_management(prev_owner - 1);
+        mutex_unlock();
     } while (1);
 
     /* add the write-barrier-already-called flag ONLY if we succeeded in
@@ -158,11 +101,11 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     /* GS invalid before this point! */
     acquire_thread_segment(tl);
 
-    assert(STM_SEGMENT->safe_point == SP_NO_TRANSACTION);
-    assert(STM_SEGMENT->transaction_state == TS_NONE);
-    STM_SEGMENT->safe_point = SP_RUNNING;
-    STM_SEGMENT->transaction_state = (jmpbuf != NULL ? TS_REGULAR
-                                                     : TS_INEVITABLE);
+    assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
+    assert(STM_PSEGMENT->transaction_state == TS_NONE);
+    STM_PSEGMENT->safe_point = SP_RUNNING;
+    STM_PSEGMENT->transaction_state = (jmpbuf != NULL ? TS_REGULAR
+                                                      : TS_INEVITABLE);
     STM_SEGMENT->jmpbuf_ptr = jmpbuf;
 
     mutex_unlock();
@@ -172,79 +115,101 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     if (UNLIKELY(old_rv == 0xff))
         reset_transaction_read_version();
 
-    assert(list_is_empty(STM_PSEGMENT->old_objects_to_trace));
     assert(list_is_empty(STM_PSEGMENT->modified_objects));
     assert(list_is_empty(STM_PSEGMENT->creation_markers));
 }
 
 
-static void push_modified_to_other_threads()
+static bool detect_write_read_conflicts(void)
 {
     long remote_num = 1 - STM_SEGMENT->segment_num;
-    char *local_base = STM_SEGMENT->segment_base;
     char *remote_base = get_segment_base(remote_num);
-    bool conflicted = false;
     uint8_t remote_version = get_segment(remote_num)->transaction_read_version;
+
+#if NB_SEGMENTS != 2
+# error "This logic only works with two segments"
+#endif
 
     LIST_FOREACH_R(
         STM_PSEGMENT->modified_objects,
         object_t * /*item*/,
         ({
-            if (!conflicted)
-                conflicted = was_read_remote(remote_base, item,
-                                             remote_version);
+            if (was_read_remote(remote_base, item, remote_version)) {
+                /* A write-read conflict! */
+                contention_management(remote_num);
+                return true;
+            }
+        }));
+    return false;
+}
+
+static void push_modified_to_other_segments(void)
+{
+    long remote_num = 1 - STM_SEGMENT->segment_num;
+    char *local_base = STM_SEGMENT->segment_base;
+    char *remote_base = get_segment_base(remote_num);
+
+#if NB_SEGMENTS != 2
+# error "This logic only works with two segments"
+#endif
+
+    LIST_FOREACH_R(
+        STM_PSEGMENT->modified_objects,
+        object_t * /*item*/,
+        ({
+            assert(!was_read_remote(remote_base, item,
+                          get_segment(remote_num)->transaction_read_version));
 
             /* clear the write-lock */
             uintptr_t lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START;
-            assert(write_locks[lock_idx] == _STM_TL->thread_num + 1);
+            assert(write_locks[lock_idx] == STM_PSEGMENT->write_lock_num);
             write_locks[lock_idx] = 0;
 
-            _stm_move_object(item,
-                             REAL_ADDRESS(local_base, item),
-                             REAL_ADDRESS(remote_base, item));
+            char *src = REAL_ADDRESS(local_base, item);
+            ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
+            memcpy(REAL_ADDRESS(remote_base, item), src, size);
         }));
 
     list_clear(STM_PSEGMENT->modified_objects);
-
-    if (conflicted) {
-        ...;  contention management again!
-        get_segment(remote_num)->transaction_state = TS_MUST_ABORT;
-    }
 }
 
 void stm_commit_transaction(void)
 {
     mutex_lock();
 
-    assert(STM_SEGMENT->safe_point = SP_RUNNING);
-    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+ restart:
+    assert(STM_PSEGMENT->safe_point = SP_RUNNING);
 
-    switch (STM_SEGMENT->transaction_state) {
+    switch (STM_PSEGMENT->transaction_state) {
 
     case TS_REGULAR:
-        /* cannot abort any more */
-        STM_SEGMENT->jmpbuf_ptr = NULL;
-        break;
-
     case TS_INEVITABLE:
-        //...
-        abort();   // XXX do it
         break;
 
     case TS_MUST_ABORT:
-        mutex_unlock();
-        stm_abort_transaction();
+        abort_with_mutex();
 
     default:
         assert(!"commit: bad transaction_state");
     }
 
-    /* copy modified object versions to other threads */
-    push_modified_to_other_threads();
+    /* detect conflicts */
+    if (detect_write_read_conflicts())
+        goto restart;
 
+    /* cannot abort any more from here */
+    assert(STM_PSEGMENT->transaction_state != TS_MUST_ABORT);
+    STM_SEGMENT->jmpbuf_ptr = NULL;
+
+    /* copy modified object versions to other threads */
+    push_modified_to_other_segments();
+
+    /* done */
+    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     release_thread_segment(tl);   /* includes the cond_broadcast(); */
-    STM_SEGMENT->safe_point = SP_NO_TRANSACTION;
-    STM_SEGMENT->transaction_state = TS_NONE;
+    STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
+    STM_PSEGMENT->transaction_state = TS_NONE;
+
     mutex_unlock();
 
     reset_all_creation_markers();
@@ -253,11 +218,15 @@ void stm_commit_transaction(void)
 void stm_abort_transaction(void)
 {
     mutex_lock();
+    abort_with_mutex();
+}
 
+static void abort_with_mutex(void)
+{
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
 
-    switch (STM_SEGMENT->transaction_state) {
+    switch (STM_PSEGMENT->transaction_state) {
     case TS_REGULAR:
     case TS_MUST_ABORT:
         break;
@@ -268,11 +237,12 @@ void stm_abort_transaction(void)
     }
 
     release_thread_segment(tl);   /* includes the cond_broadcast(); */
-    STM_SEGMENT->safe_point = SP_NO_TRANSACTION;
-    STM_SEGMENT->transaction_state = TS_NONE;
+    STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
+    STM_PSEGMENT->transaction_state = TS_NONE;
     mutex_unlock();
 
     reset_all_creation_markers();
+    list_clear(STM_PSEGMENT->modified_objects);
 
     assert(jmpbuf_ptr != NULL);
     assert(jmpbuf_ptr != (stm_jmpbuf_t *)-1);    /* for tests only */

@@ -9,6 +9,7 @@
 #include "stm/sync.h"
 #include "stm/largemalloc.h"
 #include "stm/nursery.h"
+#include "stm/contention.h"
 
 #include "stm/misc.c"
 #include "stm/list.c"
@@ -21,3 +22,4 @@
 #include "stm/sync.c"
 #include "stm/setup.c"
 #include "stm/core.c"
+#include "stm/contention.c"
