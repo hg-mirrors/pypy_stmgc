@@ -46,7 +46,7 @@ static void teardown_sync(void)
         perror("mutex/cond destroy");
         abort();
     }
-    memset(sync_ctl, 0, sizeof(sync_ctl.in_use));
+    memset(&sync_ctl, 0, sizeof(sync_ctl.in_use));
 }
 
 static void set_gs_register(char *value)
@@ -102,7 +102,7 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
     assert_has_mutex();
     assert(_is_tl_registered(tl));
 
- retry:
+ retry:;
     int num = tl->associated_segment_num;
     if (sync_ctl.in_use[num] == 0) {
         /* fast-path: we can get the same segment number than the one
@@ -129,7 +129,7 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
     sync_ctl.in_use[num] = 1;
     assert(STM_SEGMENT->running_thread == NULL);
     STM_SEGMENT->running_thread = tl;
-    STM_PSEGMENT->start_time = ++segments_ctl.global_time;
+    STM_PSEGMENT->start_time = ++sync_ctl.global_time;
 }
 
 static void release_thread_segment(stm_thread_local_t *tl)
