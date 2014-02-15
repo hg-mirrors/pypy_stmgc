@@ -28,21 +28,50 @@ static void contention_management(uint8_t current_lock_owner)
     other_pseg = get_priv_segment(current_lock_owner - 1);
     assert(other_pseg->write_lock_num == current_lock_owner);
 
-    if ((STM_PSEGMENT->approximate_start_time <
-            other_pseg->approximate_start_time) || is_inevitable()) {
-        /* we are the thread that must succeed */
-        XXX  /* don't go here if the other thread is inevitable! */
-        ...                           
-        other_pseg->need_abort = 1;
-        _stm_start_safe_point(0);
-        /* XXX: not good, maybe should be signalled by other thread */
-        usleep(1);
-        _stm_stop_safe_point(0);
-        /* done, will retry */
+    /* note: other_pseg is currently running a transaction, and it cannot
+       commit or abort unexpectedly, because to do that it would need to
+       suspend us.  So the reading of other_pseg->start_time and
+       other_pseg->transaction_state is stable, with one exception: the
+       'transaction_state' can go from TS_REGULAR to TS_INEVITABLE under
+       our feet. */
+    if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+        /* I'm inevitable, so the other is not. */
+        assert(other_pseg->transaction_state != TS_INEVITABLE);
+        other_pseg->transaction_state = TS_MUST_ABORT;
+    }
+    else if (STM_PSEGMENT->start_time >= other_pseg->start_time) {
+        /* The other thread started before us, so I should abort, as I'm
+           the least long-running transaction. */
     }
     else {
-        /* we are the thread that must abort */
+        /* The other thread started strictly after us.  We try to tell
+           it to abort, using compare_and_swap().  This fails if its
+           'transaction_state' is already TS_INEVITABLE. */
+        __sync_bool_compare_and_swap(
+                    &other_pseg->transaction_state, TS_REGULAR, TS_MUST_ABORT);
+    }
+
+    if (other_pseg->transaction_state != TS_MUST_ABORT) {
+        /* if the other thread is not in aborting-soon mode, then we must
+           abort. */
         stm_abort_transaction();
+    }
+    else {
+        /* otherwise, we will issue a safe point and wait: */
+        mutex_lock();
+        STM_PSEGMENT->safe_point = SP_SAFE_POINT;
+
+        /* signal the other thread; it must abort */
+        cond_broadcast();
+
+        /* then wait, hopefully until the other thread broadcasts "I'm
+           done aborting" (spurious wake-ups are ok) */
+        cond_wait();
+
+        /* now we return into _stm_write_slowpath() and will try again
+           to acquire the write lock on our object. */
+        STM_PSEGMENT->safe_point = SP_RUNNING;
+        mutex_unlock();
     }
 }
 
@@ -127,6 +156,8 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     /* GS invalid before this point! */
     acquire_thread_segment(tl);
 
+    assert(STM_SEGMENT->activity == ACT_NOT_RUNNING);
+    STM_SEGMENT->activity = jmpbuf != NULL ? ACT_REGULAR : ACT_INEVITABLE;
     STM_SEGMENT->jmpbuf_ptr = jmpbuf;
 
     uint8_t old_rv = STM_SEGMENT->transaction_read_version;
@@ -179,6 +210,8 @@ void stm_commit_transaction(void)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
 
+    assert(STM_SEGMENT->activity != ACT_NOT_RUNNING);
+
     /* cannot abort any more */
     STM_SEGMENT->jmpbuf_ptr = NULL;
 
@@ -186,6 +219,8 @@ void stm_commit_transaction(void)
 
     /* copy modified object versions to other threads */
     push_modified_to_other_threads();
+
+    STM_SEGMENT->activity = ACT_NOT_RUNNING;
 
     release_thread_segment(tl);
     reset_all_creation_markers();

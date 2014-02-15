@@ -207,17 +207,19 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
 /* Starting and ending transactions.  You should only call stm_read(),
    stm_write() and stm_allocate() from within a transaction.  Use
    the macro STM_START_TRANSACTION() to start a transaction that
-   can be restarted using the 'jmpbuf' (a pointer to a local variable
-   of type stm_jmpbuf_t). */
+   can be restarted using the 'jmpbuf' (a local variable of type
+   stm_jmpbuf_t). */
 #define STM_START_TRANSACTION(tl, jmpbuf)  ({           \
-    int _restart = __builtin_setjmp(jmpbuf);            \
-    _stm_start_transaction(tl, jmpbuf);                 \
+    int _restart = __builtin_setjmp(&jmpbuf);           \
+    _stm_start_transaction(tl, &jmpbuf);                \
    _restart;                                            \
 })
 
 /* Start an inevitable transaction, if it's going to return from the
    current function immediately. */
-void stm_start_inevitable_transaction(stm_thread_local_t *tl);
+static inline void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
+    _stm_start_transaction(tl, NULL);
+}
 
 /* Commit a transaction. */
 void stm_commit_transaction(void);
