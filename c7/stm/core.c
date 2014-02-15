@@ -153,12 +153,19 @@ static void reset_transaction_read_version(void)
 
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 {
+    mutex_lock();
+
     /* GS invalid before this point! */
     acquire_thread_segment(tl);
 
-    assert(STM_SEGMENT->activity == ACT_NOT_RUNNING);
-    STM_SEGMENT->activity = jmpbuf != NULL ? ACT_REGULAR : ACT_INEVITABLE;
+    assert(STM_SEGMENT->safe_point == SP_NO_TRANSACTION);
+    assert(STM_SEGMENT->transaction_state == TS_NONE);
+    STM_SEGMENT->safe_point = SP_RUNNING;
+    STM_SEGMENT->transaction_state = (jmpbuf != NULL ? TS_REGULAR
+                                                     : TS_INEVITABLE);
     STM_SEGMENT->jmpbuf_ptr = jmpbuf;
+
+    mutex_unlock();
 
     uint8_t old_rv = STM_SEGMENT->transaction_read_version;
     STM_SEGMENT->transaction_read_version = old_rv + 1;
@@ -200,38 +207,71 @@ static void push_modified_to_other_threads()
     list_clear(STM_PSEGMENT->modified_objects);
 
     if (conflicted) {
-        struct _thread_local1_s *remote_TL = (struct _thread_local1_s *)
-            REAL_ADDRESS(remote_base, _STM_TL);
-        remote_TL->need_abort = 1;
+        ...;  contention management again!
+        get_segment(remote_num)->transaction_state = TS_MUST_ABORT;
     }
 }
 
 void stm_commit_transaction(void)
 {
+    mutex_lock();
+
+    assert(STM_SEGMENT->safe_point = SP_RUNNING);
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
 
-    assert(STM_SEGMENT->activity != ACT_NOT_RUNNING);
+    switch (STM_SEGMENT->transaction_state) {
 
-    /* cannot abort any more */
-    STM_SEGMENT->jmpbuf_ptr = NULL;
+    case TS_REGULAR:
+        /* cannot abort any more */
+        STM_SEGMENT->jmpbuf_ptr = NULL;
+        break;
 
-    ...
+    case TS_INEVITABLE:
+        //...
+        abort();   // XXX do it
+        break;
+
+    case TS_MUST_ABORT:
+        mutex_unlock();
+        stm_abort_transaction();
+
+    default:
+        assert(!"commit: bad transaction_state");
+    }
 
     /* copy modified object versions to other threads */
     push_modified_to_other_threads();
 
-    STM_SEGMENT->activity = ACT_NOT_RUNNING;
+    release_thread_segment(tl);   /* includes the cond_broadcast(); */
+    STM_SEGMENT->safe_point = SP_NO_TRANSACTION;
+    STM_SEGMENT->transaction_state = TS_NONE;
+    mutex_unlock();
 
-    release_thread_segment(tl);
     reset_all_creation_markers();
 }
 
 void stm_abort_transaction(void)
 {
+    mutex_lock();
+
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
-    STM_SEGMENT->need_abort = 0;
-    release_thread_segment(tl);
+
+    switch (STM_SEGMENT->transaction_state) {
+    case TS_REGULAR:
+    case TS_MUST_ABORT:
+        break;
+    case TS_INEVITABLE:
+        assert(!"abort: transaction_state == TS_INEVITABLE");
+    default:
+        assert(!"abort: bad transaction_state");
+    }
+
+    release_thread_segment(tl);   /* includes the cond_broadcast(); */
+    STM_SEGMENT->safe_point = SP_NO_TRANSACTION;
+    STM_SEGMENT->transaction_state = TS_NONE;
+    mutex_unlock();
+
     reset_all_creation_markers();
 
     assert(jmpbuf_ptr != NULL);
