@@ -80,11 +80,19 @@ static inline void assert_has_mutex(void)
 
 static inline void cond_wait(void)
 {
+#ifdef STM_NO_COND_WAIT
+    fprintf(stderr, "*** cond_wait called!");
+    abort();
+#endif
+
     if (UNLIKELY(pthread_cond_wait(&sync_ctl.global_cond,
                                    &sync_ctl.global_mutex) != 0)) {
         perror("pthread_cond_wait");
         abort();
     }
+
+    if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
+        abort_with_mutex();
 }
 
 static inline void cond_broadcast(void)
@@ -166,12 +174,19 @@ void _stm_test_switch(stm_thread_local_t *tl)
     assert(STM_SEGMENT->running_thread == tl);
 }
 
-void _stm_start_safe_point(int flags)
+#if STM_TESTS
+void _stm_start_safe_point(void)
 {
-    //...
+    assert(STM_PSEGMENT->safe_point == SP_RUNNING);
+    STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
 }
 
-void _stm_stop_safe_point(int flags)
+void _stm_stop_safe_point(void)
 {
-    //...
+    assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT_CAN_COLLECT);
+    STM_PSEGMENT->safe_point = SP_RUNNING;
+
+    if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
+        stm_abort_transaction();
 }
+#endif
