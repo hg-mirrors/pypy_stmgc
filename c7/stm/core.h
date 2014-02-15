@@ -109,3 +109,4 @@ static inline bool obj_from_same_transaction(object_t *obj) {
 }
 
 static void teardown_core(void);
+static void abort_with_mutex(void) __attribute__((noreturn));

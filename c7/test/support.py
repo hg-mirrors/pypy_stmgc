@@ -66,12 +66,8 @@ bool _check_abort_transaction(void);
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
 
-#define LOCK_COLLECT   ...
-#define LOCK_EXCLUSIVE ...
-#define THREAD_YIELD   ...
-
-void _stm_start_safe_point(int);
-bool _check_stop_safe_point(int);
+void _stm_start_safe_point(void);
+bool _check_stop_safe_point(void);
 """)
 
 
@@ -138,12 +134,6 @@ struct myobj_s {
 typedef TLPREFIX struct myobj_s myobj_t;
 #define SIZEOF_MYOBJ sizeof(struct myobj_s)
 
-enum {
-    LOCK_COLLECT = 1,
-    LOCK_EXCLUSIVE = 2,
-    THREAD_YIELD = 4,
-};
-
 
 uint8_t _stm_get_flags(object_t *obj) {
     return obj->stm_flags;
@@ -195,13 +185,13 @@ bool _stm_stop_transaction(void) {
 }
 #endif
 
-bool _check_stop_safe_point(int flags) {
+bool _check_stop_safe_point(void) {
     stm_jmpbuf_t here;
     stm_segment_info_t *segment = STM_SEGMENT;
     if (__builtin_setjmp(here) == 0) { // returned directly
          assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
          segment->jmpbuf_ptr = &here;
-         _stm_stop_safe_point(flags);
+         _stm_stop_safe_point();
          segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
          return 0;
     }
@@ -287,7 +277,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 }
 
 ''', sources=source_files,
-     define_macros=[('STM_TESTS', '1')],
+     define_macros=[('STM_TESTS', '1'), ('STM_NO_COND_WAIT', '1')],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
      extra_compile_args=['-g', '-O0', '-Werror'],
@@ -369,10 +359,10 @@ def stm_stop_transaction():
 
 
 def stm_start_safe_point():
-    lib._stm_start_safe_point(lib.LOCK_COLLECT)
+    lib._stm_start_safe_point()
 
 def stm_stop_safe_point():
-    if lib._check_stop_safe_point(lib.LOCK_COLLECT):
+    if lib._check_stop_safe_point():
         raise Conflict()
 
 def stm_become_inevitable():

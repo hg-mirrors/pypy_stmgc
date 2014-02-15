@@ -81,8 +81,6 @@ void _stm_write_slowpath(object_t *);
 stm_char *_stm_allocate_slowpath(ssize_t);
 void _stm_become_inevitable(char*);
 void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *);
-void _stm_start_safe_point(int flags);
-void _stm_stop_safe_point(int flags);
 
 #ifdef STM_TESTS
 bool _stm_was_read(object_t *obj);
@@ -94,6 +92,8 @@ object_t *_stm_segment_address(char *ptr);
 void _stm_test_switch(stm_thread_local_t *tl);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 void _stm_large_dump(void);
+void _stm_start_safe_point(void);
+void _stm_stop_safe_point(void);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER_CALLED  0x80

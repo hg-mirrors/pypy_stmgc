@@ -3,7 +3,7 @@
 #endif
 
 
-static void contention_management(uint8_t other_segment_num)
+static void contention_management(uint8_t other_segment_num, bool wait)
 {
     /* A simple contention manager.  Called when we do stm_write()
        on an object, but some other thread already holds the write
@@ -16,12 +16,6 @@ static void contention_management(uint8_t other_segment_num)
     struct stm_priv_segment_info_s* other_pseg;
     other_pseg = get_priv_segment(other_segment_num);
 
-    /* note: other_pseg is currently running a transaction, and it cannot
-       commit or abort unexpectedly, because to do that it would need to
-       suspend us.  So the reading of other_pseg->start_time and
-       other_pseg->transaction_state is stable, with one exception: the
-       'transaction_state' can go from TS_REGULAR to TS_INEVITABLE under
-       our feet. */
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         /* I'm inevitable, so the other is not. */
         assert(other_pseg->transaction_state != TS_INEVITABLE);
@@ -42,7 +36,7 @@ static void contention_management(uint8_t other_segment_num)
            abort. */
         abort_with_mutex();
     }
-    else {
+    else if (wait) {
         /* otherwise, we will issue a safe point and wait: */
         STM_PSEGMENT->safe_point = SP_SAFE_POINT;
 

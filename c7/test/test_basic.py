@@ -96,7 +96,7 @@ class TestBasic(BaseTest):
         self.commit_transaction()
         #
         py.test.raises(Conflict, self.switch, 0) # detects rw conflict
-        
+
     def test_commit_fresh_objects(self):
         self.start_transaction()
         lp = stm_allocate(16)
