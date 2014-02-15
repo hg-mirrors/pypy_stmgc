@@ -63,7 +63,7 @@ struct stm_priv_segment_info_s {
 };
 
 enum {
-    SP_OUTSIDE=0,
+    SP_NO_TRANSACTION=0,
     SP_RUNNING,
     SP_SAFE_POINT,
     SP_SAFE_POINT_CAN_COLLECT,
