@@ -308,7 +308,7 @@ class TestBasic(BaseTest):
 
         self.start_transaction()
         stm_set_char(lp1, 'x')
-        assert stm_abort_transaction()
+        self.abort_transaction()
 
         self.start_transaction()
         assert stm_get_char(lp1) == 'a'
@@ -439,7 +439,7 @@ class TestBasic(BaseTest):
         self.push_root(new)
         stm_minor_collect()
         new = self.pop_root()
-        stm_abort_transaction()
+        self.abort_transaction()
 
         self.start_transaction()
         newer = stm_allocate(16)
@@ -456,7 +456,7 @@ class TestBasic(BaseTest):
         stm_minor_collect()
         new = self.pop_root()
         # assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.UNCOMMITTED_SHARED_PAGE
-        stm_abort_transaction()
+        self.abort_transaction()
 
         self.start_transaction()
         newer = stm_allocate(16)

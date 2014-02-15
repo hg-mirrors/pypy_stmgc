@@ -60,7 +60,7 @@ bool _stm_in_transaction(stm_thread_local_t *tl);
 void _stm_test_switch(stm_thread_local_t *tl);
 
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
-void stm_commit_transaction(void);
+bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
@@ -166,22 +166,6 @@ bool _checked_stm_write(object_t *object) {
     return 1;
 }
 
-#if 0
-bool _stm_stop_transaction(void) {
-    jmpbufptr_t here;
-    int tn = _STM_TL->thread_num;
-    if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
-         _STM_TL->jmpbufptr = &here;
-         stm_stop_transaction();
-         _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
-         return 0;
-    }
-    _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
-    return 1;
-}
-#endif
-
 bool _check_stop_safe_point(void) {
     stm_jmpbuf_t here;
     stm_segment_info_t *segment = STM_SEGMENT;
@@ -196,7 +180,21 @@ bool _check_stop_safe_point(void) {
     return 1;
 }
 
-int _check_abort_transaction(void) {
+bool _check_commit_transaction(void) {
+    stm_jmpbuf_t here;
+    stm_segment_info_t *segment = STM_SEGMENT;
+    if (__builtin_setjmp(here) == 0) { // returned directly
+         assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
+         segment->jmpbuf_ptr = &here;
+         stm_commit_transaction();
+         segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
+         return 0;
+    }
+    segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
+    return 1;
+}
+
+bool _check_abort_transaction(void) {
     stm_jmpbuf_t here;
     stm_segment_info_t *segment = STM_SEGMENT;
     if (__builtin_setjmp(here) == 0) { // returned directly
@@ -422,8 +420,10 @@ class BaseTest(object):
     def commit_transaction(self):
         tl = self.tls[self.current_thread]
         assert lib._stm_in_transaction(tl)
-        lib.stm_commit_transaction()
+        res = lib._check_commit_transaction()
         assert not lib._stm_in_transaction(tl)
+        if res:
+            raise Conflict
 
     def abort_transaction(self):
         tl = self.tls[self.current_thread]

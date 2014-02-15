@@ -238,6 +238,41 @@ void stm_abort_transaction(void)
     abort_with_mutex();
 }
 
+static void reset_modified_from_other_segments(void)
+{
+    /* pull the right versions from other threads in order
+       to reset our pages as part of an abort */
+    long remote_num = 1 - STM_SEGMENT->segment_num;
+    char *local_base = STM_SEGMENT->segment_base;
+    char *remote_base = get_segment_base(remote_num);
+
+    LIST_FOREACH_R(
+        STM_PSEGMENT->modified_objects,
+        object_t * /*item*/,
+        ({
+            /* memcpy in the opposite direction than
+               push_modified_to_other_segments() */
+            char *src = REAL_ADDRESS(remote_base, item);
+            ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
+            memcpy(REAL_ADDRESS(local_base, item), src, size);
+
+            /* copying from the other thread re-added the
+               WRITE_BARRIER flag */
+            //assert(item->stm_flags & GCFLAG_WRITE_BARRIER);  --- XXX
+
+            /* write all changes to the object before we release the
+               write lock below */
+            write_fence();
+
+            /* clear the write-lock */
+            uintptr_t lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START;
+            assert(write_locks[lock_idx]);
+            write_locks[lock_idx] = 0;
+        }));
+
+    list_clear(STM_PSEGMENT->modified_objects);
+}
+
 static void abort_with_mutex(void)
 {
     switch (STM_PSEGMENT->transaction_state) {
@@ -250,6 +285,9 @@ static void abort_with_mutex(void)
         assert(!"abort: bad transaction_state");
     }
 
+    /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
+    reset_modified_from_other_segments();
+
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     release_thread_segment(tl);   /* includes the cond_broadcast(); */
@@ -258,7 +296,6 @@ static void abort_with_mutex(void)
     mutex_unlock();
 
     reset_all_creation_markers();
-    list_clear(STM_PSEGMENT->modified_objects);
 
     assert(jmpbuf_ptr != NULL);
     assert(jmpbuf_ptr != (stm_jmpbuf_t *)-1);    /* for tests only */
