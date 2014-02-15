@@ -1,5 +1,5 @@
 import os
-import cffi
+import cffi, weakref
 import sys
 assert sys.maxint == 9223372036854775807, "requires a 64-bit environment"
 
@@ -74,9 +74,6 @@ bool _check_stop_safe_point(void);
 TEMPORARILY_DISABLED = """
 void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_become_inevitable(char* msg);
-
-void stm_push_root(object_t *obj);
-object_t *stm_pop_root(void);
 
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
@@ -347,12 +344,6 @@ def stm_was_read(o):
 def stm_was_written(o):
     return lib._stm_was_written(o)
 
-def stm_push_root(o):
-    return lib.stm_push_root(o)
-
-def stm_pop_root():
-    return lib.stm_pop_root()
-
 def stm_stop_transaction():
     if lib._stm_stop_transaction():
         raise Conflict()
@@ -386,8 +377,15 @@ def stm_get_obj_pages(o):
 def stm_get_flags(o):
     return lib._stm_get_flags(o)
 
+SHADOWSTACK_LENGTH = 100
+_keepalive = weakref.WeakKeyDictionary()
+
 def _allocate_thread_local():
     tl = ffi.new("stm_thread_local_t *")
+    ss = ffi.new("object_t *[]", SHADOWSTACK_LENGTH)
+    _keepalive[tl] = ss
+    tl.shadowstack = ss
+    tl.shadowstack_base = ss
     lib.stm_register_thread_local(tl)
     return tl
 
@@ -446,3 +444,18 @@ class BaseTest(object):
         if lib._stm_in_transaction(tl2):
             lib._stm_test_switch(tl2)
             stm_stop_safe_point() # can raise Conflict
+
+    def push_root(self, o):
+        assert ffi.typeof(o) == ffi.typeof("object_t *")
+        tl = self.tls[self.current_thread]
+        curlength = tl.shadowstack - tl.shadowstack_base
+        assert 0 <= curlength < SHADOWSTACK_LENGTH
+        tl.shadowstack[0] = ffi.cast("object_t *", o)
+        tl.shadowstack += 1
+
+    def pop_root(self):
+        tl = self.tls[self.current_thread]
+        curlength = tl.shadowstack - tl.shadowstack_base
+        assert 0 < curlength <= SHADOWSTACK_LENGTH
+        tl.shadowstack -= 1
+        return ffi.cast("object_t *", tl.shadowstack[0])

@@ -102,9 +102,9 @@ class TestBasic(BaseTest):
         lp = stm_allocate(16)
         stm_set_char(lp, 'u')
         p = stm_get_real_address(lp)
-        stm_push_root(lp)
+        self.push_root(lp)
         self.commit_transaction()
-        lp = stm_pop_root()
+        lp = self.pop_root()
         p1 = stm_get_real_address(lp)
         assert p != p1
         
@@ -131,11 +131,11 @@ class TestBasic(BaseTest):
         stm_write(lp2) # test not crash
         stm_read(lp) # test not crash
         stm_read(lp2) # test not crash
-        stm_push_root(lp)
-        stm_push_root(lp2)
+        self.push_root(lp)
+        self.push_root(lp2)
         self.commit_transaction()
-        lp2 = stm_pop_root()
-        lp = stm_pop_root()
+        lp2 = self.pop_root()
+        lp = self.pop_root()
         
         self.switch(0)
         
@@ -165,9 +165,9 @@ class TestBasic(BaseTest):
         stm_set_char(lr, 'y')
         stm_set_ref(lp, 0, lq)
         stm_set_ref(lp, 1, lr)
-        stm_push_root(lp)
+        self.push_root(lp)
         self.commit_transaction()
-        lp = stm_pop_root()
+        lp = self.pop_root()
 
         self.switch(1)
 
@@ -187,9 +187,9 @@ class TestBasic(BaseTest):
         self.start_transaction()
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'a')
-        stm_push_root(lp1)
+        self.push_root(lp1)
         self.commit_transaction()
-        lp1 = stm_pop_root()
+        lp1 = self.pop_root()
         #
         self.switch(1)
         self.start_transaction()
@@ -218,9 +218,9 @@ class TestBasic(BaseTest):
         lp1 = stm_allocate(16)
         p1 = stm_get_real_address(lp1)
         p1[HDR] = 'a'
-        stm_push_root(lp1)
+        self.push_root(lp1)
         self.commit_transaction()
-        lp1 = stm_pop_root()
+        lp1 = self.pop_root()
         # 'a' in SHARED_PAGE
         
         self.start_transaction()
@@ -247,9 +247,9 @@ class TestBasic(BaseTest):
         self.start_transaction()
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'a')
-        stm_push_root(lp1)
+        self.push_root(lp1)
         self.commit_transaction()
-        lp1 = stm_pop_root()
+        lp1 = self.pop_root()
         
         self.start_transaction()
         stm_read(lp1)
@@ -268,9 +268,9 @@ class TestBasic(BaseTest):
         self.start_transaction()
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'a')
-        stm_push_root(lp1)
+        self.push_root(lp1)
         self.commit_transaction()
-        lp1 = stm_pop_root()
+        lp1 = self.pop_root()
         
         self.start_transaction()
         #
@@ -287,9 +287,9 @@ class TestBasic(BaseTest):
         self.start_transaction()
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'a')
-        stm_push_root(lp1)
+        self.push_root(lp1)
         self.commit_transaction()
-        lp1 = stm_pop_root()
+        lp1 = self.pop_root()
         
         self.start_transaction()
         stm_write(lp1) # acquire lock
@@ -302,9 +302,9 @@ class TestBasic(BaseTest):
         self.start_transaction()
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'a')
-        stm_push_root(lp1)
+        self.push_root(lp1)
         self.commit_transaction()
-        lp1 = stm_pop_root()
+        lp1 = self.pop_root()
 
         self.start_transaction()
         stm_set_char(lp1, 'x')
@@ -320,12 +320,12 @@ class TestBasic(BaseTest):
         self.start_transaction()
         for i in range(num):
             new = stm_allocate(obj_size)
-            stm_push_root(new)
+            self.push_root(new)
 
         old = []
         young = []
         for _ in range(num):
-            r = stm_pop_root()
+            r = self.pop_root()
             if is_in_nursery(r):
                 young.append(r)
             else:
@@ -357,9 +357,9 @@ class TestBasic(BaseTest):
         assert len(stm_get_obj_pages(new)) == 2
         assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
                 == [lib.PRIVATE_PAGE]*2)
-        stm_push_root(new)
+        self.push_root(new)
         stm_minor_collect()
-        new = stm_pop_root()
+        new = self.pop_root()
 
         assert len(stm_get_obj_pages(new)) == 2
         # assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
@@ -378,9 +378,9 @@ class TestBasic(BaseTest):
         self.start_transaction()
         new = stm_allocate(obj_size)
         assert is_in_nursery(new)
-        stm_push_root(new)
+        self.push_root(new)
         self.commit_transaction()
-        new = stm_pop_root()
+        new = self.pop_root()
 
         assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
                 == [lib.SHARED_PAGE]*2)
@@ -403,9 +403,9 @@ class TestBasic(BaseTest):
     def test_partial_alloced_pages(self):
         self.start_transaction()
         new = stm_allocate(16)
-        stm_push_root(new)
+        self.push_root(new)
         stm_minor_collect()
-        new = stm_pop_root()
+        new = self.pop_root()
         # assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.UNCOMMITTED_SHARED_PAGE
         # assert not (stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED)
 
@@ -415,9 +415,9 @@ class TestBasic(BaseTest):
 
         self.start_transaction()
         newer = stm_allocate(16)
-        stm_push_root(newer)
+        self.push_root(newer)
         stm_minor_collect()
-        newer = stm_pop_root()
+        newer = self.pop_root()
         # 'new' is still in shared_page and committed
         assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.SHARED_PAGE
         assert not (stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED)
@@ -436,41 +436,41 @@ class TestBasic(BaseTest):
         self.start_transaction()
         new = stm_allocate(16)
         stm_set_char(new, 'a')
-        stm_push_root(new)
+        self.push_root(new)
         stm_minor_collect()
-        new = stm_pop_root()
+        new = self.pop_root()
         stm_abort_transaction()
 
         self.start_transaction()
         newer = stm_allocate(16)
-        stm_push_root(newer)
+        self.push_root(newer)
         stm_minor_collect()
-        newer = stm_pop_root()
+        newer = self.pop_root()
         assert stm_get_real_address(new) == stm_get_real_address(newer)
         assert stm_get_char(newer) == '\0'
 
     def test_reuse_page(self):
         self.start_transaction()
         new = stm_allocate(16)
-        stm_push_root(new)
+        self.push_root(new)
         stm_minor_collect()
-        new = stm_pop_root()
+        new = self.pop_root()
         # assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.UNCOMMITTED_SHARED_PAGE
         stm_abort_transaction()
 
         self.start_transaction()
         newer = stm_allocate(16)
-        stm_push_root(newer)
+        self.push_root(newer)
         stm_minor_collect()
-        newer = stm_pop_root()
+        newer = self.pop_root()
         assert new == newer
 
     def test_write_to_old_after_minor(self):
         self.start_transaction()
         new = stm_allocate(16)
-        stm_push_root(new)
+        self.push_root(new)
         stm_minor_collect()
-        old = stm_pop_root()
+        old = self.pop_root()
         self.commit_transaction()
 
         self.start_transaction()
