@@ -33,3 +33,19 @@ class TestBasic(BaseTest):
         assert stm_creation_marker(lp1) == 0
         assert stm_creation_marker(lp2) == 0
         assert stm_creation_marker(lp3) == 0xff
+
+    def test_nursery_medium(self):
+        self.start_transaction()
+        lp1 = stm_allocate(SOME_MEDIUM_SIZE)
+        lp2 = stm_allocate(SOME_MEDIUM_SIZE)
+
+        u1 = int(ffi.cast("uintptr_t", lp1))
+        u2 = int(ffi.cast("uintptr_t", lp2))
+        assert (u1 & 255) == 0
+        assert (u2 & 255) == 0
+        assert stm_creation_marker(lp1) == 0xff
+        assert stm_creation_marker(lp2) == 0xff
+
+        self.commit_transaction()
+        assert stm_creation_marker(lp1) == 0
+        assert stm_creation_marker(lp2) == 0
