@@ -47,6 +47,11 @@ bool _stm_was_written(object_t *obj)
                obj->stm_flags) & _STM_GCFLAG_WRITE_BARRIER_CALLED);
 }
 
+uint8_t _stm_creation_marker(object_t *obj)
+{
+    return ((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm;
+}
+
 static inline bool was_read_remote(char *base, object_t *obj,
                                    uint8_t other_transaction_read_version)
 {
