@@ -17,7 +17,7 @@
 
 /* if objects are larger than this limit but smaller than LARGE_OBJECT,
    then they might be allocted outside sections but still in the nursery. */
-#define MEDIUM_OBJECT         (8*1024)
+#define MEDIUM_OBJECT         (6*1024)
 
 /* size in bytes of the "line".  Should be equal to the line used by
    stm_creation_marker_t. */
@@ -82,6 +82,21 @@ stm_char *_stm_allocate_slowpath(ssize_t size_rounded_up)
                              CM_CURRENT_TRANSACTION_IN_NURSERY);
         return p;
     }
+
+    if (size_rounded_up < LARGE_OBJECT) {
+        /* A medium-sized object that doesn't fit into the current
+           nursery section.  Note that if by chance it does fit, then
+           _stm_allocate_slowpath() is not even called.  This case here
+           is to prevent too much of the nursery to remain not used
+           just because we tried to allocate a medium-sized object:
+           doing so doesn't end the current section. */
+        stm_char *p = allocate_from_nursery(size_rounded_up);
+        memset(REAL_ADDRESS(STM_SEGMENT->segment_base, p), 0,
+               size_rounded_up);
+        set_single_creation_marker(p, CM_CURRENT_TRANSACTION_IN_NURSERY);
+        return p;
+    }
+
     abort();
 }
 

@@ -93,6 +93,16 @@ static void set_creation_markers(stm_char *p, uint64_t size, int newvalue)
     LIST_APPEND(STM_PSEGMENT->creation_markers, addr);
 }
 
+static void set_single_creation_marker(stm_char *p, int newvalue)
+{
+    assert((((uintptr_t)p) & 255) == 0);
+
+    char *addr = REAL_ADDRESS(STM_SEGMENT->segment_base, ((uintptr_t)p) >> 8);
+    addr[0] = newvalue;
+
+    LIST_APPEND(STM_PSEGMENT->creation_markers, addr);
+}
+
 static void reset_all_creation_markers(void)
 {
     /* Note that the page 'NB_PAGES - 1' is not actually used.  This

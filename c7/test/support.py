@@ -284,6 +284,12 @@ WORD = 8
 HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 
+# from nursery.c
+SOME_MEDIUM_SIZE     = 32*1024 - 48
+SOME_LARGE_SIZE      = 100*1024 - 48
+NURSERY_SECTION_SIZE = 128*1024
+
+
 class Conflict(Exception):
     pass
 
