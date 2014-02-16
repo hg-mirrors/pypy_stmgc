@@ -74,6 +74,11 @@ enum {
     TS_INEVITABLE,
     TS_MUST_ABORT,
 };
+enum {   /* for stm_creation_marker_t */
+    CM_NOT_CURRENT_TRANSACTION             = 0x00,
+    CM_CURRENT_TRANSACTION_OUTSIDE_NURSERY = 0x01,
+    CM_CURRENT_TRANSACTION_IN_NURSERY      = 0xff,
+};
 
 static char *stm_object_pages;
 static stm_thread_local_t *stm_thread_locals = NULL;
@@ -105,7 +110,8 @@ static bool _is_tl_registered(stm_thread_local_t *tl);
 static bool _running_transaction(void);
 
 static inline bool obj_from_same_transaction(object_t *obj) {
-    return ((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm != 0;
+    return ((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm !=
+        CM_NOT_CURRENT_TRANSACTION;
 }
 
 static void teardown_core(void);

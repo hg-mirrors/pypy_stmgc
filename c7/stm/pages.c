@@ -77,3 +77,36 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count)
     assert(flag_page_private[pagenum] == REMAPPING_PAGE);
     flag_page_private[pagenum] = PRIVATE_PAGE;
 }
+
+static void set_creation_markers(stm_char *p, uint64_t size, int newvalue)
+{
+    /* Set the creation markers to 'newvalue' for all lines from 'p' to
+       'p+size'.  Both p and size should be aligned to the line size: 256. */
+
+    assert((((uintptr_t)p) & 255) == 0);
+    assert((size & 255) == 0);
+
+    char *addr = REAL_ADDRESS(STM_SEGMENT->segment_base, ((uintptr_t)p) >> 8);
+    memset(addr, newvalue, size >> 8);
+
+    LIST_APPEND(STM_PSEGMENT->creation_markers, addr);
+}
+
+static void reset_all_creation_markers(void)
+{
+    /* Note that the page 'NB_PAGES - 1' is not actually used.  This
+       ensures that the creation markers always end with some zeroes.
+       We reset the markers 8 at a time, by writing null integers
+       until we reach a place that is already null.
+    */
+    LIST_FOREACH_R(
+        STM_PSEGMENT->creation_markers,
+        uintptr_t /*item*/,
+        ({
+            uint64_t *p = (uint64_t *)(item & ~7);
+            while (*p != 0)
+                *p++ = 0;
+        }));
+
+    list_clear(STM_PSEGMENT->creation_markers);
+}
