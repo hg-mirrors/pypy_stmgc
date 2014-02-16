@@ -87,20 +87,21 @@ static void set_creation_markers(stm_char *p, uint64_t size, int newvalue)
     assert((size & 255) == 0);
     assert(size > 0);
 
-    char *addr = REAL_ADDRESS(STM_SEGMENT->segment_base, ((uintptr_t)p) >> 8);
-    memset(addr, newvalue, size >> 8);
+    uintptr_t cmaddr = ((uintptr_t)p) >> 8;
+    LIST_APPEND(STM_PSEGMENT->creation_markers, cmaddr);
 
-    LIST_APPEND(STM_PSEGMENT->creation_markers, addr);
+    char *addr = REAL_ADDRESS(STM_SEGMENT->segment_base, cmaddr);
+    memset(addr, newvalue, size >> 8);
 }
 
 static void set_single_creation_marker(stm_char *p, int newvalue)
 {
     assert((((uintptr_t)p) & 255) == 0);
 
-    char *addr = REAL_ADDRESS(STM_SEGMENT->segment_base, ((uintptr_t)p) >> 8);
-    addr[0] = newvalue;
+    uintptr_t cmaddr = ((uintptr_t)p) >> 8;
 
-    LIST_APPEND(STM_PSEGMENT->creation_markers, addr);
+    ((stm_creation_marker_t *)cmaddr)->cm = newvalue;
+    LIST_APPEND(STM_PSEGMENT->creation_markers, cmaddr);
 }
 
 static void reset_all_creation_markers(void)
@@ -114,7 +115,7 @@ static void reset_all_creation_markers(void)
         STM_PSEGMENT->creation_markers,
         uintptr_t /*item*/,
         ({
-            uint64_t *p = (uint64_t *)(item & ~7);
+            TLPREFIX uint64_t *p = (TLPREFIX uint64_t *)(item & ~7);
             while (*p != 0)
                 *p++ = 0;
         }));
