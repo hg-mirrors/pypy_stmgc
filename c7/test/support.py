@@ -53,6 +53,7 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
+uint8_t _stm_creation_marker(object_t *obj);
 bool _stm_in_nursery(object_t *obj);
 char *_stm_real_address(object_t *obj);
 object_t *_stm_segment_address(char *ptr);
@@ -341,6 +342,9 @@ def stm_was_read(o):
 
 def stm_was_written(o):
     return lib._stm_was_written(o)
+
+def stm_creation_marker(o):
+    return lib._stm_creation_marker(o)
 
 def stm_stop_transaction():
     if lib._stm_stop_transaction():
