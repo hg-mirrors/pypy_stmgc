@@ -62,6 +62,7 @@ void _stm_write_slowpath(object_t *obj)
 
     /* add the write-barrier-already-called flag ONLY if we succeeded in
        getting the write-lock */
+    assert(!(obj->stm_flags & GCFLAG_WRITE_BARRIER_CALLED));
     obj->stm_flags |= GCFLAG_WRITE_BARRIER_CALLED;
     LIST_APPEND(STM_PSEGMENT->modified_objects, obj);
 }
@@ -177,14 +178,21 @@ static void push_modified_to_other_segments(void)
                           get_segment(remote_num)->transaction_read_version));
             }
 
-            /* clear the write-lock */
+            /* clear the write-lock (note that this runs with all other
+               threads paused, so no need to be careful about ordering) */
             uintptr_t lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START;
             assert(write_locks[lock_idx] == STM_PSEGMENT->write_lock_num);
             write_locks[lock_idx] = 0;
 
+            /* remove again the WRITE_BARRIER_CALLED flag */
+            assert(item->stm_flags & GCFLAG_WRITE_BARRIER_CALLED);
+            item->stm_flags &= ~GCFLAG_WRITE_BARRIER_CALLED;
+
+            /* copy the modified object to the other segment */
             char *src = REAL_ADDRESS(local_base, item);
+            char *dst = REAL_ADDRESS(remote_base, item);
             ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
-            memcpy(REAL_ADDRESS(remote_base, item), src, size);
+            memcpy(dst, src, size);
         }));
 
     list_clear(STM_PSEGMENT->modified_objects);
@@ -250,18 +258,27 @@ static void reset_modified_from_other_segments(void)
         STM_PSEGMENT->modified_objects,
         object_t * /*item*/,
         ({
+            /* all objects in 'modified_objects' have this flag */
+            assert(item->stm_flags & GCFLAG_WRITE_BARRIER_CALLED);
+
             /* memcpy in the opposite direction than
                push_modified_to_other_segments() */
             char *src = REAL_ADDRESS(remote_base, item);
+            char *dst = REAL_ADDRESS(local_base, item);
             ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
-            memcpy(REAL_ADDRESS(local_base, item), src, size);
+            memcpy(dst, src, size);
 
-            /* copying from the other thread re-added the
-               WRITE_BARRIER flag */
-            //assert(item->stm_flags & GCFLAG_WRITE_BARRIER);  --- XXX
+            /* copying from the other segment removed again the
+               WRITE_BARRIER_CALLED flag */
+            assert(!(item->stm_flags & GCFLAG_WRITE_BARRIER_CALLED));
 
             /* write all changes to the object before we release the
-               write lock below */
+               write lock below.  This is needed because we need to
+               ensure that if the write lock is not set, another thread
+               can get it and then change 'src' in parallel.  The
+               write_fence() ensures in particular that 'src' has been
+               fully read before we release the lock: reading it
+               is necessary to write 'dst'. */
             write_fence();
 
             /* clear the write-lock */
