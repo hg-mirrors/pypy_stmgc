@@ -49,10 +49,11 @@ struct stm_read_marker_s {
 struct stm_creation_marker_s {
     /* In addition to read markers, every "line" of 256 bytes has one
        extra byte, the creation marker, located at the address divided
-       by 256.  The creation marker is either 0xff if all objects in
+       by 256.  The creation marker is either non-zero if all objects in
        this line come have been allocated by the current transaction,
        or 0x00 if none of them have been.  Lines cannot contain a
-       mixture of both. */
+       mixture of both.  Non-zero values are 0xff if in the nursery,
+       and 0x01 if outside the nursery. */
     uint8_t cm;
 };
 
@@ -152,9 +153,10 @@ static inline void stm_read(object_t *obj)
 static inline void stm_write(object_t *obj)
 {
     /* this is:
-           'if (cm == 0 && (stm_flags & WRITE_BARRIER_CALLED) == 0)'
-         assuming that 'cm' is either 0 (not created in current transaction)
-                                or 0xff (created in current transaction) */
+           'if (cm < 0x80 && (stm_flags & WRITE_BARRIER_CALLED) == 0)'
+         where 'cm' can be 0 (not created in current transaction)
+                     or 0xff (created in current transaction)
+                     or 0x01 (same, but outside the nursery) */
     if (UNLIKELY(!((((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm |
                     obj->stm_flags) & _STM_GCFLAG_WRITE_BARRIER_CALLED)))
         _stm_write_slowpath(obj);

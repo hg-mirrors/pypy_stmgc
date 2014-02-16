@@ -21,8 +21,7 @@
 
 /* size in bytes of the "line".  Should be equal to the line used by
    stm_creation_marker_t. */
-#define NURSERY_LINE_SHIFT    8
-#define NURSERY_LINE          (1 << NURSERY_LINE_SHIFT)
+#define NURSERY_LINE          256
 
 /************************************************************/
 
@@ -37,6 +36,7 @@ static union {
 
 static void setup_nursery(void)
 {
+    assert(NURSERY_LINE == (1 << 8));  /* from stm_creation_marker_t */
     assert((NURSERY_SECTION_SIZE % NURSERY_LINE) == 0);
     assert(MEDIUM_OBJECT < LARGE_OBJECT);
     assert(LARGE_OBJECT < NURSERY_SECTION_SIZE);
@@ -47,40 +47,6 @@ bool _stm_in_nursery(object_t *obj)
 {
     assert((uintptr_t)obj >= NURSERY_START);
     return (uintptr_t)obj < NURSERY_START + NURSERY_SIZE;
-}
-
-static void set_creation_markers(stm_char *p, uint64_t size)
-{
-    /* Set the creation markers to 0xff for all lines from p to p+size.
-       Both p and size should be aligned to NURSERY_LINE. */
-
-    assert((((uintptr_t)p) & (NURSERY_LINE - 1)) == 0);
-    assert((size & (NURSERY_LINE - 1)) == 0);
-
-    char *addr = REAL_ADDRESS(STM_SEGMENT->segment_base,
-                              ((uintptr_t)p) >> NURSERY_LINE_SHIFT);
-    memset(addr, 0xff, size >> NURSERY_LINE_SHIFT);
-
-    LIST_APPEND(STM_PSEGMENT->creation_markers, addr);
-}
-
-static void reset_all_creation_markers(void)
-{
-    /* Note that the page 'NB_PAGES - 1' is not actually used.  This
-       ensures that the creation markers always end with some zeroes.
-       We reset the markers 8 at a time, by writing null integers
-       until we reach a place that is already null.
-    */
-    LIST_FOREACH_R(
-        STM_PSEGMENT->creation_markers,
-        uintptr_t /*item*/,
-        ({
-            uint64_t *p = (uint64_t *)(item & ~7);
-            while (*p != 0)
-                *p++ = 0;
-        }));
-
-    list_clear(STM_PSEGMENT->creation_markers);
 }
 
 
@@ -112,8 +78,8 @@ stm_char *_stm_allocate_slowpath(ssize_t size_rounded_up)
         STM_SEGMENT->nursery_section_end = (uintptr_t)p + NURSERY_SECTION_SIZE;
 
         /* Also fill the corresponding creation markers with 0xff. */
-        set_creation_markers(p, NURSERY_SECTION_SIZE);
-
+        set_creation_markers(p, NURSERY_SECTION_SIZE,
+                             CM_CURRENT_TRANSACTION_IN_NURSERY);
         return p;
     }
     abort();

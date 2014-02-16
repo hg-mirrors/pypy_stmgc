@@ -28,3 +28,6 @@ inline static void pages_privatize(uintptr_t pagenum, uintptr_t count) {
     }
     _pages_privatize(pagenum, count);
 }
+
+static void set_creation_markers(stm_char *p, uint64_t size, int newvalue);
+static void reset_all_creation_markers(void);
