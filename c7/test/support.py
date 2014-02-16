@@ -459,3 +459,7 @@ class BaseTest(object):
         assert 0 < curlength <= SHADOWSTACK_LENGTH
         tl.shadowstack -= 1
         return ffi.cast("object_t *", tl.shadowstack[0])
+
+    def push_root_no_gc(self):
+        "Pushes an invalid object, to crash in case the GC is called"
+        self.push_root(ffi.cast("object_t *", -1))

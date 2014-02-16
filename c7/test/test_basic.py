@@ -98,27 +98,22 @@ class TestBasic(BaseTest):
         py.test.raises(Conflict, self.switch, 0) # detects rw conflict
 
     def test_commit_fresh_objects(self):
+        self.push_root_no_gc()
         self.start_transaction()
         lp = stm_allocate(16)
         stm_set_char(lp, 'u')
-        p = stm_get_real_address(lp)
-        self.push_root(lp)
         self.commit_transaction()
-        lp = self.pop_root()
         p1 = stm_get_real_address(lp)
-        assert p != p1
-        
+
         self.switch(1)
-        
+
         self.start_transaction()
         stm_write(lp) # privatize page
-        p_ = stm_get_real_address(lp)
-        assert p != p_
-        assert p1 != p_
+        p2 = stm_get_real_address(lp)
+        assert p1 != p2
         assert stm_get_char(lp) == 'u'
         self.commit_transaction()
 
-        
     def test_commit_fresh_objects2(self):
         self.switch(1)
         self.start_transaction()
