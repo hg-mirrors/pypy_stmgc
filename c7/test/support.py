@@ -69,6 +69,8 @@ uint32_t _get_type_id(object_t *obj);
 
 void _stm_start_safe_point(void);
 bool _check_stop_safe_point(void);
+
+void _stm_set_nursery_free_count(uint64_t free_count);
 """)
 
 

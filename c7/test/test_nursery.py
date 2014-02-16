@@ -49,3 +49,15 @@ class TestBasic(BaseTest):
         self.commit_transaction()
         assert stm_creation_marker(lp1) == 0
         assert stm_creation_marker(lp2) == 0
+
+    def test_nursery_full(self):
+        lib._stm_set_nursery_free_count((SOME_MEDIUM_SIZE + 255) & ~255)
+        self.push_root_no_gc()
+        self.start_transaction()
+        lp1 = stm_allocate(SOME_MEDIUM_SIZE)
+        self.pop_root()
+        #
+        self.push_root(lp1)
+        lp2 = stm_allocate(16)
+        lp1b = self.pop_root()
+        assert lp1b != lp1      # collection occurred

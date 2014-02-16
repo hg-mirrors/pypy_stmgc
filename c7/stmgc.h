@@ -62,7 +62,8 @@ struct stm_segment_info_s {
     int segment_num;
     char *segment_base;
     stm_char *nursery_current;
-    uintptr_t nursery_section_end;
+    uintptr_t nursery_section_end;  /* forced to 1 by
+                                       sync_all_threads_for_collection() */
     struct stm_thread_local_s *running_thread;
     stm_jmpbuf_t *jmpbuf_ptr;
 };
@@ -96,6 +97,7 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up);
 void _stm_large_dump(void);
 void _stm_start_safe_point(void);
 void _stm_stop_safe_point(void);
+void _stm_set_nursery_free_count(uint64_t free_count);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER_CALLED  0x80

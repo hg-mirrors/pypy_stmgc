@@ -131,6 +131,10 @@ static void wait_for_other_safe_points(void)
 {
     long remote_num = 1 - STM_SEGMENT->segment_num;
     while (get_priv_segment(remote_num)->safe_point == SP_RUNNING) {
+
+        /* we have the mutex here */
+        get_segment(remote_num)->nursery_section_end = NSE_SIGNAL;
+
         cond_wait();
     }
 }

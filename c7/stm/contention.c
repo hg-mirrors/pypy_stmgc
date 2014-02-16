@@ -38,7 +38,7 @@ static void contention_management(uint8_t other_segment_num, bool wait)
     }
     else if (wait) {
         /* otherwise, we will issue a safe point and wait: */
-        STM_PSEGMENT->safe_point = SP_SAFE_POINT;
+        STM_PSEGMENT->safe_point = SP_SAFE_POINT_CANNOT_COLLECT;
 
         /* signal the other thread; it must abort */
         cond_broadcast();
