@@ -60,12 +60,13 @@ struct stm_priv_segment_info_s {
     uint8_t write_lock_num;
     uint8_t safe_point;         /* one of the SP_xxx constants */
     uint8_t transaction_state;  /* one of the TS_xxx constants */
+    uintptr_t real_nursery_section_end;
 };
 
 enum {
     SP_NO_TRANSACTION=0,
     SP_RUNNING,
-    SP_SAFE_POINT,
+    SP_SAFE_POINT_CANNOT_COLLECT,
     SP_SAFE_POINT_CAN_COLLECT,
 };
 enum {

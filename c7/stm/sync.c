@@ -67,6 +67,9 @@ static inline void mutex_lock(void)
 
 static inline void mutex_unlock(void)
 {
+    assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION ||
+           STM_PSEGMENT->safe_point == SP_RUNNING);
+
     if (UNLIKELY(pthread_mutex_unlock(&sync_ctl.global_mutex) != 0)) {
         perror("pthread_mutex_unlock");
         abort();
