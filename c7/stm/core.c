@@ -236,10 +236,9 @@ void stm_commit_transaction(void)
     release_thread_segment(tl);   /* includes the cond_broadcast(); */
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
+    reset_all_creation_markers();
 
     mutex_unlock();
-
-    reset_all_creation_markers();
 }
 
 void stm_abort_transaction(void)
@@ -312,9 +311,9 @@ static void abort_with_mutex(void)
     release_thread_segment(tl);   /* includes the cond_broadcast(); */
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
-    mutex_unlock();
-
     reset_all_creation_markers();
+
+    mutex_unlock();
 
     assert(jmpbuf_ptr != NULL);
     assert(jmpbuf_ptr != (stm_jmpbuf_t *)-1);    /* for tests only */
