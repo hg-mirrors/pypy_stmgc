@@ -85,6 +85,7 @@ static void set_creation_markers(stm_char *p, uint64_t size, int newvalue)
 
     assert((((uintptr_t)p) & 255) == 0);
     assert((size & 255) == 0);
+    assert(size > 0);
 
     char *addr = REAL_ADDRESS(STM_SEGMENT->segment_base, ((uintptr_t)p) >> 8);
     memset(addr, newvalue, size >> 8);

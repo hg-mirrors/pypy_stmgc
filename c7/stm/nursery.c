@@ -84,3 +84,19 @@ stm_char *_stm_allocate_slowpath(ssize_t size_rounded_up)
     }
     abort();
 }
+
+static void align_nursery_at_transaction_start(void)
+{
+    /* When the transaction start, we must align the 'nursery_current'
+       and set creation markers for the part of the section the follows.
+    */
+    uintptr_t c = (uintptr_t)STM_SEGMENT->nursery_current;
+    c = NURSERY_ALIGN(c);
+    STM_SEGMENT->nursery_current = (stm_char *)c;
+
+    uint64_t size = STM_SEGMENT->nursery_section_end - c;
+    if (size > 0) {
+        set_creation_markers((stm_char *)c, size,
+                             CM_CURRENT_TRANSACTION_IN_NURSERY);
+    }
+}

@@ -116,6 +116,8 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 
     assert(list_is_empty(STM_PSEGMENT->modified_objects));
     assert(list_is_empty(STM_PSEGMENT->creation_markers));
+
+    align_nursery_at_transaction_start();
 }
 
 
