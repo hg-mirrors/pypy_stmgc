@@ -5,9 +5,9 @@
 
 static void contention_management(uint8_t other_segment_num, bool wait)
 {
-    /* A simple contention manager.  Called when we do stm_write()
-       on an object, but some other thread already holds the write
-       lock on the same object. */
+    /* A simple contention manager.  Called when some other thread
+       holds the write lock on an object.  The current thread tries
+       to do either a write or a read on it. */
 
     assert_has_mutex();
     assert(other_segment_num != STM_SEGMENT->segment_num);

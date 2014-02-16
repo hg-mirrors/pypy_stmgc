@@ -33,9 +33,6 @@ static union {
     char reserved[64];
 } nursery_ctl __attribute__((aligned(64)));
 
-static uint64_t requested_minor_collections = 0;
-static uint64_t completed_minor_collections = 0;
-
 
 /************************************************************/
 
@@ -58,64 +55,82 @@ bool _stm_in_nursery(object_t *obj)
 /************************************************************/
 
 
-static void minor_collection(void)
+
+static void minor_trace_roots(void)
 {
+    stm_thread_local_t *tl = stm_thread_locals;
+    do {
+        object_t **current = tl->shadowstack;
+        object_t **base = tl->shadowstack_base;
+        while (current-- != base) {
+            minor_trace_if_young(current);
+        }
+        tl = tl->next;
+    } while (tl != stm_thread_locals);
+}
+
+static void do_minor_collection(void)
+{
+    minor_trace_roots();
+
+            /* visit shadowstack & add to old_obj_to_trace */
+    object_t **current = _STM_TL->shadow_stack;
+    object_t **base = _STM_TL->shadow_stack_base;
+    while (current-- != base) {
+        trace_if_young(current);
+    }
+
+    
+    
+    
     fprintf(stderr, "minor_collection\n");
     abort(); //...;
 
+
+    /* reset all segments' nursery_section_end, as well as nursery_ctl.used */
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        get_segment(i)->nursery_section_end = 0;
+        get_priv_segment(i)->real_nursery_section_end = 0;
+    }
+    nursery_ctl.used = 0;
+
+    /* done */
     assert(requested_minor_collections == completed_minor_collections + 1);
     completed_minor_collections += 1;
-    nursery_ctl.used = 0;
 }
 
 
-static void sync_point_for_collection(void)
+static void restore_nursery_section_end(uintptr_t prev_value)
 {
+    __sync_bool_compare_and_swap(&STM_SEGMENT->v_nursery_section_end,
+                                 prev_value,
+                                 STM_PSEGMENT->real_nursery_section_end);
+}
+
+static void stm_minor_collection(uint64_t request_size)
+{
+    /* Run a minor collection --- but only if we can't get 'request_size'
+       bytes out of the nursery; if we can, no-op. */
     mutex_lock();
 
+    assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
 
  restart:
-    if (requested_minor_collections == completed_minor_collections) {
-        if (nursery_ctl.used < NURSERY_SIZE)
-            goto exit;
+    /* We just waited here, either from mutex_lock() or from cond_wait(),
+       so we should check again if another thread did the minor
+       collection itself */
+    if (nursery_ctl.used + bytes <= NURSERY_SIZE)
+        goto exit;
 
-        requested_minor_collections++;
-    }
-
-    /* are all threads in a safe-point? */
-    long i;
-    bool must_wait = false;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        struct stm_priv_segment_info_s *other_pseg = get_priv_segment(i);
-
-        if (other_pseg->safe_point != SP_NO_TRANSACTION &&
-            other_pseg->safe_point != SP_SAFE_POINT_CAN_COLLECT) {
-            /* segment i is not at a safe point, or at one where
-               collection is not possible (SP_SAFE_POINT_CANNOT_COLLECT) */
-
-            /* we have the mutex here */
-            other_pseg->pub.nursery_section_end = NSE_SIGNAL;
-            must_wait = true;
-        }
-    }
-    if (must_wait) {
-        /* wait until all threads are indeed in a safe-point that allows
-           collection */
-        cond_wait();
+    if (!try_wait_for_other_safe_points(SP_SAFE_POINT_CAN_COLLECT))
         goto restart;
-    }
 
-    /* now we can run minor collection */
-    minor_collection();
+    /* now we can run our minor collection */
+    do_minor_collection();
 
  exit:
-    /* we have the mutex here, and at this point there is no
-       pending requested minor collection, so we simply reset
-       our value of nursery_section_end and return. */
-    STM_SEGMENT->nursery_section_end =
-        STM_PSEGMENT->real_nursery_section_end;
-
     STM_PSEGMENT->safe_point = SP_RUNNING;
 
     mutex_unlock();
@@ -137,7 +152,9 @@ static stm_char *allocate_from_nursery(uint64_t bytes)
         if (LIKELY(p + bytes <= NURSERY_SIZE)) {
             return (stm_char *)(NURSERY_START + p);
         }
-        sync_point_for_collection();
+
+        /* nursery full! */
+        stm_minor_collection(bytes);
     }
 }
 
@@ -147,47 +164,21 @@ stm_char *_stm_allocate_slowpath(ssize_t size_rounded_up)
     /* may collect! */
     STM_SEGMENT->nursery_current -= size_rounded_up;  /* restore correct val */
 
- restart:
-    if (UNLIKELY(STM_SEGMENT->nursery_section_end == NSE_SIGNAL)) {
-
-        /* If nursery_section_end was set to NSE_SIGNAL by another thread,
-           we end up here as soon as we try to call stm_allocate(). */
-        sync_point_for_collection();
-
-        /* Once the sync point is done, retry. */
-        goto restart;
-    }
+    if (collectable_safe_point())
+        return stm_allocate(size_rounded_up);
 
     if (size_rounded_up < MEDIUM_OBJECT) {
-        /* This is a small object.  We first try to check if the current
-           section really doesn't fit the object; maybe all we were called
-           for was the sync point above */
-        stm_char *p1 = STM_SEGMENT->nursery_current;
-        stm_char *end1 = p1 + size_rounded_up;
-        if ((uintptr_t)end1 <= STM_PSEGMENT->real_nursery_section_end) {
-            /* fits */
-            STM_SEGMENT->nursery_current = end1;
-            return p1;
-        }
-
-        /* Otherwise, the current section is really full.
+        /* This is a small object.  The current section is really full.
            Allocate the next section and initialize it with zeroes. */
         stm_char *p = allocate_from_nursery(NURSERY_SECTION_SIZE);
         STM_SEGMENT->nursery_current = p + size_rounded_up;
 
-        /* Set nursery_section_end, but carefully: another thread may
+        /* Set v_nursery_section_end, but carefully: another thread may
            have forced it to be equal to NSE_SIGNAL. */
         uintptr_t end = (uintptr_t)p + NURSERY_SECTION_SIZE;
-
-        if (UNLIKELY(!__sync_bool_compare_and_swap(
-               &STM_SEGMENT->nursery_section_end,
-               STM_PSEGMENT->real_nursery_section_end,
-               end))) {
-            assert(STM_SEGMENT->nursery_section_end == NSE_SIGNAL);
-            goto restart;
-        }
-
+        uintptr_t prev_end = STM_PSEGMENT->real_nursery_section_end;
         STM_PSEGMENT->real_nursery_section_end = end;
+        restore_nursery_section_end(prev_end);
 
         memset(REAL_ADDRESS(STM_SEGMENT->segment_base, p), 0,
                NURSERY_SECTION_SIZE);
