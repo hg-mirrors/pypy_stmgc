@@ -13,3 +13,8 @@ static void cond_broadcast(void);
    (must have the mutex acquired!) */
 static void acquire_thread_segment(stm_thread_local_t *tl);
 static void release_thread_segment(stm_thread_local_t *tl);
+
+/* see the source for an exact description */
+static void wait_for_other_safe_points(int requested_safe_point_kind);
+static bool try_wait_for_other_safe_points(int requested_safe_point_kind);
+static bool collectable_safe_point(void);

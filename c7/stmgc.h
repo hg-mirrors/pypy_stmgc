@@ -62,8 +62,7 @@ struct stm_segment_info_s {
     int segment_num;
     char *segment_base;
     stm_char *nursery_current;
-    uintptr_t nursery_section_end;  /* forced to 1 by
-                                       sync_all_threads_for_collection() */
+    volatile uintptr_t v_nursery_section_end;  /* see nursery.h */
     struct stm_thread_local_s *running_thread;
     stm_jmpbuf_t *jmpbuf_ptr;
 };

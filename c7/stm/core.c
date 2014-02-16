@@ -127,19 +127,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 # error "The logic in the functions below only works with two segments"
 #endif
 
-static void wait_for_other_safe_points(void)
-{
-    long remote_num = 1 - STM_SEGMENT->segment_num;
-    while (get_priv_segment(remote_num)->safe_point == SP_RUNNING) {
-
-        /* we have the mutex here */
-        get_segment(remote_num)->nursery_section_end = NSE_SIGNAL;
-
-        cond_wait();
-    }
-}
-
-static void detect_write_read_conflicts(void)
+static bool detect_write_read_conflicts(void)
 {
     long remote_num = 1 - STM_SEGMENT->segment_num;
     char *remote_base = get_segment_base(remote_num);
@@ -148,7 +136,7 @@ static void detect_write_read_conflicts(void)
     switch (get_priv_segment(remote_num)->transaction_state) {
     case TS_NONE:
     case TS_MUST_ABORT:
-        return;    /* no need to do any check */
+        return false;    /* no need to do any check */
     }
 
     LIST_FOREACH_R(
@@ -161,9 +149,11 @@ static void detect_write_read_conflicts(void)
 
                 /* If we reach this point, it means we aborted the other
                    thread.  We're done here. */
-                return;
+                return true;
             }
         }));
+
+    return false;
 }
 
 static void push_modified_to_other_segments(void)
@@ -207,8 +197,11 @@ static void push_modified_to_other_segments(void)
 void stm_commit_transaction(void)
 {
     mutex_lock();
-    assert(STM_PSEGMENT->safe_point = SP_RUNNING);
 
+    assert(STM_PSEGMENT->safe_point = SP_RUNNING);
+    STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
+
+ restart:
     switch (STM_PSEGMENT->transaction_state) {
 
     case TS_REGULAR:
@@ -223,10 +216,14 @@ void stm_commit_transaction(void)
     }
 
     /* wait until the other thread is at a safe-point */
-    wait_for_other_safe_points();
+    wait_for_other_safe_points(SP_SAFE_POINT_CANNOT_COLLECT);
+
+    /* the rest of this function runs either atomically without releasing
+       the mutex, or it needs to restart. */
 
     /* detect conflicts */
-    detect_write_read_conflicts();
+    if (UNLIKELY(detect_write_read_conflicts()))
+        goto restart;
 
     /* cannot abort any more from here */
     assert(STM_PSEGMENT->transaction_state != TS_MUST_ABORT);
@@ -237,7 +234,7 @@ void stm_commit_transaction(void)
 
     /* done */
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
-    release_thread_segment(tl);   /* includes the cond_broadcast(); */
+    release_thread_segment(tl);
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
     reset_all_creation_markers();
@@ -312,11 +309,12 @@ static void abort_with_mutex(void)
 
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
-    release_thread_segment(tl);   /* includes the cond_broadcast(); */
+    release_thread_segment(tl);
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
     reset_all_creation_markers();
 
+    cond_broadcast();
     mutex_unlock();
 
     assert(jmpbuf_ptr != NULL);
