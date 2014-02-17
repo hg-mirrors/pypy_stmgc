@@ -51,14 +51,46 @@ bool _stm_in_nursery(object_t *obj)
     return (uintptr_t)obj < NURSERY_START + NURSERY_SIZE;
 }
 
+static bool _is_young(object_t *obj)
+{
+    return _stm_in_nursery(obj);    /* for now */
+}
+
 
 /************************************************************/
 
 
 static void minor_trace_if_young(object_t **pobj)
 {
-    //...
+    /* takes a normal pointer to a thread-local pointer to an object */
+    object_t *obj = *pobj;
+    if (obj == NULL)
+        return;
+    if (!_is_young(obj))
+        return;
+
+    /* the location the object moved to is the second word in 'obj' */
+    object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
+
+    if (UNLIKELY(obj->stm_flags & GCFLAG_MOVED)) {
+        *pobj = pforwarded_array[1];    /* already moved */
+        return;
+    }
+
+#if 0
+    /* move obj to somewhere else */
+    size_t size = stmcb_size_rounded_up(stm_object_pages + (uintptr_t)*pobj);
+    bool is_small;
+    object_t *moved = stm_big_small_alloc_old(size, &is_small);
+
+    memcpy((void*)real_address(moved),
+           (void*)real_address(*pobj),
+           size);
+#endif
+
     abort();
+
+    allocate_outside_nursery(-1);
 }
 
 static void minor_trace_roots(void)

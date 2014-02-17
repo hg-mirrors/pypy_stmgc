@@ -38,6 +38,9 @@ enum {
     /* objects that are allocated crossing a page boundary have this
        flag set */
     GCFLAG_CROSS_PAGE = 0x02,
+    /* only used during collections to mark an obj as moved out of the
+       generation it was in */
+    GCFLAG_MOVED = 0x04,
 };
 
 #define CROSS_PAGE_BOUNDARY(start, stop)                                \

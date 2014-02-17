@@ -94,12 +94,15 @@ static void set_creation_markers(stm_char *p, uint64_t size, int newvalue)
     memset(addr, newvalue, size >> 8);
 }
 
+static uint8_t get_single_creation_marker(stm_char *p)
+{
+    uintptr_t cmaddr = ((uintptr_t)p) >> 8;
+    return ((stm_creation_marker_t *)cmaddr)->cm;
+}
+
 static void set_single_creation_marker(stm_char *p, int newvalue)
 {
-    assert((((uintptr_t)p) & 255) == 0);
-
     uintptr_t cmaddr = ((uintptr_t)p) >> 8;
-
     ((stm_creation_marker_t *)cmaddr)->cm = newvalue;
     LIST_APPEND(STM_PSEGMENT->creation_markers, cmaddr);
 }
