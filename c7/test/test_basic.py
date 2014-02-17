@@ -110,7 +110,8 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_write(lp) # privatize page
         p2 = stm_get_real_address(lp)
-        assert p1 == p2       # no collection occurred
+        assert p1 != p2       # we see the other segment, but same object
+        assert (p2 - p1) % 4096 == 0
         assert stm_get_char(lp) == 'u'
         self.commit_transaction()
 
@@ -151,12 +152,13 @@ class TestBasic(BaseTest):
         assert stm_get_char(lp2) == 'y'
         self.commit_transaction()
 
-    def test_commit_fresh_object3(self):
+    def test_commit_fresh_objects3(self):
         # make objects lpx; then privatize the page by committing changes
         # to it; then create lpy in the same page.  Check that lpy is
         # visible from the other thread.
         self.start_transaction()
         lpx = stm_allocate(16)
+        print lpx
         stm_set_char(lpx, '.')
         self.commit_transaction()
 
@@ -166,7 +168,9 @@ class TestBasic(BaseTest):
 
         self.start_transaction()
         lpy = stm_allocate(16)
+        print lpy
         stm_set_char(lpy, 'y')
+        print "LAST COMMIT"
         self.commit_transaction()
 
         self.switch(1)
