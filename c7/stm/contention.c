@@ -9,7 +9,7 @@ static void contention_management(uint8_t other_segment_num, bool wait)
        holds the write lock on an object.  The current thread tries
        to do either a write or a read on it. */
 
-    assert_has_mutex();
+    assert(_has_mutex());
     assert(other_segment_num != STM_SEGMENT->segment_num);
 
     /* Who should abort here: this thread, or the other thread? */
