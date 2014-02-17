@@ -216,7 +216,8 @@ void stm_commit_transaction(void)
     }
 
     /* wait until the other thread is at a safe-point */
-    wait_for_other_safe_points(SP_SAFE_POINT_CANNOT_COLLECT);
+    if (!try_wait_for_other_safe_points(SP_SAFE_POINT_CANNOT_COLLECT))
+        goto restart;
 
     /* the rest of this function runs either atomically without releasing
        the mutex, or it needs to restart. */

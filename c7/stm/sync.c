@@ -202,12 +202,17 @@ static bool try_wait_for_other_safe_points(int requested_safe_point_kind)
        false; you can call repeatedly this function in this case.
 
        When this function returns true, the other threads are all
-       blocked at safe points as requested, until the next time we
-       unlock the mutex (with mutex_unlock() or cond_wait()).
+       blocked at safe points as requested.  They may be either in their
+       own cond_wait(), or running at SP_NO_TRANSACTION, in which case
+       they should not do anything related to stm until the next time
+       they call mutex_lock().
+
+       The next time we unlock the mutex (with mutex_unlock() or
+       cond_wait()), they will proceed.
 
        This function requires that the calling thread is in a safe-point
        right now, so there is no deadlock if one thread calls
-       wait_for_other_safe_points() while another is currently blocked
+       try_wait_for_other_safe_points() while another is currently blocked
        in the cond_wait() in this same function.
     */
     assert_has_mutex();
@@ -251,12 +256,6 @@ static bool try_wait_for_other_safe_points(int requested_safe_point_kind)
     return true;
 }
 
-static void wait_for_other_safe_points(int requested_safe_point_kind)
-{
-    while (!try_wait_for_other_safe_points(requested_safe_point_kind))
-        /* repeat */;
-}
-
 static bool collectable_safe_point(void)
 {
     bool any_operation = false;
@@ -268,6 +267,7 @@ static bool collectable_safe_point(void)
            we end up here as soon as we try to call stm_allocate().
            See try_wait_for_other_safe_points() for details. */
         mutex_lock();
+        assert(STM_PSEGMENT->safe_point == SP_RUNNING);
         STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
         cond_broadcast();
         cond_wait();

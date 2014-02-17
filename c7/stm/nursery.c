@@ -69,35 +69,33 @@ static void minor_trace_roots(void)
     } while (tl != stm_thread_locals);
 }
 
+static void reset_all_nursery_section_ends(void)
+{
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *other_pseg = get_priv_segment(i);
+        /* no race condition here, because all other threads are paused
+           in safe points, so cannot be e.g. in _stm_allocate_slowpath() */
+        other_pseg->real_nursery_section_end = 0;
+        other_pseg->pub.v_nursery_section_end = 0;
+    }
+}
+
 static void do_minor_collection(void)
 {
+    /* all other threads are paused in safe points during the whole
+       minor collection */
+    assert_has_mutex();
+
     minor_trace_roots();
 
-            /* visit shadowstack & add to old_obj_to_trace */
-    object_t **current = _STM_TL->shadow_stack;
-    object_t **base = _STM_TL->shadow_stack_base;
-    while (current-- != base) {
-        trace_if_young(current);
-    }
 
-    
-    
-    
     fprintf(stderr, "minor_collection\n");
     abort(); //...;
 
 
-    /* reset all segments' nursery_section_end, as well as nursery_ctl.used */
-    long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        get_segment(i)->nursery_section_end = 0;
-        get_priv_segment(i)->real_nursery_section_end = 0;
-    }
     nursery_ctl.used = 0;
-
-    /* done */
-    assert(requested_minor_collections == completed_minor_collections + 1);
-    completed_minor_collections += 1;
+    reset_all_nursery_section_ends();
 }
 
 
