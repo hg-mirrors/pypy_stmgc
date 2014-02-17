@@ -125,3 +125,51 @@ static void reset_all_creation_markers(void)
 
     list_clear(STM_PSEGMENT->creation_markers);
 }
+
+static void reset_all_creation_markers_and_push_created_data(void)
+{
+    /* This is like reset_all_creation_markers(), but additionally
+       it looks for markers in non-SHARED pages, and pushes the
+       corresponding data (in 256-bytes blocks) to other threads.
+    */
+#if NB_SEGMENTS != 2
+# error "The logic in this function only works with two segments"
+#endif
+
+    char *local_base = STM_SEGMENT->segment_base;
+    long remote_num = 1 - STM_SEGMENT->segment_num;
+    char *remote_base = get_segment_base(remote_num);
+
+    /* this logic assumes that creation markers are in 256-bytes blocks,
+       and pages are 4096 bytes, so creation markers are handled by groups
+       of 16 --- which is two 8-bytes uint64_t. */
+
+    LIST_FOREACH_R(
+        STM_PSEGMENT->creation_markers,
+        uintptr_t /*item*/,
+        ({
+            TLPREFIX uint64_t *p = (TLPREFIX uint64_t *)(item & ~15);
+            while (p[0] != 0 || p[1] != 0) {
+
+                uint64_t pagenum = ((uint64_t)p) >> 4;
+                if (flag_page_private[pagenum] != SHARED_PAGE) {
+                    /* copying needed */
+                    uint64_t dataofs = ((uint64_t)p) << 8;
+                    stm_char *start = (stm_char *)p;
+                    stm_char *stop = start + 16;
+                    while (start < stop) {
+                        if (*start++ != 0) {
+                            pagecopy_256(remote_base + dataofs,
+                                         local_base + dataofs);
+                        }
+                        dataofs += 256;
+                    }
+                }
+                p[0] = 0;
+                p[1] = 0;
+                p += 2;
+            }
+        }));
+
+    list_clear(STM_PSEGMENT->creation_markers);
+}

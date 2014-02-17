@@ -31,13 +31,14 @@ void _stm_write_slowpath(object_t *obj)
        only one page in total. */
     size_t obj_size = 0;
     uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
-    uintptr_t page_count = 1;
 
     /* If the object is in the uniform pages of small objects (outside the
        nursery), then it fits into one page.  Otherwise, we need to compute
        it based on its location and size. */
-    if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) == 0) {
-
+    if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0) {
+        pages_privatize(first_page, 1);
+    }
+    else {
         /* get the size of the object */
         obj_size = stmcb_size_rounded_up(
             (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
@@ -45,9 +46,8 @@ void _stm_write_slowpath(object_t *obj)
         /* that's the page *following* the last page with the object */
         uintptr_t end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
 
-        page_count = end_page - first_page;
+        pages_privatize(first_page, end_page - first_page);
     }
-    pages_privatize(first_page, page_count);
 
 
     /* do a read-barrier *before* the safepoints that may be issued in
@@ -246,12 +246,16 @@ void stm_commit_transaction(void)
     /* copy modified object versions to other threads */
     push_modified_to_other_segments();
 
+    /* reset the creation markers, and if necessary (i.e. if the page the
+       data is on is not SHARED) copy the data to other threads.  The
+       hope is that it's rarely necessary. */
+    reset_all_creation_markers_and_push_created_data();
+
     /* done */
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     release_thread_segment(tl);
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
-    reset_all_creation_markers();
 
     mutex_unlock();
 }

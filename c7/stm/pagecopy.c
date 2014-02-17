@@ -1,28 +1,37 @@
 
+#define PAGECOPY_128(dest, src)                                         \
+        asm volatile("movdqa (%0), %%xmm0\n"                            \
+                     "movdqa 16(%0), %%xmm1\n"                          \
+                     "movdqa 32(%0), %%xmm2\n"                          \
+                     "movdqa 48(%0), %%xmm3\n"                          \
+                     "movdqa %%xmm0, (%1)\n"                            \
+                     "movdqa %%xmm1, 16(%1)\n"                          \
+                     "movdqa %%xmm2, 32(%1)\n"                          \
+                     "movdqa %%xmm3, 48(%1)\n"                          \
+                     "movdqa 64(%0), %%xmm0\n"                          \
+                     "movdqa 80(%0), %%xmm1\n"                          \
+                     "movdqa 96(%0), %%xmm2\n"                          \
+                     "movdqa 112(%0), %%xmm3\n"                         \
+                     "movdqa %%xmm0, 64(%1)\n"                          \
+                     "movdqa %%xmm1, 80(%1)\n"                          \
+                     "movdqa %%xmm2, 96(%1)\n"                          \
+                     "movdqa %%xmm3, 112(%1)\n"                         \
+                     :                                                  \
+                     : "r"(src), "r"(dest)                              \
+                     : "xmm0", "xmm1", "xmm2", "xmm3", "memory")
+
 static void pagecopy(void *dest, const void *src)
 {
     unsigned long i;
-    for (i=0; i<4096/128; i++) {
-        asm volatile("movdqa (%0), %%xmm0\n"
-                     "movdqa 16(%0), %%xmm1\n"
-                     "movdqa 32(%0), %%xmm2\n"
-                     "movdqa 48(%0), %%xmm3\n"
-                     "movdqa %%xmm0, (%1)\n"
-                     "movdqa %%xmm1, 16(%1)\n"
-                     "movdqa %%xmm2, 32(%1)\n"
-                     "movdqa %%xmm3, 48(%1)\n"
-                     "movdqa 64(%0), %%xmm0\n"
-                     "movdqa 80(%0), %%xmm1\n"
-                     "movdqa 96(%0), %%xmm2\n"
-                     "movdqa 112(%0), %%xmm3\n"
-                     "movdqa %%xmm0, 64(%1)\n"
-                     "movdqa %%xmm1, 80(%1)\n"
-                     "movdqa %%xmm2, 96(%1)\n"
-                     "movdqa %%xmm3, 112(%1)\n"
-                     :
-                     : "r"(src + 128*i), "r"(dest + 128*i)
-                     : "xmm0", "xmm1", "xmm2", "xmm3", "memory");
+    for (i = 0; i < 4096 / 128; i++) {
+        PAGECOPY_128(dest + 128*i, src + 128*i);
     }
+}
+
+static void pagecopy_256(void *dest, const void *src)
+{
+    PAGECOPY_128(dest,       src      );
+    PAGECOPY_128(dest + 128, src + 128);
 }
 
 #if 0   /* XXX enable if detected on the cpu */
