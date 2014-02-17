@@ -110,7 +110,7 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_write(lp) # privatize page
         p2 = stm_get_real_address(lp)
-        assert p1 != p2
+        assert p1 == p2       # no collection occurred
         assert stm_get_char(lp) == 'u'
         self.commit_transaction()
 
@@ -131,9 +131,9 @@ class TestBasic(BaseTest):
         self.commit_transaction()
         lp2 = self.pop_root()
         lp = self.pop_root()
-        
+
         self.switch(0)
-        
+
         self.start_transaction()
         stm_write(lp) # privatize page
         assert stm_get_char(lp) == 'u'
@@ -150,6 +150,29 @@ class TestBasic(BaseTest):
         assert stm_get_char(lp) == 'x'
         assert stm_get_char(lp2) == 'y'
         self.commit_transaction()
+
+    def test_commit_fresh_object3(self):
+        # make objects lpx; then privatize the page by committing changes
+        # to it; then create lpy in the same page.  Check that lpy is
+        # visible from the other thread.
+        self.start_transaction()
+        lpx = stm_allocate(16)
+        stm_set_char(lpx, '.')
+        self.commit_transaction()
+
+        self.start_transaction()
+        stm_set_char(lpx, 'X')
+        self.commit_transaction()
+
+        self.start_transaction()
+        lpy = stm_allocate(16)
+        stm_set_char(lpy, 'y')
+        self.commit_transaction()
+
+        self.switch(1)
+        self.start_transaction()
+        assert stm_get_char(lpx) == 'X'
+        assert stm_get_char(lpy) == 'y'
 
     def test_simple_refs(self):
         self.start_transaction()
