@@ -55,6 +55,11 @@ bool _stm_in_nursery(object_t *obj)
 /************************************************************/
 
 
+static void minor_trace_if_young(object_t **pobj)
+{
+    //...
+    abort();
+}
 
 static void minor_trace_roots(void)
 {
@@ -85,7 +90,7 @@ static void do_minor_collection(void)
 {
     /* all other threads are paused in safe points during the whole
        minor collection */
-    assert_has_mutex();
+    assert(_has_mutex());
 
     minor_trace_roots();
 
@@ -119,7 +124,7 @@ static void stm_minor_collection(uint64_t request_size)
     /* We just waited here, either from mutex_lock() or from cond_wait(),
        so we should check again if another thread did the minor
        collection itself */
-    if (nursery_ctl.used + bytes <= NURSERY_SIZE)
+    if (nursery_ctl.used + request_size <= NURSERY_SIZE)
         goto exit;
 
     if (!try_wait_for_other_safe_points(SP_SAFE_POINT_CAN_COLLECT))
@@ -163,7 +168,7 @@ stm_char *_stm_allocate_slowpath(ssize_t size_rounded_up)
     STM_SEGMENT->nursery_current -= size_rounded_up;  /* restore correct val */
 
     if (collectable_safe_point())
-        return stm_allocate(size_rounded_up);
+        return (stm_char *)stm_allocate(size_rounded_up);
 
     if (size_rounded_up < MEDIUM_OBJECT) {
         /* This is a small object.  The current section is really full.

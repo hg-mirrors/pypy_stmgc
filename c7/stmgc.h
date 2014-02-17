@@ -185,7 +185,7 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
     stm_char *p = STM_SEGMENT->nursery_current;
     stm_char *end = p + size_rounded_up;
     STM_SEGMENT->nursery_current = end;
-    if (UNLIKELY((uintptr_t)end > STM_SEGMENT->nursery_section_end))
+    if (UNLIKELY((uintptr_t)end > STM_SEGMENT->v_nursery_section_end))
         p = _stm_allocate_slowpath(size_rounded_up);
     return (object_t *)p;
 }

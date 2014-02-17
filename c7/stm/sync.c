@@ -76,9 +76,9 @@ static inline void mutex_unlock(void)
     }
 }
 
-static inline void assert_has_mutex(void)
+static inline bool _has_mutex(void)
 {
-    assert(pthread_mutex_trylock(&sync_ctl.global_mutex) == EBUSY);
+    return pthread_mutex_trylock(&sync_ctl.global_mutex) == EBUSY;
 }
 
 static inline void cond_wait(void)
@@ -110,7 +110,7 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
 {
     /* This function acquires a segment for the currently running thread,
        and set up the GS register if it changed. */
-    assert_has_mutex();
+    assert(_has_mutex());
     assert(_is_tl_registered(tl));
 
  retry:;
@@ -145,7 +145,7 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
 
 static void release_thread_segment(stm_thread_local_t *tl)
 {
-    assert_has_mutex();
+    assert(_has_mutex());
 
     assert(STM_SEGMENT->running_thread == tl);
     STM_SEGMENT->running_thread = NULL;
@@ -215,7 +215,7 @@ static bool try_wait_for_other_safe_points(int requested_safe_point_kind)
        try_wait_for_other_safe_points() while another is currently blocked
        in the cond_wait() in this same function.
     */
-    assert_has_mutex();
+    assert(_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT_CAN_COLLECT);
 
     long i;
@@ -247,9 +247,9 @@ static bool try_wait_for_other_safe_points(int requested_safe_point_kind)
         if (i == STM_SEGMENT->segment_num)
             continue;    /* ignore myself */
 
-        struct stm_priv_segment_info_s *other_pseg = get_priv_segment(i);
-        if (other_pseg->v_nursery_section_end == NSE_SIGNAL)
-            other_pseg->v_nursery_section_end = NSE_SIGNAL_DONE;
+        struct stm_segment_info_s *other_seg = get_segment(i);
+        if (other_seg->v_nursery_section_end == NSE_SIGNAL)
+            other_seg->v_nursery_section_end = NSE_SIGNAL_DONE;
     }
     cond_broadcast();   /* to wake up the other threads, but later,
                            when they get the mutex again */
