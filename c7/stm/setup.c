@@ -110,16 +110,25 @@ void stm_teardown(void)
 
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
+    int num;
     if (stm_thread_locals == NULL) {
         stm_thread_locals = tl->next = tl->prev = tl;
+        num = 0;
     }
     else {
         tl->next = stm_thread_locals;
         tl->prev = stm_thread_locals->prev;
         stm_thread_locals->prev->next = tl;
         stm_thread_locals->prev = tl;
+        num = tl->prev->associated_segment_num + 1;
     }
-    tl->associated_segment_num = NB_SEGMENTS;
+
+    /* assign numbers consecutively, but that's for tests; we could also
+       assign the same number to all of them and they would get their own
+       numbers automatically. */
+    num = num % NB_SEGMENTS;
+    tl->associated_segment_num = num;
+    set_gs_register(get_segment_base(num));
 }
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)

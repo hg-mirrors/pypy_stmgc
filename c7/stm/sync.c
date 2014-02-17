@@ -22,7 +22,7 @@ static union {
         pthread_mutex_t global_mutex;
         pthread_cond_t global_cond;
         /* some additional pieces of global state follow */
-        uint8_t in_use[NB_SEGMENTS + 1];   /* 1 if running a pthread */
+        uint8_t in_use[NB_SEGMENTS];   /* 1 if running a pthread */
         uint64_t global_time;
     };
     char reserved[128];
@@ -36,7 +36,6 @@ static void setup_sync(void)
         perror("mutex/cond initialization");
         abort();
     }
-    sync_ctl.in_use[NB_SEGMENTS] = 0xff;
 }
 
 static void teardown_sync(void)
@@ -118,6 +117,11 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
     if (sync_ctl.in_use[num] == 0) {
         /* fast-path: we can get the same segment number than the one
            we had before.  The value stored in GS is still valid. */
+#ifdef STM_TESTS
+        /* that can be optimized away, except during tests, because
+           they use only one thread */
+        set_gs_register(get_segment_base(num));
+#endif
         goto got_num;
     }
     /* Look for the next free segment.  If there is none, wait for
@@ -138,6 +142,7 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
 
  got_num:
     sync_ctl.in_use[num] = 1;
+    assert(STM_SEGMENT->segment_num == num);
     assert(STM_SEGMENT->running_thread == NULL);
     STM_SEGMENT->running_thread = tl;
     STM_PSEGMENT->start_time = ++sync_ctl.global_time;
@@ -162,10 +167,8 @@ static bool _running_transaction(void)
 bool _stm_in_transaction(stm_thread_local_t *tl)
 {
     int num = tl->associated_segment_num;
-    if (num < NB_SEGMENTS)
-        return get_segment(num)->running_thread == tl;
-    else
-        return false;
+    assert(num < NB_SEGMENTS);
+    return get_segment(num)->running_thread == tl;
 }
 
 void _stm_test_switch(stm_thread_local_t *tl)
