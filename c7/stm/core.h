@@ -35,9 +35,8 @@ enum {
        _stm_write_slowpath() is called, and then the flag is set to
        say "called once already, no need to call again". */
     GCFLAG_WRITE_BARRIER_CALLED = _STM_GCFLAG_WRITE_BARRIER_CALLED,
-    /* objects that are allocated crossing a page boundary have this
-       flag set */
-    GCFLAG_CROSS_PAGE = 0x02,
+    /* allocated by gcpage.c in uniformly-sized pages of small objects */
+    GCFLAG_SMALL_UNIFORM = 0x02,
     /* only used during collections to mark an obj as moved out of the
        generation it was in */
     GCFLAG_MOVED = 0x04,

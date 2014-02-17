@@ -28,13 +28,25 @@ void _stm_write_slowpath(object_t *obj)
     /* otherwise, we need to privatize the pages containing the object,
        if they are still SHARED_PAGE.  The common case is that there is
        only one page in total. */
-    if (UNLIKELY((obj->stm_flags & GCFLAG_CROSS_PAGE) != 0)) {
-        abort();
-        //...
+    size_t size = 0;
+    uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
+    uintptr_t page_count = 1;
+
+    /* If the object is in the uniform pages of small objects (outside the
+       nursery), then it fits into one page.  Otherwise, we need to compute
+       it based on its location and size. */
+    if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) == 0) {
+
+        /* get the size of the object */
+        size = stmcb_size_rounded_up(
+            (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
+
+        /* that's the page *following* the last page with the object */
+        uintptr_t end_page = (((uintptr_t)obj) + size + 4095) / 4096UL;
+
+        page_count = end_page - first_page;
     }
-    else {
-        pages_privatize(((uintptr_t)obj) / 4096UL, 1);
-    }
+    pages_privatize(first_page, page_count);
 
     /* do a read-barrier *before* the safepoints that may be issued in
        contention_management() */

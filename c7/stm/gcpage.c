@@ -94,8 +94,5 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
     memset(addr, 0, size_rounded_up);
 
     stm_char* o = (stm_char *)(addr - stm_object_pages);
-    if (CROSS_PAGE_BOUNDARY(o, o + size_rounded_up))
-        ((object_t *)o)->stm_flags = GCFLAG_CROSS_PAGE;
-
     return (object_t *)o;
 }
