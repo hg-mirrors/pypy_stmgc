@@ -25,10 +25,11 @@ void _stm_write_slowpath(object_t *obj)
         return;
     }
 
+
     /* otherwise, we need to privatize the pages containing the object,
        if they are still SHARED_PAGE.  The common case is that there is
        only one page in total. */
-    size_t size = 0;
+    size_t obj_size = 0;
     uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
     uintptr_t page_count = 1;
 
@@ -38,39 +39,39 @@ void _stm_write_slowpath(object_t *obj)
     if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) == 0) {
 
         /* get the size of the object */
-        size = stmcb_size_rounded_up(
+        obj_size = stmcb_size_rounded_up(
             (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
 
         /* that's the page *following* the last page with the object */
-        uintptr_t end_page = (((uintptr_t)obj) + size + 4095) / 4096UL;
+        uintptr_t end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
 
         page_count = end_page - first_page;
     }
     pages_privatize(first_page, page_count);
+
 
     /* do a read-barrier *before* the safepoints that may be issued in
        contention_management() */
     stm_read(obj);
 
     /* claim the write-lock for this object */
-    do {
-        uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
-        uint8_t lock_num = STM_PSEGMENT->write_lock_num;
-        uint8_t prev_owner;
-        prev_owner = __sync_val_compare_and_swap(&write_locks[lock_idx],
-                                                 0, lock_num);
+ retry:;
+    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
+    uint8_t lock_num = STM_PSEGMENT->write_lock_num;
+    uint8_t prev_owner;
+    prev_owner = __sync_val_compare_and_swap(&write_locks[lock_idx],
+                                             0, lock_num);
 
-        /* if there was no lock-holder, we are done */
-        if (LIKELY(prev_owner == 0))
-            break;
-
+    /* if there was no lock-holder, we are done; otherwise... */
+    if (UNLIKELY(prev_owner != 0)) {
         /* otherwise, call the contention manager, and then possibly retry.
            By construction it should not be possible that the owner
            of the object is already us */
         mutex_lock();
         contention_management(prev_owner - 1, true);
         mutex_unlock();
-    } while (1);
+        goto retry;
+    }
 
     /* add the write-barrier-already-called flag ONLY if we succeeded in
        getting the write-lock */
