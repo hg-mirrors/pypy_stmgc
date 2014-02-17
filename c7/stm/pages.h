@@ -33,3 +33,4 @@ static void set_creation_markers(stm_char *p, uint64_t size, int newvalue);
 static uint8_t get_single_creation_marker(stm_char *p);
 static void set_single_creation_marker(stm_char *p, int newvalue);
 static void reset_all_creation_markers(void);
+static void reset_all_creation_markers_and_push_created_data(void);
