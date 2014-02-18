@@ -37,6 +37,10 @@ static void contention_management(uint8_t other_segment_num, bool wait)
         abort_with_mutex();
     }
     else if (wait) {
+#ifdef STM_TESTS
+        /* abort anyway for tests. We mustn't call cond_wait() */
+        abort_with_mutex();
+#endif
         /* otherwise, we will issue a safe point and wait: */
         STM_PSEGMENT->safe_point = SP_SAFE_POINT_CANNOT_COLLECT;
 
