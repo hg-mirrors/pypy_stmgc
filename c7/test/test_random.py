@@ -153,20 +153,26 @@ class ThreadState(object):
 
         
 class GlobalState(object):
-    def __init__(self, rnd):
+    def __init__(self, ex, rnd):
+        self.ex = ex
         self.rnd = rnd
         self.thread_states = []
         self.shared_roots = []
         self.committed_transaction_state = TransactionState(0)
 
     def push_state_to_other_threads(self, tr_state):
+        assert not tr_state.must_abort
         for ts in self.thread_states:
             other_trs = ts.transaction_state
             if other_trs is None or other_trs is tr_state:
                 continue
             other_trs.update_from_committed(tr_state, only_new=True)
 
+        if tr_state.must_abort:
+            self.ex.do('# conflict while pushing to other threads')
+
     def check_for_write_write_conflicts(self, tr_state):
+        assert not tr_state.must_abort
         for ts in self.thread_states:
             other_trs = ts.transaction_state
             if other_trs is None or other_trs is tr_state:
@@ -174,8 +180,12 @@ class GlobalState(object):
             
             if other_trs.write_set & tr_state.write_set:
                 contention_management(tr_state, other_trs, True)
+                
+        if tr_state.must_abort:
+            self.ex.do('# write-write conflict')
 
     def check_for_write_read_conflicts(self, tr_state):
+        assert not tr_state.must_abort
         for ts in self.thread_states:
             other_trs = ts.transaction_state
             if other_trs is None or other_trs is tr_state:
@@ -183,6 +193,9 @@ class GlobalState(object):
             
             if other_trs.read_set & tr_state.write_set:
                 contention_management(tr_state, other_trs)
+                
+        if tr_state.must_abort:
+            self.ex.do('# write-read conflict')
 
 
 # ========== STM OPERATIONS ==========
@@ -271,9 +284,15 @@ class TestRandom(BaseTest):
         N_OBJECTS = 5
         N_THREADS = 2
         ex = Exec(self)
+        ex.do("""
+################################################################
+################################################################
+################################################################
+################################################################
+        """)
         ex.do('# initialization')
 
-        global_state = GlobalState(rnd)
+        global_state = GlobalState(ex, rnd)
         for i in range(N_THREADS):
             global_state.thread_states.append(
                 ThreadState(i, global_state))
