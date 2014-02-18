@@ -66,6 +66,8 @@ bool _check_abort_transaction(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
+void _set_ptr(object_t *obj, int n, object_t *v);
+object_t * _get_ptr(object_t *obj, int n);
 
 void _stm_start_safe_point(void);
 bool _check_stop_safe_point(void);
@@ -77,9 +79,6 @@ void _stm_set_nursery_free_count(uint64_t free_count);
 TEMPORARILY_DISABLED = """
 void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_become_inevitable(char* msg);
-
-void _set_ptr(object_t *obj, int n, object_t *v);
-object_t * _get_ptr(object_t *obj, int n);
 
 void _stm_minor_collect();
 
