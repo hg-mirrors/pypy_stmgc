@@ -339,3 +339,32 @@ static void abort_with_mutex(void)
     assert(jmpbuf_ptr != (stm_jmpbuf_t *)-1);    /* for tests only */
     __builtin_longjmp(*jmpbuf_ptr, 1);
 }
+
+void _stm_become_inevitable(char *msg)
+{
+    long i;
+
+    mutex_lock();
+    switch (STM_PSEGMENT->transaction_state) {
+
+    case TS_INEVITABLE:
+        break;   /* already good */
+
+    case TS_REGULAR:
+        /* become inevitable */
+        for (i = 0; i < NB_SEGMENTS; i++) {
+            if (get_priv_segment(i)->transaction_state == TS_INEVITABLE) {
+                abort_with_mutex();
+            }
+        }
+        STM_PSEGMENT->transaction_state = TS_INEVITABLE;
+        break;
+
+    case TS_MUST_ABORT:
+        abort_with_mutex();
+
+    default:
+        assert(!"invalid transaction_state in become_inevitable");
+    }
+    mutex_unlock();
+}

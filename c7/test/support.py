@@ -63,6 +63,7 @@ void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
+bool _check_become_inevitable();
 
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
@@ -78,7 +79,6 @@ void _stm_set_nursery_free_count(uint64_t free_count);
 
 TEMPORARILY_DISABLED = """
 void stm_start_inevitable_transaction(stm_thread_local_t *tl);
-void stm_become_inevitable(char* msg);
 
 void _stm_minor_collect();
 
@@ -115,7 +115,6 @@ void _stm_chunk_pages(struct object_s *data, uintptr_t *start, uintptr_t *num);
 
 void stm_become_inevitable(char* msg);
 void stm_start_inevitable_transaction();
-bool _checked_stm_become_inevitable();
 """
 
 
@@ -137,22 +136,6 @@ typedef TLPREFIX struct myobj_s myobj_t;
 uint8_t _stm_get_flags(object_t *obj) {
     return obj->stm_flags;
 }
-
-#if 0
-bool _checked_stm_become_inevitable() {
-    jmpbufptr_t here;
-    int tn = _STM_TL->thread_num;
-    if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(_STM_TL->jmpbufptr == (jmpbufptr_t*)-1);
-         _STM_TL->jmpbufptr = &here;
-         stm_become_inevitable("TEST");
-         _STM_TL->jmpbufptr = (jmpbufptr_t*)-1;
-         return 0;
-    }
-    _stm_dbg_get_tl(tn)->jmpbufptr = (jmpbufptr_t*)-1;
-    return 1;
-}
-#endif
 
 bool _checked_stm_write(object_t *object) {
     stm_jmpbuf_t here;
@@ -203,6 +186,20 @@ bool _check_abort_transaction(void) {
          assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
          segment->jmpbuf_ptr = &here;
          stm_abort_transaction();
+         segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
+         return 0;   // but should be unreachable in this case
+    }
+    segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
+    return 1;
+}
+
+bool _check_become_inevitable() {
+    stm_jmpbuf_t here;
+    stm_segment_info_t *segment = STM_SEGMENT;
+    if (__builtin_setjmp(here) == 0) { // returned directly
+         assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
+         segment->jmpbuf_ptr = &here;
+         stm_become_inevitable("TEST");
          segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
          return 0;   // but should be unreachable in this case
     }
@@ -366,7 +363,7 @@ def stm_stop_safe_point():
         raise Conflict()
 
 def stm_become_inevitable():
-    if lib._checked_stm_become_inevitable():
+    if lib._check_become_inevitable():
         raise Conflict()
 
 def stm_minor_collect():
