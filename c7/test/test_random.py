@@ -19,13 +19,18 @@ def get_new_root_name():
     return "lp%d" % _root_numbering
 
 _global_time = 0
-def contention_management(first_trs, second_trs):
-    if first_trs.must_abort or second_trs.must_abort:
-        return
-    if first_trs.start_time < second_trs.start_time:
-        second_trs.must_abort = True
+def contention_management(our_trs, other_trs, wait=False):
+    if other_trs.start_time < our_trs.start_time:
+        pass
     else:
-        first_trs.must_abort = True
+        other_trs.must_abort = True
+        
+    if not other_trs.must_abort:
+        our_trs.must_abort = True
+    elif wait:
+        # abort anyway:
+        our_trs.must_abort = True
+        
 
 class TransactionState(object):
     """maintains read/write sets"""
@@ -168,7 +173,7 @@ class GlobalState(object):
                 continue
             
             if other_trs.write_set & tr_state.write_set:
-                contention_management(tr_state, other_trs)
+                contention_management(tr_state, other_trs, True)
 
     def check_for_write_read_conflicts(self, tr_state):
         for ts in self.thread_states:
