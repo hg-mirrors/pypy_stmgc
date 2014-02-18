@@ -62,7 +62,7 @@ struct stm_segment_info_s {
     int segment_num;
     char *segment_base;
     stm_char *nursery_current;
-    volatile uintptr_t v_nursery_section_end;  /* see nursery.h */
+    uintptr_t v_nursery_section_end;  /* see nursery.h */
     struct stm_thread_local_s *running_thread;
     stm_jmpbuf_t *jmpbuf_ptr;
 };
