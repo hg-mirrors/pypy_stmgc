@@ -227,6 +227,13 @@ static bool try_wait_for_other_safe_points(int requested_safe_point_kind)
         if (i == STM_SEGMENT->segment_num)
             continue;    /* ignore myself */
 
+        /* If the other thread is SP_NO_TRANSACTION, then it can be
+           ignored here: as long as we have the mutex, it will remain
+           SP_NO_TRANSACTION.  If it is already at a suitable safe point,
+           it must be in a cond_wait(), so it will not resume as long
+           as we hold the mutex.  Thus the only cases is if it is
+           SP_RUNNING, or at the wrong kind of safe point.
+        */
         struct stm_priv_segment_info_s *other_pseg = get_priv_segment(i);
         if (other_pseg->safe_point == SP_RUNNING ||
             (requested_safe_point_kind == SP_SAFE_POINT_CAN_COLLECT &&

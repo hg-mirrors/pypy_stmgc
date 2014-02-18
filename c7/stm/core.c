@@ -257,6 +257,9 @@ void stm_commit_transaction(void)
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
 
+    /* we did cond_broadcast() above already, in
+       try_wait_for_other_safe_points().  It may wake up
+       other threads in cond_wait() for a free segment. */
     mutex_unlock();
 }
 
