@@ -243,7 +243,7 @@ stm_char *_stm_allocate_slowpath(ssize_t size_rounded_up)
 
 static void align_nursery_at_transaction_start(void)
 {
-    /* When the transaction start, we must align the 'nursery_current'
+    /* When the transaction starts, we must align the 'nursery_current'
        and set creation markers for the part of the section the follows.
     */
     uintptr_t c = (uintptr_t)STM_SEGMENT->nursery_current;
