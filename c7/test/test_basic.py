@@ -265,7 +265,32 @@ class TestBasic(BaseTest):
         self.commit_transaction()
         assert p1[HDR] == 'b'
 
-    def test_not_resolve_write_read_conflict(self):
+    def test_not_resolve_write_read_conflict_1(self):
+        self.start_transaction()
+        lp1 = stm_allocate(16)
+        stm_set_char(lp1, 'a')
+        self.push_root(lp1)
+        self.commit_transaction()
+        lp1 = self.pop_root()
+
+        self.switch(1)
+        self.start_transaction()
+        #
+        self.switch(0)
+        self.start_transaction()
+        stm_read(lp1)
+        #
+        self.switch(1)
+        stm_write(lp1)
+        stm_set_char(lp1, 'b')
+        self.commit_transaction()
+        #
+        # transaction from thread 1 is older than from thread 0
+        py.test.raises(Conflict, self.switch, 0)
+        self.start_transaction()
+        assert stm_get_char(lp1) == 'b'
+
+    def test_not_resolve_write_read_conflict_2(self):
         self.start_transaction()
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'a')
@@ -280,11 +305,8 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_write(lp1)
         stm_set_char(lp1, 'b')
-        self.commit_transaction()
-        #
-        py.test.raises(Conflict, self.switch, 0)
-        self.start_transaction()
-        assert stm_get_char(lp1) == 'b'
+        # transaction from thread 1 is newer than from thread 0
+        py.test.raises(Conflict, self.commit_transaction)
 
     def test_resolve_write_read_conflict(self):
         self.start_transaction()
@@ -335,195 +357,28 @@ class TestBasic(BaseTest):
         self.start_transaction()
         assert stm_get_char(lp1) == 'a'
 
-    def test_many_allocs(self):
-        obj_size = 1024
-        num = (lib.NB_NURSERY_PAGES * 4096) / obj_size + 100 # more than what fits in the nursery
-        
+    def test_inevitable_transaction_has_priority(self):
         self.start_transaction()
-        for i in range(num):
-            new = stm_allocate(obj_size)
-            self.push_root(new)
-
-        old = []
-        young = []
-        for _ in range(num):
-            r = self.pop_root()
-            if is_in_nursery(r):
-                young.append(r)
-            else:
-                old.append(r)
-                
-        assert old
-        assert young
-
-    def test_larger_than_section(self):
-        obj_size = lib.NURSERY_SECTION + 16
-        
-        self.start_transaction()
-        new = stm_allocate(obj_size)
-        assert not is_in_nursery(new)
-        
-
-    def test_large_obj_alloc(self):
-        # test obj which doesn't fit into the size_classes
-        # for now, we will still allocate it in the nursery.
-        # expects: LARGE_OBJECT_WORDS  36
-        size_class = 1000 # too big
-        obj_size = size_class * 8
-        assert obj_size > 4096 # we want more than 1 page
-        assert obj_size < 4096 * 1024 # in the nursery
-
-        self.start_transaction()
-        new = stm_allocate(obj_size)
-        assert is_in_nursery(new)
-        assert len(stm_get_obj_pages(new)) == 2
-        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
-                == [lib.PRIVATE_PAGE]*2)
-        self.push_root(new)
-        stm_minor_collect()
-        new = self.pop_root()
-
-        assert len(stm_get_obj_pages(new)) == 2
-        # assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
-        #         == [lib.UNCOMMITTED_SHARED_PAGE]*2)
-
-        assert not is_in_nursery(new)
-
-    def test_large_obj_write(self):
-        # test obj which doesn't fit into the size_classes
-        # expects: LARGE_OBJECT_WORDS  36
-        size_class = 1000 # too big
-        obj_size = size_class * 8
-        assert obj_size > 4096 # we want more than 1 page
-        assert obj_size < 4096 * 1024 # in the nursery
-
-        self.start_transaction()
-        new = stm_allocate(obj_size)
-        assert is_in_nursery(new)
-        self.push_root(new)
+        lp1 = stm_allocate(16)
+        stm_set_char(lp1, 'a')
+        self.push_root(lp1)
         self.commit_transaction()
-        new = self.pop_root()
-
-        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
-                == [lib.SHARED_PAGE]*2)
+        lp1 = self.pop_root()
 
         self.start_transaction()
-        stm_write(new)
-        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
-                == [lib.PRIVATE_PAGE]*2)
-        
-        # write to 2nd page of object!!
-        wnew = stm_get_real_address(new)
-        wnew[4097] = 'x'
-
+        stm_read(lp1)
+        #
         self.switch(1)
         self.start_transaction()
-        stm_read(new)
-        rnew = stm_get_real_address(new)
-        assert rnew[4097] == '\0'
-        
-    def test_partial_alloced_pages(self):
-        self.start_transaction()
-        new = stm_allocate(16)
-        self.push_root(new)
-        stm_minor_collect()
-        new = self.pop_root()
-        # assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.UNCOMMITTED_SHARED_PAGE
-        # assert not (stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED)
-
-        self.commit_transaction()
-        assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.SHARED_PAGE
-        assert not (stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED)
-
-        self.start_transaction()
-        newer = stm_allocate(16)
-        self.push_root(newer)
-        stm_minor_collect()
-        newer = self.pop_root()
-        # 'new' is still in shared_page and committed
-        assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.SHARED_PAGE
-        assert not (stm_get_flags(new) & lib.GCFLAG_NOT_COMMITTED)
-        # 'newer' is now part of the SHARED page with 'new', but
-        # marked as UNCOMMITTED, so no privatization has to take place:
-        assert stm_get_obj_pages(new) == stm_get_obj_pages(newer)
-        assert stm_get_flags(newer) & lib.GCFLAG_NOT_COMMITTED
-        stm_write(newer) # does not privatize
-        assert stm_get_page_flag(stm_get_obj_pages(newer)[0]) == lib.SHARED_PAGE
-        self.commit_transaction()
-        
-        assert stm_get_page_flag(stm_get_obj_pages(newer)[0]) == lib.SHARED_PAGE
-        assert not (stm_get_flags(newer) & lib.GCFLAG_NOT_COMMITTED)
-        
-    def test_reset_partial_alloc_pages(self):
-        self.start_transaction()
-        new = stm_allocate(16)
-        stm_set_char(new, 'a')
-        self.push_root(new)
-        stm_minor_collect()
-        new = self.pop_root()
-        self.abort_transaction()
-
-        self.start_transaction()
-        newer = stm_allocate(16)
-        self.push_root(newer)
-        stm_minor_collect()
-        newer = self.pop_root()
-        assert stm_get_real_address(new) == stm_get_real_address(newer)
-        assert stm_get_char(newer) == '\0'
-
-    def test_reuse_page(self):
-        self.start_transaction()
-        new = stm_allocate(16)
-        self.push_root(new)
-        stm_minor_collect()
-        new = self.pop_root()
-        # assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == lib.UNCOMMITTED_SHARED_PAGE
-        self.abort_transaction()
-
-        self.start_transaction()
-        newer = stm_allocate(16)
-        self.push_root(newer)
-        stm_minor_collect()
-        newer = self.pop_root()
-        assert new == newer
-
-    def test_write_to_old_after_minor(self):
-        self.start_transaction()
-        new = stm_allocate(16)
-        self.push_root(new)
-        stm_minor_collect()
-        old = self.pop_root()
-        self.commit_transaction()
-
-        self.start_transaction()
-        stm_write(old) # old objs to trace
-        stm_set_char(old, 'x')
-        stm_minor_collect()
-        stm_write(old) # old objs to trace
-        stm_set_char(old, 'y')
-        self.commit_transaction()
-        
-
-    def test_inevitable_transaction(self):
-        py.test.skip("stm_write and self.commit_transaction"
-                     " of an inevitable tr. is not testable"
-                     " since they wait for the other thread"
-                     " to synchronize and possibly abort")
-
-        old = stm_allocate_old(16)
-        self.start_transaction()
-
-        self.switch(1)
-        self.start_transaction()
-        stm_write(old)
-
-        self.switch(0)
+        stm_write(lp1)
+        stm_set_char(lp1, 'b')
         stm_become_inevitable()
-        stm_write(old) # t1 needs to abort, not us
         self.commit_transaction()
+        #
+        py.test.raises(Conflict, self.switch, 0)
+        self.start_transaction()
+        assert stm_get_char(lp1) == 'b'
 
-        py.test.raises(Conflict, self.switch, 1)
-        
     # def test_resolve_write_write_no_conflict(self):
     #     self.start_transaction()
     #     p1 = stm_allocate(16)
