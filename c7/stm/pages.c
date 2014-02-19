@@ -189,7 +189,7 @@ static void reset_all_creation_markers_and_push_created_data(void)
                         dataofs += 256;
                     }
                 }
-                p[0] = 0;
+                p[0] = 0; _duck();
                 p[1] = 0;
                 p += 2;
             }
