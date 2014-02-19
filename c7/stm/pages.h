@@ -22,9 +22,10 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count);
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
 
 inline static void pages_privatize(uintptr_t pagenum, uintptr_t count) {
-    while (flag_page_private[pagenum + count - 1] == PRIVATE_PAGE) {
+    while (flag_page_private[pagenum] == PRIVATE_PAGE) {
         if (!--count)
             return;
+        pagenum++;
     }
     _pages_privatize(pagenum, count);
 }

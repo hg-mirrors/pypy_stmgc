@@ -158,7 +158,6 @@ class TestBasic(BaseTest):
         # visible from the other thread.
         self.start_transaction()
         lpx = stm_allocate(16)
-        print lpx
         stm_set_char(lpx, '.')
         self.commit_transaction()
 
@@ -168,9 +167,7 @@ class TestBasic(BaseTest):
 
         self.start_transaction()
         lpy = stm_allocate(16)
-        print lpy
         stm_set_char(lpy, 'y')
-        print "LAST COMMIT"
         self.commit_transaction()
 
         self.switch(1)
@@ -378,6 +375,32 @@ class TestBasic(BaseTest):
         py.test.raises(Conflict, self.switch, 0)
         self.start_transaction()
         assert stm_get_char(lp1) == 'b'
+
+    def test_object_on_two_pages(self):
+        self.start_transaction()
+        lp1 = stm_allocate(4104)
+        stm_set_char(lp1, '0')
+        stm_set_char(lp1, '1', offset=4103)
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        stm_set_char(lp1, 'a')
+        stm_set_char(lp1, 'b', offset=4103)
+        #
+        self.switch(1)
+        self.start_transaction()
+        assert stm_get_char(lp1) == '0'
+        assert stm_get_char(lp1, offset=4103) == '1'
+        self.commit_transaction()
+        #
+        self.switch(0)
+        self.commit_transaction()
+        #
+        self.switch(1)
+        self.start_transaction()
+        assert stm_get_char(lp1) == 'a'
+        assert stm_get_char(lp1, offset=4103) == 'b'
+        self.commit_transaction()
 
     # def test_resolve_write_write_no_conflict(self):
     #     self.start_transaction()
