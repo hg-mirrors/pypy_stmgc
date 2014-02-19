@@ -24,4 +24,5 @@ debug-%: %.c ${H_FILES} ${C_FILES}
 build-%: %.c ${H_FILES} ${C_FILES}
 	clang -I.. -pthread  -g -O1  $< -o build-$* -Wall  ../stmgc.c
 release-%: %.c ${H_FILES} ${C_FILES}
-	clang -I.. -pthread  -g -DNDEBUG -O2 $< -o release-$* -Wall  ../stmgc.c
+	clang -I.. -pthread  -g -DNDEBUG -O2 $< -o release-$* \
+        -Wall -Wno-unused-function  ../stmgc.c
