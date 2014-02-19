@@ -7,9 +7,9 @@
 
 
 #define dprintf(args)   threadcolor_printf args
-int dprintfcolor(void);
+static int dprintfcolor(void);
 
-int threadcolor_printf(const char *format, ...)
+static int threadcolor_printf(const char *format, ...)
      __attribute__((format (printf, 1, 2)));
 
 
@@ -25,3 +25,7 @@ int threadcolor_printf(const char *format, ...)
 /* ------------------------------------------------------------ */
 #endif
 /* ------------------------------------------------------------ */
+
+
+static void stm_fatalerror(const char *format, ...)
+     __attribute__((format (printf, 1, 2), noreturn));

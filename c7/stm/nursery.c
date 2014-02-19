@@ -70,11 +70,38 @@ static void minor_trace_if_young(object_t **pobj)
         return;
 
     /* the location the object moved to is the second word in 'obj' */
-    object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
+    struct object_s *realobj = (struct object_s *)
+                                   REAL_ADDRESS(stm_object_pages, obj);
+    object_t **pforwarded_array = (object_t **)realobj;
 
-    if (UNLIKELY(obj->stm_flags & GCFLAG_MOVED)) {
+    if (realobj->stm_flags & GCFLAG_MOVED) {
         *pobj = pforwarded_array[1];    /* already moved */
         return;
+    }
+
+    /* We need to make a copy of this object.  There are three different
+       places where the copy can be located, based on four criteria.
+
+       1) object larger than GC_MEDIUM_REQUEST        => largemalloc.c
+       2) otherwise, object from current transaction  => page S
+       3) otherwise, object with the write lock       => page W
+       4) otherwise, object without the write lock    => page S
+
+       The pages S or W above are both pages of uniform sizes obtained
+       from the end of the address space.  The difference is that page S
+       can be shared, but page W needs to be privatized.
+    */
+    size_t size = stmcb_size_rounded_up(realobj);
+
+    if (1  /*size >= GC_MEDIUM_REQUEST*/) {
+        /* case 1 */
+        abort();  //...
+    }
+    else {
+        /* cases 2 to 4 */
+        abort();  //...
+        allocate_outside_nursery_small(small_alloc_shared, size);
+        allocate_outside_nursery_small(small_alloc_privtz, size);
     }
 
 #if 0
@@ -89,8 +116,6 @@ static void minor_trace_if_young(object_t **pobj)
 #endif
 
     abort();
-
-    allocate_outside_nursery(-1);
 }
 
 static void minor_trace_roots(void)
@@ -123,6 +148,8 @@ static void do_minor_collection(void)
     /* all other threads are paused in safe points during the whole
        minor collection */
     assert(_has_mutex());
+
+    check_gcpage_still_shared();
 
     minor_trace_roots();
 

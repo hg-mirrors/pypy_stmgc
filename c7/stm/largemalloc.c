@@ -364,8 +364,9 @@ static void largemalloc_init_arena(char *data_start, size_t data_size)
 
 static int largemalloc_resize_arena(size_t new_size)
 {
-    assert(new_size >= 2 * sizeof(struct malloc_chunk));
-    assert((new_size & 31) == 0);
+    if (new_size < 2 * sizeof(struct malloc_chunk))
+        return 0;
+    OPT_ASSERT((new_size & 31) == 0);
 
     new_size -= CHUNK_HEADER_SIZE;
     mchunk_t *new_last_chunk = chunk_at_offset(first_chunk, new_size);
