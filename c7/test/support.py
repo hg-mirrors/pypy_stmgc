@@ -291,6 +291,9 @@ NURSERY_SECTION_SIZE = 128*1024
 class Conflict(Exception):
     pass
 
+class EmptyStack(Exception):
+    pass
+
 def is_in_nursery(o):
     return lib._stm_in_nursery(o)
 
@@ -464,6 +467,8 @@ class BaseTest(object):
     def pop_root(self):
         tl = self.tls[self.current_thread]
         curlength = tl.shadowstack - tl.shadowstack_base
+        if curlength == 0:
+            raise EmptyStack
         assert 0 < curlength <= SHADOWSTACK_LENGTH
         tl.shadowstack -= 1
         return ffi.cast("object_t *", tl.shadowstack[0])
