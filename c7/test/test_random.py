@@ -12,6 +12,8 @@ class Exec(object):
         print >> sys.stderr, cmd
         exec cmd in globals(), self.content
 
+        
+
 _root_numbering = 0
 is_ref_type_map = {}
 def get_new_root_name(is_ref_type):
@@ -24,6 +26,8 @@ def get_new_root_name(is_ref_type):
 
 _global_time = 0
 def contention_management(our_trs, other_trs, wait=False, objs_in_conflict=None):
+    """exact copy of logic in contention.c"""
+    
     if other_trs.start_time < our_trs.start_time:
         pass
     else:
@@ -37,7 +41,10 @@ def contention_management(our_trs, other_trs, wait=False, objs_in_conflict=None)
         
 
 class TransactionState(object):
-    """maintains read/write sets"""
+    """State of a transaction running in a thread,
+    e.g. maintains read/write sets. The state will be
+    discarded on abort or pushed to other threads"""
+    
     def __init__(self, start_time):
         self.read_set = set()
         self.write_set = set()
@@ -83,7 +90,9 @@ class TransactionState(object):
         
 
 class ThreadState(object):
-    """maintains state for one thread """
+    """Maintains state for one thread. Mostly manages things
+    to be kept between transactions (e.g. saved roots) and
+    handles discarding/reseting states on transaction abort"""
     
     def __init__(self, num, global_state):
         self.num = num
@@ -167,6 +176,10 @@ class ThreadState(object):
 
         
 class GlobalState(object):
+    """Maintains the global view (in a TransactionState) on
+    objects and threads. It also handles checking for conflicts
+    between threads and pushing state to other threads"""
+    
     def __init__(self, ex, rnd):
         self.ex = ex
         self.rnd = rnd
@@ -374,19 +387,7 @@ class TestRandom(BaseTest):
         global_state.committed_transaction_state.read_set = set()
 
         # random steps:
-        remaining_steps = 200
-        while remaining_steps > 0:
-            remaining_steps -= 1
-
-            n_thread = rnd.randrange(0, N_THREADS)
-            if n_thread != curr_thread.num:
-                ex.do('#')
-                curr_thread = global_state.thread_states[n_thread]
-                OpSwitchThread().do(ex, global_state, curr_thread)
-            if curr_thread.transaction_state is None:
-                OpStartTransaction().do(ex, global_state, curr_thread)
-
-            action = rnd.choice([
+        possible_actions = [
                 OpAllocate,
                 OpAllocateRef,
                 OpWrite,
@@ -402,9 +403,26 @@ class TestRandom(BaseTest):
                 OpCommitTransaction,
                 OpAbortTransaction,
                 OpForgetRoot,
-            ])
+            ]
+        remaining_steps = 200
+        while remaining_steps > 0:
+            remaining_steps -= 1
+
+            # make sure we are in a transaction:
+            n_thread = rnd.randrange(0, N_THREADS)
+            if n_thread != curr_thread.num:
+                ex.do('#')
+                curr_thread = global_state.thread_states[n_thread]
+                OpSwitchThread().do(ex, global_state, curr_thread)
+            if curr_thread.transaction_state is None:
+                OpStartTransaction().do(ex, global_state, curr_thread)
+
+            # do something random
+            action = rnd.choice(possible_actions)
             action().do(ex, global_state, curr_thread)
 
+        # to make sure we don't have aborts in the test's teardown method,
+        # we will simply stop all running transactions
         for ts in global_state.thread_states:
             if ts.transaction_state is not None:
                 if curr_thread != ts:
@@ -420,7 +438,7 @@ class TestRandom(BaseTest):
     def _make_fun(seed):
         def test_fun(self):
             self.test_fixed_16_bytes_objects(seed)
-        test_fun.__name__ = 'test_fixed_16_bytes_objects_%d' % seed
+        test_fun.__name__ = 'test_random_%d' % seed
         return test_fun
 
     for _seed in range(5000, 5100):
