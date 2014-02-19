@@ -25,7 +25,8 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
     }
 }
 
-static void privatize_range_and_unlock(uintptr_t pagenum, uintptr_t count)
+static void privatize_range_and_unlock(uintptr_t pagenum, uintptr_t count,
+                                       bool full)
 {
     ssize_t pgoff1 = pagenum;
     ssize_t pgoff2 = pagenum + NB_PAGES;
@@ -41,8 +42,15 @@ static void privatize_range_and_unlock(uintptr_t pagenum, uintptr_t count)
         abort();
     }
     uintptr_t i;
-    for (i = 0; i < count; i++) {
-        pagecopy(localpg + 4096 * i, otherpg + 4096 * i);
+    if (full) {
+        for (i = 0; i < count; i++) {
+            pagecopy(localpg + 4096 * i, otherpg + 4096 * i);
+        }
+    }
+    else {
+        pagecopy(localpg, otherpg);
+        if (count > 1)
+            pagecopy(localpg + 4096 * (count-1), otherpg + 4096 * (count-1));
     }
     write_fence();
     for (i = 0; i < count; i++) {
@@ -51,7 +59,7 @@ static void privatize_range_and_unlock(uintptr_t pagenum, uintptr_t count)
     }
 }
 
-static void _pages_privatize(uintptr_t pagenum, uintptr_t count)
+static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
 {
     uintptr_t page_start_range = pagenum;
     uintptr_t pagestop = pagenum + count;
@@ -80,7 +88,7 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count)
         if (!was_shared) {
             if (pagenum > page_start_range) {
                 privatize_range_and_unlock(page_start_range,
-                                           pagenum - page_start_range);
+                                           pagenum - page_start_range, full);
             }
             page_start_range = pagenum + 1;
 
@@ -98,7 +106,7 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count)
 
     if (pagenum > page_start_range) {
         privatize_range_and_unlock(page_start_range,
-                                   pagenum - page_start_range);
+                                   pagenum - page_start_range, full);
     }
 }
 

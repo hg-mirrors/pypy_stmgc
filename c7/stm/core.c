@@ -3,8 +3,6 @@
 #endif
 
 
-static uint8_t write_locks[READMARKER_END - READMARKER_START];
-
 static void teardown_core(void)
 {
     memset(write_locks, 0, sizeof(write_locks));
@@ -34,7 +32,7 @@ void _stm_write_slowpath(object_t *obj)
        nursery), then it fits into one page.  Otherwise, we need to compute
        it based on its location and size. */
     if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0) {
-        pages_privatize(first_page, 1);
+        pages_privatize(first_page, 1, true);
     }
     else {
         /* get the size of the object */
@@ -44,7 +42,7 @@ void _stm_write_slowpath(object_t *obj)
         /* that's the page *following* the last page with the object */
         uintptr_t end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
 
-        pages_privatize(first_page, end_page - first_page);
+        pages_privatize(first_page, end_page - first_page, true);
     }
 
 

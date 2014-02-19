@@ -59,6 +59,23 @@ static bool _is_young(object_t *obj)
 
 /************************************************************/
 
+#define GCWORD_MOVED  ((object_t *) -42)
+
+
+static inline void minor_copy_in_page_to_other_segments(uintptr_t p,
+                                                        size_t size)
+{
+    uintptr_t dataofs = (char *)p - stm_object_pages;
+    assert((dataofs & 4095) + size <= 4096);   /* fits in one page */
+
+    if (flag_page_private[dataofs / 4096UL] != SHARED_PAGE) {
+        long i;
+        for (i = 1; i < NB_SEGMENTS; i++) {
+            memcpy(get_segment_base(i) + dataofs, (char *)p, size);
+        }
+    }
+}
+
 
 static void minor_trace_if_young(object_t **pobj)
 {
@@ -70,11 +87,10 @@ static void minor_trace_if_young(object_t **pobj)
         return;
 
     /* the location the object moved to is the second word in 'obj' */
-    struct object_s *realobj = (struct object_s *)
-                                   REAL_ADDRESS(stm_object_pages, obj);
+    char *realobj = (char *)REAL_ADDRESS(stm_object_pages, obj);
     object_t **pforwarded_array = (object_t **)realobj;
 
-    if (realobj->stm_flags & GCFLAG_MOVED) {
+    if (pforwarded_array[0] == GCWORD_MOVED) {
         *pobj = pforwarded_array[1];    /* already moved */
         return;
     }
@@ -91,11 +107,71 @@ static void minor_trace_if_young(object_t **pobj)
        from the end of the address space.  The difference is that page S
        can be shared, but page W needs to be privatized.
     */
-    size_t size = stmcb_size_rounded_up(realobj);
+    size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
+    uint8_t write_lock = write_locks[lock_idx];
+    object_t *nobj;
+    long i;
 
-    if (1  /*size >= GC_MEDIUM_REQUEST*/) {
-        /* case 1 */
-        abort();  //...
+    if (1 /*size >= GC_MEDIUM_REQUEST*/) {
+
+        /* case 1: object is larger than GC_MEDIUM_REQUEST.
+           Ask gcpage.c for an allocation via largemalloc. */
+        char *copyobj;
+        copyobj = allocate_outside_nursery_large(size < 256 ? 256 : size);  // XXX temp
+
+        /* Copy the object to segment 0 (as a first step) */
+        memcpy(copyobj, realobj, size);
+
+        nobj = (object_t *)(copyobj - stm_object_pages);
+
+        if (write_lock == 0) {
+            /* The object is not write-locked, so any copy should be
+               identical.  Now some pages of the destination might be
+               private already (because of some older action); if so, we
+               need to replicate the corresponding parts.  The hope is
+               that it's relatively uncommon. */
+            uintptr_t p, pend = ((uintptr_t)(copyobj + size - 1)) & ~4095;
+            for (p = (uintptr_t)copyobj; p < pend; p = (p + 4096) & ~4095) {
+                minor_copy_in_page_to_other_segments(p, 4096 - (p & 4095));
+            }
+            minor_copy_in_page_to_other_segments(p, ((size-1) & 4095) + 1);
+        }
+        else {
+            /* The object has the write lock.  We need to privatize the
+               pages, and repeat the write lock in the new copy. */
+            uintptr_t dataofs = (uintptr_t)nobj;
+            uintptr_t pagenum = dataofs / 4096UL;
+            uintptr_t lastpage= (dataofs + size - 1) / 4096UL;
+            pages_privatize(pagenum, lastpage - pagenum + 1, false);
+
+            lock_idx = (dataofs >> 4) - READMARKER_START;
+            assert(write_locks[lock_idx] == 0);
+            write_locks[lock_idx] = write_lock;
+
+            /* Then, for each segment > 0, we need to repeat the
+               memcpy() done above.  XXX This could be optimized if
+               NB_SEGMENTS > 2 by reading all non-written copies from the
+               same segment, instead of reading really all segments. */
+            for (i = 1; i < NB_SEGMENTS; i++) {
+                uintptr_t diff = get_segment_base(i) - stm_object_pages;
+                memcpy(copyobj + diff, realobj + diff, size);
+            }
+        }
+
+        /* If the source creation marker is CM_CURRENT_TRANSACTION_IN_NURSERY,
+           write CM_CURRENT_TRANSACTION_OUTSIDE_NURSERY in the destination */
+        uintptr_t cmaddr = ((uintptr_t)obj) >> 8;
+
+        for (i = 0; i < NB_SEGMENTS; i++) {
+            char *absaddr = get_segment_base(i) + cmaddr;
+            if (((struct stm_creation_marker_s *)absaddr)->cm != 0) {
+                uintptr_t ncmaddr = ((uintptr_t)nobj) >> 8;
+                absaddr = get_segment_base(i) + ncmaddr;
+                ((struct stm_creation_marker_s *)absaddr)->cm =
+                    CM_CURRENT_TRANSACTION_OUTSIDE_NURSERY;
+            }
+        }
     }
     else {
         /* cases 2 to 4 */
@@ -104,18 +180,16 @@ static void minor_trace_if_young(object_t **pobj)
         allocate_outside_nursery_small(small_alloc_privtz, size);
     }
 
-#if 0
-    /* move obj to somewhere else */
-    size_t size = stmcb_size_rounded_up(stm_object_pages + (uintptr_t)*pobj);
-    bool is_small;
-    object_t *moved = stm_big_small_alloc_old(size, &is_small);
+    /* Copy the read markers */
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        uint8_t rm = get_segment_base(i)[((uintptr_t)obj) >> 4];
+        get_segment_base(i)[((uintptr_t)nobj) >> 4] = rm;
+    }
 
-    memcpy((void*)real_address(moved),
-           (void*)real_address(*pobj),
-           size);
-#endif
-
-    abort();
+    /* Done copying the object. */
+    pforwarded_array[0] = GCWORD_MOVED;
+    pforwarded_array[1] = nobj;
+    *pobj = nobj;
 }
 
 static void minor_trace_roots(void)
@@ -141,6 +215,15 @@ static void reset_all_nursery_section_ends(void)
         other_pseg->real_nursery_section_end = 0;
         other_pseg->pub.v_nursery_section_end = 0;
     }
+    nursery_ctl.used = 0;
+
+    /* reset the write locks */
+    memset(write_locks + ((NURSERY_START >> 4) - READMARKER_START),
+           0, NURSERY_SIZE >> 4);
+
+    /* reset the read markers, and the creation markers --
+       maybe in each thread in parallel?? */
+    abort();//XXX;...
 }
 
 static void do_minor_collection(void)
@@ -153,12 +236,13 @@ static void do_minor_collection(void)
 
     minor_trace_roots();
 
+    // copy modified_objects
+
 
     fprintf(stderr, "minor_collection\n");
     abort(); //...;
 
 
-    nursery_ctl.used = 0;
     reset_all_nursery_section_ends();
 }
 

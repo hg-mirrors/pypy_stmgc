@@ -37,9 +37,6 @@ enum {
     GCFLAG_WRITE_BARRIER_CALLED = _STM_GCFLAG_WRITE_BARRIER_CALLED,
     /* allocated by gcpage.c in uniformly-sized pages of small objects */
     GCFLAG_SMALL_UNIFORM = 0x02,
-    /* only used during collections to mark an obj as moved out of the
-       generation it was in */
-    GCFLAG_MOVED = 0x04,
 };
 
 #define CROSS_PAGE_BOUNDARY(start, stop)                                \
@@ -90,6 +87,8 @@ static stm_thread_local_t *stm_thread_locals = NULL;
 #ifdef STM_TESTS
 static char *stm_other_pages;
 #endif
+
+static uint8_t write_locks[READMARKER_END - READMARKER_START];
 
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))

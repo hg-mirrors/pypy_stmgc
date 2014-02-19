@@ -66,6 +66,9 @@ static void grab_more_free_pages_for_small_allocations(void)
 static char *_allocate_small_slowpath(
         struct small_alloc_s small_alloc[], uint64_t size)
 {
+    /* not thread-safe!  Use only when holding the mutex */
+    assert(_has_mutex());
+
     if (free_pages == NULL)
         grab_more_free_pages_for_small_allocations();
 
@@ -73,42 +76,31 @@ static char *_allocate_small_slowpath(
 }
 
 
-#if 0
-static char *allocate_outside_nursery(uint64_t size)
+static char *allocate_outside_nursery_large(uint64_t size)
 {
     /* not thread-safe!  Use only when holding the mutex */
     assert(_has_mutex());
 
-    OPT_ASSERT(size >= 16);
+    /* Allocate the object with largemalloc.c from the lower addresses.
+       Assumes that 'size' is at least 256 bytes; it's needed for
+       the creation marker to uniquely identify this object */
+    OPT_ASSERT(size >= (1 << 8));
     OPT_ASSERT((size & 7) == 0);
 
-    uint64_t index = size / 8;
-    assert(index >= GC_N_SMALL_REQUESTS);
-    {
-        /* The object is too large to fit inside the uniform pages.
-           Allocate it with largemalloc.c from the lower addresses */
-        char *addr = large_malloc(size);
+    char *addr = large_malloc(size);
 
-        if (addr + size > uninitialized_page_start) {
-            uintptr_t pagenum =
-                (uninitialized_page_start - stm_object_pages) / 4096UL;
-            uintptr_t pagecount =
-                (addr + size - uninitialized_page_start) / 4096UL + 20;
-            uintptr_t pagemax =
-                (uninitialized_page_stop - uninitialized_page_start) / 4096UL;
-            if (pagecount > pagemax)
-                pagecount = pagemax;
-            pages_initialize_shared(pagenum, pagecount);
-
-            uninitialized_page_start += pagecount * 4096UL;
-        }
-
-        assert(get_single_creation_marker(
-                   (stm_char *)(addr - stm_object_pages)) == 0);
-        return addr;
+    if (addr + size > uninitialized_page_start) {
+        uintptr_t npages;
+        npages = (addr + size - uninitialized_page_start) / 4096UL;
+        npages += GCPAGE_NUM_PAGES;
+        setup_N_pages(uninitialized_page_start, npages);
+        uninitialized_page_start += npages * 4096UL;
     }
+
+    assert(get_single_creation_marker((stm_char *)(addr - stm_object_pages))
+           == 0);
+    return addr;
 }
-#endif
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
