@@ -250,7 +250,12 @@ class OpAllocate(Operation):
     def do(self, ex, global_state, thread_state):
         r = get_new_root_name(False)
         thread_state.push_roots(ex)
-        ex.do('%s = stm_allocate(16)' % r)
+        size = global_state.rnd.choice([
+            16,
+            "SOME_MEDIUM_SIZE+16",
+            "SOME_LARGE_SIZE+16",
+        ])
+        ex.do('%s = stm_allocate(%s)' % (r, size))
         assert thread_state.transaction_state.write_root(r, 0) is None
         
         thread_state.pop_roots(ex)
