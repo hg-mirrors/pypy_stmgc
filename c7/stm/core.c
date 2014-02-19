@@ -119,6 +119,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     STM_PSEGMENT->transaction_state = (jmpbuf != NULL ? TS_REGULAR
                                                       : TS_INEVITABLE);
     STM_SEGMENT->jmpbuf_ptr = jmpbuf;
+    STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
 
     mutex_unlock();
 
@@ -330,6 +331,7 @@ static void abort_with_mutex(void)
 
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+    tl->shadowstack = STM_PSEGMENT->shadowstack_at_start_of_transaction;
     release_thread_segment(tl);
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
