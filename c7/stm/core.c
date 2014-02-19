@@ -2,8 +2,6 @@
 # error "must be compiled via stmgc.c"
 #endif
 
-#include <unistd.h>
-
 
 static uint8_t write_locks[READMARKER_END - READMARKER_START];
 
@@ -120,6 +118,8 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
                                                       : TS_INEVITABLE);
     STM_SEGMENT->jmpbuf_ptr = jmpbuf;
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
+
+    dprintf(("start_transaction\n"));
 
     mutex_unlock();
 
@@ -241,6 +241,8 @@ void stm_commit_transaction(void)
         goto restart;
 
     /* cannot abort any more from here */
+    dprintf(("commit_transaction\n"));
+
     assert(STM_PSEGMENT->transaction_state != TS_MUST_ABORT);
     STM_SEGMENT->jmpbuf_ptr = NULL;
 
@@ -316,6 +318,8 @@ static void reset_modified_from_other_segments(void)
 
 static void abort_with_mutex(void)
 {
+    dprintf(("~~~ ABORT\n"));
+
     switch (STM_PSEGMENT->transaction_state) {
     case TS_REGULAR:
     case TS_MUST_ABORT:

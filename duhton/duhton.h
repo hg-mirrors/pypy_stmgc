@@ -4,8 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
-#include "../c7/core.h"
-#include "../c7/list.h"
+#include "../c7/stmgc.h"
 
 #define STM 1                   /* hackish removal of all read/write
                                    barriers. synchronization is up to
