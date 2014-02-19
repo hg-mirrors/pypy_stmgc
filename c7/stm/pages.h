@@ -18,16 +18,17 @@ enum {
 
 static uint8_t flag_page_private[NB_PAGES];
 
-static void _pages_privatize(uintptr_t pagenum, uintptr_t count);
+static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full);
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
 
-inline static void pages_privatize(uintptr_t pagenum, uintptr_t count) {
+inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
+                                   bool full) {
     while (flag_page_private[pagenum] == PRIVATE_PAGE) {
         if (!--count)
             return;
         pagenum++;
     }
-    _pages_privatize(pagenum, count);
+    _pages_privatize(pagenum, count, full);
 }
 
 static void set_creation_markers(stm_char *p, uint64_t size, int newvalue);
