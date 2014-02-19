@@ -305,6 +305,12 @@ def stm_allocate_old(size):
     lib._set_type_id(o, tid)
     return o
 
+def stm_allocate_old_refs(n):
+    o = lib._stm_allocate_old(HDR + n * WORD)
+    tid = 421420 + n
+    lib._set_type_id(o, tid)
+    return o
+
 def stm_allocate(size):
     o = lib.stm_allocate(size)
     tid = 42 + size
