@@ -320,13 +320,13 @@ def stm_get_ref(obj, idx):
     stm_read(obj)
     return lib._get_ptr(obj, idx)
 
-def stm_set_char(obj, c):
+def stm_set_char(obj, c, offset=HDR):
     stm_write(obj)
-    stm_get_real_address(obj)[HDR] = c
+    stm_get_real_address(obj)[offset] = c
 
-def stm_get_char(obj):
+def stm_get_char(obj, offset=HDR):
     stm_read(obj)
-    return stm_get_real_address(obj)[HDR]
+    return stm_get_real_address(obj)[offset]
 
 def stm_get_real_address(obj):
     return lib._stm_real_address(ffi.cast('object_t*', obj))
