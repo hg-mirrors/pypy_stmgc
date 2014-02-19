@@ -245,6 +245,14 @@ class OpCommitTransaction(Operation):
             ex.do('py.test.raises(Conflict, self.commit_transaction)')
         else:
             ex.do('self.commit_transaction()')
+
+class OpAbortTransaction(Operation):
+    def do(self, ex, global_state, thread_state):
+        thread_state.transaction_state.set_must_abort()
+        thread_state.abort_transaction()
+        ex.do('self.abort_transaction()')
+
+            
             
 class OpAllocate(Operation):
     def do(self, ex, global_state, thread_state):
@@ -384,11 +392,15 @@ class TestRandom(BaseTest):
                 OpWrite,
                 OpWrite,
                 OpWrite,
+                OpWrite,
+                OpRead,
+                OpRead,
                 OpRead,
                 OpRead,
                 OpRead,
                 OpRead,
                 OpCommitTransaction,
+                OpAbortTransaction,
                 OpForgetRoot,
             ])
             action().do(ex, global_state, curr_thread)
