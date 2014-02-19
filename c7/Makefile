@@ -14,16 +14,14 @@ clean:
 	rm -f $(BUILD_EXE) $(DEBUG_EXE) $(RELEASE_EXE)
 
 
-H_FILES = core.h list.h pagecopy.h reader_writer_lock.h stmsync.h pages.h nursery.h largemalloc.h
-
-C_FILES = core.c list.c pagecopy.c reader_writer_lock.c stmsync.c pages.c nursery.c largemalloc.c
-
-DEBUG = -g 
+H_FILES = stmgc.h stm/*.h
+C_FILES = stmgc.c stm/*.c
 
 
-# note that we don't say -DNDEBUG, so that asserts should still be compiled in
-# also, all debug code with extra checks but not the debugprints
-build-%: %.c ${H_FILES} ${C_FILES} 
-	clang -pthread  -g -O1  $< -o build-$* -Wall ${C_FILES}
-release-%: %.c ${H_FILES} ${C_FILES} 
-	clang -pthread  -g -DNDEBUG -O2 $< -o release-$* -Wall ${C_FILES}
+# note that 'build' is optimized but still contains all asserts
+debug-%: %.c ${H_FILES} ${C_FILES}
+	clang -pthread  -g  $< -o debug-$* -Wall -Werror  stmgc.c
+build-%: %.c ${H_FILES} ${C_FILES}
+	clang -pthread  -g -O1  $< -o build-$* -Wall  stmgc.c
+release-%: %.c ${H_FILES} ${C_FILES}
+	clang -pthread  -g -DNDEBUG -O2 $< -o release-$* -Wall  stmgc.c
