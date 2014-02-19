@@ -13,10 +13,14 @@ class Exec(object):
         exec cmd in globals(), self.content
 
 _root_numbering = 0
-def get_new_root_name():
+is_ref_type_map = {}
+def get_new_root_name(is_ref_type):
     global _root_numbering
     _root_numbering += 1
-    return "lp%d" % _root_numbering
+    r = "lp%d" % _root_numbering
+    is_ref_type_map[r] = is_ref_type
+    return r
+
 
 _global_time = 0
 def contention_management(our_trs, other_trs, wait=False, objs_in_conflict=None):
@@ -124,7 +128,7 @@ class ThreadState(object):
 
     def update_roots(self, ex):
         assert self.roots_on_stack == self.roots_on_transaction_start
-        for r in self.saved_roots[::-1]:
+        for r in reversed(self.saved_roots):
             ex.do('%s = self.pop_root()' % r)
             self.roots_on_stack -= 1
         assert self.roots_on_stack == 0
@@ -244,7 +248,7 @@ class OpCommitTransaction(Operation):
             
 class OpAllocate(Operation):
     def do(self, ex, global_state, thread_state):
-        r = get_new_root_name()
+        r = get_new_root_name(False)
         thread_state.push_roots(ex)
         ex.do('%s = stm_allocate(16)' % r)
         assert thread_state.transaction_state.write_root(r, 0) is None
@@ -252,32 +256,59 @@ class OpAllocate(Operation):
         thread_state.pop_roots(ex)
         thread_state.register_root(r)
 
+class OpAllocateRef(Operation):
+    def do(self, ex, global_state, thread_state):
+        r = get_new_root_name(True)
+        thread_state.push_roots(ex)
+        ex.do('%s = stm_allocate_refs(1)' % r)
+        assert thread_state.transaction_state.write_root(r, "ffi.NULL") is None
+        
+        thread_state.pop_roots(ex)
+        thread_state.register_root(r)
+
+
 class OpForgetRoot(Operation):
     def do(self, ex, global_state, thread_state):
         r = thread_state.forget_random_root()
         ex.do('# forget %s' % r)
 
-class OpSetChar(Operation):
+class OpWrite(Operation):
     def do(self, ex, global_state, thread_state):
         r = thread_state.get_random_root()
-        v = ord(global_state.rnd.choice("abcdefghijklmnop"))
+        if is_ref_type_map[r]:
+            v = thread_state.get_random_root()
+        else:
+            v = ord(global_state.rnd.choice("abcdefghijklmnop"))
         trs = thread_state.transaction_state
         trs.write_root(r, v)
 
         global_state.check_for_write_write_conflicts(trs)
         if trs.check_must_abort():
             thread_state.abort_transaction()
-            ex.do("py.test.raises(Conflict, stm_set_char, %s, %s)" % (r, repr(chr(v))))
+            if is_ref_type_map[r]:
+                ex.do("py.test.raises(Conflict, stm_set_ref, %s, 0, %s)" % (r, v))
+            else:
+                ex.do("py.test.raises(Conflict, stm_set_char, %s, %s)" % (r, repr(chr(v))))
         else:
-            ex.do("stm_set_char(%s, %s)" % (r, repr(chr(v))))
+            if is_ref_type_map[r]:
+                ex.do("stm_set_ref(%s, 0, %s)" % (r, v))
+            else:
+                ex.do("stm_set_char(%s, %s)" % (r, repr(chr(v))))
 
-class OpGetChar(Operation):
+class OpRead(Operation):
     def do(self, ex, global_state, thread_state):
         r = thread_state.get_random_root()
         trs = thread_state.transaction_state
         v = trs.read_root(r)
         #
-        ex.do("assert stm_get_char(%s) == %s" % (r, repr(chr(v))))
+        if is_ref_type_map[r]:
+            if v in thread_state.saved_roots or v in global_state.shared_roots:
+                ex.do("assert stm_get_ref(%s, 0) == %s" % (r, v))
+            else:
+                # we still need to read it (as it is in the read-set):
+                ex.do("stm_get_ref(%s, 0)" % r)
+        else:
+            ex.do("assert stm_get_char(%s) == %s" % (r, repr(chr(v))))
 
 class OpSwitchThread(Operation):
     def do(self, ex, global_state, thread_state):
@@ -298,7 +329,7 @@ class TestRandom(BaseTest):
     def test_fixed_16_bytes_objects(self, seed=1010):
         rnd = random.Random(seed)
 
-        N_OBJECTS = 5
+        N_OBJECTS = 3
         N_THREADS = 2
         ex = Exec(self)
         ex.do("""
@@ -316,9 +347,14 @@ class TestRandom(BaseTest):
         curr_thread = global_state.thread_states[0]
 
         for i in range(N_OBJECTS):
-            r = get_new_root_name()
+            r = get_new_root_name(False)
             ex.do('%s = stm_allocate_old(16)' % r)
             global_state.committed_transaction_state.write_root(r, 0)
+            global_state.shared_roots.append(r)
+
+            r = get_new_root_name(True)
+            ex.do('%s = stm_allocate_old_refs(1)' % r)
+            global_state.committed_transaction_state.write_root(r, "ffi.NULL")
             global_state.shared_roots.append(r)
         global_state.committed_transaction_state.write_set = set()
         global_state.committed_transaction_state.read_set = set()
@@ -338,14 +374,28 @@ class TestRandom(BaseTest):
 
             action = rnd.choice([
                 OpAllocate,
-                OpSetChar,
-                OpSetChar,
-                OpGetChar,
-                OpGetChar,
+                OpAllocateRef,
+                OpWrite,
+                OpWrite,
+                OpWrite,
+                OpRead,
+                OpRead,
+                OpRead,
+                OpRead,
                 OpCommitTransaction,
                 OpForgetRoot,
             ])
             action().do(ex, global_state, curr_thread)
+
+        for ts in global_state.thread_states:
+            if ts.transaction_state is not None:
+                if curr_thread != ts:
+                    ex.do('#')
+                    curr_thread = ts
+                    OpSwitchThread().do(ex, global_state, curr_thread)
+                if curr_thread.transaction_state:
+                    # could have aborted in the switch() above
+                    OpCommitTransaction().do(ex, global_state, curr_thread)
             
 
 
