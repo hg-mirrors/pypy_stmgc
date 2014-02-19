@@ -402,6 +402,12 @@ class TestBasic(BaseTest):
         assert stm_get_char(lp1, offset=4103) == 'b'
         self.commit_transaction()
 
+    def test_abort_restores_shadowstack(self):
+        self.start_transaction()
+        self.push_root(ffi.cast("object_t *", 0))
+        self.abort_transaction()
+        py.test.raises(EmptyStack, self.pop_root)
+
     # def test_resolve_write_write_no_conflict(self):
     #     self.start_transaction()
     #     p1 = stm_allocate(16)
