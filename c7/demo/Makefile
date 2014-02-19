@@ -14,14 +14,14 @@ clean:
 	rm -f $(BUILD_EXE) $(DEBUG_EXE) $(RELEASE_EXE)
 
 
-H_FILES = stmgc.h stm/*.h
-C_FILES = stmgc.c stm/*.c
+H_FILES = ../stmgc.h ../stm/*.h
+C_FILES = ../stmgc.c ../stm/*.c
 
 
 # note that 'build' is optimized but still contains all asserts
 debug-%: %.c ${H_FILES} ${C_FILES}
-	clang -pthread  -g  $< -o debug-$* -Wall -Werror  stmgc.c
+	clang -I.. -pthread  -g  $< -o debug-$* -Wall -Werror  ../stmgc.c
 build-%: %.c ${H_FILES} ${C_FILES}
-	clang -pthread  -g -O1  $< -o build-$* -Wall  stmgc.c
+	clang -I.. -pthread  -g -O1  $< -o build-$* -Wall  ../stmgc.c
 release-%: %.c ${H_FILES} ${C_FILES}
-	clang -pthread  -g -DNDEBUG -O2 $< -o release-$* -Wall  stmgc.c
+	clang -I.. -pthread  -g -DNDEBUG -O2 $< -o release-$* -Wall  ../stmgc.c
