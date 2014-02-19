@@ -271,7 +271,9 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 }
 
 ''', sources=source_files,
-     define_macros=[('STM_TESTS', '1'), ('STM_NO_COND_WAIT', '1')],
+     define_macros=[('STM_TESTS', '1'),
+                    ('STM_NO_COND_WAIT', '1'),
+                    ('STM_DEBUGPRINT', '1')],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
      extra_compile_args=['-g', '-O0', '-Werror'],
