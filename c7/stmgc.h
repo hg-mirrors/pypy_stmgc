@@ -82,6 +82,7 @@ void _stm_write_slowpath(object_t *);
 stm_char *_stm_allocate_slowpath(ssize_t);
 void _stm_become_inevitable(char*);
 void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *);
+bool _stm_collectable_safe_point(void);
 
 #ifdef STM_TESTS
 bool _stm_was_read(object_t *obj);
@@ -100,6 +101,7 @@ void _stm_set_nursery_free_count(uint64_t free_count);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER_CALLED  0x80
+#define _STM_NSE_SIGNAL                   1
 #define STM_FLAGS_PREBUILT                0
 
 
@@ -208,13 +210,13 @@ void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
 
-/* Starting and ending transactions.  You should only call stm_read(),
-   stm_write() and stm_allocate() from within a transaction.  Use
-   the macro STM_START_TRANSACTION() to start a transaction that
+/* Starting and ending transactions.  stm_read(), stm_write() and
+   stm_allocate() should only be called from within a transaction.
+   Use the macro STM_START_TRANSACTION() to start a transaction that
    can be restarted using the 'jmpbuf' (a local variable of type
    stm_jmpbuf_t). */
 #define STM_START_TRANSACTION(tl, jmpbuf)  ({           \
-    int _restart = __builtin_setjmp(&jmpbuf);           \
+    int _restart = __builtin_setjmp(jmpbuf);            \
     _stm_start_transaction(tl, &jmpbuf);                \
    _restart;                                            \
 })
@@ -237,6 +239,13 @@ void stm_abort_transaction(void) __attribute__((noreturn));
 static inline void stm_become_inevitable(char* msg) {
     if (STM_SEGMENT->jmpbuf_ptr != NULL)
         _stm_become_inevitable(msg);
+}
+
+/* Forces a safe-point if needed.  Normally not needed: this is
+   automatic if you call stm_allocate(). */
+static inline void stm_safe_point(void) {
+    if (STM_SEGMENT->v_nursery_section_end == _STM_NSE_SIGNAL)
+        _stm_collectable_safe_point();
 }
 
 

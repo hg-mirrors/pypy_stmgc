@@ -199,7 +199,7 @@ stm_char *_stm_allocate_slowpath(ssize_t size_rounded_up)
     /* may collect! */
     STM_SEGMENT->nursery_current -= size_rounded_up;  /* restore correct val */
 
-    if (collectable_safe_point())
+    if (_stm_collectable_safe_point())
         return (stm_char *)stm_allocate(size_rounded_up);
 
     if (size_rounded_up < MEDIUM_OBJECT) {

@@ -266,7 +266,7 @@ static bool try_wait_for_other_safe_points(int requested_safe_point_kind)
     return true;
 }
 
-static bool collectable_safe_point(void)
+bool _stm_collectable_safe_point(void)
 {
     bool any_operation = false;
  restart:;

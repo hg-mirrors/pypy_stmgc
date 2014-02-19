@@ -3,6 +3,10 @@
 #define NSE_SIGNAL        1
 #define NSE_SIGNAL_DONE   2
 
+#if _STM_NSE_SIGNAL != NSE_SIGNAL
+# error "adapt _STM_NSE_SIGNAL"
+#endif
+
 /* Rules for 'v_nursery_section_end':
 
    - Its main purpose is to be read by the owning thread in stm_allocate().
