@@ -159,6 +159,7 @@ static void release_thread_segment(stm_thread_local_t *tl)
     sync_ctl.in_use[tl->associated_segment_num] = 0;
 }
 
+static bool _running_transaction(void) __attribute__((unused));
 static bool _running_transaction(void)
 {
     return (STM_SEGMENT->running_thread != NULL);

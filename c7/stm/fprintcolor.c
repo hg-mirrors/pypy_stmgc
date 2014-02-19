@@ -3,12 +3,12 @@
 /* ------------------------------------------------------------ */
 
 
-int dprintfcolor(void)
+static int dprintfcolor(void)
 {
     return 31 + STM_SEGMENT->segment_num % 6;
 }
 
-int threadcolor_printf(const char *format, ...)
+static int threadcolor_printf(const char *format, ...)
 {
     char buffer[2048];
     va_list ap;
@@ -31,3 +31,21 @@ int threadcolor_printf(const char *format, ...)
 /* ------------------------------------------------------------ */
 #endif
 /* ------------------------------------------------------------ */
+
+
+static void stm_fatalerror(const char *format, ...)
+{
+    va_list ap;
+
+#ifdef STM_DEBUGPRINT
+    dprintf(("STM Subsystem: Fatal Error\n"));
+#else
+    fprintf(stderr, "STM Subsystem: Fatal Error\n");
+#endif
+
+    va_start(ap, format);
+    vfprintf(stderr, format, ap);
+    va_end(ap);
+
+    abort();
+}

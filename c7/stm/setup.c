@@ -106,6 +106,7 @@ void stm_teardown(void)
 
     teardown_core();
     teardown_sync();
+    teardown_gcpage();
 }
 
 void stm_register_thread_local(stm_thread_local_t *tl)
@@ -146,6 +147,7 @@ void stm_unregister_thread_local(stm_thread_local_t *tl)
     tl->next = NULL;
 }
 
+static bool _is_tl_registered(stm_thread_local_t *tl) __attribute__((unused));
 static bool _is_tl_registered(stm_thread_local_t *tl)
 {
     return tl->next != NULL;
