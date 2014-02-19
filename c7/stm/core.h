@@ -121,5 +121,8 @@ static void teardown_core(void);
 static void abort_with_mutex(void) __attribute__((noreturn));
 
 static inline void _duck(void) {
+    /* put a call to _duck() between two instructions that set 0 into
+       a %gs-prefixed address and that may otherwise be replaced with
+       llvm.memset --- it fails later because of the prefix... */
     asm("/* workaround for llvm bug */");
 }
