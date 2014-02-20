@@ -205,8 +205,15 @@ static void minor_trace_roots(void)
     } while (tl != stm_thread_locals);
 }
 
-static void reset_all_nursery_section_ends(void)
+static void reset_nursery(void)
 {
+    /* reset the global amount-of-nursery-used-so-far */
+    nursery_ctl.used = 0;
+
+    /* reset the write locks */
+    memset(write_locks + ((NURSERY_START >> 4) - READMARKER_START),
+           0, NURSERY_SIZE >> 4);
+
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *other_pseg = get_priv_segment(i);
@@ -214,16 +221,21 @@ static void reset_all_nursery_section_ends(void)
            in safe points, so cannot be e.g. in _stm_allocate_slowpath() */
         other_pseg->real_nursery_section_end = 0;
         other_pseg->pub.v_nursery_section_end = 0;
+
+        /* reset the read markers. XXX could be done more cleverly, by
+           increasing the transaction_read_version of everybody, and
+           making was_read_remote() more complex, detecting the exact
+           transaction_read_version if in the nursery but a range of
+           read markers if outside */
+        char *read_markers = REAL_ADDRESS(other_pseg->pub.segment_base,
+                                          NURSERY_START >> 4);
+        memset(read_markers, 0, NURSERY_SIZE >> 4);
+
+        /* reset the creation markers */
+        char *creation_markers = REAL_ADDRESS(other_pseg->pub.segment_base,
+                                              NURSERY_START >> 8);
+        memset(creation_markers, 0, NURSERY_SIZE >> 8);
     }
-    nursery_ctl.used = 0;
-
-    /* reset the write locks */
-    memset(write_locks + ((NURSERY_START >> 4) - READMARKER_START),
-           0, NURSERY_SIZE >> 4);
-
-    /* reset the read markers, and the creation markers --
-       maybe in each thread in parallel?? */
-    abort();//XXX;...
 }
 
 static void do_minor_collection(void)
@@ -243,7 +255,7 @@ static void do_minor_collection(void)
     abort(); //...;
 
 
-    reset_all_nursery_section_ends();
+    reset_nursery();
 }
 
 
