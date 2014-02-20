@@ -280,7 +280,7 @@ class OpAllocate(Operation):
         size = global_state.rnd.choice([
             16,
             "SOME_MEDIUM_SIZE+16",
-            "SOME_LARGE_SIZE+16",
+            #"SOME_LARGE_SIZE+16",
         ])
         ex.do('%s = stm_allocate(%s)' % (r, size))
         thread_state.transaction_state.add_root(r, 0)
@@ -344,17 +344,28 @@ class OpRead(Operation):
         if is_ref_type_map[r]:
             ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
             if v in thread_state.saved_roots or v in global_state.prebuilt_roots:
-                # v = root from this transaction; or shared
+                # v = root known to this transaction; or prebuilt
                 ex.do("assert stm_get_ref(%s, idx) == %s" % (r, v))
-            elif v in trs.values:
-                # v must have survived stored in r, thus register it as a new
-                # known root in the current thread
-                ex.do("# get %r from other thread" % v)
+            elif v != "ffi.NULL":
+                # if v came from this transaction: re-add it to saved_roots because
+                #     it survived by being referenced by another saved root
+                # if v is from a different transaction:
+                #     we fish its value from somewhere and add it to our known roots
+                if v not in trs.values:
+                    # not from this transaction AND not known at the start of this
+                    # transaction
+                    trs.add_root(v, global_state.committed_transaction_state.values[v])
+                    ex.do("# get %r from other thread" % v)
+                elif v not in global_state.committed_transaction_state.values:
+                    ex.do("# revive %r in this thread" % v)
+                else:
+                    ex.do("# register %r in this thread" % v)
+                #
                 ex.do("%s = stm_get_ref(%s, idx)" % (v, r))
                 thread_state.register_root(v)
             else:
-                # v is NULL; we still need to read it (as it is in the read-set):
-                ex.do("stm_get_ref(%s, idx)" % r)
+                # v is NULL; we still need to read it (as it should be in the read-set):
+                ex.do("assert stm_get_ref(%s, idx) == %s" % (r,v))
         else:
             ex.do("offset = stm_get_obj_size(%s) - 1" % r)
             ex.do("assert stm_get_char(%s, offset) == %s" % (r, repr(chr(v))))
@@ -376,6 +387,11 @@ class OpSwitchThread(Operation):
 class TestRandom(BaseTest):
 
     def test_fixed_16_bytes_objects(self, seed=1010):
+        global _root_numbering
+        _root_numbering = 0
+        global is_ref_type_map
+        is_ref_type_map = {}
+
         rnd = random.Random(seed)
 
         N_OBJECTS = 3
@@ -412,8 +428,8 @@ class TestRandom(BaseTest):
         possible_actions = [
                 OpAllocate,
                 OpAllocateRef, OpAllocateRef,
-                OpWrite, OpWrite, OpWrite, OpWrite, OpWrite, OpWrite,
-                OpRead, OpRead, OpRead, OpRead, OpRead, OpRead,
+                OpWrite, OpWrite, OpWrite,
+                OpRead, OpRead, OpRead, OpRead, OpRead, OpRead, OpRead, OpRead,
                 OpCommitTransaction,
                 OpAbortTransaction,
                 OpForgetRoot,
