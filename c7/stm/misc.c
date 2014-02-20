@@ -37,8 +37,9 @@ stm_thread_local_t *_stm_thread(void)
 
 bool _stm_was_read(object_t *obj)
 {
-    return ((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm ==
-        STM_SEGMENT->transaction_read_version;
+    return was_read_remote(STM_SEGMENT->segment_base, obj,
+                           STM_SEGMENT->transaction_read_version,
+                           STM_PSEGMENT->min_read_version_outside_nursery);
 }
 
 bool _stm_was_written(object_t *obj)
@@ -50,12 +51,4 @@ bool _stm_was_written(object_t *obj)
 uint8_t _stm_creation_marker(object_t *obj)
 {
     return ((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm;
-}
-
-static inline bool was_read_remote(char *base, object_t *obj,
-                                   uint8_t other_transaction_read_version)
-{
-    struct stm_read_marker_s *marker = (struct stm_read_marker_s *)
-        (base + (((uintptr_t)obj) >> 4));
-    return (marker->rm == other_transaction_read_version);
 }

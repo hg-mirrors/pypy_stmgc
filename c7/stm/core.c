@@ -126,6 +126,9 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     if (UNLIKELY(old_rv == 0xff))
         reset_transaction_read_version();
 
+    STM_PSEGMENT->min_read_version_outside_nursery =
+        STM_SEGMENT->transaction_read_version;
+
     assert(list_is_empty(STM_PSEGMENT->modified_objects));
     assert(list_is_empty(STM_PSEGMENT->creation_markers));
 
@@ -144,6 +147,8 @@ static bool detect_write_read_conflicts(void)
     long remote_num = 1 - STM_SEGMENT->segment_num;
     char *remote_base = get_segment_base(remote_num);
     uint8_t remote_version = get_segment(remote_num)->transaction_read_version;
+    uint8_t remote_min_outside_nursery =
+        get_priv_segment(remote_num)->min_read_version_outside_nursery;
 
     switch (get_priv_segment(remote_num)->transaction_state) {
     case TS_NONE:
@@ -155,7 +160,8 @@ static bool detect_write_read_conflicts(void)
         STM_PSEGMENT->modified_objects,
         object_t * /*item*/,
         ({
-            if (was_read_remote(remote_base, item, remote_version)) {
+            if (was_read_remote(remote_base, item, remote_version,
+                                remote_min_outside_nursery)) {
                 /* A write-read conflict! */
                 contention_management(remote_num, false);
 
@@ -183,7 +189,9 @@ static void push_modified_to_other_segments(void)
         ({
             if (remote_active) {
                 assert(!was_read_remote(remote_base, item,
-                          get_segment(remote_num)->transaction_read_version));
+                    get_segment(remote_num)->transaction_read_version,
+                    get_priv_segment(remote_num)->
+                        min_read_version_outside_nursery));
             }
 
             /* clear the write-lock (note that this runs with all other

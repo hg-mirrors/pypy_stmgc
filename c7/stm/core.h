@@ -59,6 +59,7 @@ struct stm_priv_segment_info_s {
     uint8_t write_lock_num;
     uint8_t safe_point;         /* one of the SP_xxx constants */
     uint8_t transaction_state;  /* one of the TS_xxx constants */
+    uint8_t min_read_version_outside_nursery;   /* see was_read_remote() */
     uintptr_t real_nursery_section_end;
     object_t **shadowstack_at_start_of_transaction;
 };

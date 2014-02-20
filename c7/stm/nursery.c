@@ -45,15 +45,39 @@ static void setup_nursery(void)
     nursery_ctl.used = 0;
 }
 
-bool _stm_in_nursery(object_t *obj)
+static inline bool _is_in_nursery(object_t *obj)
 {
     assert((uintptr_t)obj >= NURSERY_START);
     return (uintptr_t)obj < NURSERY_START + NURSERY_SIZE;
 }
 
+bool _stm_in_nursery(object_t *obj)
+{
+    return _is_in_nursery(obj);
+}
+
 static bool _is_young(object_t *obj)
 {
-    return _stm_in_nursery(obj);    /* for now */
+    return _is_in_nursery(obj);    /* for now */
+}
+
+static inline bool was_read_remote(char *base, object_t *obj,
+                                   uint8_t other_transaction_read_version,
+                                   uint8_t min_read_version_outside_nursery)
+{
+    uint8_t rm = ((struct stm_read_marker_s *)
+                  (base + (((uintptr_t)obj) >> 4)))->rm;
+
+    assert(min_read_version_outside_nursery <=
+           other_transaction_read_version);
+    assert(rm <= other_transaction_read_version);
+
+    if (_is_in_nursery(obj)) {
+        return rm == other_transaction_read_version;
+    }
+    else {
+        return rm >= min_read_version_outside_nursery;
+    }
 }
 
 
@@ -222,14 +246,26 @@ static void reset_nursery(void)
         other_pseg->real_nursery_section_end = 0;
         other_pseg->pub.v_nursery_section_end = 0;
 
-        /* reset the read markers. XXX could be done more cleverly, by
-           increasing the transaction_read_version of everybody, and
-           making was_read_remote() more complex, detecting the exact
-           transaction_read_version if in the nursery but a range of
-           read markers if outside */
-        char *read_markers = REAL_ADDRESS(other_pseg->pub.segment_base,
-                                          NURSERY_START >> 4);
-        memset(read_markers, 0, NURSERY_SIZE >> 4);
+        /* we don't need to actually reset the read markers, unless
+           we run too many nursery collections in the same transaction:
+           in the normal case it is enough to increase
+           'transaction_read_version' without changing
+           'min_read_version_outside_nursery'.
+        */
+        if (other_pseg->pub.transaction_read_version < 0xff) {
+            other_pseg->pub.transaction_read_version++;
+            assert(0 < other_pseg->min_read_version_outside_nursery &&
+                   other_pseg->min_read_version_outside_nursery
+                     < other_pseg->pub.transaction_read_version);
+        }
+        else {
+            /* however, when the value 0xff is reached, we are stuck
+               and we need to clean all the nursery read markers.
+               We'll be un-stuck when this transaction finishes. */
+            char *read_markers = REAL_ADDRESS(other_pseg->pub.segment_base,
+                                              NURSERY_START >> 4);
+            memset(read_markers, 0, NURSERY_SIZE >> 4);
+        }
 
         /* reset the creation markers */
         char *creation_markers = REAL_ADDRESS(other_pseg->pub.segment_base,
