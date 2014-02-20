@@ -12,7 +12,7 @@ class Exec(object):
         print >> sys.stderr, cmd
         exec cmd in globals(), self.content
 
-        
+
 
 _root_numbering = 0
 is_ref_type_map = {}
@@ -27,24 +27,24 @@ def get_new_root_name(is_ref_type):
 _global_time = 0
 def contention_management(our_trs, other_trs, wait=False, objs_in_conflict=None):
     """exact copy of logic in contention.c"""
-    
+
     if other_trs.start_time < our_trs.start_time:
         pass
     else:
         other_trs.set_must_abort(objs_in_conflict)
-        
+
     if not other_trs.check_must_abort():
         our_trs.set_must_abort(objs_in_conflict)
     elif wait:
         # abort anyway:
         our_trs.set_must_abort(objs_in_conflict)
-        
+
 
 class TransactionState(object):
     """State of a transaction running in a thread,
     e.g. maintains read/write sets. The state will be
     discarded on abort or pushed to other threads"""
-    
+
     def __init__(self, start_time):
         self.read_set = set()
         self.write_set = set()
@@ -60,10 +60,10 @@ class TransactionState(object):
 
     def check_must_abort(self):
         return self._must_abort
-        
+
     def has_conflict_with(self, committed):
         return bool(self.read_set & committed.write_set)
-    
+
     def update_from_committed(self, committed, only_new=False):
         """returns True if conflict"""
         if only_new:
@@ -84,20 +84,20 @@ class TransactionState(object):
     def add_root(self, r, v):
         assert self.values.get(r, None) is None
         self.values[r] = v
-    
+
     def write_root(self, r, v):
         self.read_set.add(r)
         self.write_set.add(r)
         old = self.values.get(r, None)
         self.values[r] = v
         return old
-        
+
 
 class ThreadState(object):
     """Maintains state for one thread. Mostly manages things
     to be kept between transactions (e.g. saved roots) and
     handles discarding/reseting states on transaction abort"""
-    
+
     def __init__(self, num, global_state):
         self.num = num
         self.saved_roots = []
@@ -116,7 +116,7 @@ class ThreadState(object):
         #     r = self.saved_roots[idx]
         #     del self.saved_roots[idx]
         #     return r
-        
+
         # forget all non-pushed roots for now
         assert self.roots_on_stack == self.roots_on_transaction_start
         res = str(self.saved_roots[self.roots_on_stack:])
@@ -135,7 +135,7 @@ class ThreadState(object):
         for r in self.saved_roots[self.roots_on_transaction_start:]:
             ex.do('self.push_root(%s)' % r)
             self.roots_on_stack += 1
-    
+
     def pop_roots(self, ex):
         for r in reversed(self.saved_roots[self.roots_on_transaction_start:]):
             ex.do('%s = self.pop_root()' % r)
@@ -160,7 +160,7 @@ class ThreadState(object):
             self.global_state.committed_transaction_state)
         self.transaction_state = trs
         self.roots_on_transaction_start = self.roots_on_stack
-        
+
     def commit_transaction(self):
         trs = self.transaction_state
         gtrs = self.global_state.committed_transaction_state
@@ -179,12 +179,12 @@ class ThreadState(object):
         del self.saved_roots[self.roots_on_stack:]
         self.transaction_state = None
 
-        
+
 class GlobalState(object):
     """Maintains the global view (in a TransactionState) on
     objects and threads. It also handles checking for conflicts
     between threads and pushing state to other threads"""
-    
+
     def __init__(self, ex, rnd):
         self.ex = ex
         self.rnd = rnd
@@ -215,7 +215,7 @@ class GlobalState(object):
             if confl_set:
                 contention_management(tr_state, other_trs, True,
                                       objs_in_conflict=confl_set)
-                
+
         if tr_state.check_must_abort():
             self.ex.do('# write-write conflict: %s' %
                        tr_state.objs_in_conflict)
@@ -226,12 +226,12 @@ class GlobalState(object):
             other_trs = ts.transaction_state
             if other_trs is None or other_trs is tr_state:
                 continue
-            
+
             confl_set = other_trs.read_set & tr_state.write_set
             if confl_set:
                 contention_management(tr_state, other_trs,
                                       objs_in_conflict=confl_set)
-                
+
         if tr_state.check_must_abort():
             self.ex.do('# write-read conflict: %s' %
                        tr_state.objs_in_conflict)
@@ -255,6 +255,7 @@ class OpCommitTransaction(Operation):
     def do(self, ex, global_state, thread_state):
         #
         # push all new roots
+        ex.do("# push new objs before commit:")
         thread_state.push_roots(ex)
         aborts = thread_state.commit_transaction()
         #
@@ -270,8 +271,8 @@ class OpAbortTransaction(Operation):
         thread_state.abort_transaction()
         ex.do('self.abort_transaction()')
 
-            
-            
+
+
 class OpAllocate(Operation):
     def do(self, ex, global_state, thread_state):
         r = get_new_root_name(False)
@@ -283,7 +284,7 @@ class OpAllocate(Operation):
         ])
         ex.do('%s = stm_allocate(%s)' % (r, size))
         thread_state.transaction_state.add_root(r, 0)
-        
+
         thread_state.pop_roots(ex)
         thread_state.reload_roots(ex)
         thread_state.register_root(r)
@@ -295,7 +296,7 @@ class OpAllocateRef(Operation):
         num = global_state.rnd.randrange(1, 100)
         ex.do('%s = stm_allocate_refs(%s)' % (r, num))
         thread_state.transaction_state.add_root(r, "ffi.NULL")
-        
+
         thread_state.pop_roots(ex)
         thread_state.reload_roots(ex)
         thread_state.register_root(r)
@@ -320,7 +321,7 @@ class OpWrite(Operation):
             ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
         else:
             ex.do("offset = stm_get_obj_size(%s) - 1" % r)
-        #    
+        #
         global_state.check_for_write_write_conflicts(trs)
         if trs.check_must_abort():
             thread_state.abort_transaction()
@@ -368,10 +369,10 @@ class OpSwitchThread(Operation):
             ex.do('py.test.raises(Conflict, self.switch, %s)' % thread_state.num)
         else:
             ex.do('self.switch(%s)' % thread_state.num)
-    
+
 
 # ========== TEST GENERATION ==========
-        
+
 class TestRandom(BaseTest):
 
     def test_fixed_16_bytes_objects(self, seed=1010):
@@ -410,8 +411,8 @@ class TestRandom(BaseTest):
         # random steps:
         possible_actions = [
                 OpAllocate,
-                OpAllocateRef,
-                OpWrite, OpWrite, OpWrite, OpWrite,
+                OpAllocateRef, OpAllocateRef,
+                OpWrite, OpWrite, OpWrite, OpWrite, OpWrite, OpWrite,
                 OpRead, OpRead, OpRead, OpRead, OpRead, OpRead,
                 OpCommitTransaction,
                 OpAbortTransaction,
@@ -439,11 +440,11 @@ class TestRandom(BaseTest):
                     ex.do('#')
                     curr_thread = ts
                     OpSwitchThread().do(ex, global_state, curr_thread)
-                    
+
                 # could have aborted in the switch() above:
-                if curr_thread.transaction_state: 
+                if curr_thread.transaction_state:
                     OpCommitTransaction().do(ex, global_state, curr_thread)
-            
+
 
 
     def _make_fun(seed):
