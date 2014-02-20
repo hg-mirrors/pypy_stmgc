@@ -301,6 +301,13 @@ class OpAllocateRef(Operation):
         thread_state.reload_roots(ex)
         thread_state.register_root(r)
 
+class OpMinorCollect(Operation):
+    def do(self, ex, global_state, thread_state):
+        thread_state.push_roots(ex)
+        ex.do('stm_minor_collect()')
+        thread_state.pop_roots(ex)
+        thread_state.reload_roots(ex)
+
 
 class OpForgetRoot(Operation):
     def do(self, ex, global_state, thread_state):
@@ -426,14 +433,15 @@ class TestRandom(BaseTest):
 
         # random steps:
         possible_actions = [
-                OpAllocate,
-                OpAllocateRef, OpAllocateRef,
-                OpWrite, OpWrite, OpWrite,
-                OpRead, OpRead, OpRead, OpRead, OpRead, OpRead, OpRead, OpRead,
-                OpCommitTransaction,
-                OpAbortTransaction,
-                OpForgetRoot,
-            ]
+            OpAllocate,
+            OpAllocateRef, OpAllocateRef,
+            OpWrite, OpWrite, OpWrite,
+            OpRead, OpRead, OpRead, OpRead, OpRead, OpRead, OpRead, OpRead,
+            OpCommitTransaction,
+            OpAbortTransaction,
+            OpForgetRoot,
+            # OpMinorCollect,
+        ]
         for _ in range(200):
             # make sure we are in a transaction:
             n_thread = rnd.randrange(0, N_THREADS)
