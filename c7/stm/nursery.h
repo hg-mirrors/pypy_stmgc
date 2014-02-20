@@ -34,3 +34,7 @@
 
 static void align_nursery_at_transaction_start(void);
 static void restore_nursery_section_end(uintptr_t prev_value);
+
+static inline bool was_read_remote(char *base, object_t *obj,
+                                   uint8_t other_transaction_read_version,
+                                   uint8_t min_read_version_outside_nursery);
