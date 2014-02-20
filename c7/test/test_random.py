@@ -315,19 +315,24 @@ class OpWrite(Operation):
             v = ord(global_state.rnd.choice("abcdefghijklmnop"))
         trs = thread_state.transaction_state
         trs.write_root(r, v)
-
+        #
+        if is_ref_type_map[r]:
+            ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
+        else:
+            ex.do("offset = stm_get_obj_size(%s) - 1" % r)
+        #    
         global_state.check_for_write_write_conflicts(trs)
         if trs.check_must_abort():
             thread_state.abort_transaction()
             if is_ref_type_map[r]:
-                ex.do("py.test.raises(Conflict, stm_set_ref, %s, 0, %s)" % (r, v))
+                ex.do("py.test.raises(Conflict, stm_set_ref, %s, idx, %s)" % (r, v))
             else:
-                ex.do("py.test.raises(Conflict, stm_set_char, %s, %s)" % (r, repr(chr(v))))
+                ex.do("py.test.raises(Conflict, stm_set_char, %s, %s, offset)" % (r, repr(chr(v))))
         else:
             if is_ref_type_map[r]:
-                ex.do("stm_set_ref(%s, 0, %s)" % (r, v))
+                ex.do("stm_set_ref(%s, idx, %s)" % (r, v))
             else:
-                ex.do("stm_set_char(%s, %s)" % (r, repr(chr(v))))
+                ex.do("stm_set_char(%s, %s, offset)" % (r, repr(chr(v))))
 
 class OpRead(Operation):
     def do(self, ex, global_state, thread_state):
@@ -336,20 +341,22 @@ class OpRead(Operation):
         v = trs.read_root(r)
         #
         if is_ref_type_map[r]:
+            ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
             if v in thread_state.saved_roots or v in global_state.prebuilt_roots:
                 # v = root from this transaction; or shared
-                ex.do("assert stm_get_ref(%s, 0) == %s" % (r, v))
+                ex.do("assert stm_get_ref(%s, idx) == %s" % (r, v))
             elif v in trs.values:
                 # v must have survived stored in r, thus register it as a new
                 # known root in the current thread
                 ex.do("# get %r from other thread" % v)
-                ex.do("%s = stm_get_ref(%s, 0)" % (v, r))
+                ex.do("%s = stm_get_ref(%s, idx)" % (v, r))
                 thread_state.register_root(v)
             else:
                 # v is NULL; we still need to read it (as it is in the read-set):
-                ex.do("stm_get_ref(%s, 0)" % r)
+                ex.do("stm_get_ref(%s, idx)" % r)
         else:
-            ex.do("assert stm_get_char(%s) == %s" % (r, repr(chr(v))))
+            ex.do("offset = stm_get_obj_size(%s) - 1" % r)
+            ex.do("assert stm_get_char(%s, offset) == %s" % (r, repr(chr(v))))
 
 class OpSwitchThread(Operation):
     def do(self, ex, global_state, thread_state):
