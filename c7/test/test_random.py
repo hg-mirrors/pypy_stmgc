@@ -292,7 +292,7 @@ class OpAllocateRef(Operation):
     def do(self, ex, global_state, thread_state):
         r = get_new_root_name(True)
         thread_state.push_roots(ex)
-        num = global_state.rnd.randrange(1, 10)
+        num = global_state.rnd.randrange(1, 100)
         ex.do('%s = stm_allocate_refs(%s)' % (r, num))
         thread_state.transaction_state.add_root(r, "ffi.NULL")
         
