@@ -4,12 +4,16 @@ import py
 from cStringIO import StringIO
 
 
+
+
 class Exec(object):
     def __init__(self, test):
         self.content = {'self': test}
+        self.thread_num = 0
 
     def do(self, cmd):
-        print >> sys.stderr, cmd
+        color = "\033[%dm" % (31 + self.thread_num % 6)
+        print >> sys.stderr, color + cmd + "\033[0m"
         exec cmd in globals(), self.content
 
 
@@ -192,49 +196,49 @@ class GlobalState(object):
         self.prebuilt_roots = []
         self.committed_transaction_state = TransactionState(0)
 
-    def push_state_to_other_threads(self, tr_state):
-        assert not tr_state.check_must_abort()
+    def push_state_to_other_threads(self, trs):
+        assert not trs.check_must_abort()
         for ts in self.thread_states:
             other_trs = ts.transaction_state
-            if other_trs is None or other_trs is tr_state:
+            if other_trs is None or other_trs is trs:
                 continue
-            other_trs.update_from_committed(tr_state, only_new=True)
+            other_trs.update_from_committed(trs, only_new=True)
 
-        if tr_state.check_must_abort():
+        if trs.check_must_abort():
             self.ex.do('# conflict while pushing to other threads: %s' %
-                       tr_state.objs_in_conflict)
+                       trs.objs_in_conflict)
 
-    def check_for_write_write_conflicts(self, tr_state):
-        assert not tr_state.check_must_abort()
+    def check_for_write_write_conflicts(self, trs):
+        assert not trs.check_must_abort()
         for ts in self.thread_states:
             other_trs = ts.transaction_state
-            if other_trs is None or other_trs is tr_state:
+            if other_trs is None or other_trs is trs:
                 continue
 
-            confl_set = other_trs.write_set & tr_state.write_set
+            confl_set = other_trs.write_set & trs.write_set
             if confl_set:
-                contention_management(tr_state, other_trs, True,
+                contention_management(trs, other_trs, True,
                                       objs_in_conflict=confl_set)
 
-        if tr_state.check_must_abort():
+        if trs.check_must_abort():
             self.ex.do('# write-write conflict: %s' %
-                       tr_state.objs_in_conflict)
+                       trs.objs_in_conflict)
 
-    def check_for_write_read_conflicts(self, tr_state):
-        assert not tr_state.check_must_abort()
+    def check_for_write_read_conflicts(self, trs):
+        assert not trs.check_must_abort()
         for ts in self.thread_states:
             other_trs = ts.transaction_state
-            if other_trs is None or other_trs is tr_state:
+            if other_trs is None or other_trs is trs:
                 continue
 
-            confl_set = other_trs.read_set & tr_state.write_set
+            confl_set = other_trs.read_set & trs.write_set
             if confl_set:
-                contention_management(tr_state, other_trs,
+                contention_management(trs, other_trs,
                                       objs_in_conflict=confl_set)
 
-        if tr_state.check_must_abort():
+        if trs.check_must_abort():
             self.ex.do('# write-read conflict: %s' %
-                       tr_state.objs_in_conflict)
+                       trs.objs_in_conflict)
 
 
 # ========== STM OPERATIONS ==========
@@ -381,6 +385,7 @@ class OpSwitchThread(Operation):
     def do(self, ex, global_state, thread_state):
         trs = thread_state.transaction_state
         conflicts = trs is not None and trs.check_must_abort()
+        ex.thread_num = thread_state.num
         #
         if conflicts:
             thread_state.abort_transaction()
