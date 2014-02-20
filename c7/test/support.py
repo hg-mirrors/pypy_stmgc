@@ -74,6 +74,8 @@ void _stm_start_safe_point(void);
 bool _check_stop_safe_point(void);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
+
+ssize_t stmcb_size_rounded_up(struct object_s *obj);
 """)
 
 
@@ -384,7 +386,7 @@ def stm_get_page_flag(pagenum):
     return lib.stm_get_page_flag(pagenum)
 
 def stm_get_obj_size(o):
-    return lib.stmcb_size(stm_get_real_address(o))
+    return lib.stmcb_size_rounded_up(stm_get_real_address(o))
 
 def stm_get_obj_pages(o):
     start = int(ffi.cast('uintptr_t', o))

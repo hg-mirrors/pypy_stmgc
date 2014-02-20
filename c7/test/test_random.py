@@ -80,6 +80,10 @@ class TransactionState(object):
     def read_root(self, r):
         self.read_set.add(r)
         return self.values[r]
+
+    def add_root(self, r, v):
+        assert self.values.get(r, None) is None
+        self.values[r] = v
     
     def write_root(self, r, v):
         self.read_set.add(r)
@@ -114,6 +118,7 @@ class ThreadState(object):
         #     return r
         
         # forget all non-pushed roots for now
+        assert self.roots_on_stack == self.roots_on_transaction_start
         res = str(self.saved_roots[self.roots_on_stack:])
         del self.saved_roots[self.roots_on_stack:]
         return res
@@ -121,11 +126,12 @@ class ThreadState(object):
     def get_random_root(self):
         rnd = self.global_state.rnd
         if self.saved_roots:
-            return rnd.choice([rnd.choice(self.global_state.shared_roots),
+            return rnd.choice([rnd.choice(self.global_state.prebuilt_roots),
                                rnd.choice(self.saved_roots)])
-        return rnd.choice(self.global_state.shared_roots)
+        return rnd.choice(self.global_state.prebuilt_roots)
 
     def push_roots(self, ex):
+        assert self.roots_on_stack == self.roots_on_transaction_start
         for r in self.saved_roots[self.roots_on_transaction_start:]:
             ex.do('self.push_root(%s)' % r)
             self.roots_on_stack += 1
@@ -134,16 +140,15 @@ class ThreadState(object):
         for r in reversed(self.saved_roots[self.roots_on_transaction_start:]):
             ex.do('%s = self.pop_root()' % r)
             self.roots_on_stack -= 1
-
-    def update_roots(self, ex):
         assert self.roots_on_stack == self.roots_on_transaction_start
-        for r in reversed(self.saved_roots):
+
+    def reload_roots(self, ex):
+        assert self.roots_on_stack == self.roots_on_transaction_start
+        ex.do("# reload roots on stack:")
+        for r in reversed(self.saved_roots[:self.roots_on_stack]):
             ex.do('%s = self.pop_root()' % r)
-            self.roots_on_stack -= 1
-        assert self.roots_on_stack == 0
-        for r in self.saved_roots:
+        for r in self.saved_roots[:self.roots_on_stack]:
             ex.do('self.push_root(%s)' % r)
-            self.roots_on_stack += 1
 
     def start_transaction(self):
         assert self.transaction_state is None
@@ -184,7 +189,7 @@ class GlobalState(object):
         self.ex = ex
         self.rnd = rnd
         self.thread_states = []
-        self.shared_roots = []
+        self.prebuilt_roots = []
         self.committed_transaction_state = TransactionState(0)
 
     def push_state_to_other_threads(self, tr_state):
@@ -243,7 +248,7 @@ class OpStartTransaction(Operation):
         thread_state.start_transaction()
         #
         ex.do('self.start_transaction()')
-        thread_state.update_roots(ex)
+        thread_state.reload_roots(ex)
 
 
 class OpCommitTransaction(Operation):
@@ -277,20 +282,22 @@ class OpAllocate(Operation):
             "SOME_LARGE_SIZE+16",
         ])
         ex.do('%s = stm_allocate(%s)' % (r, size))
-        assert thread_state.transaction_state.write_root(r, 0) is None
+        thread_state.transaction_state.add_root(r, 0)
         
         thread_state.pop_roots(ex)
+        thread_state.reload_roots(ex)
         thread_state.register_root(r)
 
 class OpAllocateRef(Operation):
     def do(self, ex, global_state, thread_state):
         r = get_new_root_name(True)
         thread_state.push_roots(ex)
-        num = global_state.rnd.randrange(1, 10)
+        num = global_state.rnd.randrange(1, 100)
         ex.do('%s = stm_allocate_refs(%s)' % (r, num))
-        assert thread_state.transaction_state.write_root(r, "ffi.NULL") is None
+        thread_state.transaction_state.add_root(r, "ffi.NULL")
         
         thread_state.pop_roots(ex)
+        thread_state.reload_roots(ex)
         thread_state.register_root(r)
 
 
@@ -308,19 +315,24 @@ class OpWrite(Operation):
             v = ord(global_state.rnd.choice("abcdefghijklmnop"))
         trs = thread_state.transaction_state
         trs.write_root(r, v)
-
+        #
+        if is_ref_type_map[r]:
+            ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
+        else:
+            ex.do("offset = stm_get_obj_size(%s) - 1" % r)
+        #    
         global_state.check_for_write_write_conflicts(trs)
         if trs.check_must_abort():
             thread_state.abort_transaction()
             if is_ref_type_map[r]:
-                ex.do("py.test.raises(Conflict, stm_set_ref, %s, 0, %s)" % (r, v))
+                ex.do("py.test.raises(Conflict, stm_set_ref, %s, idx, %s)" % (r, v))
             else:
-                ex.do("py.test.raises(Conflict, stm_set_char, %s, %s)" % (r, repr(chr(v))))
+                ex.do("py.test.raises(Conflict, stm_set_char, %s, %s, offset)" % (r, repr(chr(v))))
         else:
             if is_ref_type_map[r]:
-                ex.do("stm_set_ref(%s, 0, %s)" % (r, v))
+                ex.do("stm_set_ref(%s, idx, %s)" % (r, v))
             else:
-                ex.do("stm_set_char(%s, %s)" % (r, repr(chr(v))))
+                ex.do("stm_set_char(%s, %s, offset)" % (r, repr(chr(v))))
 
 class OpRead(Operation):
     def do(self, ex, global_state, thread_state):
@@ -329,13 +341,22 @@ class OpRead(Operation):
         v = trs.read_root(r)
         #
         if is_ref_type_map[r]:
-            if v in thread_state.saved_roots or v in global_state.shared_roots:
-                ex.do("assert stm_get_ref(%s, 0) == %s" % (r, v))
+            ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
+            if v in thread_state.saved_roots or v in global_state.prebuilt_roots:
+                # v = root from this transaction; or shared
+                ex.do("assert stm_get_ref(%s, idx) == %s" % (r, v))
+            elif v in trs.values:
+                # v must have survived stored in r, thus register it as a new
+                # known root in the current thread
+                ex.do("# get %r from other thread" % v)
+                ex.do("%s = stm_get_ref(%s, idx)" % (v, r))
+                thread_state.register_root(v)
             else:
-                # we still need to read it (as it is in the read-set):
-                ex.do("stm_get_ref(%s, 0)" % r)
+                # v is NULL; we still need to read it (as it is in the read-set):
+                ex.do("stm_get_ref(%s, idx)" % r)
         else:
-            ex.do("assert stm_get_char(%s) == %s" % (r, repr(chr(v))))
+            ex.do("offset = stm_get_obj_size(%s) - 1" % r)
+            ex.do("assert stm_get_char(%s, offset) == %s" % (r, repr(chr(v))))
 
 class OpSwitchThread(Operation):
     def do(self, ex, global_state, thread_state):
@@ -377,12 +398,12 @@ class TestRandom(BaseTest):
             r = get_new_root_name(False)
             ex.do('%s = stm_allocate_old(16)' % r)
             global_state.committed_transaction_state.write_root(r, 0)
-            global_state.shared_roots.append(r)
+            global_state.prebuilt_roots.append(r)
 
             r = get_new_root_name(True)
             ex.do('%s = stm_allocate_old_refs(1)' % r)
             global_state.committed_transaction_state.write_root(r, "ffi.NULL")
-            global_state.shared_roots.append(r)
+            global_state.prebuilt_roots.append(r)
         global_state.committed_transaction_state.write_set = set()
         global_state.committed_transaction_state.read_set = set()
 
@@ -390,24 +411,13 @@ class TestRandom(BaseTest):
         possible_actions = [
                 OpAllocate,
                 OpAllocateRef,
-                OpWrite,
-                OpWrite,
-                OpWrite,
-                OpWrite,
-                OpRead,
-                OpRead,
-                OpRead,
-                OpRead,
-                OpRead,
-                OpRead,
+                OpWrite, OpWrite, OpWrite, OpWrite,
+                OpRead, OpRead, OpRead, OpRead, OpRead, OpRead,
                 OpCommitTransaction,
                 OpAbortTransaction,
                 OpForgetRoot,
             ]
-        remaining_steps = 200
-        while remaining_steps > 0:
-            remaining_steps -= 1
-
+        for _ in range(200):
             # make sure we are in a transaction:
             n_thread = rnd.randrange(0, N_THREADS)
             if n_thread != curr_thread.num:
@@ -429,8 +439,9 @@ class TestRandom(BaseTest):
                     ex.do('#')
                     curr_thread = ts
                     OpSwitchThread().do(ex, global_state, curr_thread)
-                if curr_thread.transaction_state:
-                    # could have aborted in the switch() above
+                    
+                # could have aborted in the switch() above:
+                if curr_thread.transaction_state: 
                     OpCommitTransaction().do(ex, global_state, curr_thread)
             
 
