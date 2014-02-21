@@ -148,7 +148,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 # error "The logic in the functions below only works with two segments"
 #endif
 
-static bool detect_write_read_conflicts(void)
+static void detect_write_read_conflicts(void)
 {
     long remote_num = 1 - STM_SEGMENT->segment_num;
     char *remote_base = get_segment_base(remote_num);
@@ -159,7 +159,8 @@ static bool detect_write_read_conflicts(void)
     switch (get_priv_segment(remote_num)->transaction_state) {
     case TS_NONE:
     case TS_MUST_ABORT:
-        return false;    /* no need to do any check */
+        return;    /* no need to do any check */
+    default:;
     }
 
     LIST_FOREACH_R(
@@ -173,11 +174,11 @@ static bool detect_write_read_conflicts(void)
 
                 /* If we reach this point, it means we aborted the other
                    thread.  We're done here. */
-                return true;
+                assert(get_priv_segment(remote_num)->transaction_state ==
+                       TS_MUST_ABORT);
+                return;
             }
         }));
-
-    return false;
 }
 
 static void push_modified_to_other_segments(void)
@@ -249,8 +250,7 @@ void stm_commit_transaction(void)
        the mutex, or it needs to restart. */
 
     /* detect conflicts */
-    if (UNLIKELY(detect_write_read_conflicts()))
-        goto restart;
+    detect_write_read_conflicts();
 
     /* cannot abort any more from here */
     dprintf(("commit_transaction\n"));
