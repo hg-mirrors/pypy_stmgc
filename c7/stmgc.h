@@ -144,6 +144,10 @@ struct object_s {
 */
 static inline void stm_read(object_t *obj)
 {
+#if 0    /* very costly check */
+    assert(((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm
+           <= STM_SEGMENT->transaction_read_version);
+#endif
     ((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm =
         STM_SEGMENT->transaction_read_version;
 }

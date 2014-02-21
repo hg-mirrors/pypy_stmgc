@@ -93,10 +93,16 @@ static void reset_transaction_read_version(void)
     */
     char *readmarkers = REAL_ADDRESS(STM_SEGMENT->segment_base,
                                      FIRST_READMARKER_PAGE * 4096UL);
-    if (madvise(readmarkers, NB_READMARKER_PAGES * 4096UL,
-                MADV_DONTNEED) < 0) {
-        perror("madvise");
+    dprintf(("reset_transaction_read_version: %p %ld\n", readmarkers,
+             (long)(NB_READMARKER_PAGES * 4096UL)));
+    if (mmap(readmarkers, NB_READMARKER_PAGES * 4096UL,
+             PROT_READ | PROT_WRITE,
+             MAP_FIXED | MAP_PAGES_FLAGS, -1, 0) != readmarkers) {
+        /* fall-back */
+#if STM_TESTS
         abort();
+#endif
+        memset(readmarkers, 0, NB_READMARKER_PAGES * 4096UL);
     }
     reset_transaction_read_version_prebuilt();
     STM_SEGMENT->transaction_read_version = 1;
