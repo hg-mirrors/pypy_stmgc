@@ -11,7 +11,7 @@ class TestDemo:
 
     def make_and_run(self, target):
         self._do("make -C ../demo %s" % target)
-        self._do("../demo/%s" % target)
+        self._do("../demo/%s 2> /dev/null" % target)
 
     def test_demo2_debug(self):   self.make_and_run("debug-demo2")
     def test_demo2_build(self):   self.make_and_run("build-demo2")
