@@ -17,6 +17,12 @@ class Exec(object):
         exec cmd in globals(), self.content
 
 
+def raising_call(conflict, func, *args):
+    arguments = ", ".join(map(str, args))
+    if conflict:
+        return "py.test.raises(Conflict, %s, %s)" % (func, arguments)
+    return "%s(%s)" % (func, arguments)
+
 
 class WriteWriteConflictNotTestable(Exception):
     # How can I test a write-write conflict between
@@ -227,6 +233,16 @@ class GlobalState(object):
             self.ex.do('# conflict while pushing to other threads: %s' %
                        trs.objs_in_conflict)
 
+    def check_if_can_become_inevitable(self, trs):
+        assert not trs.check_must_abort()
+        for ts in self.thread_states:
+            other_trs = ts.transaction_state
+            if (other_trs and trs is not other_trs
+                and other_trs.inevitable):
+                self.ex.do("# there is another inevitable transaction:")
+                trs.set_must_abort()
+                break
+
     def check_for_write_write_conflicts(self, trs):
         assert not trs.check_must_abort()
         for ts in self.thread_states:
@@ -284,9 +300,7 @@ class OpCommitTransaction(Operation):
         #
         if aborts:
             thread_state.abort_transaction()
-            ex.do('py.test.raises(Conflict, self.commit_transaction)')
-        else:
-            ex.do('self.commit_transaction()')
+        ex.do(raising_call(aborts, "self.commit_transaction"))
 
 class OpAbortTransaction(Operation):
     def do(self, ex, global_state, thread_state):
@@ -300,20 +314,15 @@ class OpAbortTransaction(Operation):
 class OpBecomeInevitable(Operation):
     def do(self, ex, global_state, thread_state):
         trs = thread_state.transaction_state
-        for ts in global_state.thread_states:
-            other_trs = ts.transaction_state
-            if (other_trs and trs is not other_trs
-                and other_trs.inevitable):
-                trs.set_must_abort()
-                break
+        global_state.check_if_can_become_inevitable(trs)
 
         thread_state.push_roots(ex)
+        ex.do(raising_call(trs.check_must_abort(),
+                           "stm_become_inevitable"))
         if trs.check_must_abort():
             thread_state.abort_transaction()
-            ex.do('py.test.raises(Conflict, stm_become_inevitable)')
         else:
             trs.inevitable = True
-            ex.do('stm_become_inevitable()')
             thread_state.pop_roots(ex)
             thread_state.reload_roots(ex)
 
@@ -362,18 +371,10 @@ class OpForgetRoot(Operation):
 class OpWrite(Operation):
     def do(self, ex, global_state, thread_state):
         r = thread_state.get_random_root()
-        is_ref = global_state.has_ref_type(r)
-        if is_ref:
-            v = thread_state.get_random_root()
-        else:
-            v = ord(global_state.rnd.choice("abcdefghijklmnop"))
         trs = thread_state.transaction_state
+        is_ref = global_state.has_ref_type(r)
         #
-        if is_ref:
-            ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
-        else:
-            ex.do("offset = stm_get_obj_size(%s) - 1" % r)
-        #
+        # check for possible write-write conflict:
         was_written = False
         try:
             # HACK to avoid calling write_root() just yet because we have to
@@ -384,23 +385,27 @@ class OpWrite(Operation):
         except WriteWriteConflictNotTestable:
             if not was_written:
                 trs.write_set.remove(r)
-            ex.do("# this is an untestable write-write conflict between an")
-            ex.do("# inevitable and a normal transaction :(")
+            ex.do("# writing to %s produces an untestable write-write" % r)
+            ex.do("# conflict between an inevitable and a normal transaction :(")
             return
         #
+        # decide on a value to write
+        if is_ref:
+            v = thread_state.get_random_root()
+            ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
+        else:
+            v = ord(global_state.rnd.choice("abcdefghijklmnop"))
+            ex.do("offset = stm_get_obj_size(%s) - 1" % r)
         trs.write_root(r, v)
         #
         if trs.check_must_abort():
             thread_state.abort_transaction()
-            if is_ref:
-                ex.do("py.test.raises(Conflict, stm_set_ref, %s, idx, %s)" % (r, v))
-            else:
-                ex.do("py.test.raises(Conflict, stm_set_char, %s, %s, offset)" % (r, repr(chr(v))))
+        if is_ref:
+            ex.do(raising_call(trs.check_must_abort(),
+                               "stm_set_ref", r, "idx", v))
         else:
-            if is_ref:
-                ex.do("stm_set_ref(%s, idx, %s)" % (r, v))
-            else:
-                ex.do("stm_set_char(%s, %s, offset)" % (r, repr(chr(v))))
+            ex.do(raising_call(trs.check_must_abort(),
+                               "stm_set_char", r, repr(chr(v)), "offset"))
 
 class OpRead(Operation):
     def do(self, ex, global_state, thread_state):
@@ -445,9 +450,10 @@ class OpSwitchThread(Operation):
         #
         if conflicts:
             thread_state.abort_transaction()
-            ex.do('py.test.raises(Conflict, self.switch, %s)' % thread_state.num)
-        else:
-            ex.do('self.switch(%s)' % thread_state.num)
+
+        ex.do(raising_call(conflicts,
+                           "self.switch", thread_state.num))
+
 
 
 # ========== TEST GENERATION ==========
