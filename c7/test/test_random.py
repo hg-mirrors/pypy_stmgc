@@ -18,16 +18,6 @@ class Exec(object):
 
 
 
-_root_numbering = 0
-is_ref_type_map = {}
-def get_new_root_name(is_ref_type):
-    global _root_numbering
-    _root_numbering += 1
-    r = "lp%d" % _root_numbering
-    is_ref_type_map[r] = is_ref_type
-    return r
-
-
 class WriteWriteConflictNotTestable(Exception):
     # How can I test a write-write conflict between
     # an inevitable and a normal transaction? The
@@ -36,7 +26,6 @@ class WriteWriteConflictNotTestable(Exception):
     # aborting the inevitable transaction is not possible..
     pass
 
-_global_time = 0
 def contention_management(our_trs, other_trs, wait=False, objs_in_conflict=None):
     """exact copy of logic in contention.c"""
     if our_trs.inevitable and wait:
@@ -172,9 +161,7 @@ class ThreadState(object):
 
     def start_transaction(self):
         assert self.transaction_state is None
-        global _global_time
-        _global_time += 1
-        start_time = _global_time
+        start_time = self.global_state.inc_and_get_global_time()
         trs = TransactionState(start_time)
         trs.update_from_committed(
             self.global_state.committed_transaction_state)
@@ -211,6 +198,22 @@ class GlobalState(object):
         self.thread_states = []
         self.prebuilt_roots = []
         self.committed_transaction_state = TransactionState(0)
+        self.global_time = 0
+        self.root_numbering = 0
+        self.ref_type_map = {}
+
+    def get_new_root_name(self, is_ref_type):
+        self.root_numbering += 1
+        r = "lp_%s_%d" % ("ref" if is_ref_type else "char", self.root_numbering)
+        self.ref_type_map[r] = is_ref_type
+        return r
+
+    def has_ref_type(self, r):
+        return self.ref_type_map[r]
+
+    def inc_and_get_global_time(self):
+        self.global_time += 1
+        return self.global_time
 
     def push_state_to_other_threads(self, trs):
         assert not trs.check_must_abort()
@@ -317,7 +320,7 @@ class OpBecomeInevitable(Operation):
 
 class OpAllocate(Operation):
     def do(self, ex, global_state, thread_state):
-        r = get_new_root_name(False)
+        r = global_state.get_new_root_name(False)
         thread_state.push_roots(ex)
         size = global_state.rnd.choice([
             16,
@@ -333,7 +336,7 @@ class OpAllocate(Operation):
 
 class OpAllocateRef(Operation):
     def do(self, ex, global_state, thread_state):
-        r = get_new_root_name(True)
+        r = global_state.get_new_root_name(True)
         thread_state.push_roots(ex)
         num = global_state.rnd.randrange(1, 100)
         ex.do('%s = stm_allocate_refs(%s)' % (r, num))
@@ -359,20 +362,22 @@ class OpForgetRoot(Operation):
 class OpWrite(Operation):
     def do(self, ex, global_state, thread_state):
         r = thread_state.get_random_root()
-        if is_ref_type_map[r]:
+        is_ref = global_state.has_ref_type(r)
+        if is_ref:
             v = thread_state.get_random_root()
         else:
             v = ord(global_state.rnd.choice("abcdefghijklmnop"))
         trs = thread_state.transaction_state
         #
-        if is_ref_type_map[r]:
+        if is_ref:
             ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
         else:
             ex.do("offset = stm_get_obj_size(%s) - 1" % r)
         #
         was_written = False
         try:
-            # HACK to avoid calling write_root() just yet
+            # HACK to avoid calling write_root() just yet because we have to
+            # undo it in case of the exception :(
             was_written = r in trs.write_set
             trs.write_set.add(r)
             global_state.check_for_write_write_conflicts(trs)
@@ -387,12 +392,12 @@ class OpWrite(Operation):
         #
         if trs.check_must_abort():
             thread_state.abort_transaction()
-            if is_ref_type_map[r]:
+            if is_ref:
                 ex.do("py.test.raises(Conflict, stm_set_ref, %s, idx, %s)" % (r, v))
             else:
                 ex.do("py.test.raises(Conflict, stm_set_char, %s, %s, offset)" % (r, repr(chr(v))))
         else:
-            if is_ref_type_map[r]:
+            if is_ref:
                 ex.do("stm_set_ref(%s, idx, %s)" % (r, v))
             else:
                 ex.do("stm_set_char(%s, %s, offset)" % (r, repr(chr(v))))
@@ -403,7 +408,7 @@ class OpRead(Operation):
         trs = thread_state.transaction_state
         v = trs.read_root(r)
         #
-        if is_ref_type_map[r]:
+        if global_state.has_ref_type(r):
             ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
             if v in thread_state.saved_roots or v in global_state.prebuilt_roots:
                 # v = root known to this transaction; or prebuilt
@@ -450,11 +455,6 @@ class OpSwitchThread(Operation):
 class TestRandom(BaseTest):
 
     def test_fixed_16_bytes_objects(self, seed=1010):
-        global _root_numbering
-        _root_numbering = 0
-        global is_ref_type_map
-        is_ref_type_map = {}
-
         rnd = random.Random(seed)
 
         N_OBJECTS = 3
@@ -475,12 +475,12 @@ class TestRandom(BaseTest):
         curr_thread = global_state.thread_states[0]
 
         for i in range(N_OBJECTS):
-            r = get_new_root_name(False)
+            r = global_state.get_new_root_name(False)
             ex.do('%s = stm_allocate_old(16)' % r)
             global_state.committed_transaction_state.write_root(r, 0)
             global_state.prebuilt_roots.append(r)
 
-            r = get_new_root_name(True)
+            r = global_state.get_new_root_name(True)
             ex.do('%s = stm_allocate_old_refs(1)' % r)
             global_state.committed_transaction_state.write_root(r, "ffi.NULL")
             global_state.prebuilt_roots.append(r)
@@ -506,6 +506,7 @@ class TestRandom(BaseTest):
                 ex.do('#')
                 curr_thread = global_state.thread_states[n_thread]
                 OpSwitchThread().do(ex, global_state, curr_thread)
+
             if curr_thread.transaction_state is None:
                 OpStartTransaction().do(ex, global_state, curr_thread)
 
