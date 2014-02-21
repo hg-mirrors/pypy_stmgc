@@ -28,18 +28,32 @@ def get_new_root_name(is_ref_type):
     return r
 
 
+class WriteWriteConflictNotTestable(Exception):
+    # How can I test a write-write conflict between
+    # an inevitable and a normal transaction? The
+    # inevitable transaction would have to wait,
+    # but now for tests we simply abort. Of course
+    # aborting the inevitable transaction is not possible..
+    pass
+
 _global_time = 0
 def contention_management(our_trs, other_trs, wait=False, objs_in_conflict=None):
     """exact copy of logic in contention.c"""
+    if our_trs.inevitable and wait:
+        # we win but cannot wait in tests...
+        raise WriteWriteConflictNotTestable
 
-    if other_trs.start_time < our_trs.start_time:
+    if our_trs.inevitable:
+        other_trs.set_must_abort(objs_in_conflict)
+    elif other_trs.start_time < our_trs.start_time:
         pass
-    else:
+    elif not other_trs.inevitable:
         other_trs.set_must_abort(objs_in_conflict)
 
     if not other_trs.check_must_abort():
         our_trs.set_must_abort(objs_in_conflict)
     elif wait:
+        assert not our_trs.inevitable
         # abort anyway:
         our_trs.set_must_abort(objs_in_conflict)
 
@@ -56,8 +70,10 @@ class TransactionState(object):
         self._must_abort = False
         self.start_time = start_time
         self.objs_in_conflict = set()
+        self.inevitable = False
 
     def set_must_abort(self, objs_in_conflict=None):
+        assert not self.inevitable
         if objs_in_conflict is not None:
             self.objs_in_conflict |= objs_in_conflict
         self._must_abort = True
@@ -271,10 +287,32 @@ class OpCommitTransaction(Operation):
 
 class OpAbortTransaction(Operation):
     def do(self, ex, global_state, thread_state):
-        thread_state.transaction_state.set_must_abort()
+        trs = thread_state.transaction_state
+        if trs.inevitable:
+            return
+        trs.set_must_abort()
         thread_state.abort_transaction()
         ex.do('self.abort_transaction()')
 
+class OpBecomeInevitable(Operation):
+    def do(self, ex, global_state, thread_state):
+        trs = thread_state.transaction_state
+        for ts in global_state.thread_states:
+            other_trs = ts.transaction_state
+            if (other_trs and trs is not other_trs
+                and other_trs.inevitable):
+                trs.set_must_abort()
+                break
+
+        thread_state.push_roots(ex)
+        if trs.check_must_abort():
+            thread_state.abort_transaction()
+            ex.do('py.test.raises(Conflict, stm_become_inevitable)')
+        else:
+            trs.inevitable = True
+            ex.do('stm_become_inevitable()')
+            thread_state.pop_roots(ex)
+            thread_state.reload_roots(ex)
 
 
 class OpAllocate(Operation):
@@ -326,14 +364,27 @@ class OpWrite(Operation):
         else:
             v = ord(global_state.rnd.choice("abcdefghijklmnop"))
         trs = thread_state.transaction_state
-        trs.write_root(r, v)
         #
         if is_ref_type_map[r]:
             ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
         else:
             ex.do("offset = stm_get_obj_size(%s) - 1" % r)
         #
-        global_state.check_for_write_write_conflicts(trs)
+        was_written = False
+        try:
+            # HACK to avoid calling write_root() just yet
+            was_written = r in trs.write_set
+            trs.write_set.add(r)
+            global_state.check_for_write_write_conflicts(trs)
+        except WriteWriteConflictNotTestable:
+            if not was_written:
+                trs.write_set.remove(r)
+            ex.do("# this is an untestable write-write conflict between an")
+            ex.do("# inevitable and a normal transaction :(")
+            return
+        #
+        trs.write_root(r, v)
+        #
         if trs.check_must_abort():
             thread_state.abort_transaction()
             if is_ref_type_map[r]:
@@ -445,6 +496,7 @@ class TestRandom(BaseTest):
             OpCommitTransaction,
             OpAbortTransaction,
             OpForgetRoot,
+            OpBecomeInevitable,
             # OpMinorCollect,
         ]
         for _ in range(200):
