@@ -123,6 +123,7 @@ class ThreadState(object):
 
     def register_root(self, r):
         self.saved_roots.append(r)
+        assert len(self.saved_roots) < SHADOWSTACK_LENGTH
 
     def forget_random_root(self):
         # # forget some non-pushed root for now
@@ -463,16 +464,28 @@ class OpAssertSize(Operation):
             ex.do("assert stm_get_obj_size(%s) == %s" % (r, size))
 
 class OpSwitchThread(Operation):
-    def do(self, ex, global_state, thread_state):
-        trs = thread_state.transaction_state
-        conflicts = trs is not None and trs.check_must_abort()
-        ex.thread_num = thread_state.num
-        #
-        if conflicts:
-            thread_state.abort_transaction()
+    def do(self, ex, global_state, thread_state, new_thread_state=None):
+        if new_thread_state is None:
+            new_thread_state = global_state.rnd.choice(global_state.thread_states)
 
-        ex.do(raising_call(conflicts,
-                           "self.switch", thread_state.num))
+        if new_thread_state != thread_state:
+            if thread_state.transaction_state:
+                thread_state.push_roots(ex)
+            ex.do('#')
+            #
+            trs = new_thread_state.transaction_state
+            conflicts = trs is not None and trs.check_must_abort()
+            ex.thread_num = new_thread_state.num
+            #
+            ex.do(raising_call(conflicts,
+                               "self.switch", new_thread_state.num))
+            if conflicts:
+                new_thread_state.abort_transaction()
+            else:
+                new_thread_state.pop_roots(ex)
+                new_thread_state.reload_roots(ex)
+
+        return new_thread_state
 
 
 
@@ -523,11 +536,7 @@ class TestRandom(BaseTest):
         ]
         for _ in range(200):
             # make sure we are in a transaction:
-            n_thread = rnd.randrange(0, N_THREADS)
-            if n_thread != curr_thread.num:
-                ex.do('#')
-                curr_thread = global_state.thread_states[n_thread]
-                OpSwitchThread().do(ex, global_state, curr_thread)
+            curr_thread = OpSwitchThread().do(ex, global_state, curr_thread)
 
             if curr_thread.transaction_state is None:
                 OpStartTransaction().do(ex, global_state, curr_thread)
@@ -542,8 +551,8 @@ class TestRandom(BaseTest):
             if ts.transaction_state is not None:
                 if curr_thread != ts:
                     ex.do('#')
-                    curr_thread = ts
-                    OpSwitchThread().do(ex, global_state, curr_thread)
+                    curr_thread = OpSwitchThread().do(ex, global_state, curr_thread,
+                                                      new_thread_state=ts)
 
                 # could have aborted in the switch() above:
                 if curr_thread.transaction_state:
