@@ -207,15 +207,20 @@ class GlobalState(object):
         self.global_time = 0
         self.root_numbering = 0
         self.ref_type_map = {}
+        self.root_sizes = {}
 
-    def get_new_root_name(self, is_ref_type):
+    def get_new_root_name(self, is_ref_type, size):
         self.root_numbering += 1
         r = "lp_%s_%d" % ("ref" if is_ref_type else "char", self.root_numbering)
         self.ref_type_map[r] = is_ref_type
+        self.root_sizes[r] = size
         return r
 
     def has_ref_type(self, r):
         return self.ref_type_map[r]
+
+    def get_root_size(self, r):
+        return self.root_sizes[r]
 
     def inc_and_get_global_time(self):
         self.global_time += 1
@@ -329,13 +334,14 @@ class OpBecomeInevitable(Operation):
 
 class OpAllocate(Operation):
     def do(self, ex, global_state, thread_state):
-        r = global_state.get_new_root_name(False)
-        thread_state.push_roots(ex)
         size = global_state.rnd.choice([
-            16,
+            "16",
             "SOME_MEDIUM_SIZE+16",
             #"SOME_LARGE_SIZE+16",
         ])
+        r = global_state.get_new_root_name(False, size)
+        thread_state.push_roots(ex)
+
         ex.do('%s = stm_allocate(%s)' % (r, size))
         thread_state.transaction_state.add_root(r, 0)
 
@@ -345,9 +351,9 @@ class OpAllocate(Operation):
 
 class OpAllocateRef(Operation):
     def do(self, ex, global_state, thread_state):
-        r = global_state.get_new_root_name(True)
+        num = str(global_state.rnd.randrange(1, 100))
+        r = global_state.get_new_root_name(True, num)
         thread_state.push_roots(ex)
-        num = global_state.rnd.randrange(1, 100)
         ex.do('%s = stm_allocate_refs(%s)' % (r, num))
         thread_state.transaction_state.add_root(r, "ffi.NULL")
 
@@ -392,20 +398,22 @@ class OpWrite(Operation):
         # decide on a value to write
         if is_ref:
             v = thread_state.get_random_root()
-            ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
         else:
             v = ord(global_state.rnd.choice("abcdefghijklmnop"))
-            ex.do("offset = stm_get_obj_size(%s) - 1" % r)
         trs.write_root(r, v)
         #
-        if trs.check_must_abort():
+        aborts = trs.check_must_abort()
+        if aborts:
             thread_state.abort_transaction()
+        offset = global_state.get_root_size(r) + " - 1"
         if is_ref:
-            ex.do(raising_call(trs.check_must_abort(),
-                               "stm_set_ref", r, "idx", v))
+            ex.do(raising_call(aborts, "stm_set_ref", r, offset, v))
+            if not aborts:
+                ex.do(raising_call(False, "stm_set_ref", r, "0", v))
         else:
-            ex.do(raising_call(trs.check_must_abort(),
-                               "stm_set_char", r, repr(chr(v)), "offset"))
+            ex.do(raising_call(aborts, "stm_set_char", r, repr(chr(v)), offset))
+            if not aborts:
+                ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR"))
 
 class OpRead(Operation):
     def do(self, ex, global_state, thread_state):
@@ -413,11 +421,12 @@ class OpRead(Operation):
         trs = thread_state.transaction_state
         v = trs.read_root(r)
         #
+        offset = global_state.get_root_size(r) + " - 1"
         if global_state.has_ref_type(r):
-            ex.do("idx = (stm_get_obj_size(%s) - HDR) / WORD - 1" % r)
             if v in thread_state.saved_roots or v in global_state.prebuilt_roots:
                 # v = root known to this transaction; or prebuilt
-                ex.do("assert stm_get_ref(%s, idx) == %s" % (r, v))
+                ex.do("assert stm_get_ref(%s, %s) == %s" % (r, offset, v))
+                ex.do("assert stm_get_ref(%s, 0) == %s" % (r, v))
             elif v != "ffi.NULL":
                 # if v came from this transaction: re-add it to saved_roots because
                 #     it survived by being referenced by another saved root
@@ -433,14 +442,25 @@ class OpRead(Operation):
                 else:
                     ex.do("# register %r in this thread" % v)
                 #
-                ex.do("%s = stm_get_ref(%s, idx)" % (v, r))
+                ex.do("%s = stm_get_ref(%s, %s)" % (v, r, offset))
+                ex.do("%s = stm_get_ref(%s, 0)" % (v, r))
                 thread_state.register_root(v)
             else:
                 # v is NULL; we still need to read it (as it should be in the read-set):
-                ex.do("assert stm_get_ref(%s, idx) == %s" % (r,v))
+                ex.do("assert stm_get_ref(%s, %s) == %s" % (r,offset,v))
+                ex.do("assert stm_get_ref(%s, 0) == %s" % (r,v))
         else:
-            ex.do("offset = stm_get_obj_size(%s) - 1" % r)
-            ex.do("assert stm_get_char(%s, offset) == %s" % (r, repr(chr(v))))
+            ex.do("assert stm_get_char(%s, %s) == %s" % (r, offset, repr(chr(v))))
+            ex.do("assert stm_get_char(%s, HDR) == %s" % (r, repr(chr(v))))
+
+class OpAssertSize(Operation):
+    def do(self, ex, global_state, thread_state):
+        r = thread_state.get_random_root()
+        size = global_state.get_root_size(r)
+        if global_state.has_ref_type(r):
+            ex.do("assert stm_get_obj_size(%s) == %s" % (r, size + " * WORD + HDR"))
+        else:
+            ex.do("assert stm_get_obj_size(%s) == %s" % (r, size))
 
 class OpSwitchThread(Operation):
     def do(self, ex, global_state, thread_state):
@@ -466,12 +486,7 @@ class TestRandom(BaseTest):
         N_OBJECTS = 3
         N_THREADS = 2
         ex = Exec(self)
-        ex.do("""
-################################################################
-################################################################
-################################################################
-################################################################
-        """)
+        ex.do("################################################################\n"*10)
         ex.do('# initialization')
 
         global_state = GlobalState(ex, rnd)
@@ -481,13 +496,13 @@ class TestRandom(BaseTest):
         curr_thread = global_state.thread_states[0]
 
         for i in range(N_OBJECTS):
-            r = global_state.get_new_root_name(False)
-            ex.do('%s = stm_allocate_old(16)' % r)
+            r = global_state.get_new_root_name(False, "384")
+            ex.do('%s = stm_allocate_old(384)' % r)
             global_state.committed_transaction_state.write_root(r, 0)
             global_state.prebuilt_roots.append(r)
 
-            r = global_state.get_new_root_name(True)
-            ex.do('%s = stm_allocate_old_refs(1)' % r)
+            r = global_state.get_new_root_name(True, "50")
+            ex.do('%s = stm_allocate_old_refs(50)' % r)
             global_state.committed_transaction_state.write_root(r, "ffi.NULL")
             global_state.prebuilt_roots.append(r)
         global_state.committed_transaction_state.write_set = set()
@@ -503,6 +518,7 @@ class TestRandom(BaseTest):
             OpAbortTransaction,
             OpForgetRoot,
             OpBecomeInevitable,
+            OpAssertSize,
             # OpMinorCollect,
         ]
         for _ in range(200):
