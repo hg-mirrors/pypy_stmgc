@@ -19,15 +19,31 @@ struct small_alloc_s {
     char *next_object;   /* the next address we will return, or NULL */
     char *range_last;    /* if equal to next_object: next_object starts with
                             a next pointer; if greater: last item of a
-                            contigous range of unallocated objs */
+                            contiguous range of unallocated objs */
 };
+
+/* For each small request size, we have three independent chained lists
+   of address ranges:
+
+   - 'small_alloc_shared': ranges are within pages that are likely to be
+     shared.  We don't know for sure, because pages can be privatized
+     by normal run of stm_write().
+
+   - 'small_alloc_sh_old': moved from 'small_alloc_shared' when we're
+     looking for a range with the creation_marker set; this collects
+     the unsuitable ranges, i.e. the ones with already at least one
+     object and no creation marker.
+
+   - 'small_alloc_privtz': ranges are within pages that are privatized.
+*/
 static struct small_alloc_s small_alloc_shared[GC_N_SMALL_REQUESTS];
+static struct small_alloc_s small_alloc_sh_old[GC_N_SMALL_REQUESTS];
 static struct small_alloc_s small_alloc_privtz[GC_N_SMALL_REQUESTS];
-static char *free_pages;
+static char *free_uniform_pages;
 
 static void setup_gcpage(void);
 static void teardown_gcpage(void);
-static void check_gcpage_still_shared(void);
+//static void check_gcpage_still_shared(void);
 static char *allocate_outside_nursery_large(uint64_t size);
 
 

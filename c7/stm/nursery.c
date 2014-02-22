@@ -33,6 +33,8 @@ static union {
     char reserved[64];
 } nursery_ctl __attribute__((aligned(64)));
 
+static struct list_s *old_objects_pointing_to_young;
+
 
 /************************************************************/
 
@@ -43,6 +45,12 @@ static void setup_nursery(void)
     assert(MEDIUM_OBJECT < LARGE_OBJECT);
     assert(LARGE_OBJECT < NURSERY_SECTION_SIZE);
     nursery_ctl.used = 0;
+    old_objects_pointing_to_young = list_create();
+}
+
+static void teardown_nursery(void)
+{
+    list_free(old_objects_pointing_to_young);
 }
 
 static inline bool _is_in_nursery(object_t *obj)
@@ -100,7 +108,6 @@ static inline void minor_copy_in_page_to_other_segments(uintptr_t p,
     }
 }
 
-
 static void minor_trace_if_young(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
@@ -110,7 +117,9 @@ static void minor_trace_if_young(object_t **pobj)
     if (!_is_young(obj))
         return;
 
-    /* the location the object moved to is the second word in 'obj' */
+    /* If the object was already seen here, its first word was set
+       to GCWORD_MOVED.  In that case, the forwarding location, i.e.
+       where the object moved to, is stored in the second word in 'obj'. */
     char *realobj = (char *)REAL_ADDRESS(stm_object_pages, obj);
     object_t **pforwarded_array = (object_t **)realobj;
 
@@ -129,7 +138,9 @@ static void minor_trace_if_young(object_t **pobj)
 
        The pages S or W above are both pages of uniform sizes obtained
        from the end of the address space.  The difference is that page S
-       can be shared, but page W needs to be privatized.
+       can be shared, but page W needs to be privatized.  Moreover,
+       cases 2 and 4 differ in the creation_marker they need to put,
+       which has a granularity of 256 bytes.
     */
     size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
@@ -214,9 +225,12 @@ static void minor_trace_if_young(object_t **pobj)
     pforwarded_array[0] = GCWORD_MOVED;
     pforwarded_array[1] = nobj;
     *pobj = nobj;
+
+    /* Must trace the object later */
+    LIST_APPEND(old_objects_pointing_to_young, nobj);
 }
 
-static void minor_trace_roots(void)
+static void collect_roots_in_nursery(void)
 {
     stm_thread_local_t *tl = stm_thread_locals;
     do {
@@ -227,6 +241,48 @@ static void minor_trace_roots(void)
         }
         tl = tl->next;
     } while (tl != stm_thread_locals);
+}
+
+static void trace_and_drag_out_of_nursery(object_t *obj)
+{
+    if (is_in_shared_pages(obj)) {
+        /* the object needs fixing only in one copy, because all copies
+           are shared and identical. */
+        char *realobj = (char *)REAL_ADDRESS(stm_object_pages, obj);
+        stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+    }
+    else {
+        /* every segment needs fixing */
+        long i;
+        for (i = 0; i < NB_SEGMENTS; i++) {
+            char *realobj = (char *)REAL_ADDRESS(get_segment_base(i), obj);
+            stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+        }
+    }
+}
+
+static void collect_oldrefs_to_nursery(struct list_s *lst)
+{
+    while (!list_is_empty(lst)) {
+        object_t *obj = (object_t *)list_pop_item(lst);
+        assert(!_is_in_nursery(obj));
+
+        /* We must have GCFLAG_WRITE_BARRIER_CALLED so far.  If we
+           don't, it's because the same object was stored in several
+           segment's old_objects_pointing_to_young.  It's fine to
+           ignore duplicates. */
+        if ((obj->stm_flags & GCFLAG_WRITE_BARRIER_CALLED) == 0)
+            continue;
+
+        /* Remove the flag GCFLAG_WRITE_BARRIER_CALLED.  No live object
+           should have this flag set after a nursery collection. */
+        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER_CALLED;
+
+        /* Trace the 'obj' to replace pointers to nursery with pointers
+           outside the nursery, possibly forcing nursery objects out
+           and adding them to 'old_objects_pointing_to_young' as well. */
+        trace_and_drag_out_of_nursery(obj);
+    }
 }
 
 static void reset_nursery(void)
@@ -243,6 +299,7 @@ static void reset_nursery(void)
         struct stm_priv_segment_info_s *other_pseg = get_priv_segment(i);
         /* no race condition here, because all other threads are paused
            in safe points, so cannot be e.g. in _stm_allocate_slowpath() */
+        uintptr_t old_end = other_pseg->real_nursery_section_end;
         other_pseg->real_nursery_section_end = 0;
         other_pseg->pub.v_nursery_section_end = 0;
 
@@ -252,7 +309,10 @@ static void reset_nursery(void)
            'transaction_read_version' without changing
            'min_read_version_outside_nursery'.
         */
-        if (other_pseg->pub.transaction_read_version < 0xff) {
+        if (other_pseg->transaction_state == TS_NONE) {
+            /* no transaction running now, nothing to do */
+        }
+        else if (other_pseg->pub.transaction_read_version < 0xff) {
             other_pseg->pub.transaction_read_version++;
             assert(0 < other_pseg->min_read_version_outside_nursery &&
                    other_pseg->min_read_version_outside_nursery
@@ -268,9 +328,15 @@ static void reset_nursery(void)
         }
 
         /* reset the creation markers */
-        char *creation_markers = REAL_ADDRESS(other_pseg->pub.segment_base,
-                                              NURSERY_START >> 8);
-        memset(creation_markers, 0, NURSERY_SIZE >> 8);
+        if (old_end > NURSERY_START) {
+            char *creation_markers = REAL_ADDRESS(other_pseg->pub.segment_base,
+                                                  NURSERY_START >> 8);
+            assert(old_end < NURSERY_START + NURSERY_SIZE);
+            memset(creation_markers, 0, (old_end - NURSERY_START) >> 8);
+        }
+        else {
+            assert(old_end == 0 || old_end == NURSERY_START);
+        }
     }
 }
 
@@ -278,18 +344,43 @@ static void do_minor_collection(void)
 {
     /* all other threads are paused in safe points during the whole
        minor collection */
+    dprintf(("minor_collection\n"));
     assert(_has_mutex());
+    assert(list_is_empty(old_objects_pointing_to_young));
 
-    check_gcpage_still_shared();
+    /* List of what we need to do and invariants we need to preserve
+       -------------------------------------------------------------
 
-    minor_trace_roots();
+       We must move out of the nursery any object found within the
+       nursery.  This requires either one or NB_SEGMENTS copies,
+       depending on the current write-state of the object.
 
-    // copy modified_objects
+       We need to move the mark stored in the write_locks, read_markers
+       and creation_markers arrays.  The creation_markers need some care
+       because they work at a coarser granularity of 256 bytes, so
+       objects with an "on" mark should not be moved too close to
+       objects with an "off" mark and vice-versa.
 
+       Then we must trace (= look inside) some objects outside the
+       nursery, and fix any pointer found that goes to a nursery object.
+       This tracing itself needs to be done either once or NB_SEGMENTS
+       times, depending on whether the object is fully in shared pages
+       or not.  We assume that 'stmcb_size_rounded_up' produce the same
+       results on all copies (i.e. don't depend on modifiable
+       information).
+    */
 
-    fprintf(stderr, "minor_collection\n");
-    abort(); //...;
+    //check_gcpage_still_shared();
 
+    collect_roots_in_nursery();
+
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *other_pseg = get_priv_segment(i);
+        collect_oldrefs_to_nursery(other_pseg->old_objects_pointing_to_young);
+    }
+
+    collect_oldrefs_to_nursery(old_objects_pointing_to_young);
 
     reset_nursery();
 }

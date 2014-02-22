@@ -45,6 +45,7 @@ static inline bool list_count(struct list_s *lst)
 
 static inline uintptr_t list_pop_item(struct list_s *lst)
 {
+    assert(lst->count > 0);
     return lst->items[--lst->count];
 }
 
