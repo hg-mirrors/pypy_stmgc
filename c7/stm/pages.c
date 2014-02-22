@@ -5,9 +5,9 @@
 
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
 {
-    /* call remap_file_pages() to make all pages in the
-       range(pagenum, pagenum+count) refer to the same
-       physical range of pages from segment 0 */
+    /* call remap_file_pages() to make all pages in the range(pagenum,
+       pagenum+count) refer to the same physical range of pages from
+       segment 0. */
     uintptr_t i;
     for (i = 1; i < NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
@@ -19,9 +19,27 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
             abort();
         }
     }
-    for (i = 0; i < count; i++) {
-        assert(flag_page_private[pagenum + i] == FREE_PAGE);
+    for (i = 0; i < count; i++)
         flag_page_private[pagenum + i] = SHARED_PAGE;
+}
+
+static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count)
+{
+    /* Same as pages_initialize_shared(), but tries hard to minimize the
+       total number of pages that remap_file_pages() must handle, by
+       fragmenting calls as much as possible (the overhead of one system
+       call appears smaller as the overhead per page). */
+    uintptr_t start, i = 0;
+    while (i < count) {
+        if (flag_page_private[pagenum + (i++)] == SHARED_PAGE)
+            continue;
+        start = i;    /* first index of a private page */
+        while (1) {
+            i++;
+            if (i == count || flag_page_private[pagenum + i] == SHARED_PAGE)
+                break;
+        }
+        pages_initialize_shared(pagenum + start, i - start);
     }
 }
 
