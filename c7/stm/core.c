@@ -13,11 +13,10 @@ void _stm_write_slowpath(object_t *obj)
 {
     assert(_running_transaction());
 
-    LIST_APPEND(STM_PSEGMENT->old_objects_to_trace, obj);
-
     /* for old objects from the same transaction, we are done now */
     if (obj_from_same_transaction(obj)) {
         obj->stm_flags |= GCFLAG_WRITE_BARRIER_CALLED;
+        LIST_APPEND(STM_PSEGMENT->old_objects_pointing_to_young, obj);
         return;
     }
 
@@ -221,6 +220,15 @@ static void push_modified_to_other_segments(void)
     list_clear(STM_PSEGMENT->modified_objects);
 }
 
+static void _finish_transaction(void)
+{
+    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+    release_thread_segment(tl);
+    STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
+    STM_PSEGMENT->transaction_state = TS_NONE;
+    list_clear(STM_PSEGMENT->old_objects_pointing_to_young);
+}
+
 void stm_commit_transaction(void)
 {
     mutex_lock();
@@ -267,10 +275,7 @@ void stm_commit_transaction(void)
     reset_all_creation_markers_and_push_created_data();
 
     /* done */
-    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
-    release_thread_segment(tl);
-    STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
-    STM_PSEGMENT->transaction_state = TS_NONE;
+    _finish_transaction();
 
     /* we did cond_broadcast() above already, in
        try_wait_for_other_safe_points().  It may wake up
@@ -345,13 +350,13 @@ static void abort_with_mutex(void)
     /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
     reset_modified_from_other_segments();
 
+    reset_all_creation_markers();
+
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     tl->shadowstack = STM_PSEGMENT->shadowstack_at_start_of_transaction;
-    release_thread_segment(tl);
-    STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
-    STM_PSEGMENT->transaction_state = TS_NONE;
-    reset_all_creation_markers();
+
+    _finish_transaction();
 
     cond_broadcast();
     mutex_unlock();

@@ -64,7 +64,7 @@ void stm_setup(void)
         pr->write_lock_num = i + 1;
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
-        pr->old_objects_to_trace = list_create();
+        pr->old_objects_pointing_to_young = list_create();
         pr->modified_objects = list_create();
         pr->creation_markers = list_create();
     }
@@ -96,7 +96,9 @@ void stm_teardown(void)
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
-        list_free(pr->old_objects_to_trace);
+        list_free(pr->old_objects_pointing_to_young);
+        list_free(pr->modified_objects);
+        list_free(pr->creation_markers);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);
@@ -107,6 +109,7 @@ void stm_teardown(void)
     teardown_core();
     teardown_sync();
     teardown_gcpage();
+    teardown_nursery();
 }
 
 void stm_register_thread_local(stm_thread_local_t *tl)

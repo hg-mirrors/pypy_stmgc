@@ -36,3 +36,4 @@ static uint8_t get_single_creation_marker(stm_char *p) __attribute__((unused));
 static void set_single_creation_marker(stm_char *p, int newvalue);
 static void reset_all_creation_markers(void);
 static void reset_all_creation_markers_and_push_created_data(void);
+static bool is_in_shared_pages(object_t *obj);

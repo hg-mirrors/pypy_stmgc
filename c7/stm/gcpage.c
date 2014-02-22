@@ -21,13 +21,13 @@ static void teardown_gcpage(void)
 {
     memset(small_alloc_shared, 0, sizeof(small_alloc_shared));
     memset(small_alloc_privtz, 0, sizeof(small_alloc_privtz));
-    free_pages = NULL;
+    free_uniform_pages = NULL;
 }
 
-static void check_gcpage_still_shared(void)
-{
-    //...;
-}
+//static void check_gcpage_still_shared(void)
+//{
+//    //...;
+//}
 
 #define GCPAGE_NUM_PAGES   20
 
@@ -54,8 +54,8 @@ static void grab_more_free_pages_for_small_allocations(void)
     char *p = uninitialized_page_start;
     long i;
     for (i = 0; i < 16; i++) {
-        *(char **)p = free_pages;
-        free_pages = p;
+        *(char **)p = free_uniform_pages;
+        free_uniform_pages = p;
     }
     return;
 
@@ -69,7 +69,7 @@ static char *_allocate_small_slowpath(
     /* not thread-safe!  Use only when holding the mutex */
     assert(_has_mutex());
 
-    if (free_pages == NULL)
+    if (free_uniform_pages == NULL)
         grab_more_free_pages_for_small_allocations();
 
     abort();//...

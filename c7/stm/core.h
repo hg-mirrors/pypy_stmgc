@@ -52,7 +52,7 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
-    struct list_s *old_objects_to_trace;
+    struct list_s *old_objects_pointing_to_young;
     struct list_s *modified_objects;
     struct list_s *creation_markers;
     uint64_t start_time;

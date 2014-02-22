@@ -205,3 +205,22 @@ static void reset_all_creation_markers_and_push_created_data(void)
 
     list_clear(STM_PSEGMENT->creation_markers);
 }
+
+static bool is_in_shared_pages(object_t *obj)
+{
+    uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
+
+    if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0)
+        return (flag_page_private[first_page] == SHARED_PAGE);
+
+    ssize_t obj_size = stmcb_size_rounded_up(
+        (struct object_s *)REAL_ADDRESS(stm_object_pages, obj));
+
+    uintptr_t end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
+    /* that's the page *following* the last page with the object */
+
+    while (first_page < end_page)
+        if (flag_page_private[first_page++] != SHARED_PAGE)
+            return false;
+    return true;
+}
