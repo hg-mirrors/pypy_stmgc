@@ -20,6 +20,7 @@ static uint8_t flag_page_private[NB_PAGES];
 
 static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full);
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
+static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count);
 
 inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
                                    bool full) {

@@ -383,6 +383,8 @@ static void do_minor_collection(void)
     collect_oldrefs_to_nursery(old_objects_pointing_to_young);
 
     reset_nursery();
+
+    pages_make_shared_again(FIRST_NURSERY_PAGE, NB_NURSERY_PAGES);
 }
 
 
