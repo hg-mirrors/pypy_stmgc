@@ -245,18 +245,19 @@ static void collect_roots_in_nursery(void)
 
 static void trace_and_drag_out_of_nursery(object_t *obj)
 {
-    if (is_in_shared_pages(obj)) {
-        /* the object needs fixing only in one copy, because all copies
-           are shared and identical. */
-        char *realobj = (char *)REAL_ADDRESS(stm_object_pages, obj);
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct object_s *realobj =
+            (struct object_s *)REAL_ADDRESS(get_segment_base(i), obj);
+
+        realobj->stm_flags &= ~GCFLAG_WRITE_BARRIER_CALLED;
+
         stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
-    }
-    else {
-        /* every segment needs fixing */
-        long i;
-        for (i = 0; i < NB_SEGMENTS; i++) {
-            char *realobj = (char *)REAL_ADDRESS(get_segment_base(i), obj);
-            stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+
+        if (i == 0 && is_in_shared_pages(obj)) {
+            /* the object needs fixing only in one copy, because all copies
+               are shared and identical. */
+            break;
         }
     }
 }
@@ -274,9 +275,9 @@ static void collect_oldrefs_to_nursery(struct list_s *lst)
         if ((obj->stm_flags & GCFLAG_WRITE_BARRIER_CALLED) == 0)
             continue;
 
-        /* Remove the flag GCFLAG_WRITE_BARRIER_CALLED.  No live object
-           should have this flag set after a nursery collection. */
-        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER_CALLED;
+        /* The flag GCFLAG_WRITE_BARRIER_CALLED is going to be removed:
+           no live object should have this flag set after a nursery
+           collection.  It is done in either one or NB_SEGMENTS copies. */
 
         /* Trace the 'obj' to replace pointers to nursery with pointers
            outside the nursery, possibly forcing nursery objects out
