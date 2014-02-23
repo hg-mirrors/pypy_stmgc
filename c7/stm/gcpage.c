@@ -24,10 +24,6 @@ static void teardown_gcpage(void)
     free_uniform_pages = NULL;
 }
 
-//static void check_gcpage_still_shared(void)
-//{
-//    //...;
-//}
 
 #define GCPAGE_NUM_PAGES   20
 

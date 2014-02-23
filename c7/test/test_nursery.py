@@ -58,9 +58,30 @@ class TestBasic(BaseTest):
         self.pop_root()
         #
         self.push_root(lp1)
-        lp2 = stm_allocate(16)
+        lp2 = stm_allocate(SOME_MEDIUM_SIZE)
         lp1b = self.pop_root()
         assert lp1b != lp1      # collection occurred
+
+    def test_several_minor_collections(self):
+        # make a long, ever-growing linked list of objects, in one transaction
+        lib._stm_set_nursery_free_count(NURSERY_SECTION_SIZE * 2)
+        self.start_transaction()
+        lp1 = stm_allocate(16)
+        self.push_root(lp1)
+        lp2 = lp1
+        N = (NURSERY_SECTION_SIZE * 5) / 16
+        for i in range(N):
+            self.push_root(lp2)
+            lp3 = stm_allocate(16)
+            lp2 = self.pop_root()
+            stm_set_ref(lp2, 0, lp3)
+            lp2 = lp3
+        lp1 = self.pop_root()
+        lp2 = lp1
+        for i in range(N):
+            assert lp2
+            lp2 = stm_get_ref(lp2, 0)
+        assert lp2 == lp3
 
     def test_many_allocs(self):
         obj_size = 1024

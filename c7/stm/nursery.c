@@ -29,6 +29,7 @@
 static union {
     struct {
         uint64_t used;    /* number of bytes from the nursery used so far */
+        uint64_t initial_value_of_used;
     };
     char reserved[64];
 } nursery_ctl __attribute__((aligned(64)));
@@ -51,6 +52,7 @@ static void setup_nursery(void)
 static void teardown_nursery(void)
 {
     list_free(old_objects_pointing_to_young);
+    nursery_ctl.initial_value_of_used = 0;
 }
 
 static inline bool _is_in_nursery(object_t *obj)
@@ -289,7 +291,7 @@ static void collect_oldrefs_to_nursery(struct list_s *lst)
 static void reset_nursery(void)
 {
     /* reset the global amount-of-nursery-used-so-far */
-    nursery_ctl.used = 0;
+    nursery_ctl.used = nursery_ctl.initial_value_of_used;
 
     /* reset the write locks */
     memset(write_locks + ((NURSERY_START >> 4) - READMARKER_START),
@@ -332,7 +334,7 @@ static void reset_nursery(void)
         if (old_end > NURSERY_START) {
             char *creation_markers = REAL_ADDRESS(other_pseg->pub.segment_base,
                                                   NURSERY_START >> 8);
-            assert(old_end < NURSERY_START + NURSERY_SIZE);
+            assert(old_end <= NURSERY_START + NURSERY_SIZE);
             memset(creation_markers, 0, (old_end - NURSERY_START) >> 8);
         }
         else {
@@ -370,8 +372,6 @@ static void do_minor_collection(void)
        results on all copies (i.e. don't depend on modifiable
        information).
     */
-
-    //check_gcpage_still_shared();
 
     collect_roots_in_nursery();
 
@@ -516,5 +516,6 @@ void _stm_set_nursery_free_count(uint64_t free_count)
     assert(free_count == NURSERY_ALIGN(free_count));
     assert(nursery_ctl.used <= NURSERY_SIZE - free_count);
     nursery_ctl.used = NURSERY_SIZE - free_count;
+    nursery_ctl.initial_value_of_used = nursery_ctl.used;
 }
 #endif
