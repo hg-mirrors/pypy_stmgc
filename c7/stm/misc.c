@@ -38,35 +38,28 @@ stm_thread_local_t *_stm_thread(void)
 bool _stm_was_read(object_t *obj)
 {
     return was_read_remote(STM_SEGMENT->segment_base, obj,
-                           STM_SEGMENT->transaction_read_version,
-                           STM_PSEGMENT->min_read_version_outside_nursery);
+                           STM_SEGMENT->transaction_read_version);
 }
 
 bool _stm_was_written(object_t *obj)
 {
-    return !!((((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm |
-               obj->stm_flags) & _STM_GCFLAG_WRITE_BARRIER_CALLED);
-}
-
-uint8_t _stm_creation_marker(object_t *obj)
-{
-    return ((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm;
+    return (obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) == 0;
 }
 
 #ifdef STM_TESTS
-object_t *_stm_enum_old_objects_pointing_to_young(void)
+object_t *_stm_enum_overflow_objects_pointing_to_nursery(void)
 {
     static long index = 0;
-    struct list_s *lst = STM_PSEGMENT->old_objects_pointing_to_young;
+    struct list_s *lst = STM_PSEGMENT->overflow_objects_pointing_to_nursery;
     if (index < list_count(lst))
         return (object_t *)list_item(lst, index++);
     index = 0;
     return (object_t *)-1;
 }
-object_t *_stm_enum_modified_objects(void)
+object_t *_stm_enum_modified_old_objects(void)
 {
     static long index = 0;
-    struct list_s *lst = STM_PSEGMENT->modified_objects;
+    struct list_s *lst = STM_PSEGMENT->modified_old_objects;
     if (index < list_count(lst))
         return (object_t *)list_item(lst, index++);
     index = 0;

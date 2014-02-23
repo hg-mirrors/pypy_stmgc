@@ -11,8 +11,8 @@
 
 #define NB_PAGES            (1500*256)    // 1500MB
 #define NB_SEGMENTS         2
+#define NB_SEGMENTS_MAX     240    /* don't increase NB_SEGMENTS past this */
 #define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
-#define LARGE_OBJECT_WORDS  36
 #define NB_NURSERY_PAGES    1024          // 4MB
 
 #define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_SEGMENTS)
@@ -25,22 +25,30 @@
 #define FIRST_READMARKER_PAGE (READMARKER_START / 4096UL)
 #define NB_READMARKER_PAGES   (FIRST_OBJECT_PAGE - FIRST_READMARKER_PAGE)
 
-#define CREATMARKER_START     ((FIRST_OBJECT_PAGE * 4096UL) >> 8)
-#define FIRST_CREATMARKER_PAGE (CREATMARKER_START / 4096UL)
+#define WRITELOCK_START       ((END_NURSERY_PAGE * 4096UL) >> 4)
+#define WRITELOCK_END         READMARKER_END
 
 
-enum {
-    /* this flag is not set on most objects.  when stm_write() is called
-       on an object that is not from the current transaction, then
-       _stm_write_slowpath() is called, and then the flag is set to
-       say "called once already, no need to call again". */
-    GCFLAG_WRITE_BARRIER_CALLED = _STM_GCFLAG_WRITE_BARRIER_CALLED,
-    /* allocated by gcpage.c in uniformly-sized pages of small objects */
+enum /* stm_flags */ {
+    /* This flag is set on non-nursery objects.  It forces stm_write()
+       to call _stm_write_slowpath().
+    */
+    GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
+
+    /* This flag is set by gcpage.c for all objects living in
+       uniformly-sized pages of small objects.
+    */
     GCFLAG_SMALL_UNIFORM = 0x02,
-};
 
-#define CROSS_PAGE_BOUNDARY(start, stop)                                \
-    (((uintptr_t)(start)) / 4096UL != ((uintptr_t)(stop)) / 4096UL)
+    /* All remaining bits of the 32-bit 'stm_flags' field are taken by
+       the "overflow number".  This is a number that identifies the
+       "overflow objects" from the current transaction among all old
+       objects.  More precisely, overflow objects are objects from the
+       current transaction that have been flushed out of the nursery,
+       which occurs if the same transaction allocates too many objects.
+    */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x04   /* must be last */
+};
 
 
 /************************************************************/
@@ -52,44 +60,61 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
-    struct list_s *old_objects_pointing_to_young;
-    struct list_s *modified_objects;
-    struct list_s *creation_markers;
+
+    /* List of overflowed objects (from the same transaction but outside
+       the nursery) on which the write-barrier was triggered, so that
+       they likely contain a pointer to a nursery object */
+    struct list_s *overflow_objects_pointing_to_nursery;
+
+    /* List of old objects (older than the current transaction) that the
+       current transaction attempts to modify */
+    struct list_s *modified_old_objects;
+
+    /* Start time: to know approximately for how long a transaction has
+       been running, in contention management */
     uint64_t start_time;
+
+    /* This is the number stored in the overflowed objects (a multiple of
+       GCFLAG_OVERFLOW_NUMBER_bit0).  It is incremented when the
+       transaction is done, but only if we actually overflowed any
+       object; otherwise, no object has got this number. */
+    uint32_t overflow_number;
+
+    /* The marker stored in the global 'write_locks' array to mean
+       "this segment has modified this old object". */
     uint8_t write_lock_num;
-    uint8_t safe_point;         /* one of the SP_xxx constants */
-    uint8_t transaction_state;  /* one of the TS_xxx constants */
-    uint8_t min_read_version_outside_nursery;   /* see was_read_remote() */
-    uintptr_t real_nursery_section_end;
+
+    /* The thread's safe-point state, one of the SP_xxx constants */
+    uint8_t safe_point;
+
+    /* The transaction status, one of the TS_xxx constants */
+    uint8_t transaction_state;
+
+    /* In case of abort, we restore the 'shadowstack' field. */
     object_t **shadowstack_at_start_of_transaction;
 };
 
-enum {
+enum /* safe_point */ {
     SP_NO_TRANSACTION=0,
     SP_RUNNING,
     SP_SAFE_POINT_CANNOT_COLLECT,
     SP_SAFE_POINT_CAN_COLLECT,
 };
-enum {
+enum /* transaction_state */ {
     TS_NONE=0,
     TS_REGULAR,
     TS_INEVITABLE,
     TS_MUST_ABORT,
 };
-enum {   /* for stm_creation_marker_t */
-    CM_NOT_CURRENT_TRANSACTION             = 0x00,
-    CM_CURRENT_TRANSACTION_OUTSIDE_NURSERY = 0x01,
-    CM_CURRENT_TRANSACTION_IN_NURSERY      = 0xff,
-};
 
 static char *stm_object_pages;
-static stm_thread_local_t *stm_thread_locals = NULL;
+static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 #ifdef STM_TESTS
 static char *stm_other_pages;
 #endif
 
-static uint8_t write_locks[READMARKER_END - READMARKER_START];
+static uint8_t write_locks[WRITELOCK_END - WRITELOCK_START];
 
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
@@ -113,13 +138,17 @@ struct stm_priv_segment_info_s *get_priv_segment(long segment_num) {
 static bool _is_tl_registered(stm_thread_local_t *tl);
 static bool _running_transaction(void);
 
-static inline bool obj_from_same_transaction(object_t *obj) {
-    return ((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm !=
-        CM_NOT_CURRENT_TRANSACTION;
-}
-
 static void teardown_core(void);
 static void abort_with_mutex(void) __attribute__((noreturn));
+
+static inline bool was_read_remote(char *base, object_t *obj,
+                                   uint8_t other_transaction_read_version)
+{
+    uint8_t rm = ((struct stm_read_marker_s *)
+                  (base + (((uintptr_t)obj) >> 4)))->rm;
+    assert(rm <= other_transaction_read_version);
+    return rm == other_transaction_read_version;
+}
 
 static inline void _duck(void) {
     /* put a call to _duck() between two instructions that set 0 into
@@ -128,4 +157,18 @@ static inline void _duck(void) {
        This is not needed any more after applying the patch
        llvmfix/no-memset-creation-with-addrspace.diff. */
     asm("/* workaround for llvm bug */");
+}
+
+static inline void abort_if_needed(void) {
+    switch (STM_PSEGMENT->transaction_state) {
+    case TS_REGULAR:
+    case TS_INEVITABLE:
+        break;
+
+    case TS_MUST_ABORT:
+        abort_with_mutex();
+
+    default:
+        assert(!"commit: bad transaction_state");
+    }
 }

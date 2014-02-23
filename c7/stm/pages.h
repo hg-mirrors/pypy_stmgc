@@ -1,5 +1,5 @@
 
-enum {
+enum /* flag_page_private */ {
     /* The page is not in use.  Assume that each segment sees its own copy. */
     FREE_PAGE=0,
 
@@ -12,15 +12,13 @@ enum {
 
     /* Page is private for each segment. */
     PRIVATE_PAGE,
-
-};      /* used for flag_page_private */
-
+};
 
 static uint8_t flag_page_private[NB_PAGES];
 
 static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full);
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
-static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count);
+//static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count);
 
 inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
                                    bool full) {
@@ -32,9 +30,4 @@ inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
     _pages_privatize(pagenum, count, full);
 }
 
-static void set_creation_markers(stm_char *p, uint64_t size, int newvalue);
-static uint8_t get_single_creation_marker(stm_char *p) __attribute__((unused));
-static void set_single_creation_marker(stm_char *p, int newvalue);
-static void reset_all_creation_markers(void);
-static void reset_all_creation_markers_and_push_created_data(void);
-static bool is_in_shared_pages(object_t *obj);
+//static bool is_in_shared_pages(object_t *obj);

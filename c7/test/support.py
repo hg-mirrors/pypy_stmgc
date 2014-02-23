@@ -53,7 +53,6 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
-uint8_t _stm_creation_marker(object_t *obj);
 bool _stm_in_nursery(object_t *obj);
 char *_stm_real_address(object_t *obj);
 object_t *_stm_segment_address(char *ptr);
@@ -77,8 +76,8 @@ void _stm_set_nursery_free_count(uint64_t free_count);
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
-object_t *_stm_enum_old_objects_pointing_to_young(void);
-object_t *_stm_enum_modified_objects(void);
+object_t *_stm_enum_overflow_objects_pointing_to_nursery(void);
+object_t *_stm_enum_modified_old_objects(void);
 
 void stm_collect(long level);
 """)
@@ -248,7 +247,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
                     ('STM_DEBUGPRINT', '1')],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0', '-Werror'],
+     extra_compile_args=['-g', '-O0', '-Werror', '-ferror-limit=1'],
      force_generic_engine=True)
 
 

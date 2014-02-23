@@ -28,11 +28,13 @@ static void pagecopy(void *dest, const void *src)
     }
 }
 
+#if 0
 static void pagecopy_256(void *dest, const void *src)
 {
     PAGECOPY_128(dest,       src      );
     PAGECOPY_128(dest + 128, src + 128);
 }
+#endif
 
 #if 0   /* XXX enable if detected on the cpu */
 static void pagecopy_ymm8(void *dest, const void *src)

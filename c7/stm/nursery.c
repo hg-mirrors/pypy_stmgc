@@ -4,61 +4,38 @@
 
 /************************************************************/
 
+/* xxx later: divide the nursery into sections, and zero them
+   incrementally.  For now we avoid the mess of maintaining a
+   description of which parts of the nursery are already zeroed
+   and which ones are not (caused by the fact that each
+   transaction fills up a different amount).
+*/
+
 #define NURSERY_START         (FIRST_NURSERY_PAGE * 4096UL)
 #define NURSERY_SIZE          (NB_NURSERY_PAGES * 4096UL)
+#define NURSERY_END           (NURSERY_START + NURSERY_SIZE)
 
-/* an object larger than LARGE_OBJECT will never be allocated in
-   the nursery. */
-#define LARGE_OBJECT          (65*1024)
-
-/* the nursery is divided in "sections" this big.  Each section is
-   allocated to a single running thread. */
-#define NURSERY_SECTION_SIZE  (128*1024)
-
-/* if objects are larger than this limit but smaller than LARGE_OBJECT,
-   then they might be allocted outside sections but still in the nursery. */
-#define MEDIUM_OBJECT         (6*1024)
-
-/* size in bytes of the "line".  Should be equal to the line used by
-   stm_creation_marker_t. */
-#define NURSERY_LINE          256
-
-/************************************************************/
-
-
-static union {
-    struct {
-        uint64_t used;    /* number of bytes from the nursery used so far */
-        uint64_t initial_value_of_used;
-    };
-    char reserved[64];
-} nursery_ctl __attribute__((aligned(64)));
-
-static struct list_s *old_objects_pointing_to_young;
+static uintptr_t _stm_nursery_start;
+uintptr_t _stm_nursery_end;
 
 
 /************************************************************/
 
 static void setup_nursery(void)
 {
-    assert(NURSERY_LINE == (1 << 8));  /* from stm_creation_marker_t */
-    assert((NURSERY_SECTION_SIZE % NURSERY_LINE) == 0);
-    assert(MEDIUM_OBJECT < LARGE_OBJECT);
-    assert(LARGE_OBJECT < NURSERY_SECTION_SIZE);
-    nursery_ctl.used = 0;
-    old_objects_pointing_to_young = list_create();
+    assert(_STM_FAST_ALLOC <= NURSERY_SIZE);
+    _stm_nursery_start = NURSERY_START;
+    _stm_nursery_end   = NURSERY_END;
 }
 
 static void teardown_nursery(void)
 {
-    list_free(old_objects_pointing_to_young);
-    nursery_ctl.initial_value_of_used = 0;
 }
 
 static inline bool _is_in_nursery(object_t *obj)
 {
     assert((uintptr_t)obj >= NURSERY_START);
-    return (uintptr_t)obj < NURSERY_START + NURSERY_SIZE;
+    return (uintptr_t)obj < NURSERY_END;
 }
 
 bool _stm_in_nursery(object_t *obj)
@@ -66,29 +43,12 @@ bool _stm_in_nursery(object_t *obj)
     return _is_in_nursery(obj);
 }
 
+#if 0
 static bool _is_young(object_t *obj)
 {
     return _is_in_nursery(obj);    /* for now */
 }
-
-static inline bool was_read_remote(char *base, object_t *obj,
-                                   uint8_t other_transaction_read_version,
-                                   uint8_t min_read_version_outside_nursery)
-{
-    uint8_t rm = ((struct stm_read_marker_s *)
-                  (base + (((uintptr_t)obj) >> 4)))->rm;
-
-    assert(min_read_version_outside_nursery <=
-           other_transaction_read_version);
-    assert(rm <= other_transaction_read_version);
-
-    if (_is_in_nursery(obj)) {
-        return rm == other_transaction_read_version;
-    }
-    else {
-        return rm >= min_read_version_outside_nursery;
-    }
-}
+#endif
 
 
 /************************************************************/
@@ -110,8 +70,10 @@ static inline void minor_copy_in_page_to_other_segments(uintptr_t p,
     }
 }
 
+#if 0
 static void minor_trace_if_young(object_t **pobj)
 {
+    abort(); //...
     /* takes a normal pointer to a thread-local pointer to an object */
     object_t *obj = *pobj;
     if (obj == NULL)
@@ -145,7 +107,7 @@ static void minor_trace_if_young(object_t **pobj)
        which has a granularity of 256 bytes.
     */
     size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
-    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
+    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
     uint8_t write_lock = write_locks[lock_idx];
     object_t *nobj;
     long i;
@@ -183,7 +145,7 @@ static void minor_trace_if_young(object_t **pobj)
             uintptr_t lastpage= (dataofs + size - 1) / 4096UL;
             pages_privatize(pagenum, lastpage - pagenum + 1, false);
 
-            lock_idx = (dataofs >> 4) - READMARKER_START;
+            lock_idx = (dataofs >> 4) - WRITELOCK_START;
             assert(write_locks[lock_idx] == 0);
             write_locks[lock_idx] = write_lock;
 
@@ -238,7 +200,7 @@ static void minor_trace_if_young(object_t **pobj)
 
 static void collect_roots_in_nursery(void)
 {
-    stm_thread_local_t *tl = stm_thread_locals;
+    stm_thread_local_t *tl = stm_all_thread_locals;
     do {
         object_t **current = tl->shadowstack;
         object_t **base = tl->shadowstack_base;
@@ -246,7 +208,7 @@ static void collect_roots_in_nursery(void)
             minor_trace_if_young(current);
         }
         tl = tl->next;
-    } while (tl != stm_thread_locals);
+    } while (tl != stm_all_thread_locals);
 }
 
 static void trace_and_drag_out_of_nursery(object_t *obj)
@@ -256,7 +218,7 @@ static void trace_and_drag_out_of_nursery(object_t *obj)
         struct object_s *realobj =
             (struct object_s *)REAL_ADDRESS(get_segment_base(i), obj);
 
-        realobj->stm_flags &= ~GCFLAG_WRITE_BARRIER_CALLED;
+        realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
 
         stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
 
@@ -278,8 +240,9 @@ static void collect_oldrefs_to_nursery(struct list_s *lst)
            don't, it's because the same object was stored in several
            segment's old_objects_pointing_to_young.  It's fine to
            ignore duplicates. */
-        if ((obj->stm_flags & GCFLAG_WRITE_BARRIER_CALLED) == 0)
-            continue;
+        abort();//...
+        //if ((obj->stm_flags & GCFLAG_WRITE_BARRIER_CALLED) == 0)
+        //    continue;
 
         /* The flag GCFLAG_WRITE_BARRIER_CALLED is going to be removed:
            no live object should have this flag set after a nursery
@@ -294,12 +257,9 @@ static void collect_oldrefs_to_nursery(struct list_s *lst)
 
 static void reset_nursery(void)
 {
+    abort();//...
     /* reset the global amount-of-nursery-used-so-far */
     nursery_ctl.used = nursery_ctl.initial_value_of_used;
-
-    /* reset the write locks */
-    memset(write_locks + ((NURSERY_START >> 4) - READMARKER_START),
-           0, NURSERY_SIZE >> 4);
 
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
@@ -321,9 +281,10 @@ static void reset_nursery(void)
         }
         else if (other_pseg->pub.transaction_read_version < 0xff) {
             other_pseg->pub.transaction_read_version++;
-            assert(0 < other_pseg->min_read_version_outside_nursery &&
+            abort();//...
+            /*assert(0 < other_pseg->min_read_version_outside_nursery &&
                    other_pseg->min_read_version_outside_nursery
-                     < other_pseg->pub.transaction_read_version);
+                   < other_pseg->pub.transaction_read_version);*/
         }
         else {
             /* however, when the value 0xff is reached, we are stuck
@@ -338,7 +299,7 @@ static void reset_nursery(void)
         if (old_end > NURSERY_START) {
             char *creation_markers = REAL_ADDRESS(other_pseg->pub.segment_base,
                                                   NURSERY_START >> 8);
-            assert(old_end <= NURSERY_START + NURSERY_SIZE);
+            assert(old_end <= NURSERY_END);
             memset(creation_markers, 0, (old_end - NURSERY_START) >> 8);
         }
         else {
@@ -346,14 +307,17 @@ static void reset_nursery(void)
         }
     }
 }
+#endif
 
-static void do_minor_collection(void)
+static void minor_collection(void)
 {
-    /* all other threads are paused in safe points during the whole
-       minor collection */
+    assert(!_has_mutex());
+    abort_if_needed();
+
     dprintf(("minor_collection\n"));
-    assert(_has_mutex());
-    assert(list_is_empty(old_objects_pointing_to_young));
+
+    abort();//...
+#if 0
 
     /* List of what we need to do and invariants we need to preserve
        -------------------------------------------------------------
@@ -390,142 +354,66 @@ static void do_minor_collection(void)
     reset_nursery();
 
     pages_make_shared_again(FIRST_NURSERY_PAGE, NB_NURSERY_PAGES);
+#endif
 }
 
-
-static void restore_nursery_section_end(uintptr_t prev_value)
-{
-    __sync_bool_compare_and_swap(&STM_SEGMENT->v_nursery_section_end,
-                                 prev_value,
-                                 STM_PSEGMENT->real_nursery_section_end);
-}
-
-static void stm_minor_collection(uint64_t request_size)
-{
-    /* Run a minor collection --- but only if we can't get 'request_size'
-       bytes out of the nursery; if we can, no-op. */
-    mutex_lock();
-
-    assert(STM_PSEGMENT->safe_point == SP_RUNNING);
-    STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
-
- restart:
-    /* We just waited here, either from mutex_lock() or from cond_wait(),
-       so we should check again if another thread did the minor
-       collection itself */
-    if (request_size <= NURSERY_SIZE - nursery_ctl.used)
-        goto exit;
-
-    if (!try_wait_for_other_safe_points(SP_SAFE_POINT_CAN_COLLECT))
-        goto restart;
-
-    /* now we can run our minor collection */
-    do_minor_collection();
-
- exit:
-    STM_PSEGMENT->safe_point = SP_RUNNING;
-
-    mutex_unlock();
-}
 
 void stm_collect(long level)
 {
     assert(level == 0);
-    stm_minor_collection(-1);
+    minor_collection();
 }
 
 
 /************************************************************/
 
-#define NURSERY_ALIGN(bytes)  \
-    (((bytes) + NURSERY_LINE - 1) & ~(NURSERY_LINE - 1))
 
-static stm_char *allocate_from_nursery(uint64_t bytes)
-{
-    /* may collect! */
-    /* thread-safe; allocate a chunk of memory from the nursery */
-    bytes = NURSERY_ALIGN(bytes);
-    while (1) {
-        uint64_t p = __sync_fetch_and_add(&nursery_ctl.used, bytes);
-        if (LIKELY(p + bytes <= NURSERY_SIZE)) {
-            return (stm_char *)(NURSERY_START + p);
-        }
-
-        /* nursery full! */
-        stm_minor_collection(bytes);
-    }
-}
-
-
-stm_char *_stm_allocate_slowpath(ssize_t size_rounded_up)
+object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 {
     /* may collect! */
     STM_SEGMENT->nursery_current -= size_rounded_up;  /* restore correct val */
 
-    if (_stm_collectable_safe_point())
-        return (stm_char *)stm_allocate(size_rounded_up);
+ restart:
+    stm_safe_point();
 
-    if (size_rounded_up < MEDIUM_OBJECT) {
-        /* This is a small object.  The current section is really full.
-           Allocate the next section and initialize it with zeroes. */
-        stm_char *p = allocate_from_nursery(NURSERY_SECTION_SIZE);
-        STM_SEGMENT->nursery_current = p + size_rounded_up;
+    OPT_ASSERT(size_rounded_up >= 16);
+    OPT_ASSERT((size_rounded_up & 7) == 0);
+    OPT_ASSERT(size_rounded_up < _STM_FAST_ALLOC);
 
-        /* Set v_nursery_section_end, but carefully: another thread may
-           have forced it to be equal to NSE_SIGNAL. */
-        uintptr_t end = (uintptr_t)p + NURSERY_SECTION_SIZE;
-        uintptr_t prev_end = STM_PSEGMENT->real_nursery_section_end;
-        STM_PSEGMENT->real_nursery_section_end = end;
-        restore_nursery_section_end(prev_end);
-
-        memset(REAL_ADDRESS(STM_SEGMENT->segment_base, p), 0,
-               NURSERY_SECTION_SIZE);
-
-        /* Also fill the corresponding creation markers with 0xff. */
-        set_creation_markers(p, NURSERY_SECTION_SIZE,
-                             CM_CURRENT_TRANSACTION_IN_NURSERY);
-        return p;
+    stm_char *p = STM_SEGMENT->nursery_current;
+    stm_char *end = p + size_rounded_up;
+    if ((uintptr_t)end <= NURSERY_END) {
+        STM_SEGMENT->nursery_current = end;
+        return (object_t *)p;
     }
 
-    if (size_rounded_up < LARGE_OBJECT) {
-        /* A medium-sized object that doesn't fit into the current
-           nursery section.  Note that if by chance it does fit, then
-           _stm_allocate_slowpath() is not even called.  This case here
-           is to prevent too much of the nursery to remain not used
-           just because we tried to allocate a medium-sized object:
-           doing so doesn't end the current section. */
-        stm_char *p = allocate_from_nursery(size_rounded_up);
-        memset(REAL_ADDRESS(STM_SEGMENT->segment_base, p), 0,
-               size_rounded_up);
-        set_single_creation_marker(p, CM_CURRENT_TRANSACTION_IN_NURSERY);
-        return p;
-    }
-
-    abort();
+    minor_collection();
+    goto restart;
 }
 
-static void align_nursery_at_transaction_start(void)
+object_t *_stm_allocate_external(ssize_t size_rounded_up)
 {
-    /* When the transaction starts, we must align the 'nursery_current'
-       and set creation markers for the part of the section the follows.
-    */
-    uintptr_t c = (uintptr_t)STM_SEGMENT->nursery_current;
-    c = NURSERY_ALIGN(c);
-    STM_SEGMENT->nursery_current = (stm_char *)c;
-
-    uint64_t size = STM_PSEGMENT->real_nursery_section_end - c;
-    if (size > 0) {
-        set_creation_markers((stm_char *)c, size,
-                             CM_CURRENT_TRANSACTION_IN_NURSERY);
-    }
+    abort();//...
 }
 
 #ifdef STM_TESTS
 void _stm_set_nursery_free_count(uint64_t free_count)
 {
-    assert(free_count == NURSERY_ALIGN(free_count));
-    assert(nursery_ctl.used <= NURSERY_SIZE - free_count);
-    nursery_ctl.used = NURSERY_SIZE - free_count;
-    nursery_ctl.initial_value_of_used = nursery_ctl.used;
+    assert(free_count <= NURSERY_SIZE);
+    _stm_nursery_start = NURSERY_END - free_count;
+
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        if ((uintptr_t)get_segment(i)->nursery_current < _stm_nursery_start)
+            get_segment(i)->nursery_current = (stm_char *)_stm_nursery_start;
+    }
 }
 #endif
+
+static void check_nursery_at_transaction_start(void)
+{
+    assert((uintptr_t)STM_SEGMENT->nursery_current == _stm_nursery_start);
+    uintptr_t i;
+    for (i = 0; i < _stm_nursery_end - _stm_nursery_start; i++)
+        assert(STM_SEGMENT->nursery_current[i] == 0);
+}

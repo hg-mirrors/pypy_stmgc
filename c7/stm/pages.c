@@ -23,6 +23,7 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
         flag_page_private[pagenum + i] = SHARED_PAGE;
 }
 
+#if 0
 static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count)
 {
     /* Same as pages_initialize_shared(), but tries hard to minimize the
@@ -42,6 +43,7 @@ static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count)
         pages_initialize_shared(pagenum + start, i - start);
     }
 }
+#endif
 
 static void privatize_range_and_unlock(uintptr_t pagenum, uintptr_t count,
                                        bool full)
@@ -128,102 +130,7 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
     }
 }
 
-static void set_creation_markers(stm_char *p, uint64_t size, int newvalue)
-{
-    /* Set the creation markers to 'newvalue' for all lines from 'p' to
-       'p+size'.  Both p and size should be aligned to the line size: 256. */
-
-    assert((((uintptr_t)p) & 255) == 0);
-    assert((size & 255) == 0);
-    assert(size > 0);
-
-    uintptr_t cmaddr = ((uintptr_t)p) >> 8;
-    LIST_APPEND(STM_PSEGMENT->creation_markers, cmaddr);
-
-    char *addr = REAL_ADDRESS(STM_SEGMENT->segment_base, cmaddr);
-    memset(addr, newvalue, size >> 8);
-}
-
-static uint8_t get_single_creation_marker(stm_char *p)
-{
-    uintptr_t cmaddr = ((uintptr_t)p) >> 8;
-    return ((stm_creation_marker_t *)cmaddr)->cm;
-}
-
-static void set_single_creation_marker(stm_char *p, int newvalue)
-{
-    uintptr_t cmaddr = ((uintptr_t)p) >> 8;
-    ((stm_creation_marker_t *)cmaddr)->cm = newvalue;
-    LIST_APPEND(STM_PSEGMENT->creation_markers, cmaddr);
-}
-
-static void reset_all_creation_markers(void)
-{
-    /* Note that the page 'NB_PAGES - 1' is not actually used.  This
-       ensures that the creation markers always end with some zeroes.
-       We reset the markers 8 at a time, by writing null integers
-       until we reach a place that is already null.
-    */
-    LIST_FOREACH_R(
-        STM_PSEGMENT->creation_markers,
-        uintptr_t /*item*/,
-        ({
-            TLPREFIX uint64_t *p = (TLPREFIX uint64_t *)(item & ~7);
-            while (*p != 0)
-                *p++ = 0;
-        }));
-
-    list_clear(STM_PSEGMENT->creation_markers);
-}
-
-static void reset_all_creation_markers_and_push_created_data(void)
-{
-    /* This is like reset_all_creation_markers(), but additionally
-       it looks for markers in non-SHARED pages, and pushes the
-       corresponding data (in 256-bytes blocks) to other threads.
-    */
-#if NB_SEGMENTS != 2
-# error "The logic in this function only works with two segments"
-#endif
-
-    char *local_base = STM_SEGMENT->segment_base;
-    long remote_num = 1 - STM_SEGMENT->segment_num;
-    char *remote_base = get_segment_base(remote_num);
-
-    /* this logic assumes that creation markers are in 256-bytes blocks,
-       and pages are 4096 bytes, so creation markers are handled by groups
-       of 16 --- which is two 8-bytes uint64_t. */
-
-    LIST_FOREACH_R(
-        STM_PSEGMENT->creation_markers,
-        uintptr_t /*item*/,
-        ({
-            TLPREFIX uint64_t *p = (TLPREFIX uint64_t *)(item & ~15);
-            while (p[0] != 0 || p[1] != 0) {
-
-                uint64_t pagenum = ((uint64_t)p) >> 4;
-                if (flag_page_private[pagenum] != SHARED_PAGE) {
-                    /* copying needed */
-                    uint64_t dataofs = ((uint64_t)p) << 8;
-                    stm_char *start = (stm_char *)p;
-                    stm_char *stop = start + 16;
-                    while (start < stop) {
-                        if (*start++ != 0) {
-                            pagecopy_256(remote_base + dataofs,
-                                         local_base + dataofs);
-                        }
-                        dataofs += 256;
-                    }
-                }
-                p[0] = 0; _duck();
-                p[1] = 0;
-                p += 2;
-            }
-        }));
-
-    list_clear(STM_PSEGMENT->creation_markers);
-}
-
+#if 0
 static bool is_in_shared_pages(object_t *obj)
 {
     uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
@@ -234,11 +141,11 @@ static bool is_in_shared_pages(object_t *obj)
     ssize_t obj_size = stmcb_size_rounded_up(
         (struct object_s *)REAL_ADDRESS(stm_object_pages, obj));
 
-    uintptr_t end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
-    /* that's the page *following* the last page with the object */
+    uintptr_t last_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
 
-    while (first_page < end_page)
+    while (first_page <= last_page)
         if (flag_page_private[first_page++] != SHARED_PAGE)
             return false;
     return true;
 }
+#endif

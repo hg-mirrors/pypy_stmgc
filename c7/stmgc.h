@@ -12,19 +12,10 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <limits.h>
-#include <endian.h>
 #include <unistd.h>
 
 #if LONG_MAX == 2147483647
 # error "Requires a 64-bit environment"
-#endif
-
-#if BYTE_ORDER == 1234
-# define LENDIAN  1    // little endian
-#elif BYTE_ORDER == 4321
-# define LENDIAN  0    // big endian
-#else
-# error "Unsupported endianness"
 #endif
 
 
@@ -42,19 +33,9 @@ struct stm_read_marker_s {
        We assume that objects are at least 16 bytes long, and use
        their address divided by 16.  The read marker is equal to
        'STM_SEGMENT->transaction_read_version' if and only if the
-       object was read in the current transaction. */
+       object was read in the current transaction.  The nurseries
+       also have corresponding read markers, but they are never used. */
     uint8_t rm;
-};
-
-struct stm_creation_marker_s {
-    /* In addition to read markers, every "line" of 256 bytes has one
-       extra byte, the creation marker, located at the address divided
-       by 256.  The creation marker is either non-zero if all objects in
-       this line come have been allocated by the current transaction,
-       or 0x00 if none of them have been.  Lines cannot contain a
-       mixture of both.  Non-zero values are 0xff if in the nursery,
-       and 0x01 if outside the nursery. */
-    uint8_t cm;
 };
 
 struct stm_segment_info_s {
@@ -62,7 +43,6 @@ struct stm_segment_info_s {
     int segment_num;
     char *segment_base;
     stm_char *nursery_current;
-    uintptr_t v_nursery_section_end;  /* see nursery.h */
     struct stm_thread_local_s *running_thread;
     stm_jmpbuf_t *jmpbuf_ptr;
 };
@@ -79,10 +59,13 @@ typedef struct stm_thread_local_s {
 /* this should use llvm's coldcc calling convention,
    but it's not exposed to C code so far */
 void _stm_write_slowpath(object_t *);
-stm_char *_stm_allocate_slowpath(ssize_t);
+object_t *_stm_allocate_slowpath(ssize_t);
+object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(char*);
 void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *);
-bool _stm_collectable_safe_point(void);
+void _stm_collectable_safe_point(void);
+
+extern uintptr_t _stm_nursery_end;
 
 #ifdef STM_TESTS
 bool _stm_was_read(object_t *obj);
@@ -98,12 +81,13 @@ void _stm_large_dump(void);
 void _stm_start_safe_point(void);
 void _stm_stop_safe_point(void);
 void _stm_set_nursery_free_count(uint64_t free_count);
-object_t *_stm_enum_old_objects_pointing_to_young(void);
-object_t *_stm_enum_modified_objects(void);
+object_t *_stm_enum_overflow_objects_pointing_to_nursery(void);
+object_t *_stm_enum_modified_old_objects(void);
 #endif
 
-#define _STM_GCFLAG_WRITE_BARRIER_CALLED  0x80
-#define _STM_NSE_SIGNAL                   1
+#define _STM_GCFLAG_WRITE_BARRIER      0x01
+#define _STM_NSE_SIGNAL                   0
+#define _STM_FAST_ALLOC           (66*1024)
 #define STM_FLAGS_PREBUILT                0
 
 
@@ -133,7 +117,7 @@ object_t *_stm_enum_modified_objects(void);
 */
 
 struct object_s {
-    uint8_t stm_flags;            /* reserved for the STM library */
+    uint32_t stm_flags;            /* reserved for the STM library */
 };
 
 /* The read barrier must be called whenever the object 'obj' is read.
@@ -142,33 +126,24 @@ struct object_s {
    transaction commit, nothing that can potentially collect or do a safe
    point (like stm_write() on a different object).  Also, if we might
    have finished the transaction and started the next one, then
-   stm_read() needs to be called again.
+   stm_read() needs to be called again.  It can be omitted if
+   stm_write() is called, or immediately after getting the object from
+   stm_allocate(), as long as the rules above are respected.
 */
 static inline void stm_read(object_t *obj)
 {
-#if 0    /* very costly check */
-    assert(((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm
-           <= STM_SEGMENT->transaction_read_version);
-#endif
     ((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm =
         STM_SEGMENT->transaction_read_version;
 }
 
 /* The write barrier must be called *before* doing any change to the
    object 'obj'.  If we might have finished the transaction and started
-   the next one, then stm_write() needs to be called again.
-   If stm_write() is called, it is not necessary to also call stm_read()
-   on the same object.
+   the next one, then stm_write() needs to be called again.  It is not
+   necessary to call it immediately after stm_allocate().
 */
 static inline void stm_write(object_t *obj)
 {
-    /* this is:
-           'if (cm < 0x80 && (stm_flags & WRITE_BARRIER_CALLED) == 0)'
-         where 'cm' can be 0 (not created in current transaction)
-                     or 0xff (created in current transaction)
-                     or 0x01 (same, but outside the nursery) */
-    if (UNLIKELY(!((((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm |
-                    obj->stm_flags) & _STM_GCFLAG_WRITE_BARRIER_CALLED)))
+    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
         _stm_write_slowpath(obj);
 }
 
@@ -190,11 +165,15 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
     OPT_ASSERT(size_rounded_up >= 16);
     OPT_ASSERT((size_rounded_up & 7) == 0);
 
+    if (UNLIKELY(size_rounded_up >= _STM_FAST_ALLOC))
+        return _stm_allocate_external(size_rounded_up);
+
     stm_char *p = STM_SEGMENT->nursery_current;
     stm_char *end = p + size_rounded_up;
     STM_SEGMENT->nursery_current = end;
-    if (UNLIKELY((uintptr_t)end > STM_SEGMENT->v_nursery_section_end))
-        p = _stm_allocate_slowpath(size_rounded_up);
+    if (UNLIKELY((uintptr_t)end > _stm_nursery_end))
+        return _stm_allocate_slowpath(size_rounded_up);
+
     return (object_t *)p;
 }
 
@@ -250,7 +229,7 @@ static inline void stm_become_inevitable(char* msg) {
 /* Forces a safe-point if needed.  Normally not needed: this is
    automatic if you call stm_allocate(). */
 static inline void stm_safe_point(void) {
-    if (STM_SEGMENT->v_nursery_section_end == _STM_NSE_SIGNAL)
+    if (_stm_nursery_end == _STM_NSE_SIGNAL)
         _stm_collectable_safe_point();
 }
 
