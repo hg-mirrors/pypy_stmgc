@@ -128,8 +128,14 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 
     uint8_t old_rv = STM_SEGMENT->transaction_read_version;
     STM_SEGMENT->transaction_read_version = old_rv + 1;
-    if (UNLIKELY(old_rv == 0xff))
+    if (UNLIKELY(old_rv >= 0xfe)) {
+        /* reset if transaction_read_version was 0xfe or 0xff.  If it's
+           0xff, then we need it because the new value would overflow to
+           0.  But resetting it already from 0xfe is better for short
+           or medium transactions: at the next minor collection we'll
+           still have one free number to increase to. */
         reset_transaction_read_version();
+    }
 
     STM_PSEGMENT->min_read_version_outside_nursery =
         STM_SEGMENT->transaction_read_version;
