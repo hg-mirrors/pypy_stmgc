@@ -22,35 +22,17 @@ struct small_alloc_s {
                             contiguous range of unallocated objs */
 };
 
-/* For each small request size, we have three independent chained lists
-   of address ranges:
-
-   - 'small_alloc_shared': ranges are within pages that are likely to be
-     shared.  We don't know for sure, because pages can be privatized
-     by normal run of stm_write().
-
-   - 'small_alloc_sh_old': moved from 'small_alloc_shared' when we're
-     looking for a range with the creation_marker set; this collects
-     the unsuitable ranges, i.e. the ones with already at least one
-     object and no creation marker.
-
-   - 'small_alloc_privtz': ranges are within pages that are privatized.
-*/
-static struct small_alloc_s small_alloc_shared[GC_N_SMALL_REQUESTS];
-static struct small_alloc_s small_alloc_sh_old[GC_N_SMALL_REQUESTS];
-static struct small_alloc_s small_alloc_privtz[GC_N_SMALL_REQUESTS];
+static struct small_alloc_s small_alloc[GC_N_SMALL_REQUESTS];
 static char *free_uniform_pages;
 
 static void setup_gcpage(void);
 static void teardown_gcpage(void);
-static char *allocate_outside_nursery_large(uint64_t size);
+//static char *allocate_outside_nursery_large(uint64_t size);
 
 
-static char *_allocate_small_slowpath(
-        struct small_alloc_s small_alloc[], uint64_t size);
+static char *_allocate_small_slowpath(uint64_t size);
 
-static inline char *allocate_outside_nursery_small(
-        struct small_alloc_s small_alloc[], uint64_t size)
+static inline char *allocate_outside_nursery_small(uint64_t size)
 {
     uint64_t index = size / 8;
     OPT_ASSERT(2 <= index);
@@ -58,7 +40,7 @@ static inline char *allocate_outside_nursery_small(
 
     char *result = small_alloc[index].next_object;
     if (result == NULL)
-        return _allocate_small_slowpath(small_alloc, size);
+        return _allocate_small_slowpath(size);
 
     char *following;
     if (small_alloc[index].range_last == result) {

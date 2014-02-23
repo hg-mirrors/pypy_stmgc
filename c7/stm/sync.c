@@ -191,7 +191,6 @@ void _stm_stop_safe_point(void)
     assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT_CAN_COLLECT);
     STM_PSEGMENT->safe_point = SP_RUNNING;
 
-    restore_nursery_section_end(NSE_SIGNAL_DONE);
     if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
         stm_abort_transaction();
 }
@@ -219,6 +218,8 @@ static bool try_wait_for_other_safe_points(int requested_safe_point_kind)
        try_wait_for_other_safe_points() while another is currently blocked
        in the cond_wait() in this same function.
     */
+    abort();//...
+#if 0
     assert(_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT_CAN_COLLECT);
 
@@ -265,36 +266,28 @@ static bool try_wait_for_other_safe_points(int requested_safe_point_kind)
     cond_broadcast();   /* to wake up the other threads, but later,
                            when they get the mutex again */
     return true;
+#endif
 }
 
-bool _stm_collectable_safe_point(void)
+void _stm_collectable_safe_point(void)
 {
-    bool any_operation = false;
- restart:;
-    switch (STM_SEGMENT->v_nursery_section_end) {
+    /* If nursery_section_end was set to NSE_SIGNAL by another thread,
+       we end up here as soon as we try to call stm_allocate() or do
+       a call to stm_safe_point().
+       See try_wait_for_other_safe_points() for details.
+    */
+    mutex_lock();
+    assert(STM_PSEGMENT->safe_point == SP_RUNNING);
 
-    case NSE_SIGNAL:
-        /* If nursery_section_end was set to NSE_SIGNAL by another thread,
-           we end up here as soon as we try to call stm_allocate().
-           See try_wait_for_other_safe_points() for details. */
-        mutex_lock();
-        assert(STM_PSEGMENT->safe_point == SP_RUNNING);
+    if (_stm_nursery_end == NSE_SIGNAL) {
         STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
+
         cond_broadcast();
-        cond_wait();
+
+        do { cond_wait(); } while (_stm_nursery_end == NSE_SIGNAL);
+
         STM_PSEGMENT->safe_point = SP_RUNNING;
-        mutex_unlock();
-
-        /* Once the sync point is done, retry. */
-        any_operation = true;
-        goto restart;
-
-    case NSE_SIGNAL_DONE:
-        restore_nursery_section_end(NSE_SIGNAL_DONE);
-        any_operation = true;
-        break;
-
-    default:;
     }
-    return any_operation;
+
+    mutex_unlock();
 }

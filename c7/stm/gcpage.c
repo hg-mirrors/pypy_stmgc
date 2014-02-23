@@ -19,8 +19,7 @@ static void setup_gcpage(void)
 
 static void teardown_gcpage(void)
 {
-    memset(small_alloc_shared, 0, sizeof(small_alloc_shared));
-    memset(small_alloc_privtz, 0, sizeof(small_alloc_privtz));
+    memset(small_alloc, 0, sizeof(small_alloc));
     free_uniform_pages = NULL;
 }
 
@@ -56,11 +55,10 @@ static void grab_more_free_pages_for_small_allocations(void)
     return;
 
  out_of_memory:
-    stm_fatalerror("out of memory!\n");
+    stm_fatalerror("out of memory!\n");   /* XXX */
 }
 
-static char *_allocate_small_slowpath(
-        struct small_alloc_s small_alloc[], uint64_t size)
+static char *_allocate_small_slowpath(uint64_t size)
 {
     /* not thread-safe!  Use only when holding the mutex */
     assert(_has_mutex());
@@ -72,8 +70,10 @@ static char *_allocate_small_slowpath(
 }
 
 
+#if 0
 static char *allocate_outside_nursery_large(uint64_t size)
 {
+    abort(); //XXX review
     /* not thread-safe!  Use only when holding the mutex */
     assert(_has_mutex());
 
@@ -92,11 +92,9 @@ static char *allocate_outside_nursery_large(uint64_t size)
         setup_N_pages(uninitialized_page_start, npages);
         uninitialized_page_start += npages * 4096UL;
     }
-
-    assert(get_single_creation_marker((stm_char *)(addr - stm_object_pages))
-           == 0);
     return addr;
 }
+#endif
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {

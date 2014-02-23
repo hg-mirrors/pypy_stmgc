@@ -5,14 +5,8 @@
 
 void stm_setup(void)
 {
-#if 0
-    _stm_reset_shared_lock();
-    _stm_reset_pages();
-
-    inevitable_lock = 0;
-#endif
-
     /* Check that some values are acceptable */
+    assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
     assert(4096 <= ((uintptr_t)STM_SEGMENT));
     assert((uintptr_t)STM_SEGMENT == (uintptr_t)STM_PSEGMENT);
     assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= 8192);
@@ -21,9 +15,6 @@ void stm_setup(void)
     assert(READMARKER_START < READMARKER_END);
     assert(READMARKER_END <= 4096UL * FIRST_OBJECT_PAGE);
     assert(FIRST_OBJECT_PAGE < NB_PAGES);
-    assert(CREATMARKER_START >= 8192);
-    assert(2 <= FIRST_CREATMARKER_PAGE);
-    assert(FIRST_CREATMARKER_PAGE <= FIRST_READMARKER_PAGE);
     assert((NB_PAGES * 4096UL) >> 8 <= (FIRST_OBJECT_PAGE * 4096UL) >> 4);
     assert((END_NURSERY_PAGE * 4096UL) >> 8 <=
            (FIRST_READMARKER_PAGE * 4096UL));
@@ -53,10 +44,10 @@ void stm_setup(void)
         memset(REAL_ADDRESS(segment_base, STM_PSEGMENT), 0,
                sizeof(*STM_PSEGMENT));
 
-        /* Pages in range(2, FIRST_CREATMARKER_PAGE) are never used */
-        if (FIRST_CREATMARKER_PAGE > 2)
+        /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
+        if (FIRST_READMARKER_PAGE > 2)
             mprotect(segment_base + 8192,
-                     (FIRST_CREATMARKER_PAGE - 2) * 4096UL,
+                     (FIRST_READMARKER_PAGE - 2) * 4096UL,
                      PROT_NONE);
 
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
@@ -64,17 +55,16 @@ void stm_setup(void)
         pr->write_lock_num = i + 1;
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
-        pr->old_objects_pointing_to_young = list_create();
-        pr->modified_objects = list_create();
-        pr->creation_markers = list_create();
+        pr->overflow_objects_pointing_to_nursery = NULL;
+        pr->modified_old_objects = list_create();
+        pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * (i + 1);
+        highest_overflow_number = pr->overflow_number;
     }
 
-    /* Make the nursery pages shared.  The other pages are
-       shared lazily, as remap_file_pages() takes a relatively
-       long time for each page. */
-    pages_initialize_shared(FIRST_NURSERY_PAGE, NB_NURSERY_PAGES);
+    /* The pages are shared lazily, as remap_file_pages() takes a relatively
+       long time for each page.
 
-    /* The read markers are initially zero, which is correct:
+       The read markers are initially zero, which is correct:
        STM_SEGMENT->transaction_read_version never contains zero,
        so a null read marker means "not read" whatever the
        current transaction_read_version is.
@@ -96,9 +86,8 @@ void stm_teardown(void)
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
-        list_free(pr->old_objects_pointing_to_young);
-        list_free(pr->modified_objects);
-        list_free(pr->creation_markers);
+        assert(pr->overflow_objects_pointing_to_nursery == NULL);
+        list_free(pr->modified_old_objects);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);
@@ -115,15 +104,15 @@ void stm_teardown(void)
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
     int num;
-    if (stm_thread_locals == NULL) {
-        stm_thread_locals = tl->next = tl->prev = tl;
+    if (stm_all_thread_locals == NULL) {
+        stm_all_thread_locals = tl->next = tl->prev = tl;
         num = 0;
     }
     else {
-        tl->next = stm_thread_locals;
-        tl->prev = stm_thread_locals->prev;
-        stm_thread_locals->prev->next = tl;
-        stm_thread_locals->prev = tl;
+        tl->next = stm_all_thread_locals;
+        tl->prev = stm_all_thread_locals->prev;
+        stm_all_thread_locals->prev->next = tl;
+        stm_all_thread_locals->prev = tl;
         num = tl->prev->associated_segment_num + 1;
     }
 
@@ -137,10 +126,11 @@ void stm_register_thread_local(stm_thread_local_t *tl)
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)
 {
-    if (tl == stm_thread_locals) {
-        stm_thread_locals = stm_thread_locals->next;
-        if (tl == stm_thread_locals) {
-            stm_thread_locals = NULL;
+    assert(tl->next != NULL);
+    if (tl == stm_all_thread_locals) {
+        stm_all_thread_locals = stm_all_thread_locals->next;
+        if (tl == stm_all_thread_locals) {
+            stm_all_thread_locals = NULL;
             return;
         }
     }

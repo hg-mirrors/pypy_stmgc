@@ -12,6 +12,9 @@ static void teardown_core(void)
 void _stm_write_slowpath(object_t *obj)
 {
     assert(_running_transaction());
+    assert(!_is_in_nursery(obj));
+    abort();//...
+#if 0
 
     /* for old objects from the same transaction, we are done now */
     if (obj_from_same_transaction(obj)) {
@@ -51,9 +54,10 @@ void _stm_write_slowpath(object_t *obj)
 
     /* claim the write-lock for this object */
  retry:;
-    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - READMARKER_START;
+    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
     uint8_t lock_num = STM_PSEGMENT->write_lock_num;
     uint8_t prev_owner;
+    assert((intptr_t)lock_idx >= 0);
     prev_owner = __sync_val_compare_and_swap(&write_locks[lock_idx],
                                              0, lock_num);
 
@@ -73,6 +77,7 @@ void _stm_write_slowpath(object_t *obj)
     assert(!(obj->stm_flags & GCFLAG_WRITE_BARRIER_CALLED));
     obj->stm_flags |= GCFLAG_WRITE_BARRIER_CALLED;
     LIST_APPEND(STM_PSEGMENT->modified_objects, obj);
+#endif
 }
 
 static void reset_transaction_read_version(void)
@@ -137,13 +142,11 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
         reset_transaction_read_version();
     }
 
-    STM_PSEGMENT->min_read_version_outside_nursery =
-        STM_SEGMENT->transaction_read_version;
+    assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
 
-    assert(list_is_empty(STM_PSEGMENT->modified_objects));
-    assert(list_is_empty(STM_PSEGMENT->creation_markers));
-
-    align_nursery_at_transaction_start();
+#ifdef STM_TESTS
+    check_nursery_at_transaction_start();
+#endif
 }
 
 
@@ -158,8 +161,6 @@ static void detect_write_read_conflicts(void)
     long remote_num = 1 - STM_SEGMENT->segment_num;
     char *remote_base = get_segment_base(remote_num);
     uint8_t remote_version = get_segment(remote_num)->transaction_read_version;
-    uint8_t remote_min_outside_nursery =
-        get_priv_segment(remote_num)->min_read_version_outside_nursery;
 
     switch (get_priv_segment(remote_num)->transaction_state) {
     case TS_NONE:
@@ -169,11 +170,10 @@ static void detect_write_read_conflicts(void)
     }
 
     LIST_FOREACH_R(
-        STM_PSEGMENT->modified_objects,
+        STM_PSEGMENT->modified_old_objects,
         object_t * /*item*/,
         ({
-            if (was_read_remote(remote_base, item, remote_version,
-                                remote_min_outside_nursery)) {
+            if (was_read_remote(remote_base, item, remote_version)) {
                 /* A write-read conflict! */
                 contention_management(remote_num, false);
 
@@ -196,25 +196,24 @@ static void push_modified_to_other_segments(void)
          get_priv_segment(remote_num)->transaction_state == TS_INEVITABLE);
 
     LIST_FOREACH_R(
-        STM_PSEGMENT->modified_objects,
+        STM_PSEGMENT->modified_old_objects,
         object_t * /*item*/,
         ({
             if (remote_active) {
                 assert(!was_read_remote(remote_base, item,
-                    get_segment(remote_num)->transaction_read_version,
-                    get_priv_segment(remote_num)->
-                        min_read_version_outside_nursery));
+                    get_segment(remote_num)->transaction_read_version));
             }
 
             /* clear the write-lock (note that this runs with all other
                threads paused, so no need to be careful about ordering) */
-            uintptr_t lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START;
+            uintptr_t lock_idx = (((uintptr_t)item) >> 4) - WRITELOCK_START;
+            assert((intptr_t)lock_idx >= 0);
             assert(write_locks[lock_idx] == STM_PSEGMENT->write_lock_num);
             write_locks[lock_idx] = 0;
 
-            /* remove again the WRITE_BARRIER_CALLED flag */
-            assert(item->stm_flags & GCFLAG_WRITE_BARRIER_CALLED);
-            item->stm_flags &= ~GCFLAG_WRITE_BARRIER_CALLED;
+            /* set again the WRITE_BARRIER flag */
+            assert((item->stm_flags & GCFLAG_WRITE_BARRIER) == 0);
+            item->stm_flags |= GCFLAG_WRITE_BARRIER;
 
             /* copy the modified object to the other segment */
             char *src = REAL_ADDRESS(local_base, item);
@@ -223,7 +222,7 @@ static void push_modified_to_other_segments(void)
             memcpy(dst, src, size);
         }));
 
-    list_clear(STM_PSEGMENT->modified_objects);
+    list_clear(STM_PSEGMENT->modified_old_objects);
 }
 
 static void _finish_transaction(void)
@@ -232,29 +231,23 @@ static void _finish_transaction(void)
     release_thread_segment(tl);
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
-    list_clear(STM_PSEGMENT->old_objects_pointing_to_young);
+    if (STM_PSEGMENT->overflow_objects_pointing_to_nursery != NULL) {
+        list_free(STM_PSEGMENT->overflow_objects_pointing_to_nursery);
+        STM_PSEGMENT->overflow_objects_pointing_to_nursery = NULL;
+    }
 }
 
 void stm_commit_transaction(void)
 {
+    minor_collection();
+
     mutex_lock();
 
     assert(STM_PSEGMENT->safe_point = SP_RUNNING);
     STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
 
  restart:
-    switch (STM_PSEGMENT->transaction_state) {
-
-    case TS_REGULAR:
-    case TS_INEVITABLE:
-        break;
-
-    case TS_MUST_ABORT:
-        abort_with_mutex();
-
-    default:
-        assert(!"commit: bad transaction_state");
-    }
+    abort_if_needed();
 
     /* wait until the other thread is at a safe-point */
     if (!try_wait_for_other_safe_points(SP_SAFE_POINT_CANNOT_COLLECT))
@@ -275,10 +268,11 @@ void stm_commit_transaction(void)
     /* copy modified object versions to other threads */
     push_modified_to_other_segments();
 
-    /* reset the creation markers, and if necessary (i.e. if the page the
-       data is on is not SHARED) copy the data to other threads.  The
-       hope is that it's rarely necessary. */
-    reset_all_creation_markers_and_push_created_data();
+    /* update 'overflow_number' if needed */
+    if (STM_PSEGMENT->overflow_objects_pointing_to_nursery != NULL) {
+        highest_overflow_number += GCFLAG_OVERFLOW_NUMBER_bit0;
+        STM_PSEGMENT->overflow_number = highest_overflow_number;
+    }
 
     /* done */
     _finish_transaction();
@@ -297,6 +291,8 @@ void stm_abort_transaction(void)
 
 static void reset_modified_from_other_segments(void)
 {
+    abort();//...
+#if 0
     /* pull the right versions from other threads in order
        to reset our pages as part of an abort */
     long remote_num = 1 - STM_SEGMENT->segment_num;
@@ -304,7 +300,7 @@ static void reset_modified_from_other_segments(void)
     char *remote_base = get_segment_base(remote_num);
 
     LIST_FOREACH_R(
-        STM_PSEGMENT->modified_objects,
+        STM_PSEGMENT->modified_old_objects,
         object_t * /*item*/,
         ({
             /* all objects in 'modified_objects' have this flag */
@@ -331,12 +327,14 @@ static void reset_modified_from_other_segments(void)
             write_fence();
 
             /* clear the write-lock */
-            uintptr_t lock_idx = (((uintptr_t)item) >> 4) - READMARKER_START;
+            uintptr_t lock_idx = (((uintptr_t)item) >> 4) - WRITELOCK_START;
+            assert((intptr_t)lock_idx >= 0);
             assert(write_locks[lock_idx]);
             write_locks[lock_idx] = 0;
         }));
 
     list_clear(STM_PSEGMENT->modified_objects);
+#endif
 }
 
 static void abort_with_mutex(void)
@@ -355,8 +353,6 @@ static void abort_with_mutex(void)
 
     /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
     reset_modified_from_other_segments();
-
-    reset_all_creation_markers();
 
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
