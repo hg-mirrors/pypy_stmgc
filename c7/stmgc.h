@@ -98,6 +98,8 @@ void _stm_large_dump(void);
 void _stm_start_safe_point(void);
 void _stm_stop_safe_point(void);
 void _stm_set_nursery_free_count(uint64_t free_count);
+object_t *_stm_enum_old_objects_pointing_to_young(void);
+object_t *_stm_enum_modified_objects(void);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER_CALLED  0x80

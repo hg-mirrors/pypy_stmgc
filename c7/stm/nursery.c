@@ -159,6 +159,7 @@ static void minor_trace_if_young(object_t **pobj)
 
         /* Copy the object to segment 0 (as a first step) */
         memcpy(copyobj, realobj, size);
+        ((struct object_s *)copyobj)->stm_flags |= GCFLAG_WRITE_BARRIER_CALLED;
 
         nobj = (object_t *)(copyobj - stm_object_pages);
 
@@ -193,6 +194,8 @@ static void minor_trace_if_young(object_t **pobj)
             for (i = 1; i < NB_SEGMENTS; i++) {
                 uintptr_t diff = get_segment_base(i) - stm_object_pages;
                 memcpy(copyobj + diff, realobj + diff, size);
+                ((struct object_s *)(copyobj + diff))->stm_flags |=
+                    GCFLAG_WRITE_BARRIER_CALLED;
             }
         }
 
@@ -224,6 +227,7 @@ static void minor_trace_if_young(object_t **pobj)
     }
 
     /* Done copying the object. */
+    //dprintf(("%p -> %p\n", obj, nobj));
     pforwarded_array[0] = GCWORD_MOVED;
     pforwarded_array[1] = nobj;
     *pobj = nobj;

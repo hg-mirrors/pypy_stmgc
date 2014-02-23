@@ -50,6 +50,7 @@ class TestBasic(BaseTest):
         assert stm_was_written(lp1)
         stm_write(lp1)
         assert stm_was_written(lp1)
+        assert modified_objects() == []    # because same transaction
         self.commit_transaction()
 
     def test_allocate_old(self):
@@ -83,7 +84,9 @@ class TestBasic(BaseTest):
         #
         self.switch(1)
         self.start_transaction()
+        assert modified_objects() == []
         stm_write(lp1)
+        assert modified_objects() == [lp1]
         assert stm_get_char(lp1) == 'a'
         stm_set_char(lp1, 'b')
         #

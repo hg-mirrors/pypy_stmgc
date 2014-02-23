@@ -76,48 +76,10 @@ bool _check_stop_safe_point(void);
 void _stm_set_nursery_free_count(uint64_t free_count);
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
+
+object_t *_stm_enum_old_objects_pointing_to_young(void);
+object_t *_stm_enum_modified_objects(void);
 """)
-
-
-TEMPORARILY_DISABLED = """
-void stm_start_inevitable_transaction(stm_thread_local_t *tl);
-
-void _stm_minor_collect();
-
-void *memset(void *s, int c, size_t n);
-extern size_t stmcb_size(struct object_s *);
-extern void stmcb_trace(struct object_s *, void (object_t **));
-
-uint8_t _stm_get_flags(object_t *obj);
-uint8_t stm_get_page_flag(int pagenum);
-enum {
-    SHARED_PAGE=0,
-    REMAPPING_PAGE,
-    PRIVATE_PAGE,
-};  /* flag_page_private */
-
-enum {
-    GCFLAG_WRITE_BARRIER = 1,
-    GCFLAG_NOT_COMMITTED = 2,
-    GCFLAG_MOVED = 4,
-};
-
-void stm_largemalloc_init(char *data_start, size_t data_size);
-int stm_largemalloc_resize_arena(size_t new_size);
-
-object_t *stm_large_malloc(size_t request_size);
-void stm_large_free(object_t *data);
-
-void _stm_large_dump(void);
-char *_stm_largemalloc_data_start(void);
-
-void _stm_move_object(object_t* obj, char *src, char *dst);
-size_t _stm_data_size(struct object_s *data);
-void _stm_chunk_pages(struct object_s *data, uintptr_t *start, uintptr_t *num);
-
-void stm_become_inevitable(char* msg);
-void stm_start_inevitable_transaction();
-"""
 
 
 lib = ffi.verify('''
@@ -222,6 +184,9 @@ uint32_t _get_type_id(object_t *obj) {
 
 void _set_ptr(object_t *obj, int n, object_t *v)
 {
+    int nrefs = ((myobj_t*)obj)->type_id - 421420;
+    assert(n < nrefs);
+
     stm_char *field_addr = ((stm_char*)obj);
     field_addr += SIZEOF_MYOBJ; /* header */
     field_addr += n * sizeof(void*); /* field */
@@ -231,6 +196,9 @@ void _set_ptr(object_t *obj, int n, object_t *v)
 
 object_t * _get_ptr(object_t *obj, int n)
 {
+    int nrefs = ((myobj_t*)obj)->type_id - 421420;
+    assert(n < nrefs);
+
     stm_char *field_addr = ((stm_char*)obj);
     field_addr += SIZEOF_MYOBJ; /* header */
     field_addr += n * sizeof(void*); /* field */
@@ -395,6 +363,15 @@ def stm_get_obj_pages(o):
 
 def stm_get_flags(o):
     return lib._stm_get_flags(o)
+
+def old_objects_pointing_to_young():
+    return list(iter(lib._stm_enum_old_objects_pointing_to_young,
+                     ffi.cast("object_t *", -1)))
+
+def modified_objects():
+    return list(iter(lib._stm_enum_modified_objects,
+                     ffi.cast("object_t *", -1)))
+
 
 SHADOWSTACK_LENGTH = 100
 _keepalive = weakref.WeakKeyDictionary()
