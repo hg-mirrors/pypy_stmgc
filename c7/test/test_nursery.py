@@ -66,20 +66,41 @@ class TestBasic(BaseTest):
         # make a long, ever-growing linked list of objects, in one transaction
         lib._stm_set_nursery_free_count(NURSERY_SECTION_SIZE * 2)
         self.start_transaction()
-        lp1 = stm_allocate(16)
+        lp1 = stm_allocate_refs(1)
         self.push_root(lp1)
-        lp2 = lp1
-        N = (NURSERY_SECTION_SIZE * 5) / 16
+        prev = lp1
+        prevprev = None
+        FIT = (NURSERY_SECTION_SIZE * 2) / 16 - 1   # without 'lp1' above
+        N = (NURSERY_SECTION_SIZE * 4) / 16 + 41
         for i in range(N):
-            self.push_root(lp2)
-            lp3 = stm_allocate(16)
-            lp2 = self.pop_root()
-            stm_set_ref(lp2, 0, lp3)
-            lp2 = lp3
+            if prevprev:
+                assert stm_get_ref(prevprev, 0) == prev
+                self.push_root(prevprev)
+            self.push_root(prev)
+            lp3 = stm_allocate_refs(1)
+            prev = self.pop_root()
+            if prevprev:
+                prevprev = self.pop_root()
+                assert prevprev != prev
+            stm_set_ref(prev, 0, lp3)
+            prevprev = prev
+            prev = lp3
+
+            seeme = old_objects_pointing_to_young()
+            if i < FIT:
+                assert len(seeme) == 0    # no minor collection so far
+            else:
+                assert len(seeme) == 1    # the one from the prev minor coll
+
         lp1 = self.pop_root()
+        assert modified_objects() == []
+
         lp2 = lp1
         for i in range(N):
             assert lp2
+            assert stm_creation_marker(lp2) == (0xff if is_in_nursery(lp2)
+                                                     else 0x01)
+            prev = lp2
             lp2 = stm_get_ref(lp2, 0)
         assert lp2 == lp3
 

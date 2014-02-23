@@ -52,3 +52,24 @@ uint8_t _stm_creation_marker(object_t *obj)
 {
     return ((stm_creation_marker_t *)(((uintptr_t)obj) >> 8))->cm;
 }
+
+#ifdef STM_TESTS
+object_t *_stm_enum_old_objects_pointing_to_young(void)
+{
+    static long index = 0;
+    struct list_s *lst = STM_PSEGMENT->old_objects_pointing_to_young;
+    if (index < list_count(lst))
+        return (object_t *)list_item(lst, index++);
+    index = 0;
+    return (object_t *)-1;
+}
+object_t *_stm_enum_modified_objects(void)
+{
+    static long index = 0;
+    struct list_s *lst = STM_PSEGMENT->modified_objects;
+    if (index < list_count(lst))
+        return (object_t *)list_item(lst, index++);
+    index = 0;
+    return (object_t *)-1;
+}
+#endif
