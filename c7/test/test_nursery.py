@@ -105,18 +105,21 @@ class TestBasic(BaseTest):
         assert lp2 == lp3
 
     def test_many_allocs(self):
+        lib._stm_set_nursery_free_count(NURSERY_SECTION_SIZE * 2)
         obj_size = 1024
-        num = (lib.NB_NURSERY_PAGES * 4096) / obj_size + 100 # more than what fits in the nursery
+        num = (NURSERY_SECTION_SIZE * 4) / obj_size + 41
 
         self.start_transaction()
         for i in range(num):
             new = stm_allocate(obj_size)
+            stm_set_char(new, chr(i % 255))
             self.push_root(new)
 
         old = []
         young = []
-        for _ in range(num):
+        for i in reversed(range(num)):
             r = self.pop_root()
+            assert stm_get_char(r) == chr(i % 255)
             if is_in_nursery(r):
                 young.append(r)
             else:

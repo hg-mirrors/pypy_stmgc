@@ -373,7 +373,7 @@ def modified_objects():
                      ffi.cast("object_t *", -1)))
 
 
-SHADOWSTACK_LENGTH = 100
+SHADOWSTACK_LENGTH = 1000
 _keepalive = weakref.WeakKeyDictionary()
 
 def _allocate_thread_local():
