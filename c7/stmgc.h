@@ -254,6 +254,9 @@ static inline void stm_safe_point(void) {
         _stm_collectable_safe_point();
 }
 
+/* Forces a collection. */
+void stm_collect(long level);
+
 
 /* ==================== END ==================== */
 

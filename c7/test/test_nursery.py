@@ -129,11 +129,16 @@ class TestBasic(BaseTest):
         assert young
 
     def test_larger_than_section(self):
-        obj_size = lib.NURSERY_SECTION + 16
+        obj_size = NURSERY_SECTION_SIZE + 16
 
         self.start_transaction()
-        new = stm_allocate(obj_size)
-        assert not is_in_nursery(new)
+        seen = set()
+        for i in range(10):
+            stm_minor_collect()
+            new = stm_allocate(obj_size)
+            assert not is_in_nursery(new)
+            seen.add(new)
+        assert len(seen) < 5     # addresses are reused
 
     def test_reset_partial_alloc_pages(self):
         self.start_transaction()

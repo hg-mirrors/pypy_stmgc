@@ -79,6 +79,8 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
 object_t *_stm_enum_old_objects_pointing_to_young(void);
 object_t *_stm_enum_modified_objects(void);
+
+void stm_collect(long level);
 """)
 
 
@@ -348,7 +350,7 @@ def stm_become_inevitable():
         raise Conflict()
 
 def stm_minor_collect():
-    lib._stm_minor_collect()
+    lib.stm_collect(0)
 
 def stm_get_page_flag(pagenum):
     return lib.stm_get_page_flag(pagenum)
