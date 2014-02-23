@@ -413,7 +413,7 @@ static void stm_minor_collection(uint64_t request_size)
     /* We just waited here, either from mutex_lock() or from cond_wait(),
        so we should check again if another thread did the minor
        collection itself */
-    if (nursery_ctl.used + request_size <= NURSERY_SIZE)
+    if (request_size <= NURSERY_SIZE - nursery_ctl.used)
         goto exit;
 
     if (!try_wait_for_other_safe_points(SP_SAFE_POINT_CAN_COLLECT))
@@ -426,6 +426,12 @@ static void stm_minor_collection(uint64_t request_size)
     STM_PSEGMENT->safe_point = SP_RUNNING;
 
     mutex_unlock();
+}
+
+void stm_collect(long level)
+{
+    assert(level == 0);
+    stm_minor_collection(-1);
 }
 
 
