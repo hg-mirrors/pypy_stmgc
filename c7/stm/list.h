@@ -13,6 +13,8 @@ static inline void list_free(struct list_s *lst)
     free(lst);
 }
 
+#define LIST_FREE(lst)  (list_free(lst), (lst) = NULL)
+
 
 static struct list_s *_list_grow(struct list_s *, uintptr_t);
 

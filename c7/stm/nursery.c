@@ -26,6 +26,10 @@ static void setup_nursery(void)
     assert(_STM_FAST_ALLOC <= NURSERY_SIZE);
     _stm_nursery_start = NURSERY_START;
     _stm_nursery_end   = NURSERY_END;
+
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++)
+        get_segment(i)->nursery_current = (stm_char *)NURSERY_START;
 }
 
 static void teardown_nursery(void)

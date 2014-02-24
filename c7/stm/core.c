@@ -251,14 +251,16 @@ static void push_modified_to_other_segments(void)
 
 static void _finish_transaction(void)
 {
-    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
-    release_thread_segment(tl);
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
-    if (STM_PSEGMENT->overflow_objects_pointing_to_nursery != NULL) {
-        list_free(STM_PSEGMENT->overflow_objects_pointing_to_nursery);
-        STM_PSEGMENT->overflow_objects_pointing_to_nursery = NULL;
-    }
+
+    /* reset these lists to NULL for the next transaction */
+    LIST_FREE(STM_PSEGMENT->old_objects_pointing_to_nursery);
+    LIST_FREE(STM_PSEGMENT->overflow_objects_pointing_to_nursery);
+
+    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+    release_thread_segment(tl);
+    /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 }
 
 void stm_commit_transaction(void)
@@ -315,8 +317,6 @@ void stm_abort_transaction(void)
 
 static void reset_modified_from_other_segments(void)
 {
-    abort();//...
-#if 0
     /* pull the right versions from other threads in order
        to reset our pages as part of an abort */
     long remote_num = 1 - STM_SEGMENT->segment_num;
@@ -327,8 +327,8 @@ static void reset_modified_from_other_segments(void)
         STM_PSEGMENT->modified_old_objects,
         object_t * /*item*/,
         ({
-            /* all objects in 'modified_objects' have this flag */
-            assert(item->stm_flags & GCFLAG_WRITE_BARRIER_CALLED);
+            /* all objects in 'modified_objects' have this flag removed */
+            assert((item->stm_flags & GCFLAG_WRITE_BARRIER) == 0);
 
             /* memcpy in the opposite direction than
                push_modified_to_other_segments() */
@@ -337,9 +337,9 @@ static void reset_modified_from_other_segments(void)
             ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
             memcpy(dst, src, size);
 
-            /* copying from the other segment removed again the
-               WRITE_BARRIER_CALLED flag */
-            assert(!(item->stm_flags & GCFLAG_WRITE_BARRIER_CALLED));
+            /* copying from the other segment added again the
+               WRITE_BARRIER flag */
+            assert(item->stm_flags & GCFLAG_WRITE_BARRIER);
 
             /* write all changes to the object before we release the
                write lock below.  This is needed because we need to
@@ -353,12 +353,11 @@ static void reset_modified_from_other_segments(void)
             /* clear the write-lock */
             uintptr_t lock_idx = (((uintptr_t)item) >> 4) - WRITELOCK_START;
             assert((intptr_t)lock_idx >= 0);
-            assert(write_locks[lock_idx]);
+            assert(write_locks[lock_idx] == STM_PSEGMENT->write_lock_num);
             write_locks[lock_idx] = 0;
         }));
 
-    list_clear(STM_PSEGMENT->modified_objects);
-#endif
+    list_clear(STM_PSEGMENT->modified_old_objects);
 }
 
 static void abort_with_mutex(void)
