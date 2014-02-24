@@ -1,8 +1,6 @@
 from support import *
 import sys, random
 import py
-from cStringIO import StringIO
-
 
 
 
@@ -299,241 +297,233 @@ class GlobalState(object):
                        trs.objs_in_conflict)
 
 
-# ========== STM OPERATIONS ==========
-
-class Operation(object):
-    def do(self, ex, global_state, thread_state):
-        raise NotImplemented
-
-class OpStartTransaction(Operation):
-    def do(self, ex, global_state, thread_state):
-        thread_state.start_transaction()
-        #
-        ex.do('self.start_transaction()')
-        thread_state.reload_roots(ex)
-        #
-        # assert that everything known is old:
-        old_objs = thread_state.saved_roots
-        for o in old_objs:
-            ex.do("assert not is_in_nursery(%s)" % o)
+###################################################################
+###################################################################
+######################## STM OPERATIONS ###########################
+###################################################################
+###################################################################
 
 
-class OpCommitTransaction(Operation):
-    def do(self, ex, global_state, thread_state):
-        #
-        # push all new roots
-        ex.do("# push new objs before commit:")
-        thread_state.push_roots(ex)
-        aborts = thread_state.commit_transaction()
-        #
-        if aborts:
-            thread_state.abort_transaction()
-        ex.do(raising_call(aborts, "self.commit_transaction"))
+def op_start_transaction(ex, global_state, thread_state):
+    thread_state.start_transaction()
+    #
+    ex.do('self.start_transaction()')
+    thread_state.reload_roots(ex)
+    #
+    # assert that everything known is old:
+    old_objs = thread_state.saved_roots
+    for o in old_objs:
+        ex.do("assert not is_in_nursery(%s)" % o)
 
-class OpAbortTransaction(Operation):
-    def do(self, ex, global_state, thread_state):
-        trs = thread_state.transaction_state
-        if trs.inevitable:
-            return
-        trs.set_must_abort()
+
+def op_commit_transaction(ex, global_state, thread_state):
+    #
+    # push all new roots
+    ex.do("# push new objs before commit:")
+    thread_state.push_roots(ex)
+    aborts = thread_state.commit_transaction()
+    #
+    if aborts:
         thread_state.abort_transaction()
-        ex.do('self.abort_transaction()')
+    ex.do(raising_call(aborts, "self.commit_transaction"))
 
-class OpBecomeInevitable(Operation):
-    def do(self, ex, global_state, thread_state):
-        trs = thread_state.transaction_state
-        global_state.check_if_can_become_inevitable(trs)
+def op_abort_transaction(ex, global_state, thread_state):
+    trs = thread_state.transaction_state
+    if trs.inevitable:
+        return
+    trs.set_must_abort()
+    thread_state.abort_transaction()
+    ex.do('self.abort_transaction()')
 
-        thread_state.push_roots(ex)
-        ex.do(raising_call(trs.check_must_abort(),
-                           "stm_become_inevitable"))
-        if trs.check_must_abort():
-            thread_state.abort_transaction()
-        else:
-            trs.inevitable = True
-            thread_state.pop_roots(ex)
-            thread_state.reload_roots(ex)
+def op_become_inevitable(ex, global_state, thread_state):
+    trs = thread_state.transaction_state
+    global_state.check_if_can_become_inevitable(trs)
 
-
-class OpAllocate(Operation):
-    def do(self, ex, global_state, thread_state):
-        size = global_state.rnd.choice([
-            "16",
-            "SOME_MEDIUM_SIZE+16",
-            #"SOME_LARGE_SIZE+16",
-        ])
-        r = global_state.get_new_root_name(False, size)
-        thread_state.push_roots(ex)
-
-        ex.do('%s = stm_allocate(%s)' % (r, size))
-        thread_state.transaction_state.add_root(r, 0, True)
-
-        thread_state.pop_roots(ex)
-        thread_state.reload_roots(ex)
-        thread_state.register_root(r)
-
-class OpAllocateRef(Operation):
-    def do(self, ex, global_state, thread_state):
-        num = str(global_state.rnd.randrange(1, 100))
-        r = global_state.get_new_root_name(True, num)
-        thread_state.push_roots(ex)
-        ex.do('%s = stm_allocate_refs(%s)' % (r, num))
-        thread_state.transaction_state.add_root(r, "ffi.NULL", True)
-
-        thread_state.pop_roots(ex)
-        thread_state.reload_roots(ex)
-        thread_state.register_root(r)
-
-class OpMinorCollect(Operation):
-    def do(self, ex, global_state, thread_state):
-        thread_state.push_roots(ex)
-        ex.do('stm_minor_collect()')
+    thread_state.push_roots(ex)
+    ex.do(raising_call(trs.check_must_abort(),
+                       "stm_become_inevitable"))
+    if trs.check_must_abort():
+        thread_state.abort_transaction()
+    else:
+        trs.inevitable = True
         thread_state.pop_roots(ex)
         thread_state.reload_roots(ex)
 
 
-class OpForgetRoot(Operation):
-    def do(self, ex, global_state, thread_state):
-        r = thread_state.forget_random_root()
-        if thread_state.transaction_state.inevitable:
-            ex.do('# inevitable forget %s' % r)
-        else:
-            ex.do('# forget %s' % r)
+def op_allocate(ex, global_state, thread_state):
+    size = global_state.rnd.choice([
+        "16",
+        "SOME_MEDIUM_SIZE+16",
+        #"SOME_LARGE_SIZE+16",
+    ])
+    r = global_state.get_new_root_name(False, size)
+    thread_state.push_roots(ex)
 
-class OpWrite(Operation):
-    def do(self, ex, global_state, thread_state):
-        r = thread_state.get_random_root()
-        trs = thread_state.transaction_state
-        is_ref = global_state.has_ref_type(r)
-        #
-        # check for possible write-write conflict:
-        was_written = False
-        try:
-            # HACK to avoid calling write_root() just yet because we have to
-            # undo it in case of the exception :(
-            was_written = r in trs.write_set
-            trs.write_set.add(r)
-            global_state.check_for_write_write_conflicts(trs)
-        except WriteWriteConflictNotTestable:
-            if not was_written:
-                trs.write_set.remove(r)
-            ex.do("# writing to %s produces an untestable write-write" % r)
-            ex.do("# conflict between an inevitable and a normal transaction :(")
-            return
-        #
-        # decide on a value to write
-        if is_ref:
-            v = thread_state.get_random_root()
-        else:
-            v = ord(global_state.rnd.choice("abcdefghijklmnop"))
-        assert trs.write_root(r, v) is not None
-        #
-        aborts = trs.check_must_abort()
-        if aborts:
-            thread_state.abort_transaction()
-        offset = global_state.get_root_size(r) + " - 1"
-        if is_ref:
-            ex.do(raising_call(aborts, "stm_set_ref", r, offset, v))
-            if not aborts:
-                ex.do(raising_call(False, "stm_set_ref", r, "0", v))
-        else:
-            ex.do(raising_call(aborts, "stm_set_char", r, repr(chr(v)), offset))
-            if not aborts:
-                ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR"))
+    ex.do('%s = stm_allocate(%s)' % (r, size))
+    thread_state.transaction_state.add_root(r, 0, True)
 
-class OpRead(Operation):
-    def do(self, ex, global_state, thread_state):
-        r = thread_state.get_random_root()
-        trs = thread_state.transaction_state
-        v = trs.read_root(r)
-        #
-        offset = global_state.get_root_size(r) + " - 1"
-        if global_state.has_ref_type(r):
-            if v in thread_state.saved_roots or v in global_state.prebuilt_roots:
-                # v = root known to this transaction; or prebuilt
-                ex.do("assert stm_get_ref(%s, %s) == %s" % (r, offset, v))
-                ex.do("assert stm_get_ref(%s, 0) == %s" % (r, v))
-            elif v != "ffi.NULL":
-                # if v came from this transaction: re-add it to saved_roots because
-                #     it survived by being referenced by another saved root
-                # if v is from a different transaction:
-                #     we fish its value from somewhere and add it to our known roots
-                global_trs = global_state.committed_transaction_state
-                if v not in trs.values:
-                    # not from this transaction AND not known at the start of this
-                    # transaction
-                    trs.add_root(v, global_trs.values[v], False)
-                    ex.do("# get %r from other thread" % v)
-                elif v not in global_trs.values:
-                    # created and forgotten earlier in this thread
-                    ex.do("# revive %r in this thread" % v)
-                else:
-                    # created in an earlier transaction, now also known here
-                    ex.do("# register %r in this thread" % v)
-                #
-                ex.do("%s = stm_get_ref(%s, %s)" % (v, r, offset))
-                ex.do("%s = stm_get_ref(%s, 0)" % (v, r))
-                thread_state.register_root(v)
+    thread_state.pop_roots(ex)
+    thread_state.reload_roots(ex)
+    thread_state.register_root(r)
+
+def op_allocate_ref(ex, global_state, thread_state):
+    num = str(global_state.rnd.randrange(1, 100))
+    r = global_state.get_new_root_name(True, num)
+    thread_state.push_roots(ex)
+    ex.do('%s = stm_allocate_refs(%s)' % (r, num))
+    thread_state.transaction_state.add_root(r, "ffi.NULL", True)
+
+    thread_state.pop_roots(ex)
+    thread_state.reload_roots(ex)
+    thread_state.register_root(r)
+
+def op_minor_collect(ex, global_state, thread_state):
+    thread_state.push_roots(ex)
+    ex.do('stm_minor_collect()')
+    thread_state.pop_roots(ex)
+    thread_state.reload_roots(ex)
+
+
+def op_forget_root(ex, global_state, thread_state):
+    r = thread_state.forget_random_root()
+    if thread_state.transaction_state.inevitable:
+        ex.do('# inevitable forget %s' % r)
+    else:
+        ex.do('# forget %s' % r)
+
+def op_write(ex, global_state, thread_state):
+    r = thread_state.get_random_root()
+    trs = thread_state.transaction_state
+    is_ref = global_state.has_ref_type(r)
+    #
+    # check for possible write-write conflict:
+    was_written = False
+    try:
+        # HACK to avoid calling write_root() just yet because we have to
+        # undo it in case of the exception :(
+        was_written = r in trs.write_set
+        trs.write_set.add(r)
+        global_state.check_for_write_write_conflicts(trs)
+    except WriteWriteConflictNotTestable:
+        if not was_written:
+            trs.write_set.remove(r)
+        ex.do("# writing to %s produces an untestable write-write" % r)
+        ex.do("# conflict between an inevitable and a normal transaction :(")
+        return
+    #
+    # decide on a value to write
+    if is_ref:
+        v = thread_state.get_random_root()
+    else:
+        v = ord(global_state.rnd.choice("abcdefghijklmnop"))
+    assert trs.write_root(r, v) is not None
+    #
+    aborts = trs.check_must_abort()
+    if aborts:
+        thread_state.abort_transaction()
+    offset = global_state.get_root_size(r) + " - 1"
+    if is_ref:
+        ex.do(raising_call(aborts, "stm_set_ref", r, offset, v))
+        if not aborts:
+            ex.do(raising_call(False, "stm_set_ref", r, "0", v))
+    else:
+        ex.do(raising_call(aborts, "stm_set_char", r, repr(chr(v)), offset))
+        if not aborts:
+            ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR"))
+
+def op_read(ex, global_state, thread_state):
+    r = thread_state.get_random_root()
+    trs = thread_state.transaction_state
+    v = trs.read_root(r)
+    #
+    offset = global_state.get_root_size(r) + " - 1"
+    if global_state.has_ref_type(r):
+        if v in thread_state.saved_roots or v in global_state.prebuilt_roots:
+            # v = root known to this transaction; or prebuilt
+            ex.do("assert stm_get_ref(%s, %s) == %s" % (r, offset, v))
+            ex.do("assert stm_get_ref(%s, 0) == %s" % (r, v))
+        elif v != "ffi.NULL":
+            # if v came from this transaction: re-add it to saved_roots because
+            #     it survived by being referenced by another saved root
+            # if v is from a different transaction:
+            #     we fish its value from somewhere and add it to our known roots
+            global_trs = global_state.committed_transaction_state
+            if v not in trs.values:
+                # not from this transaction AND not known at the start of this
+                # transaction
+                trs.add_root(v, global_trs.values[v], False)
+                ex.do("# get %r from other thread" % v)
+            elif v not in global_trs.values:
+                # created and forgotten earlier in this thread
+                ex.do("# revive %r in this thread" % v)
             else:
-                # v is NULL; we still need to read it (as it should be in the read-set):
-                ex.do("assert stm_get_ref(%s, %s) == %s" % (r,offset,v))
-                ex.do("assert stm_get_ref(%s, 0) == %s" % (r,v))
-        else:
-            ex.do("assert stm_get_char(%s, %s) == %s" % (r, offset, repr(chr(v))))
-            ex.do("assert stm_get_char(%s, HDR) == %s" % (r, repr(chr(v))))
-
-class OpAssertSize(Operation):
-    def do(self, ex, global_state, thread_state):
-        r = thread_state.get_random_root()
-        size = global_state.get_root_size(r)
-        if global_state.has_ref_type(r):
-            ex.do("assert stm_get_obj_size(%s) == %s" % (r, size + " * WORD + HDR"))
-        else:
-            ex.do("assert stm_get_obj_size(%s) == %s" % (r, size))
-
-class OpAssertModified(Operation):
-    def do(self, ex, global_state, thread_state):
-        trs = thread_state.transaction_state
-        modified = trs.get_old_modified()
-        ex.do("# modified = %s" % modified)
-        ex.do("modified = modified_objects()")
-        if not modified:
-            ex.do("assert modified == []")
-        else:
-            saved = [m for m in modified
-                     if m in thread_state.saved_roots or m in global_state.prebuilt_roots]
-            ex.do("assert {%s}.issubset(set(modified))" % (
-                ", ".join(saved)
-            ))
-
-
-class OpSwitchThread(Operation):
-    def do(self, ex, global_state, thread_state, new_thread_state=None):
-        if new_thread_state is None:
-            new_thread_state = global_state.rnd.choice(global_state.thread_states)
-
-        if new_thread_state != thread_state:
-            if thread_state.transaction_state:
-                thread_state.push_roots(ex)
-            ex.do('#')
+                # created in an earlier transaction, now also known here
+                ex.do("# register %r in this thread" % v)
             #
-            trs = new_thread_state.transaction_state
-            conflicts = trs is not None and trs.check_must_abort()
-            ex.thread_num = new_thread_state.num
-            #
-            ex.do(raising_call(conflicts,
-                               "self.switch", new_thread_state.num))
-            if conflicts:
-                new_thread_state.abort_transaction()
-            else:
-                new_thread_state.pop_roots(ex)
-                new_thread_state.reload_roots(ex)
+            ex.do("%s = stm_get_ref(%s, %s)" % (v, r, offset))
+            ex.do("%s = stm_get_ref(%s, 0)" % (v, r))
+            thread_state.register_root(v)
+        else:
+            # v is NULL; we still need to read it (as it should be in the read-set):
+            ex.do("assert stm_get_ref(%s, %s) == %s" % (r,offset,v))
+            ex.do("assert stm_get_ref(%s, 0) == %s" % (r,v))
+    else:
+        ex.do("assert stm_get_char(%s, %s) == %s" % (r, offset, repr(chr(v))))
+        ex.do("assert stm_get_char(%s, HDR) == %s" % (r, repr(chr(v))))
 
-        return new_thread_state
+def op_assert_size(ex, global_state, thread_state):
+    r = thread_state.get_random_root()
+    size = global_state.get_root_size(r)
+    if global_state.has_ref_type(r):
+        ex.do("assert stm_get_obj_size(%s) == %s" % (r, size + " * WORD + HDR"))
+    else:
+        ex.do("assert stm_get_obj_size(%s) == %s" % (r, size))
+
+def op_assert_modified(ex, global_state, thread_state):
+    trs = thread_state.transaction_state
+    modified = trs.get_old_modified()
+    ex.do("# modified = %s" % modified)
+    ex.do("modified = modified_objects()")
+    if not modified:
+        ex.do("assert modified == []")
+    else:
+        saved = [m for m in modified
+                 if m in thread_state.saved_roots or m in global_state.prebuilt_roots]
+        ex.do("assert {%s}.issubset(set(modified))" % (
+            ", ".join(saved)
+        ))
 
 
+def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
+    if new_thread_state is None:
+        new_thread_state = global_state.rnd.choice(global_state.thread_states)
 
-# ========== TEST GENERATION ==========
+    if new_thread_state != thread_state:
+        if thread_state.transaction_state:
+            thread_state.push_roots(ex)
+        ex.do('#')
+        #
+        trs = new_thread_state.transaction_state
+        conflicts = trs is not None and trs.check_must_abort()
+        ex.thread_num = new_thread_state.num
+        #
+        ex.do(raising_call(conflicts,
+                           "self.switch", new_thread_state.num))
+        if conflicts:
+            new_thread_state.abort_transaction()
+        else:
+            new_thread_state.pop_roots(ex)
+            new_thread_state.reload_roots(ex)
+
+    return new_thread_state
+
+
+###################################################################
+###################################################################
+####################### TEST GENERATION ###########################
+###################################################################
+###################################################################
+
 
 class TestRandom(BaseTest):
 
@@ -567,28 +557,28 @@ class TestRandom(BaseTest):
 
         # random steps:
         possible_actions = [
-            OpAllocate,
-            OpAllocateRef, OpAllocateRef,
-            OpWrite, OpWrite, OpWrite,
-            OpRead, OpRead, OpRead, OpRead, OpRead, OpRead, OpRead, OpRead,
-            OpCommitTransaction,
-            OpAbortTransaction,
-            OpForgetRoot,
-            OpBecomeInevitable,
-            OpAssertSize,
-            #OpAssertModified,
-            OpMinorCollect,
+            op_allocate,
+            op_allocate_ref, op_allocate_ref,
+            op_write, op_write, op_write,
+            op_read, op_read, op_read, op_read, op_read, op_read, op_read, op_read,
+            op_commit_transaction,
+            op_abort_transaction,
+            op_forget_root,
+            op_become_inevitable,
+            op_assert_size,
+            #op_assert_modified,
+            op_minor_collect,
         ]
         for _ in range(200):
             # make sure we are in a transaction:
-            curr_thread = OpSwitchThread().do(ex, global_state, curr_thread)
+            curr_thread = op_switch_thread(ex, global_state, curr_thread)
 
             if curr_thread.transaction_state is None:
-                OpStartTransaction().do(ex, global_state, curr_thread)
+                op_start_transaction(ex, global_state, curr_thread)
 
             # do something random
             action = rnd.choice(possible_actions)
-            action().do(ex, global_state, curr_thread)
+            action(ex, global_state, curr_thread)
 
         # to make sure we don't have aborts in the test's teardown method,
         # we will simply stop all running transactions
@@ -596,12 +586,12 @@ class TestRandom(BaseTest):
             if ts.transaction_state is not None:
                 if curr_thread != ts:
                     ex.do('#')
-                    curr_thread = OpSwitchThread().do(ex, global_state, curr_thread,
-                                                      new_thread_state=ts)
+                    curr_thread = op_switch_thread(ex, global_state, curr_thread,
+                                                  new_thread_state=ts)
 
                 # could have aborted in the switch() above:
                 if curr_thread.transaction_state:
-                    OpCommitTransaction().do(ex, global_state, curr_thread)
+                    op_commit_transaction(ex, global_state, curr_thread)
 
 
 
