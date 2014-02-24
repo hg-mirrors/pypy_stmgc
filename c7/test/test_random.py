@@ -88,6 +88,8 @@ class TransactionState(object):
         if only_new:
             for w in committed.write_set:
                 self.values[w] = committed.values[w]
+            for w in committed.created_in_this_transaction:
+                self.values[w] = committed.values[w]
         else:
             self.values.update(committed.values)
 
@@ -107,8 +109,9 @@ class TransactionState(object):
             self.created_in_this_transaction.add(r)
 
     def write_root(self, r, v):
-        self.read_set.add(r)
-        self.write_set.add(r)
+        if r not in self.created_in_this_transaction:
+            self.read_set.add(r)
+            self.write_set.add(r)
         old = self.values.get(r, None)
         self.values[r] = v
         return old
@@ -132,13 +135,6 @@ class ThreadState(object):
         assert len(self.saved_roots) < SHADOWSTACK_LENGTH
 
     def forget_random_root(self):
-        # # forget some non-pushed root for now
-        # if self.roots_on_stack < len(self.saved_roots):
-        #     idx = self.global_state.rnd.randrange(self.roots_on_stack, len(self.saved_roots))
-        #     r = self.saved_roots[idx]
-        #     del self.saved_roots[idx]
-        #     return r
-
         if self.transaction_state.inevitable:
             # forget *all* roots
             self.roots_on_stack = 0
@@ -204,6 +200,7 @@ class ThreadState(object):
 
     def abort_transaction(self):
         assert self.transaction_state.check_must_abort()
+        assert not self.transaction_state.inevitable
         self.roots_on_stack = self.roots_on_transaction_start
         del self.saved_roots[self.roots_on_stack:]
         self.transaction_state = None
@@ -443,21 +440,18 @@ def op_read(ex, global_state, thread_state):
             ex.do("assert stm_get_ref(%s, %s) == %s" % (r, offset, v))
             ex.do("assert stm_get_ref(%s, 0) == %s" % (r, v))
         elif v != "ffi.NULL":
-            # if v came from this transaction: re-add it to saved_roots because
-            #     it survived by being referenced by another saved root
-            # if v is from a different transaction:
-            #     we fish its value from somewhere and add it to our known roots
             global_trs = global_state.committed_transaction_state
             if v not in trs.values:
                 # not from this transaction AND not known at the start of this
-                # transaction
-                trs.add_root(v, global_trs.values[v], False)
-                ex.do("# get %r from other thread" % v)
+                # transaction AND not pushed to us by a commit
+                assert False
             elif v not in global_trs.values:
-                # created and forgotten earlier in this thread
-                ex.do("# revive %r in this thread" % v)
+                # created and forgotten earlier in this transaction, we still
+                # know its latest value (v in trs.values)
+                ex.do("# revive %r in this transaction" % v)
             else:
-                # created in an earlier transaction, now also known here
+                # created in an earlier transaction, now also known here. We
+                # know its value (v in trs.values)
                 ex.do("# register %r in this thread" % v)
             #
             ex.do("%s = stm_get_ref(%s, %s)" % (v, r, offset))
