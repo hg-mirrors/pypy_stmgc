@@ -104,16 +104,18 @@ class TestBasic(BaseTest):
         py.test.raises(Conflict, self.switch, 0) # detects rw conflict
 
     def test_commit_fresh_objects(self):
-        self.push_root_no_gc()
         self.start_transaction()
         lp = stm_allocate(16)
         stm_set_char(lp, 'u')
+        self.push_root(lp)
         self.commit_transaction()
+        lp = self.pop_root()
         p1 = stm_get_real_address(lp)
 
         self.switch(1)
 
         self.start_transaction()
+        assert stm_get_char(lp) == 'u'
         stm_write(lp) # privatize page
         p2 = stm_get_real_address(lp)
         assert p1 != p2       # we see the other segment, but same object
@@ -159,13 +161,16 @@ class TestBasic(BaseTest):
         self.commit_transaction()
 
     def test_commit_fresh_objects3(self):
-        # make objects lpx; then privatize the page by committing changes
+        # make object lpx; then privatize the page by committing changes
         # to it; then create lpy in the same page.  Check that lpy is
         # visible from the other thread.
         self.start_transaction()
         lpx = stm_allocate(16)
         stm_set_char(lpx, '.')
+        self.push_root(lpx)
         self.commit_transaction()
+        lpx = self.pop_root()
+        self.push_root(lpx)
 
         self.start_transaction()
         stm_set_char(lpx, 'X')
@@ -174,7 +179,9 @@ class TestBasic(BaseTest):
         self.start_transaction()
         lpy = stm_allocate(16)
         stm_set_char(lpy, 'y')
+        self.push_root(lpy)
         self.commit_transaction()
+        lpy = self.pop_root()
 
         self.switch(1)
         self.start_transaction()
