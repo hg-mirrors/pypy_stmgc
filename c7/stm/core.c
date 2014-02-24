@@ -18,10 +18,10 @@ void _stm_write_slowpath(object_t *obj)
     if ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) ==
             STM_PSEGMENT->overflow_number) {
 
-        dprintf_test(("write_slowpath %p -> ovf_obj\n", obj));
+        dprintf_test(("write_slowpath %p -> ovf obj_to_nurs\n", obj));
         obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-        assert(STM_PSEGMENT->overflow_objects_pointing_to_nursery != NULL);
-        LIST_APPEND(STM_PSEGMENT->overflow_objects_pointing_to_nursery, obj);
+        assert(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
+        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
         return;
     }
 
@@ -32,7 +32,7 @@ void _stm_write_slowpath(object_t *obj)
     /* claim the write-lock for this object.  In case we're running the
        same transaction since a long while, the object can be already in
        'modified_old_objects' (but, because it had GCFLAG_WRITE_BARRIER,
-       not in 'old_objects_pointing_to_nursery').  We'll detect this case
+       not in 'objects_pointing_to_nursery').  We'll detect this case
        by finding that we already own the write-lock. */
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
     uint8_t lock_num = STM_PSEGMENT->write_lock_num;
@@ -77,7 +77,7 @@ void _stm_write_slowpath(object_t *obj)
         }
     }
     else if (write_locks[lock_idx] == lock_num) {
-        OPT_ASSERT(STM_PSEGMENT->old_objects_pointing_to_nursery != NULL);
+        OPT_ASSERT(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
 #ifdef STM_TESTS
         bool found = false;
         LIST_FOREACH_R(STM_PSEGMENT->modified_old_objects, object_t *,
@@ -97,11 +97,11 @@ void _stm_write_slowpath(object_t *obj)
     }
 
     /* A common case for write_locks[] that was either 0 or lock_num:
-       we need to add the object to 'old_objects_pointing_to_nursery'
+       we need to add the object to 'objects_pointing_to_nursery'
        if there is such a list. */
-    if (STM_PSEGMENT->old_objects_pointing_to_nursery != NULL) {
-        dprintf_test(("write_slowpath %p -> old_obj_pointing_to_nurs\n", obj));
-        LIST_APPEND(STM_PSEGMENT->old_objects_pointing_to_nursery, obj);
+    if (STM_PSEGMENT->objects_pointing_to_nursery != NULL) {
+        dprintf_test(("write_slowpath %p -> old obj_to_nurs\n", obj));
+        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
     }
 
     /* add the write-barrier-already-called flag ONLY if we succeeded in
@@ -173,8 +173,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
-    assert(STM_PSEGMENT->old_objects_pointing_to_nursery == NULL);
-    assert(STM_PSEGMENT->overflow_objects_pointing_to_nursery == NULL);
+    assert(STM_PSEGMENT->objects_pointing_to_nursery == NULL);
     assert(STM_PSEGMENT->large_overflow_objects == NULL);
 
 #ifdef STM_TESTS
@@ -318,8 +317,7 @@ static void _finish_transaction(void)
     STM_PSEGMENT->transaction_state = TS_NONE;
 
     /* reset these lists to NULL for the next transaction */
-    LIST_FREE(STM_PSEGMENT->old_objects_pointing_to_nursery);
-    LIST_FREE(STM_PSEGMENT->overflow_objects_pointing_to_nursery);
+    LIST_FREE(STM_PSEGMENT->objects_pointing_to_nursery);
     LIST_FREE(STM_PSEGMENT->large_overflow_objects);
 
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
@@ -331,6 +329,9 @@ void stm_commit_transaction(void)
 {
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
+
+    bool has_any_overflow_object =
+        (STM_PSEGMENT->objects_pointing_to_nursery != NULL);
 
     minor_collection(/*commit=*/ true);
 
@@ -359,7 +360,7 @@ void stm_commit_transaction(void)
     push_modified_to_other_segments();
 
     /* update 'overflow_number' if needed */
-    if (STM_PSEGMENT->overflow_objects_pointing_to_nursery != NULL) {
+    if (has_any_overflow_object) {
         highest_overflow_number += GCFLAG_OVERFLOW_NUMBER_bit0;
         STM_PSEGMENT->overflow_number = highest_overflow_number;
     }

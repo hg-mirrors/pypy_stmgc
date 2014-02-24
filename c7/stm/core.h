@@ -67,20 +67,15 @@ struct stm_priv_segment_info_s {
        that need to be copied to other segments upon commit. */
     struct list_s *modified_old_objects;
 
-    /* List of the modified old objects that may point to the nursery.
-       If the current transaction didn't span a minor collection so far,
-       this is NULL, understood as meaning implicitly "this is the same
-       as 'modified_old_objects'".  Otherwise, this list is a subset of
-       'modified_old_objects'. */
-    struct list_s *old_objects_pointing_to_nursery;
-
-    /* List of overflowed objects (from the same transaction but outside
-       the nursery) on which the write-barrier was triggered, so that
-       they likely contain a pointer to a nursery object.  This is used
-       by the GC: it's additional roots for the next minor collection.
-       This is NULL if the current transaction didn't span a minor
-       collection so far. */
-    struct list_s *overflow_objects_pointing_to_nursery;
+    /* List of out-of-nursery objects that may contain pointers to
+       nursery objects.  This is used to track the GC status: they
+       are all objects outside the nursery on which an stm_write()
+       occurred since the last minor collection.  If there was no
+       minor collection yet in the current transaction, this is NULL,
+       understood as meaning implicitly "this is the same as
+       'modified_old_objects'.  This list contains exactly the
+       objects without GCFLAG_WRITE_BARRIER. */
+    struct list_s *objects_pointing_to_nursery;
 
     /* List of all large, overflowed objects.  Only non-NULL after the
        current transaction spanned a minor collection. */

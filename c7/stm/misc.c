@@ -48,18 +48,11 @@ long _stm_count_modified_old_objects(void)
     return list_count(STM_PSEGMENT->modified_old_objects);
 }
 
-long _stm_count_old_objects_pointing_to_nursery(void)
+long _stm_count_objects_pointing_to_nursery(void)
 {
-    if (STM_PSEGMENT->old_objects_pointing_to_nursery == NULL)
+    if (STM_PSEGMENT->objects_pointing_to_nursery == NULL)
         return -1;
-    return list_count(STM_PSEGMENT->old_objects_pointing_to_nursery);
-}
-
-long _stm_count_overflow_objects_pointing_to_nursery(void)
-{
-    if (STM_PSEGMENT->overflow_objects_pointing_to_nursery == NULL)
-        return -1;
-    return list_count(STM_PSEGMENT->overflow_objects_pointing_to_nursery);
+    return list_count(STM_PSEGMENT->objects_pointing_to_nursery);
 }
 
 object_t *_stm_enum_modified_old_objects(long index)
@@ -68,15 +61,9 @@ object_t *_stm_enum_modified_old_objects(long index)
         STM_PSEGMENT->modified_old_objects, index);
 }
 
-object_t *_stm_enum_old_objects_pointing_to_nursery(long index)
+object_t *_stm_enum_objects_pointing_to_nursery(long index)
 {
     return (object_t *)list_item(
-        STM_PSEGMENT->old_objects_pointing_to_nursery, index);
-}
-
-object_t *_stm_enum_overflow_objects_pointing_to_nursery(long index)
-{
-    return (object_t *)list_item(
-        STM_PSEGMENT->overflow_objects_pointing_to_nursery, index);
+        STM_PSEGMENT->objects_pointing_to_nursery, index);
 }
 #endif
