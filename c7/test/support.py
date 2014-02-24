@@ -76,8 +76,12 @@ void _stm_set_nursery_free_count(uint64_t free_count);
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
-object_t *_stm_enum_overflow_objects_pointing_to_nursery(void);
-object_t *_stm_enum_modified_old_objects(void);
+long _stm_count_modified_old_objects(void);
+long _stm_count_old_objects_pointing_to_nursery(void);
+long _stm_count_overflow_objects_pointing_to_nursery(void);
+object_t *_stm_enum_modified_old_objects(long index);
+object_t *_stm_enum_old_objects_pointing_to_nursery(long index);
+object_t *_stm_enum_overflow_objects_pointing_to_nursery(long index);
 
 void stm_collect(long level);
 """)
@@ -365,13 +369,23 @@ def stm_get_obj_pages(o):
 def stm_get_flags(o):
     return lib._stm_get_flags(o)
 
-def old_objects_pointing_to_young():
-    return list(iter(lib._stm_enum_old_objects_pointing_to_young,
-                     ffi.cast("object_t *", -1)))
+def modified_old_objects():
+    count = lib._stm_count_modified_old_objects()
+    if count < 0:
+        return None
+    return map(lib._stm_enum_modified_old_objects, range(count))
 
-def modified_objects():
-    return list(iter(lib._stm_enum_modified_objects,
-                     ffi.cast("object_t *", -1)))
+def old_objects_pointing_to_nursery():
+    count = lib._stm_count_old_objects_pointing_to_nursery()
+    if count < 0:
+        return None
+    return map(lib._stm_enum_old_objects_pointing_to_nursery, range(count))
+
+def overflow_objects_pointing_to_nursery():
+    count = lib._stm_count_overflow_objects_pointing_to_nursery()
+    if count < 0:
+        return None
+    return map(lib._stm_enum_overflow_objects_pointing_to_nursery,range(count))
 
 
 SHADOWSTACK_LENGTH = 1000
