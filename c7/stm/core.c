@@ -440,6 +440,9 @@ static void abort_with_mutex(void)
         assert(!"abort: bad transaction_state");
     }
 
+    /* throw away the content of the nursery */
+    throw_away_nursery();
+
     /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
     reset_modified_from_other_segments();
 

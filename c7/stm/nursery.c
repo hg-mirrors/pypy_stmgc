@@ -147,7 +147,7 @@ static void collect_oldrefs_to_nursery(void)
     }
 }
 
-static void reset_nursery(void)
+static void throw_away_nursery(void)
 {
     /* reset the nursery by zeroing it */
     size_t size;
@@ -196,7 +196,7 @@ static void minor_collection(bool commit)
 
     collect_oldrefs_to_nursery();
 
-    reset_nursery();
+    throw_away_nursery();
 
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
 }
