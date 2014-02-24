@@ -98,23 +98,9 @@ static object_t *allocate_outside_nursery_large(uint64_t size)
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
-    /* XXX not thread-safe!  and only for tests, don't use when a
-       transaction might be running! */
-    assert(size_rounded_up >= 16);
-    assert((size_rounded_up & 7) == 0);
-
-    char *addr = large_malloc(size_rounded_up);
-
-    if (addr + size_rounded_up > uninitialized_page_start) {
-        uintptr_t npages;
-        npages = (addr + size_rounded_up - uninitialized_page_start) / 4096UL;
-        npages += GCPAGE_NUM_PAGES;
-        setup_N_pages(uninitialized_page_start, npages);
-        uninitialized_page_start += npages * 4096UL;
-    }
-
-    memset(addr, 0, size_rounded_up);
-
-    stm_char* o = (stm_char *)(addr - stm_object_pages);
-    return (object_t *)o;
+    /* only for tests */
+    object_t *o = allocate_outside_nursery_large(size_rounded_up);
+    memset(REAL_ADDRESS(stm_object_pages, o), 0, size_rounded_up);
+    o->stm_flags = STM_FLAGS_PREBUILT;
+    return o;
 }

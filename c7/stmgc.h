@@ -92,7 +92,7 @@ object_t *_stm_enum_overflow_objects_pointing_to_nursery(long index);
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
 #define _STM_NSE_SIGNAL                   0
 #define _STM_FAST_ALLOC           (66*1024)
-#define STM_FLAGS_PREBUILT                0
+#define STM_FLAGS_PREBUILT   _STM_GCFLAG_WRITE_BARRIER
 
 
 /* ==================== HELPERS ==================== */
