@@ -101,6 +101,11 @@ static void minor_trace_if_young(object_t **pobj)
         abort();  //...
     }
 
+    assert((nobj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) == 0);
+    if (!STM_PSEGMENT->minor_collect_will_commit_now) {
+        nobj->stm_flags |= STM_PSEGMENT->overflow_number;
+    }
+
     /* Done copying the object. */
     //dprintf(("%p -> %p\n", obj, nobj));
     pforwarded_array[0] = GCWORD_MOVED;
