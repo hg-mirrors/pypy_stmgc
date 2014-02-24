@@ -50,7 +50,9 @@ class TestBasic(BaseTest):
         assert stm_was_written(lp1)
         stm_write(lp1)
         assert stm_was_written(lp1)
-        assert modified_objects() == []    # because same transaction
+        assert modified_old_objects() == []             # object not old
+        assert old_objects_pointing_to_nursery() == None    # short transac.
+        assert overflow_objects_pointing_to_nursery() == None # short transac.
         self.commit_transaction()
 
     def test_allocate_old(self):

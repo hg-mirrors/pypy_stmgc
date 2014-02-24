@@ -63,8 +63,8 @@ struct stm_priv_segment_info_s {
 
     /* List of old objects (older than the current transaction) that the
        current transaction attempts to modify.  This is used to track
-       the STM status: it's old objects that where written to and that
-       need to be copied to other segments upon commit. */
+       the STM status: they are old objects that where written to and
+       that need to be copied to other segments upon commit. */
     struct list_s *modified_old_objects;
 
     /* List of the modified old objects that may point to the nursery.
@@ -77,9 +77,9 @@ struct stm_priv_segment_info_s {
     /* List of overflowed objects (from the same transaction but outside
        the nursery) on which the write-barrier was triggered, so that
        they likely contain a pointer to a nursery object.  This is used
-       by the GC: it's roots for the next minor collection.  This is
-       NULL if the current transaction didn't span a minor collection
-       so far. */
+       by the GC: it's additional roots for the next minor collection.
+       This is NULL if the current transaction didn't span a minor
+       collection so far. */
     struct list_s *overflow_objects_pointing_to_nursery;
 
     /* Start time: to know approximately for how long a transaction has

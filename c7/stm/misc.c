@@ -47,22 +47,42 @@ bool _stm_was_written(object_t *obj)
 }
 
 #ifdef STM_TESTS
-object_t *_stm_enum_overflow_objects_pointing_to_nursery(void)
+long _stm_count_modified_old_objects(void)
 {
-    static long index = 0;
-    struct list_s *lst = STM_PSEGMENT->overflow_objects_pointing_to_nursery;
-    if (index < list_count(lst))
-        return (object_t *)list_item(lst, index++);
-    index = 0;
-    return (object_t *)-1;
+    if (STM_PSEGMENT->modified_old_objects == NULL)
+        return -1;
+    return list_count(STM_PSEGMENT->modified_old_objects);
 }
-object_t *_stm_enum_modified_old_objects(void)
+
+long _stm_count_old_objects_pointing_to_nursery(void)
 {
-    static long index = 0;
-    struct list_s *lst = STM_PSEGMENT->modified_old_objects;
-    if (index < list_count(lst))
-        return (object_t *)list_item(lst, index++);
-    index = 0;
-    return (object_t *)-1;
+    if (STM_PSEGMENT->old_objects_pointing_to_nursery == NULL)
+        return -1;
+    return list_count(STM_PSEGMENT->old_objects_pointing_to_nursery);
+}
+
+long _stm_count_overflow_objects_pointing_to_nursery(void)
+{
+    if (STM_PSEGMENT->overflow_objects_pointing_to_nursery == NULL)
+        return -1;
+    return list_count(STM_PSEGMENT->overflow_objects_pointing_to_nursery);
+}
+
+object_t *_stm_enum_modified_old_objects(long index)
+{
+    return (object_t *)list_item(
+        STM_PSEGMENT->modified_old_objects, index);
+}
+
+object_t *_stm_enum_old_objects_pointing_to_nursery(long index)
+{
+    return (object_t *)list_item(
+        STM_PSEGMENT->old_objects_pointing_to_nursery, index);
+}
+
+object_t *_stm_enum_overflow_objects_pointing_to_nursery(long index)
+{
+    return (object_t *)list_item(
+        STM_PSEGMENT->overflow_objects_pointing_to_nursery, index);
 }
 #endif
