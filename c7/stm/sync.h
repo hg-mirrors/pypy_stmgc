@@ -8,7 +8,9 @@ static void mutex_lock(void);
 static void mutex_unlock(void);
 static void cond_wait(void);
 static void cond_broadcast(void);
+#ifndef NDEBUG
 static bool _has_mutex(void);
+#endif
 
 /* acquire and release one of the segments for running the given thread
    (must have the mutex acquired!) */

@@ -45,6 +45,14 @@ static void teardown_sync(void)
     memset(&sync_ctl, 0, sizeof(sync_ctl.in_use));
 }
 
+#ifndef NDEBUG
+__thread bool _has_mutex_here;
+static inline bool _has_mutex(void)
+{
+    return _has_mutex_here;
+}
+#endif
+
 static void set_gs_register(char *value)
 {
     if (UNLIKELY(syscall(SYS_arch_prctl, ARCH_SET_GS, (uint64_t)value) != 0))
@@ -53,8 +61,10 @@ static void set_gs_register(char *value)
 
 static inline void mutex_lock(void)
 {
+    assert(!_has_mutex_here);
     if (UNLIKELY(pthread_mutex_lock(&sync_ctl.global_mutex) != 0))
         stm_fatalerror("pthread_mutex_lock: %m\n");
+    assert((_has_mutex_here = true, 1));
 
     if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
         abort_with_mutex();
@@ -65,19 +75,10 @@ static inline void mutex_unlock(void)
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION ||
            STM_PSEGMENT->safe_point == SP_RUNNING);
 
+    assert(_has_mutex_here);
     if (UNLIKELY(pthread_mutex_unlock(&sync_ctl.global_mutex) != 0))
         stm_fatalerror("pthread_mutex_unlock: %m\n");
-}
-
-static inline bool _has_mutex(void)
-{
-    if (pthread_mutex_trylock(&sync_ctl.global_mutex) == EBUSY) {
-        return true;
-    }
-    else {
-        pthread_mutex_unlock(&sync_ctl.global_mutex);
-        return false;
-    }
+    assert((_has_mutex_here = false, 1));
 }
 
 static inline void cond_wait(void)
@@ -87,6 +88,7 @@ static inline void cond_wait(void)
     abort();
 #endif
 
+    assert(_has_mutex_here);
     if (UNLIKELY(pthread_cond_wait(&sync_ctl.global_cond,
                                    &sync_ctl.global_mutex) != 0))
         stm_fatalerror("pthread_cond_wait: %m\n");
