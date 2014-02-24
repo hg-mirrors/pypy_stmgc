@@ -88,11 +88,7 @@ void _stm_write_slowpath(object_t *obj)
     else {
         /* call the contention manager, and then retry (unless we were
            aborted). */
-        mutex_lock();
-        uint8_t prev_owner = ((volatile uint8_t *)write_locks)[lock_idx];
-        if (prev_owner != 0 && prev_owner != lock_num)
-            contention_management(prev_owner - 1, true);
-        mutex_unlock();
+        write_write_contention_management(lock_idx);
         goto retry;
     }
 
@@ -156,6 +152,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
                                                       : TS_INEVITABLE);
     STM_SEGMENT->jmpbuf_ptr = jmpbuf;
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
+    STM_SEGMENT->nursery_end = NURSERY_END;
 
     dprintf(("start_transaction\n"));
 
@@ -205,7 +202,7 @@ static void detect_write_read_conflicts(void)
         ({
             if (was_read_remote(remote_base, item, remote_version)) {
                 /* A write-read conflict! */
-                contention_management(remote_num, false);
+                contention_management(remote_num);
 
                 /* If we reach this point, it means we aborted the other
                    thread.  We're done here. */
@@ -311,6 +308,12 @@ static void push_modified_to_other_segments(void)
 
 static void _finish_transaction(void)
 {
+    /* signal all the threads blocked in wait_for_other_safe_points() */
+    if (STM_SEGMENT->nursery_end == NSE_SIGNAL) {
+        STM_SEGMENT->nursery_end = NURSERY_END;
+        cond_broadcast(C_SAFE_POINT);
+    }
+
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
 
@@ -339,8 +342,8 @@ void stm_commit_transaction(void)
     /* wait until the other thread is at a safe-point */
     wait_for_other_safe_points(SP_SAFE_POINT_CANNOT_COLLECT);
 
-    /* the rest of this function runs either atomically without releasing
-       the mutex, or it needs to restart. */
+    /* the rest of this function either runs atomically without
+       releasing the mutex, or aborts the current thread. */
 
     /* detect conflicts */
     detect_write_read_conflicts();
@@ -366,9 +369,9 @@ void stm_commit_transaction(void)
     /* done */
     _finish_transaction();
 
-    /* we did cond_broadcast() above already, in
-       try_wait_for_other_safe_points().  It may wake up
-       other threads in cond_wait() for a free segment. */
+    /* wake up one other thread waiting for a segment. */
+    cond_signal(C_RELEASE_THREAD_SEGMENT);
+
     mutex_unlock();
 }
 
@@ -446,7 +449,14 @@ static void abort_with_mutex(void)
 
     _finish_transaction();
 
-    cond_broadcast();
+    /* wake up one other thread waiting for a segment.  In order to support
+       contention.c, we use a broadcast, to make sure that all threads are
+       signalled, including the one that requested an abort, if any.
+       Moreover, we wake up any thread waiting for this one to do a safe
+       point, if any.
+    */
+    cond_broadcast(C_RELEASE_THREAD_SEGMENT);
+
     mutex_unlock();
 
     assert(jmpbuf_ptr != NULL);

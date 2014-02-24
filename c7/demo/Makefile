@@ -24,7 +24,7 @@ debug-%: %.c ${H_FILES} ${C_FILES}
         -Wall -Werror ../stmgc.c
 
 build-%: %.c ${H_FILES} ${C_FILES}
-	clang -I.. -pthread  -g -O1  $< -o build-$* \
+	clang -I.. -pthread  -g -O0  $< -o build-$* \
         -Wall -Werror ../stmgc.c
 
 release-%: %.c ${H_FILES} ${C_FILES}

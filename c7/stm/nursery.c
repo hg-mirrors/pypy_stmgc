@@ -16,7 +16,6 @@
 #define NURSERY_END           (NURSERY_START + NURSERY_SIZE)
 
 static uintptr_t _stm_nursery_start;
-uintptr_t _stm_nursery_end;
 
 
 /************************************************************/
@@ -25,11 +24,12 @@ static void setup_nursery(void)
 {
     assert(_STM_FAST_ALLOC <= NURSERY_SIZE);
     _stm_nursery_start = NURSERY_START;
-    _stm_nursery_end   = NURSERY_END;
 
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++)
+    for (i = 0; i < NB_SEGMENTS; i++) {
         get_segment(i)->nursery_current = (stm_char *)NURSERY_START;
+        get_segment(i)->nursery_end = NURSERY_END;
+    }
 }
 
 static void teardown_nursery(void)
@@ -163,6 +163,8 @@ static void reset_nursery(void)
 static void minor_collection(bool commit)
 {
     assert(!_has_mutex());
+
+    stm_safe_point();
     abort_if_needed();
 
     /* We must move out of the nursery any object found within the
@@ -257,7 +259,7 @@ static void check_nursery_at_transaction_start(void)
     assert((uintptr_t)STM_SEGMENT->nursery_current == _stm_nursery_start);
     uintptr_t i, limit;
 # ifdef STM_TESTS
-    limit = _stm_nursery_end - _stm_nursery_start;
+    limit = NURSERY_END - _stm_nursery_start;
 # else
     limit = 64;
 # endif
