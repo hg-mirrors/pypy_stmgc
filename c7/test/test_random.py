@@ -477,7 +477,7 @@ def op_assert_modified(ex, global_state, thread_state):
     trs = thread_state.transaction_state
     modified = trs.get_old_modified()
     ex.do("# modified = %s" % modified)
-    ex.do("modified = modified_objects()")
+    ex.do("modified = modified_old_objects()")
     if not modified:
         ex.do("assert modified == []")
     else:
@@ -560,7 +560,7 @@ class TestRandom(BaseTest):
             op_forget_root,
             op_become_inevitable,
             op_assert_size,
-            #op_assert_modified,
+            op_assert_modified,
             op_minor_collect,
         ]
         for _ in range(200):
