@@ -68,13 +68,13 @@ struct stm_priv_segment_info_s {
     struct list_s *modified_old_objects;
 
     /* List of out-of-nursery objects that may contain pointers to
-       nursery objects.  This is used to track the GC status: they
-       are all objects outside the nursery on which an stm_write()
-       occurred since the last minor collection.  If there was no
-       minor collection yet in the current transaction, this is NULL,
+       nursery objects.  This is used to track the GC status: they are
+       all objects outside the nursery on which an stm_write() occurred
+       since the last minor collection.  This list contains exactly the
+       objects without GCFLAG_WRITE_BARRIER.  If there was no minor
+       collection yet in the current transaction, this is NULL,
        understood as meaning implicitly "this is the same as
-       'modified_old_objects'.  This list contains exactly the
-       objects without GCFLAG_WRITE_BARRIER. */
+       'modified_old_objects'". */
     struct list_s *objects_pointing_to_nursery;
 
     /* List of all large, overflowed objects.  Only non-NULL after the

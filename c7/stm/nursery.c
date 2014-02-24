@@ -51,6 +51,7 @@ bool _stm_in_nursery(object_t *obj)
 /************************************************************/
 
 #define GCWORD_MOVED  ((object_t *) -42)
+#define FLAG_SYNC_LARGE_NOW   0x01
 
 
 static void minor_trace_if_young(object_t **pobj)
@@ -80,19 +81,21 @@ static void minor_trace_if_young(object_t **pobj)
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
     object_t *nobj;
+    uintptr_t nobj_sync_now;
 
     if (1 /*size >= GC_MEDIUM_REQUEST*/) {
 
         /* case 1: object is not small enough.
            Ask gcpage.c for an allocation via largemalloc. */
         nobj = allocate_outside_nursery_large(size);
+        nobj_sync_now = (uintptr_t)nobj;
 
         /* Copy the object  */
         char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
         memcpy(realnobj, realobj, size);
 
         if (STM_PSEGMENT->minor_collect_will_commit_now)
-            synchronize_overflow_object_now(nobj);
+            nobj_sync_now |= FLAG_SYNC_LARGE_NOW;
         else
             LIST_APPEND(STM_PSEGMENT->large_overflow_objects, nobj);
     }
@@ -107,13 +110,13 @@ static void minor_trace_if_young(object_t **pobj)
     }
 
     /* Done copying the object. */
-    //dprintf(("%p -> %p\n", obj, nobj));
+    //dprintf(("\t\t\t\t\t%p -> %p\n", obj, nobj));
     pforwarded_array[0] = GCWORD_MOVED;
     pforwarded_array[1] = nobj;
     *pobj = nobj;
 
     /* Must trace the object later */
-    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj);
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
 }
 
 static void collect_roots_in_nursery(void)
@@ -127,24 +130,44 @@ static void collect_roots_in_nursery(void)
     }
 }
 
+static inline void _collect_now(object_t *obj)
+{
+    assert(!_is_in_nursery(obj));
+
+    /* We must not have GCFLAG_WRITE_BARRIER so far.  Add it now. */
+    assert(!(obj->stm_flags & GCFLAG_WRITE_BARRIER));
+    obj->stm_flags |= GCFLAG_WRITE_BARRIER;
+
+    /* Trace the 'obj' to replace pointers to nursery with pointers
+       outside the nursery, possibly forcing nursery objects out and
+       adding them to 'objects_pointing_to_nursery' as well. */
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+}
+
 static void collect_oldrefs_to_nursery(void)
 {
     struct list_s *lst = STM_PSEGMENT->objects_pointing_to_nursery;
 
     while (!list_is_empty(lst)) {
-        object_t *obj = (object_t *)list_pop_item(lst);
-        assert(!_is_in_nursery(obj));
+        uintptr_t obj_sync_now = list_pop_item(lst);
+        object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE_NOW);
 
-        /* We must not have GCFLAG_WRITE_BARRIER so far.  Add it now. */
-        assert(!(obj->stm_flags & GCFLAG_WRITE_BARRIER));
-        obj->stm_flags |= GCFLAG_WRITE_BARRIER;
+        _collect_now(obj);
 
-        /* Trace the 'obj' to replace pointers to nursery with pointers
-           outside the nursery, possibly forcing nursery objects out and
-           adding them to 'objects_pointing_to_nursery' as well. */
-        char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-        stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+        if (obj_sync_now & FLAG_SYNC_LARGE_NOW) {
+            /* synchronize the object to other segments *now* -- which
+               means, just after we added the WRITE_BARRIER flag and
+               traced into it, because tracing might change it again. */
+            synchronize_overflow_object_now(obj);
+        }
     }
+}
+
+static void collect_modified_old_objects(void)
+{
+    LIST_FOREACH_R(STM_PSEGMENT->modified_old_objects, object_t * /*item*/,
+                   _collect_now(item));
 }
 
 static void throw_away_nursery(void)
@@ -181,16 +204,24 @@ static void minor_collection(bool commit)
 
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
 
-    /* All the objects we move out of the nursery become "overflow"
-       objects.  We use the list 'objects_pointing_to_nursery'
-       to hold the ones we didn't trace so far. */
-    if (STM_PSEGMENT->objects_pointing_to_nursery == NULL)
-        STM_PSEGMENT->objects_pointing_to_nursery = list_create();
-
     /* We need this to track the large overflow objects for a future
        commit.  We don't need it if we're committing now. */
     if (!commit && STM_PSEGMENT->large_overflow_objects == NULL)
         STM_PSEGMENT->large_overflow_objects = list_create();
+
+    /* All the objects we move out of the nursery become "overflow"
+       objects.  We use the list 'objects_pointing_to_nursery'
+       to hold the ones we didn't trace so far. */
+    if (STM_PSEGMENT->objects_pointing_to_nursery == NULL) {
+        STM_PSEGMENT->objects_pointing_to_nursery = list_create();
+
+        /* See the doc of 'objects_pointing_to_nursery': if it is NULL,
+           then it is implicitly understood to be equal to
+           'modified_old_objects'.  We could copy modified_old_objects
+           into objects_pointing_to_nursery, but instead we use the
+           following shortcut */
+        collect_modified_old_objects();
+    }
 
     collect_roots_in_nursery();
 
