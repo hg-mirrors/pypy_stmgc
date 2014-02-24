@@ -55,26 +55,21 @@ class TestBasic(BaseTest):
             stm_set_ref(prev, 0, lp3)
 
             assert modified_old_objects() == []    # only 1 transaction
-            ovf_o = overflow_objects_pointing_to_nursery()
-            old_o = old_objects_pointing_to_nursery()
+            opn = objects_pointing_to_nursery()
             if i < FIT:
-                assert ovf_o is None      # no minor collection so far
-                assert old_o is None      # no minor collection so far
+                assert opn is None      # no minor collection so far
             else:
-                assert len(ovf_o) == 1
-                assert old_o == []
+                assert len(opn) == 1
 
             prevprev = prev
             prev = lp3
 
         lp1 = self.pop_root()
-        assert modified_objects() == []
+        assert modified_old_objects() == []
 
         lp2 = lp1
         for i in range(N):
             assert lp2
-            assert stm_creation_marker(lp2) == (0xff if is_in_nursery(lp2)
-                                                     else 0x01)
             prev = lp2
             lp2 = stm_get_ref(lp2, 0)
         assert lp2 == lp3
