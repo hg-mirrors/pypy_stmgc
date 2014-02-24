@@ -176,9 +176,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     assert(STM_PSEGMENT->objects_pointing_to_nursery == NULL);
     assert(STM_PSEGMENT->large_overflow_objects == NULL);
 
-#ifdef STM_TESTS
     check_nursery_at_transaction_start();
-#endif
 }
 
 
