@@ -87,6 +87,7 @@ void stm_teardown(void)
     for (i = 0; i < NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
         assert(pr->overflow_objects_pointing_to_nursery == NULL);
+        assert(pr->old_objects_pointing_to_nursery == NULL);
         list_free(pr->modified_old_objects);
     }
 

@@ -61,14 +61,26 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
 
+    /* List of old objects (older than the current transaction) that the
+       current transaction attempts to modify.  This is used to track
+       the STM status: it's old objects that where written to and that
+       need to be copied to other segments upon commit. */
+    struct list_s *modified_old_objects;
+
+    /* List of the modified old objects that may point to the nursery.
+       If the current transaction didn't span a minor collection so far,
+       this is NULL, understood as meaning implicitly "this is the same
+       as 'modified_old_objects'".  Otherwise, this list is a subset of
+       'modified_old_objects'. */
+    struct list_s *old_objects_pointing_to_nursery;
+
     /* List of overflowed objects (from the same transaction but outside
        the nursery) on which the write-barrier was triggered, so that
-       they likely contain a pointer to a nursery object */
+       they likely contain a pointer to a nursery object.  This is used
+       by the GC: it's roots for the next minor collection.  This is
+       NULL if the current transaction didn't span a minor collection
+       so far. */
     struct list_s *overflow_objects_pointing_to_nursery;
-
-    /* List of old objects (older than the current transaction) that the
-       current transaction attempts to modify */
-    struct list_s *modified_old_objects;
 
     /* Start time: to know approximately for how long a transaction has
        been running, in contention management */
