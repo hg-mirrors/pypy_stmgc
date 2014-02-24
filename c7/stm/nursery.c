@@ -73,6 +73,7 @@ static void minor_trace_if_young(object_t **pobj)
     object_t *obj = *pobj;
     if (obj == NULL)
         return;
+    assert((uintptr_t)obj < NB_PAGES * 4096UL);
     if (!_is_in_nursery(obj))
         return;
 
@@ -125,6 +126,7 @@ static void collect_roots_in_nursery(void)
     object_t **current = tl->shadowstack;
     object_t **base = tl->shadowstack_base;
     while (current-- != base) {
+        assert(*current != (object_t *)-1);
         minor_trace_if_young(current);
     }
 }
