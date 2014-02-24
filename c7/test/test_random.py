@@ -350,7 +350,8 @@ def op_become_inevitable(ex, global_state, thread_state):
 def op_allocate(ex, global_state, thread_state):
     size = global_state.rnd.choice([
         "16",
-        "SOME_MEDIUM_SIZE+16",
+        str(4096+16),
+        #"SOME_MEDIUM_SIZE+16",
         #"SOME_LARGE_SIZE+16",
     ])
     r = global_state.get_new_root_name(False, size)
