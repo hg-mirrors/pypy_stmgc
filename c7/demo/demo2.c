@@ -6,8 +6,8 @@
 
 #include "stmgc.h"
 
-#define LIST_LENGTH 6000
-#define BUNCH       400
+#define LIST_LENGTH 2000
+#define BUNCH       100
 
 typedef TLPREFIX struct node_s node_t;
 typedef node_t* nodeptr_t;
@@ -34,7 +34,7 @@ void init_shadow_stack(void)
 
 void done_shadow_stack(void)
 {
-    free(stm_thread_local.shadowstack);
+    free(stm_thread_local.shadowstack_base);
     stm_thread_local.shadowstack = NULL;
     stm_thread_local.shadowstack_base = NULL;
 }

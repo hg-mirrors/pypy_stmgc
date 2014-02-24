@@ -43,6 +43,7 @@ struct stm_segment_info_s {
     int segment_num;
     char *segment_base;
     stm_char *nursery_current;
+    uintptr_t nursery_end;
     struct stm_thread_local_s *running_thread;
     stm_jmpbuf_t *jmpbuf_ptr;
 };
@@ -64,8 +65,6 @@ object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(char*);
 void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *);
 void _stm_collectable_safe_point(void);
-
-extern uintptr_t _stm_nursery_end;
 
 #ifdef STM_TESTS
 bool _stm_was_read(object_t *obj);
@@ -173,7 +172,7 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
     stm_char *p = STM_SEGMENT->nursery_current;
     stm_char *end = p + size_rounded_up;
     STM_SEGMENT->nursery_current = end;
-    if (UNLIKELY((uintptr_t)end > _stm_nursery_end))
+    if (UNLIKELY((uintptr_t)end > STM_SEGMENT->nursery_end))
         return _stm_allocate_slowpath(size_rounded_up);
 
     return (object_t *)p;
@@ -231,7 +230,7 @@ static inline void stm_become_inevitable(char* msg) {
 /* Forces a safe-point if needed.  Normally not needed: this is
    automatic if you call stm_allocate(). */
 static inline void stm_safe_point(void) {
-    if (_stm_nursery_end == _STM_NSE_SIGNAL)
+    if (STM_SEGMENT->nursery_end == _STM_NSE_SIGNAL)
         _stm_collectable_safe_point();
 }
 
