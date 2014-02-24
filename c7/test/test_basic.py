@@ -86,9 +86,10 @@ class TestBasic(BaseTest):
         #
         self.switch(1)
         self.start_transaction()
-        assert modified_objects() == []
+        assert modified_old_objects() == []
         stm_write(lp1)
-        assert modified_objects() == [lp1]
+        assert modified_old_objects() == [lp1]
+        assert old_objects_pointing_to_nursery() == None
         assert stm_get_char(lp1) == 'a'
         stm_set_char(lp1, 'b')
         #
