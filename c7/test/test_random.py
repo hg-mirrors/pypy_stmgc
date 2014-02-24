@@ -506,7 +506,7 @@ def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
                            "self.switch", new_thread_state.num))
         if conflicts:
             new_thread_state.abort_transaction()
-        else:
+        elif trs:
             new_thread_state.pop_roots(ex)
             new_thread_state.reload_roots(ex)
 
