@@ -180,6 +180,7 @@ class TestBasic(BaseTest):
         lpy = stm_allocate(16)
         stm_set_char(lpy, 'y')
         self.push_root(lpy)
+        assert modified_old_objects() == []
         self.commit_transaction()
         lpy = self.pop_root()
 

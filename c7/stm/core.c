@@ -171,6 +171,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
     assert(STM_PSEGMENT->old_objects_pointing_to_nursery == NULL);
     assert(STM_PSEGMENT->overflow_objects_pointing_to_nursery == NULL);
+    assert(STM_PSEGMENT->large_overflow_objects == NULL);
 
 #ifdef STM_TESTS
     check_nursery_at_transaction_start();
@@ -212,6 +213,60 @@ static void detect_write_read_conflicts(void)
                 return;
             }
         }));
+}
+
+static void synchronize_overflow_object_now(object_t *obj)
+{
+    assert(!_is_in_nursery(obj));
+    assert((obj->stm_flags & GCFLAG_SMALL_UNIFORM) == 0);
+
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
+    uintptr_t start = (uintptr_t)obj;
+    uintptr_t end = start + obj_size;
+    uintptr_t first_page = start / 4096UL;
+    uintptr_t last_page = (end - 1) / 4096UL;
+
+    do {
+        if (flag_page_private[first_page] != SHARED_PAGE) {
+            /* The page is a PRIVATE_PAGE.  We need to diffuse this fragment
+               of our object from our own segment to all other segments. */
+
+            uintptr_t copy_size;
+            if (first_page == last_page) {
+                /* this is the final fragment */
+                copy_size = end - start;
+            }
+            else {
+                /* this is a non-final fragment, going up to the page's end */
+                copy_size = 4096 - (start & 4095);
+            }
+
+            /* double-check that the result fits in one page */
+            assert(copy_size > 0);
+            assert(copy_size + (start & 4095) <= 4096);
+
+            long i;
+            char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
+            for (i = 0; i < NB_SEGMENTS; i++) {
+                if (i != STM_SEGMENT->segment_num) {
+                    char *dst = REAL_ADDRESS(get_segment_base(i), start);
+                    memcpy(dst, src, copy_size);
+                }
+            }
+        }
+
+        start = (start + 4096) & ~4095;
+    } while (first_page++ < last_page);
+}
+
+static void push_overflow_objects_from_privatized_pages(void)
+{
+    if (STM_PSEGMENT->large_overflow_objects == NULL)
+        return;
+
+    LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
+                   synchronize_overflow_object_now(item));
 }
 
 static void push_modified_to_other_segments(void)
@@ -261,6 +316,7 @@ static void _finish_transaction(void)
     /* reset these lists to NULL for the next transaction */
     LIST_FREE(STM_PSEGMENT->old_objects_pointing_to_nursery);
     LIST_FREE(STM_PSEGMENT->overflow_objects_pointing_to_nursery);
+    LIST_FREE(STM_PSEGMENT->large_overflow_objects);
 
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     release_thread_segment(tl);
@@ -292,7 +348,10 @@ void stm_commit_transaction(void)
     assert(STM_PSEGMENT->transaction_state != TS_MUST_ABORT);
     STM_SEGMENT->jmpbuf_ptr = NULL;
 
-    /* copy modified object versions to other threads */
+    /* synchronize overflow objects living in privatized pages */
+    push_overflow_objects_from_privatized_pages();
+
+    /* synchronize modified old objects to other threads */
     push_modified_to_other_segments();
 
     /* update 'overflow_number' if needed */
