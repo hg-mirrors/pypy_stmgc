@@ -113,7 +113,7 @@ static void minor_trace_if_young(object_t **pobj)
     *pobj = nobj;
 
     /* Must trace the object later */
-    LIST_APPEND(STM_PSEGMENT->old_objects_pointing_to_nursery, nobj);
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj);
 }
 
 static void collect_roots_in_nursery(void)
@@ -129,7 +129,7 @@ static void collect_roots_in_nursery(void)
 
 static void collect_oldrefs_to_nursery(void)
 {
-    struct list_s *lst = STM_PSEGMENT->old_objects_pointing_to_nursery;
+    struct list_s *lst = STM_PSEGMENT->objects_pointing_to_nursery;
 
     while (!list_is_empty(lst)) {
         object_t *obj = (object_t *)list_pop_item(lst);
@@ -140,8 +140,8 @@ static void collect_oldrefs_to_nursery(void)
         obj->stm_flags |= GCFLAG_WRITE_BARRIER;
 
         /* Trace the 'obj' to replace pointers to nursery with pointers
-           outside the nursery, possibly forcing nursery objects out
-           and adding them to 'old_objects_pointing_to_nursery' as well. */
+           outside the nursery, possibly forcing nursery objects out and
+           adding them to 'objects_pointing_to_nursery' as well. */
         char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
     }
@@ -167,9 +167,9 @@ static void minor_collection(bool commit)
 
     /* We must move out of the nursery any object found within the
        nursery.  All objects touched are either from the current
-       transaction, or are from 'old_objects_pointing_to_young'.
-       In all cases, we should only read and change objects belonging
-       to the current segment.
+       transaction, or are from 'modified_old_objects'.  In all cases,
+       we should only read and change objects belonging to the current
+       segment.
 
        XXX improve: it might be possible to run this function in
        a safe-point but without the mutex, if we are careful
@@ -178,8 +178,15 @@ static void minor_collection(bool commit)
     dprintf(("minor_collection commit=%d\n", (int)commit));
 
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
-    if (STM_PSEGMENT->old_objects_pointing_to_nursery == NULL)
-        STM_PSEGMENT->old_objects_pointing_to_nursery = list_create();
+
+    /* All the objects we move out of the nursery become "overflow"
+       objects.  We use the list 'objects_pointing_to_nursery'
+       to hold the ones we didn't trace so far. */
+    if (STM_PSEGMENT->objects_pointing_to_nursery == NULL)
+        STM_PSEGMENT->objects_pointing_to_nursery = list_create();
+
+    /* We need this to track the large overflow objects for a future
+       commit.  We don't need it if we're committing now. */
     if (!commit && STM_PSEGMENT->large_overflow_objects == NULL)
         STM_PSEGMENT->large_overflow_objects = list_create();
 
@@ -189,9 +196,7 @@ static void minor_collection(bool commit)
 
     reset_nursery();
 
-    assert(list_is_empty(STM_PSEGMENT->old_objects_pointing_to_nursery));
-    if (!commit && STM_PSEGMENT->overflow_objects_pointing_to_nursery == NULL)
-        STM_PSEGMENT->overflow_objects_pointing_to_nursery = list_create();
+    assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
 }
 
 void stm_collect(long level)

@@ -82,11 +82,9 @@ void _stm_start_safe_point(void);
 void _stm_stop_safe_point(void);
 void _stm_set_nursery_free_count(uint64_t free_count);
 long _stm_count_modified_old_objects(void);
-long _stm_count_old_objects_pointing_to_nursery(void);
-long _stm_count_overflow_objects_pointing_to_nursery(void);
+long _stm_count_objects_pointing_to_nursery(void);
 object_t *_stm_enum_modified_old_objects(long index);
-object_t *_stm_enum_old_objects_pointing_to_nursery(long index);
-object_t *_stm_enum_overflow_objects_pointing_to_nursery(long index);
+object_t *_stm_enum_objects_pointing_to_nursery(long index);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01

@@ -53,7 +53,7 @@ void stm_setup(void)
         pr->write_lock_num = i + 1;
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
-        pr->overflow_objects_pointing_to_nursery = NULL;
+        pr->objects_pointing_to_nursery = NULL;
         pr->large_overflow_objects = NULL;
         pr->modified_old_objects = list_create();
         pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * (i + 1);
@@ -85,9 +85,8 @@ void stm_teardown(void)
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
-        assert(pr->overflow_objects_pointing_to_nursery == NULL);
+        assert(pr->objects_pointing_to_nursery == NULL);
         assert(pr->large_overflow_objects == NULL);
-        assert(pr->old_objects_pointing_to_nursery == NULL);
         list_free(pr->modified_old_objects);
     }
 
