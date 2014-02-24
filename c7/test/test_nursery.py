@@ -112,6 +112,8 @@ class TestBasic(BaseTest):
         assert len(seen) < 5     # addresses are reused
 
     def test_reset_partial_alloc_pages(self):
+        py.test.skip("a would-be-nice feature, but not actually needed: "
+                     "the next major GC will take care of it")
         self.start_transaction()
         new = stm_allocate(16)
         stm_set_char(new, 'a')
@@ -129,6 +131,8 @@ class TestBasic(BaseTest):
         assert stm_get_char(newer) == '\0'
 
     def test_reuse_page(self):
+        py.test.skip("a would-be-nice feature, but not actually needed: "
+                     "the next major GC will take care of it")
         self.start_transaction()
         new = stm_allocate(16)
         self.push_root(new)
