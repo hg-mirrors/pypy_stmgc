@@ -11,10 +11,9 @@ static struct list_s *list_create(void)
 {
     uintptr_t initial_allocation = 32;
     struct list_s *lst = malloc(LIST_SETSIZE(initial_allocation));
-    if (lst == NULL) {
-        perror("out of memory in list_create");
-        abort();
-    }
+    if (lst == NULL)
+        stm_fatalerror("out of memory in list_create\n");   /* XXX */
+
     lst->count = 0;
     lst->last_allocated = initial_allocation - 1;
     return lst;
@@ -24,10 +23,9 @@ static struct list_s *_list_grow(struct list_s *lst, uintptr_t nalloc)
 {
     nalloc = LIST_OVERCNT(nalloc);
     lst = realloc(lst, LIST_SETSIZE(nalloc));
-    if (lst == NULL) {
-        perror("out of memory in _list_grow");
-        abort();
-    }
+    if (lst == NULL)
+        stm_fatalerror("out of memory in _list_grow\n");   /* XXX */
+
     lst->last_allocated = nalloc - 1;
     return lst;
 }

@@ -22,10 +22,8 @@ void stm_setup(void)
     stm_object_pages = mmap(NULL, TOTAL_MEMORY,
                             PROT_READ | PROT_WRITE,
                             MAP_PAGES_FLAGS, -1, 0);
-    if (stm_object_pages == MAP_FAILED) {
-        perror("stm_object_pages mmap");
-        abort();
-    }
+    if (stm_object_pages == MAP_FAILED)
+        stm_fatalerror("initial stm_object_pages mmap() failed: %m\n");
 
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {

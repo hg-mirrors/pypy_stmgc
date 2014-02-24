@@ -13,6 +13,7 @@ void _stm_write_slowpath(object_t *obj)
 {
     assert(_running_transaction());
     assert(!_is_in_nursery(obj));
+    dprintf(("write_slowpath %p\n", obj));
 
     /* is this an object from the same transaction, outside the nursery? */
     if ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) ==
