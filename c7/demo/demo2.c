@@ -164,9 +164,11 @@ void setup_list(void)
 
     stm_commit_transaction();
 
+    stm_start_inevitable_transaction(&stm_thread_local);
     POP_ROOT(global_chained_list);   /* update value */
     assert(global_chained_list->value == -1);
     PUSH_ROOT(global_chained_list);  /* remains forever in the shadow stack */
+    stm_commit_transaction();
 
     printf("setup ok\n");
 }

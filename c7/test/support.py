@@ -55,7 +55,7 @@ bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 bool _stm_in_nursery(object_t *obj);
 char *_stm_real_address(object_t *obj);
-object_t *_stm_segment_address(char *ptr);
+char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 void _stm_test_switch(stm_thread_local_t *tl);
 
@@ -259,11 +259,6 @@ WORD = 8
 HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 
-# from nursery.c
-SOME_MEDIUM_SIZE     = 32*1024 - 48
-SOME_LARGE_SIZE      = 100*1024 - 48
-NURSERY_SECTION_SIZE = 128*1024
-
 
 class Conflict(Exception):
     pass
@@ -316,9 +311,6 @@ def stm_get_char(obj, offset=HDR):
 
 def stm_get_real_address(obj):
     return lib._stm_real_address(ffi.cast('object_t*', obj))
-
-def stm_get_segment_address(ptr):
-    return int(ffi.cast('uintptr_t', lib._stm_segment_address(ptr)))
 
 def stm_read(o):
     lib.stm_read(o)
@@ -478,3 +470,9 @@ class BaseTest(object):
     def push_root_no_gc(self):
         "Pushes an invalid object, to crash in case the GC is called"
         self.push_root(ffi.cast("object_t *", -1))
+
+    def check_char_everywhere(self, obj, expected_content, offset=HDR):
+        for i in range(len(self.tls)):
+            addr = lib._stm_get_segment_base(i)
+            content = addr[int(ffi.cast("uintptr_t", obj)) + offset]
+            assert content == expected_content

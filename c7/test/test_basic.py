@@ -425,6 +425,15 @@ class TestBasic(BaseTest):
         self.abort_transaction()
         py.test.raises(EmptyStack, self.pop_root)
 
+    def test_check_content_after_commit(self):
+        self.start_transaction()
+        lp1 = stm_allocate(16)
+        stm_set_char(lp1, 'X')
+        self.push_root(lp1)
+        self.commit_transaction()
+        lp1 = self.pop_root()
+        self.check_char_everywhere(lp1, 'X')
+
     # def test_resolve_write_write_no_conflict(self):
     #     self.start_transaction()
     #     p1 = stm_allocate(16)
