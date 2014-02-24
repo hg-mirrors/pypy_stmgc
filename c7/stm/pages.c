@@ -22,6 +22,7 @@ static void mutex_pages_unlock(void)
     __sync_lock_release(&pages_ctl.mutex_pages);
 }
 
+static bool _has_mutex_pages(void) __attribute__((unused));
 static bool _has_mutex_pages(void)
 {
     return pages_ctl.mutex_pages != 0;
