@@ -3,41 +3,11 @@ import py
 
 class TestBasic(BaseTest):
 
-    def test_align_nursery_to_256_bytes(self):
+    def test_nursery_large(self):
+        py.test.skip("XXX later")
         self.start_transaction()
-        lp1 = stm_allocate(16)
-        self.commit_transaction()
-        self.start_transaction()
-        lp2 = stm_allocate(16)
-        #
-        u1 = int(ffi.cast("uintptr_t", lp1))
-        u2 = int(ffi.cast("uintptr_t", lp2))
-        assert (u1 & ~255) != (u2 & ~255)
-
-    def test_creation_marker_in_nursery(self):
-        self.start_transaction()
-        lp1 = stm_allocate(16)
-        lp2 = stm_allocate(16)
-        assert stm_creation_marker(lp1) == 0xff
-        assert stm_creation_marker(lp2) == 0xff
-        u1 = int(ffi.cast("uintptr_t", lp1))
-        u2 = int(ffi.cast("uintptr_t", lp2))
-        assert u2 == u1 + 16
-        self.commit_transaction()
-
-        assert stm_creation_marker(lp1) == 0
-        assert stm_creation_marker(lp2) == 0
-
-        self.start_transaction()
-        lp3 = stm_allocate(16)
-        assert stm_creation_marker(lp1) == 0
-        assert stm_creation_marker(lp2) == 0
-        assert stm_creation_marker(lp3) == 0xff
-
-    def test_nursery_medium(self):
-        self.start_transaction()
-        lp1 = stm_allocate(SOME_MEDIUM_SIZE)
-        lp2 = stm_allocate(SOME_MEDIUM_SIZE)
+        lp1 = stm_allocate(SOME_LARGE_SIZE)
+        lp2 = stm_allocate(SOME_LARGE_SIZE)
 
         u1 = int(ffi.cast("uintptr_t", lp1))
         u2 = int(ffi.cast("uintptr_t", lp2))
@@ -51,27 +21,27 @@ class TestBasic(BaseTest):
         assert stm_creation_marker(lp2) == 0
 
     def test_nursery_full(self):
-        lib._stm_set_nursery_free_count((SOME_MEDIUM_SIZE + 255) & ~255)
-        self.push_root_no_gc()
+        lib._stm_set_nursery_free_count(2048)
         self.start_transaction()
-        lp1 = stm_allocate(SOME_MEDIUM_SIZE)
+        self.push_root_no_gc()
+        lp1 = stm_allocate(2048)    # no collection here
         self.pop_root()
         #
         self.push_root(lp1)
-        lp2 = stm_allocate(SOME_MEDIUM_SIZE)
+        lp2 = stm_allocate(2048)
         lp1b = self.pop_root()
         assert lp1b != lp1      # collection occurred
 
     def test_several_minor_collections(self):
         # make a long, ever-growing linked list of objects, in one transaction
-        lib._stm_set_nursery_free_count(NURSERY_SECTION_SIZE * 2)
+        lib._stm_set_nursery_free_count(2048)
         self.start_transaction()
         lp1 = stm_allocate_refs(1)
         self.push_root(lp1)
         prev = lp1
         prevprev = None
-        FIT = (NURSERY_SECTION_SIZE * 2) / 16 - 1   # without 'lp1' above
-        N = (NURSERY_SECTION_SIZE * 4) / 16 + 41
+        FIT = 2048 / 16 - 1   # without 'lp1' above
+        N = 4096 / 16 + 41
         for i in range(N):
             if prevprev:
                 assert stm_get_ref(prevprev, 0) == prev
@@ -83,14 +53,19 @@ class TestBasic(BaseTest):
                 prevprev = self.pop_root()
                 assert prevprev != prev
             stm_set_ref(prev, 0, lp3)
+
+            assert modified_old_objects() == []    # only 1 transaction
+            ovf_o = overflow_objects_pointing_to_nursery()
+            old_o = old_objects_pointing_to_nursery()
+            if i < FIT:
+                assert ovf_o is None      # no minor collection so far
+                assert old_o is None      # no minor collection so far
+            else:
+                assert len(ovf_o) == 1
+                assert old_o == []
+
             prevprev = prev
             prev = lp3
-
-            seeme = old_objects_pointing_to_young()
-            if i < FIT:
-                assert len(seeme) == 0    # no minor collection so far
-            else:
-                assert len(seeme) == 1    # the one from the prev minor coll
 
         lp1 = self.pop_root()
         assert modified_objects() == []
