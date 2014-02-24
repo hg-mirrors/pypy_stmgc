@@ -104,6 +104,15 @@ void _stm_write_slowpath(object_t *obj)
        getting the write-lock */
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+
+    /* for sanity, check that all other segment copies of this object
+       still have the flag */
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        assert(i == STM_SEGMENT->segment_num ||
+               (((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
+                ->stm_flags & GCFLAG_WRITE_BARRIER));
+    }
 }
 
 static void reset_transaction_read_version(void)
@@ -292,9 +301,9 @@ static void push_modified_to_other_segments(void)
             assert(write_locks[lock_idx] == STM_PSEGMENT->write_lock_num);
             write_locks[lock_idx] = 0;
 
-            /* set again the WRITE_BARRIER flag */
-            assert((item->stm_flags & GCFLAG_WRITE_BARRIER) == 0);
-            item->stm_flags |= GCFLAG_WRITE_BARRIER;
+            /* the WRITE_BARRIER flag should have been set again by
+               minor_collection() */
+            assert((item->stm_flags & GCFLAG_WRITE_BARRIER) != 0);
 
             /* copy the modified object to the other segment */
             char *src = REAL_ADDRESS(local_base, item);
@@ -363,6 +372,7 @@ void stm_commit_transaction(void)
     /* update 'overflow_number' if needed */
     if (has_any_overflow_object) {
         highest_overflow_number += GCFLAG_OVERFLOW_NUMBER_bit0;
+        assert(highest_overflow_number != 0);   /* XXX else, overflow! */
         STM_PSEGMENT->overflow_number = highest_overflow_number;
     }
 
@@ -393,9 +403,6 @@ static void reset_modified_from_other_segments(void)
         STM_PSEGMENT->modified_old_objects,
         object_t * /*item*/,
         ({
-            /* all objects in 'modified_objects' have this flag removed */
-            assert((item->stm_flags & GCFLAG_WRITE_BARRIER) == 0);
-
             /* memcpy in the opposite direction than
                push_modified_to_other_segments() */
             char *src = REAL_ADDRESS(remote_base, item);
@@ -403,8 +410,10 @@ static void reset_modified_from_other_segments(void)
             ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
             memcpy(dst, src, size);
 
-            /* copying from the other segment added again the
-               WRITE_BARRIER flag */
+            /* objects in 'modified_old_objects' usually have the
+               WRITE_BARRIER flag, unless they have been modified
+               recently.  Ignore the old flag; after copying from the
+               other segment, we should have the flag. */
             assert(item->stm_flags & GCFLAG_WRITE_BARRIER);
 
             /* write all changes to the object before we release the
