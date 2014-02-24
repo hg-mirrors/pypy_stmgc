@@ -22,6 +22,11 @@ static void mutex_pages_unlock(void)
     __sync_lock_release(&pages_ctl.mutex_pages);
 }
 
+static bool _has_mutex_pages(void)
+{
+    return pages_ctl.mutex_pages != 0;
+}
+
 /************************************************************/
 
 
@@ -31,7 +36,7 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
        pagenum+count) refer to the same physical range of pages from
        segment 0. */
     uintptr_t i;
-    mutex_pages_lock();
+    assert(_has_mutex_pages());
     for (i = 1; i < NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
         int res = remap_file_pages(segment_base + pagenum * 4096UL,
@@ -44,7 +49,6 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
     }
     for (i = 0; i < count; i++)
         flag_page_private[pagenum + i] = SHARED_PAGE;
-    mutex_pages_unlock();
 }
 
 #if 0
