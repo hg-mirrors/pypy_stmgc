@@ -66,6 +66,12 @@ class TransactionState(object):
         self.start_time = start_time
         self.objs_in_conflict = set()
         self.inevitable = False
+        self.created_in_this_transaction = set()
+
+    def get_old_modified(self):
+        # returns only the ones that are modified and not from
+        # this transaction
+        return self.write_set.difference(self.created_in_this_transaction)
 
     def set_must_abort(self, objs_in_conflict=None):
         assert not self.inevitable
@@ -96,9 +102,11 @@ class TransactionState(object):
         self.read_set.add(r)
         return self.values[r]
 
-    def add_root(self, r, v):
+    def add_root(self, r, v, created_in_this_transaction):
         assert self.values.get(r, None) is None
         self.values[r] = v
+        if created_in_this_transaction:
+            self.created_in_this_transaction.add(r)
 
     def write_root(self, r, v):
         self.read_set.add(r)
@@ -133,10 +141,17 @@ class ThreadState(object):
         #     del self.saved_roots[idx]
         #     return r
 
-        # forget all non-pushed roots for now
-        assert self.roots_on_stack == self.roots_on_transaction_start
-        res = str(self.saved_roots[self.roots_on_stack:])
-        del self.saved_roots[self.roots_on_stack:]
+        if self.transaction_state.inevitable:
+            # forget *all* roots
+            self.roots_on_stack = 0
+            self.roots_on_transaction_start = 0
+            res = str(self.saved_roots)
+            del self.saved_roots[:]
+        else:
+            # forget all non-pushed roots for now
+            assert self.roots_on_stack == self.roots_on_transaction_start
+            res = str(self.saved_roots[self.roots_on_stack:])
+            del self.saved_roots[self.roots_on_stack:]
         return res
 
     def get_random_root(self):
@@ -160,11 +175,13 @@ class ThreadState(object):
 
     def reload_roots(self, ex):
         assert self.roots_on_stack == self.roots_on_transaction_start
-        ex.do("# reload roots on stack:")
-        for r in reversed(self.saved_roots[:self.roots_on_stack]):
-            ex.do('%s = self.pop_root()' % r)
-        for r in self.saved_roots[:self.roots_on_stack]:
-            ex.do('self.push_root(%s)' % r)
+        to_reload = self.saved_roots[:self.roots_on_stack]
+        if to_reload:
+            ex.do("# reload roots on stack:")
+            for r in reversed(to_reload):
+                ex.do('%s = self.pop_root()' % r)
+            for r in to_reload:
+                ex.do('self.push_root(%s)' % r)
 
     def start_transaction(self):
         assert self.transaction_state is None
@@ -294,6 +311,11 @@ class OpStartTransaction(Operation):
         #
         ex.do('self.start_transaction()')
         thread_state.reload_roots(ex)
+        #
+        # assert that everything known is old:
+        old_objs = thread_state.saved_roots
+        for o in old_objs:
+            ex.do("assert not is_in_nursery(%s)" % o)
 
 
 class OpCommitTransaction(Operation):
@@ -344,7 +366,7 @@ class OpAllocate(Operation):
         thread_state.push_roots(ex)
 
         ex.do('%s = stm_allocate(%s)' % (r, size))
-        thread_state.transaction_state.add_root(r, 0)
+        thread_state.transaction_state.add_root(r, 0, True)
 
         thread_state.pop_roots(ex)
         thread_state.reload_roots(ex)
@@ -356,7 +378,7 @@ class OpAllocateRef(Operation):
         r = global_state.get_new_root_name(True, num)
         thread_state.push_roots(ex)
         ex.do('%s = stm_allocate_refs(%s)' % (r, num))
-        thread_state.transaction_state.add_root(r, "ffi.NULL")
+        thread_state.transaction_state.add_root(r, "ffi.NULL", True)
 
         thread_state.pop_roots(ex)
         thread_state.reload_roots(ex)
@@ -373,7 +395,10 @@ class OpMinorCollect(Operation):
 class OpForgetRoot(Operation):
     def do(self, ex, global_state, thread_state):
         r = thread_state.forget_random_root()
-        ex.do('# forget %s' % r)
+        if thread_state.transaction_state.inevitable:
+            ex.do('# inevitable forget %s' % r)
+        else:
+            ex.do('# forget %s' % r)
 
 class OpWrite(Operation):
     def do(self, ex, global_state, thread_state):
@@ -401,7 +426,7 @@ class OpWrite(Operation):
             v = thread_state.get_random_root()
         else:
             v = ord(global_state.rnd.choice("abcdefghijklmnop"))
-        trs.write_root(r, v)
+        assert trs.write_root(r, v) is not None
         #
         aborts = trs.check_must_abort()
         if aborts:
@@ -433,14 +458,17 @@ class OpRead(Operation):
                 #     it survived by being referenced by another saved root
                 # if v is from a different transaction:
                 #     we fish its value from somewhere and add it to our known roots
+                global_trs = global_state.committed_transaction_state
                 if v not in trs.values:
                     # not from this transaction AND not known at the start of this
                     # transaction
-                    trs.add_root(v, global_state.committed_transaction_state.values[v])
+                    trs.add_root(v, global_trs.values[v], False)
                     ex.do("# get %r from other thread" % v)
-                elif v not in global_state.committed_transaction_state.values:
+                elif v not in global_trs.values:
+                    # created and forgotten earlier in this thread
                     ex.do("# revive %r in this thread" % v)
                 else:
+                    # created in an earlier transaction, now also known here
                     ex.do("# register %r in this thread" % v)
                 #
                 ex.do("%s = stm_get_ref(%s, %s)" % (v, r, offset))
@@ -462,6 +490,22 @@ class OpAssertSize(Operation):
             ex.do("assert stm_get_obj_size(%s) == %s" % (r, size + " * WORD + HDR"))
         else:
             ex.do("assert stm_get_obj_size(%s) == %s" % (r, size))
+
+class OpAssertModified(Operation):
+    def do(self, ex, global_state, thread_state):
+        trs = thread_state.transaction_state
+        modified = trs.get_old_modified()
+        ex.do("# modified = %s" % modified)
+        ex.do("modified = modified_objects()")
+        if not modified:
+            ex.do("assert modified == []")
+        else:
+            saved = [m for m in modified
+                     if m in thread_state.saved_roots or m in global_state.prebuilt_roots]
+            ex.do("assert {%s}.issubset(set(modified))" % (
+                ", ".join(saved)
+            ))
+
 
 class OpSwitchThread(Operation):
     def do(self, ex, global_state, thread_state, new_thread_state=None):
@@ -511,12 +555,12 @@ class TestRandom(BaseTest):
         for i in range(N_OBJECTS):
             r = global_state.get_new_root_name(False, "384")
             ex.do('%s = stm_allocate_old(384)' % r)
-            global_state.committed_transaction_state.write_root(r, 0)
+            global_state.committed_transaction_state.add_root(r, 0, False)
             global_state.prebuilt_roots.append(r)
 
             r = global_state.get_new_root_name(True, "50")
             ex.do('%s = stm_allocate_old_refs(50)' % r)
-            global_state.committed_transaction_state.write_root(r, "ffi.NULL")
+            global_state.committed_transaction_state.add_root(r, "ffi.NULL", False)
             global_state.prebuilt_roots.append(r)
         global_state.committed_transaction_state.write_set = set()
         global_state.committed_transaction_state.read_set = set()
@@ -532,7 +576,8 @@ class TestRandom(BaseTest):
             OpForgetRoot,
             OpBecomeInevitable,
             OpAssertSize,
-            # OpMinorCollect,
+            #OpAssertModified,
+            OpMinorCollect,
         ]
         for _ in range(200):
             # make sure we are in a transaction:
