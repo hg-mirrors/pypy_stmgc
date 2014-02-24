@@ -75,9 +75,9 @@ class TestBasic(BaseTest):
         assert lp2 == lp3
 
     def test_many_allocs(self):
-        lib._stm_set_nursery_free_count(NURSERY_SECTION_SIZE * 2)
-        obj_size = 1024
-        num = (NURSERY_SECTION_SIZE * 4) / obj_size + 41
+        lib._stm_set_nursery_free_count(32768)
+        obj_size = 512
+        num = 65536 / obj_size + 41
 
         self.start_transaction()
         for i in range(num):
