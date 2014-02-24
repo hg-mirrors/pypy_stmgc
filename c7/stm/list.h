@@ -40,7 +40,7 @@ static inline bool list_is_empty(struct list_s *lst)
     return (lst->count == 0);
 }
 
-static inline bool list_count(struct list_s *lst)
+static inline uintptr_t list_count(struct list_s *lst)
 {
     return lst->count;
 }

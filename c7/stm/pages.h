@@ -7,10 +7,9 @@ enum /* flag_page_private */ {
        physical page (the one that is within the segment 0 mmap address). */
     SHARED_PAGE,
 
-    /* Page being in the process of privatization */
-    REMAPPING_PAGE,
-
-    /* Page is private for each segment. */
+    /* Page is private for each segment.  If we obtain this value outside
+       a mutex_pages_lock(), there might be a race: the value can say
+       PRIVATE_PAGE before the page is really un-shared. */
     PRIVATE_PAGE,
 };
 
@@ -33,4 +32,4 @@ inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
 static void mutex_pages_lock(void);
 static void mutex_pages_unlock(void);
 
-//static bool is_in_shared_pages(object_t *obj);
+//static bool is_fully_in_shared_pages(object_t *obj);  -- not needed?

@@ -82,6 +82,10 @@ struct stm_priv_segment_info_s {
        collection so far. */
     struct list_s *overflow_objects_pointing_to_nursery;
 
+    /* List of all large, overflowed objects.  Only non-NULL after the
+       current transaction spanned a minor collection. */
+    struct list_s *large_overflow_objects;
+
     /* Start time: to know approximately for how long a transaction has
        been running, in contention management */
     uint64_t start_time;
@@ -107,6 +111,9 @@ struct stm_priv_segment_info_s {
     /* The transaction status, one of the TS_xxx constants.  This is
        only accessed when we hold the mutex. */
     uint8_t transaction_state;
+
+    /* Temp for minor collection */
+    bool minor_collect_will_commit_now;
 
     /* In case of abort, we restore the 'shadowstack' field. */
     object_t **shadowstack_at_start_of_transaction;
@@ -190,3 +197,5 @@ static inline void abort_if_needed(void) {
         assert(!"commit: bad transaction_state");
     }
 }
+
+static void synchronize_overflow_object_now(object_t *obj);

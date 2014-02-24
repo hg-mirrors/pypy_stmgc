@@ -92,6 +92,7 @@ static void privatize_range(uintptr_t pagenum, uintptr_t count, bool full)
     void *localpg = stm_object_pages + localpgoff * 4096UL;
     void *otherpg = stm_object_pages + otherpgoff * 4096UL;
 
+    memset(flag_page_private + pagenum, PRIVATE_PAGE, count);
     d_remap_file_pages(localpg, count * 4096, pgoff2);
     uintptr_t i;
     if (full) {
@@ -104,8 +105,6 @@ static void privatize_range(uintptr_t pagenum, uintptr_t count, bool full)
         if (count > 1)
             pagecopy(localpg + 4096 * (count-1), otherpg + 4096 * (count-1));
     }
-    write_fence();
-    memset(flag_page_private + pagenum, PRIVATE_PAGE, count);
 }
 
 static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
@@ -143,7 +142,7 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
 }
 
 #if 0
-static bool is_in_shared_pages(object_t *obj)
+static bool is_fully_in_shared_pages(object_t *obj)
 {
     uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
 
@@ -155,9 +154,11 @@ static bool is_in_shared_pages(object_t *obj)
 
     uintptr_t last_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
 
-    while (first_page <= last_page)
+    do {
         if (flag_page_private[first_page++] != SHARED_PAGE)
             return false;
+    } while (first_page <= last_page);
+
     return true;
 }
 #endif

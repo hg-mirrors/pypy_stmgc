@@ -53,20 +53,6 @@ bool _stm_in_nursery(object_t *obj)
 #define GCWORD_MOVED  ((object_t *) -42)
 
 
-static inline void minor_copy_in_page_to_other_segments(uintptr_t p,
-                                                        size_t size)
-{
-    uintptr_t dataofs = (char *)p - stm_object_pages;
-    assert((dataofs & 4095) + size <= 4096);   /* fits in one page */
-
-    if (flag_page_private[dataofs / 4096UL] != SHARED_PAGE) {
-        long i;
-        for (i = 1; i < NB_SEGMENTS; i++) {
-            memcpy(get_segment_base(i) + dataofs, (char *)p, size);
-        }
-    }
-}
-
 static void minor_trace_if_young(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
@@ -104,6 +90,11 @@ static void minor_trace_if_young(object_t **pobj)
         /* Copy the object  */
         char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
         memcpy(realnobj, realobj, size);
+
+        if (STM_PSEGMENT->minor_collect_will_commit_now)
+            synchronize_overflow_object_now(nobj);
+        else
+            LIST_APPEND(STM_PSEGMENT->large_overflow_objects, nobj);
     }
     else {
         /* case "small enough" */
@@ -181,8 +172,11 @@ static void minor_collection(bool commit)
 
     dprintf(("minor_collection commit=%d\n", (int)commit));
 
+    STM_PSEGMENT->minor_collect_will_commit_now = commit;
     if (STM_PSEGMENT->old_objects_pointing_to_nursery == NULL)
         STM_PSEGMENT->old_objects_pointing_to_nursery = list_create();
+    if (!commit && STM_PSEGMENT->large_overflow_objects == NULL)
+        STM_PSEGMENT->large_overflow_objects = list_create();
 
     collect_roots_in_nursery();
 
