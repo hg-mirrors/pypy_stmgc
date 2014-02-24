@@ -3,12 +3,35 @@
 #endif
 
 
+/************************************************************/
+
+static union {
+    uint8_t mutex_pages;
+    char reserved[64];
+} pages_ctl __attribute__((aligned(64)));
+
+static void mutex_pages_lock(void)
+{
+    while (__sync_lock_test_and_set(&pages_ctl.mutex_pages, 1) != 0) {
+        spin_loop();
+    }
+}
+
+static void mutex_pages_unlock(void)
+{
+    __sync_lock_release(&pages_ctl.mutex_pages);
+}
+
+/************************************************************/
+
+
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
 {
     /* call remap_file_pages() to make all pages in the range(pagenum,
        pagenum+count) refer to the same physical range of pages from
        segment 0. */
     uintptr_t i;
+    mutex_pages_lock();
     for (i = 1; i < NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
         int res = remap_file_pages(segment_base + pagenum * 4096UL,
@@ -21,6 +44,7 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
     }
     for (i = 0; i < count; i++)
         flag_page_private[pagenum + i] = SHARED_PAGE;
+    mutex_pages_unlock();
 }
 
 #if 0
@@ -45,8 +69,7 @@ static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count)
 }
 #endif
 
-static void privatize_range_and_unlock(uintptr_t pagenum, uintptr_t count,
-                                       bool full)
+static void privatize_range(uintptr_t pagenum, uintptr_t count, bool full)
 {
     ssize_t pgoff1 = pagenum;
     ssize_t pgoff2 = pagenum + NB_PAGES;
@@ -73,61 +96,41 @@ static void privatize_range_and_unlock(uintptr_t pagenum, uintptr_t count,
             pagecopy(localpg + 4096 * (count-1), otherpg + 4096 * (count-1));
     }
     write_fence();
-    for (i = 0; i < count; i++) {
-        assert(flag_page_private[pagenum + i] == REMAPPING_PAGE);
-        flag_page_private[pagenum + i] = PRIVATE_PAGE;
-    }
+    memset(flag_page_private + pagenum, PRIVATE_PAGE, count);
 }
 
 static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
 {
-    uintptr_t page_start_range = pagenum;
-    uintptr_t pagestop = pagenum + count;
-
     while (flag_page_private[pagenum + count - 1] == PRIVATE_PAGE) {
         if (!--count)
             return;
     }
 
+    mutex_pages_lock();
+
+    uintptr_t page_start_range = pagenum;
+    uintptr_t pagestop = pagenum + count;
+
     for (; pagenum < pagestop; pagenum++) {
-#ifdef HAVE_FULL_EXCHANGE_INSN
-        /* use __sync_lock_test_and_set() as a cheaper alternative to
-           __sync_bool_compare_and_swap(). */
-        int prev = __sync_lock_test_and_set(&flag_page_private[pagenum],
-                                            REMAPPING_PAGE);
-        assert(prev != FREE_PAGE);
-        if (prev == PRIVATE_PAGE) {
-            flag_page_private[pagenum] = PRIVATE_PAGE;
-        }
-        bool was_shared = (prev == SHARED_PAGE);
-#else
-        bool was_shared = __sync_bool_compare_and_swap(
-                                            &flag_page_private[pagenum + cnt1],
-                                            SHARED_PAGE, REMAPPING_PAGE);
-#endif
-        if (!was_shared) {
+        uint8_t prev = flag_page_private[pagenum];
+        if (prev == SHARED_PAGE) {
             if (pagenum > page_start_range) {
-                privatize_range_and_unlock(page_start_range,
-                                           pagenum - page_start_range, full);
+                privatize_range(page_start_range,
+                                pagenum - page_start_range, full);
             }
             page_start_range = pagenum + 1;
-
-            while (1) {
-                uint8_t state;
-                state = ((uint8_t volatile *)flag_page_private)[pagenum];
-                if (state != REMAPPING_PAGE) {
-                    assert(state == PRIVATE_PAGE);
-                    break;
-                }
-                spin_loop();
-            }
+        }
+        else {
+            assert(prev == PRIVATE_PAGE);
         }
     }
 
     if (pagenum > page_start_range) {
-        privatize_range_and_unlock(page_start_range,
-                                   pagenum - page_start_range, full);
+        privatize_range(page_start_range,
+                        pagenum - page_start_range, full);
     }
+
+    mutex_pages_unlock();
 }
 
 #if 0

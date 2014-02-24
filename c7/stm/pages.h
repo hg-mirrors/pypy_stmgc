@@ -30,4 +30,7 @@ inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
     _pages_privatize(pagenum, count, full);
 }
 
+static void mutex_pages_lock(void);
+static void mutex_pages_unlock(void);
+
 //static bool is_in_shared_pages(object_t *obj);

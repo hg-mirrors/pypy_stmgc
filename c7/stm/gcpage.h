@@ -27,7 +27,7 @@ static char *free_uniform_pages;
 
 static void setup_gcpage(void);
 static void teardown_gcpage(void);
-//static char *allocate_outside_nursery_large(uint64_t size);
+static object_t *allocate_outside_nursery_large(uint64_t size);
 
 
 static char *_allocate_small_slowpath(uint64_t size);

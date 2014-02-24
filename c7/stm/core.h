@@ -96,10 +96,16 @@ struct stm_priv_segment_info_s {
        "this segment has modified this old object". */
     uint8_t write_lock_num;
 
-    /* The thread's safe-point state, one of the SP_xxx constants */
+    /* The thread's safe-point state, one of the SP_xxx constants.  The
+       thread is in a "safe point" if it is not concurrently doing any
+       change that might cause race conditions in other threads.  A
+       thread may enter but not *leave* the safe point it is in without
+       getting hold of the mutex.  Broadly speaking, any value other
+       than SP_RUNNING means a safe point of some kind. */
     uint8_t safe_point;
 
-    /* The transaction status, one of the TS_xxx constants */
+    /* The transaction status, one of the TS_xxx constants.  This is
+       only accessed when we hold the mutex. */
     uint8_t transaction_state;
 
     /* In case of abort, we restore the 'shadowstack' field. */
