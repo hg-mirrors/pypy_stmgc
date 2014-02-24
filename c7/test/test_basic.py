@@ -395,7 +395,10 @@ class TestBasic(BaseTest):
         lp1 = stm_allocate(4104)
         stm_set_char(lp1, '0')
         stm_set_char(lp1, '1', offset=4103)
+        self.push_root(lp1)
         self.commit_transaction()
+        lp1 = self.pop_root()
+        self.push_root(lp1)
         #
         self.start_transaction()
         stm_set_char(lp1, 'a')
