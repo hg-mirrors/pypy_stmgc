@@ -74,7 +74,7 @@ uint8_t _stm_creation_marker(object_t *obj);
 bool _stm_in_nursery(object_t *obj);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 char *_stm_real_address(object_t *o);
-object_t *_stm_segment_address(char *ptr);
+char *_stm_get_segment_base(long index);
 void _stm_test_switch(stm_thread_local_t *tl);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 void _stm_large_dump(void);

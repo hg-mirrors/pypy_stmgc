@@ -13,15 +13,9 @@ char *_stm_real_address(object_t *o)
     return REAL_ADDRESS(STM_SEGMENT->segment_base, o);
 }
 
-object_t *_stm_segment_address(char *ptr)
+char *_stm_get_segment_base(long index)
 {
-    if (ptr == NULL)
-        return NULL;
-
-    uintptr_t res = ptr - STM_SEGMENT->segment_base;
-    assert(FIRST_OBJECT_PAGE * 4096UL <= res
-           && res < NB_PAGES * 4096UL);
-    return (object_t*)res;
+    return get_segment_base(index);
 }
 
 struct stm_priv_segment_info_s *_stm_segment(void)
