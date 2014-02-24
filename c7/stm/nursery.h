@@ -5,4 +5,5 @@
 
 static uint32_t highest_overflow_number;
 
+static void minor_collection(bool commit);
 static void check_nursery_at_transaction_start(void) __attribute__((unused));

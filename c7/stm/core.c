@@ -49,7 +49,6 @@ void _stm_write_slowpath(object_t *obj)
         /* We need to privatize the pages containing the object, if they
            are still SHARED_PAGE.  The common case is that there is only
            one page in total. */
-        size_t obj_size = 0;
         uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
 
         /* If the object is in the uniform pages of small objects
@@ -60,12 +59,16 @@ void _stm_write_slowpath(object_t *obj)
             pages_privatize(first_page, 1, true);
         }
         else {
+            char *realobj;
+            size_t obj_size;
+            uintptr_t end_page;
+
             /* get the size of the object */
-            obj_size = stmcb_size_rounded_up(
-              (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
+            realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+            obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
 
             /* that's the page *following* the last page with the object */
-            uintptr_t end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
+            end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
 
             pages_privatize(first_page, end_page - first_page, true);
         }
@@ -265,19 +268,16 @@ static void _finish_transaction(void)
 
 void stm_commit_transaction(void)
 {
-    minor_collection();
+    assert(!_has_mutex());
+    assert(STM_PSEGMENT->safe_point == SP_RUNNING);
+
+    minor_collection(/*commit=*/ true);
 
     mutex_lock();
-
-    assert(STM_PSEGMENT->safe_point = SP_RUNNING);
     STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
 
- restart:
-    abort_if_needed();
-
     /* wait until the other thread is at a safe-point */
-    if (!try_wait_for_other_safe_points(SP_SAFE_POINT_CANNOT_COLLECT))
-        goto restart;
+    wait_for_other_safe_points(SP_SAFE_POINT_CANNOT_COLLECT);
 
     /* the rest of this function runs either atomically without releasing
        the mutex, or it needs to restart. */

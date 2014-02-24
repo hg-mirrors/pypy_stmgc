@@ -12,7 +12,7 @@ static void setup_gcpage(void)
     largemalloc_init_arena(base, length);
 
     uninitialized_page_start = stm_object_pages + END_NURSERY_PAGE * 4096UL;
-    uninitialized_page_stop  = stm_object_pages + (NB_PAGES - 1) * 4096UL;
+    uninitialized_page_stop  = stm_object_pages + NB_PAGES * 4096UL;
 
     assert(GC_MEDIUM_REQUEST >= (1 << 8));
 }
@@ -70,31 +70,31 @@ static char *_allocate_small_slowpath(uint64_t size)
 }
 
 
-#if 0
-static char *allocate_outside_nursery_large(uint64_t size)
+static object_t *allocate_outside_nursery_large(uint64_t size)
 {
-    abort(); //XXX review
-    /* not thread-safe!  Use only when holding the mutex */
-    assert(_has_mutex());
+    /* thread-safe: use the lock of pages.c to prevent any remapping
+       from occurring under our feet */
+    mutex_pages_lock();
 
-    /* Allocate the object with largemalloc.c from the lower addresses.
-       Assumes that 'size' is at least 256 bytes; it's needed for
-       the creation marker to uniquely identify this object */
-    OPT_ASSERT(size >= (1 << 8));
-    OPT_ASSERT((size & 7) == 0);
-
+    /* Allocate the object with largemalloc.c from the lower addresses. */
     char *addr = large_malloc(size);
 
     if (addr + size > uninitialized_page_start) {
         uintptr_t npages;
         npages = (addr + size - uninitialized_page_start) / 4096UL;
         npages += GCPAGE_NUM_PAGES;
+        if (uninitialized_page_stop - uninitialized_page_start <
+                npages * 4096UL) {
+            stm_fatalerror("out of memory!\n");   /* XXX */
+        }
         setup_N_pages(uninitialized_page_start, npages);
         uninitialized_page_start += npages * 4096UL;
     }
-    return addr;
+
+    mutex_pages_unlock();
+
+    return (object_t *)(addr - stm_object_pages);
 }
-#endif
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {

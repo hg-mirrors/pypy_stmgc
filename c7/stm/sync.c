@@ -62,6 +62,9 @@ static inline void mutex_lock(void)
         perror("pthread_mutex_lock");
         abort();
     }
+
+    if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
+        abort_with_mutex();
 }
 
 static inline void mutex_unlock(void)
@@ -77,7 +80,13 @@ static inline void mutex_unlock(void)
 
 static inline bool _has_mutex(void)
 {
-    return pthread_mutex_trylock(&sync_ctl.global_mutex) == EBUSY;
+    if (pthread_mutex_trylock(&sync_ctl.global_mutex) == EBUSY) {
+        return true;
+    }
+    else {
+        pthread_mutex_unlock(&sync_ctl.global_mutex);
+        return false;
+    }
 }
 
 static inline void cond_wait(void)
@@ -197,38 +206,33 @@ void _stm_stop_safe_point(void)
 #endif
 
 
-static bool try_wait_for_other_safe_points(int requested_safe_point_kind)
+static void wait_for_other_safe_points(int requested_safe_point_kind)
 {
-    /* Must be called with the mutex.  If all other threads are in a
-       safe point of at least the requested kind, returns true.  Otherwise,
-       asks them to enter a safe point, issues a cond_wait(), and returns
-       false; you can call repeatedly this function in this case.
+    /* Must be called with the mutex.  When all other threads are in a
+       safe point of at least the requested kind, returns.  Otherwise,
+       asks them to enter a safe point, issues a cond_wait(), and wait.
 
-       When this function returns true, the other threads are all
-       blocked at safe points as requested.  They may be either in their
-       own cond_wait(), or running at SP_NO_TRANSACTION, in which case
-       they should not do anything related to stm until the next time
-       they call mutex_lock().
+       When this function returns, the other threads are all blocked at
+       safe points as requested.  They may be either in their own
+       cond_wait(), or running at SP_NO_TRANSACTION, in which case they
+       should not do anything related to stm until the next time they
+       call mutex_lock().
 
        The next time we unlock the mutex (with mutex_unlock() or
        cond_wait()), they will proceed.
 
        This function requires that the calling thread is in a safe-point
        right now, so there is no deadlock if one thread calls
-       try_wait_for_other_safe_points() while another is currently blocked
+       wait_for_other_safe_points() while another is currently blocked
        in the cond_wait() in this same function.
     */
-    abort();//...
-#if 0
+
+ restart:
     assert(_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT_CAN_COLLECT);
 
     long i;
-    bool must_wait = false;
     for (i = 0; i < NB_SEGMENTS; i++) {
-        if (i == STM_SEGMENT->segment_num)
-            continue;    /* ignore myself */
-
         /* If the other thread is SP_NO_TRANSACTION, then it can be
            ignored here: as long as we have the mutex, it will remain
            SP_NO_TRANSACTION.  If it is already at a suitable safe point,
@@ -241,32 +245,18 @@ static bool try_wait_for_other_safe_points(int requested_safe_point_kind)
             (requested_safe_point_kind == SP_SAFE_POINT_CAN_COLLECT &&
                 other_pseg->safe_point == SP_SAFE_POINT_CANNOT_COLLECT)) {
 
-            /* we need to wait for this thread.  Use NSE_SIGNAL to
-               ask it to enter a safe-point soon. */
-            other_pseg->pub.v_nursery_section_end = NSE_SIGNAL;
-            must_wait = true;
+            /* we need to wait for this thread.  Use NSE_SIGNAL to ask
+               it (and possibly all other threads in the same case) to
+               enter a safe-point soon. */
+            _stm_nursery_end = NSE_SIGNAL;
+            cond_wait();
+            goto restart;
         }
     }
-    if (must_wait) {
-        cond_wait();
-        return false;
-    }
 
-    /* done!  All NSE_SIGNAL threads become NSE_SIGNAL_DONE now, which
-       mean they will actually run again the next time they grab the
-       mutex. */
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        if (i == STM_SEGMENT->segment_num)
-            continue;    /* ignore myself */
-
-        struct stm_segment_info_s *other_seg = get_segment(i);
-        if (other_seg->v_nursery_section_end == NSE_SIGNAL)
-            other_seg->v_nursery_section_end = NSE_SIGNAL_DONE;
-    }
+    /* all threads are at a safe-point now. */
     cond_broadcast();   /* to wake up the other threads, but later,
                            when they get the mutex again */
-    return true;
-#endif
 }
 
 void _stm_collectable_safe_point(void)
@@ -274,7 +264,7 @@ void _stm_collectable_safe_point(void)
     /* If nursery_section_end was set to NSE_SIGNAL by another thread,
        we end up here as soon as we try to call stm_allocate() or do
        a call to stm_safe_point().
-       See try_wait_for_other_safe_points() for details.
+       See wait_for_other_safe_points() for details.
     */
     mutex_lock();
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
