@@ -30,6 +30,20 @@ static bool _has_mutex_pages(void)
 /************************************************************/
 
 
+static void d_remap_file_pages(char *addr, size_t size, ssize_t pgoff)
+{
+    dprintf(("remap_file_pages: 0x%lx bytes: (seg%ld %p) --> (seg%ld %p)\n",
+             (long)size,
+             (long)((addr - stm_object_pages) / 4096UL) / NB_PAGES,
+             (void *)((addr - stm_object_pages) % (4096UL * NB_PAGES)),
+             (long)pgoff / NB_PAGES,
+             (void *)((pgoff % NB_PAGES) * 4096UL)));
+
+    int res = remap_file_pages(addr, size, 0, pgoff, 0);
+    if (UNLIKELY(res < 0))
+        stm_fatalerror("remap_file_pages: %m\n");
+}
+
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
 {
     /* call remap_file_pages() to make all pages in the range(pagenum,
@@ -39,13 +53,8 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
     assert(_has_mutex_pages());
     for (i = 1; i < NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
-        int res = remap_file_pages(segment_base + pagenum * 4096UL,
-                                   count * 4096UL,
-                                   0, pagenum, 0);
-        if (res != 0) {
-            perror("remap_file_pages");
-            abort();
-        }
+        d_remap_file_pages(segment_base + pagenum * 4096UL,
+                           count * 4096UL, pagenum);
     }
     for (i = 0; i < count; i++)
         flag_page_private[pagenum + i] = SHARED_PAGE;
@@ -83,11 +92,7 @@ static void privatize_range(uintptr_t pagenum, uintptr_t count, bool full)
     void *localpg = stm_object_pages + localpgoff * 4096UL;
     void *otherpg = stm_object_pages + otherpgoff * 4096UL;
 
-    int res = remap_file_pages(localpg, count * 4096, 0, pgoff2, 0);
-    if (res < 0) {
-        perror("remap_file_pages");
-        abort();
-    }
+    d_remap_file_pages(localpg, count * 4096, pgoff2);
     uintptr_t i;
     if (full) {
         for (i = 0; i < count; i++) {
@@ -117,7 +122,7 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
 
     for (; pagenum < pagestop; pagenum++) {
         uint8_t prev = flag_page_private[pagenum];
-        if (prev == SHARED_PAGE) {
+        if (prev == PRIVATE_PAGE) {
             if (pagenum > page_start_range) {
                 privatize_range(page_start_range,
                                 pagenum - page_start_range, full);
@@ -125,7 +130,7 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
             page_start_range = pagenum + 1;
         }
         else {
-            assert(prev == PRIVATE_PAGE);
+            assert(prev == SHARED_PAGE);
         }
     }
 

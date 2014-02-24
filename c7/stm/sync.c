@@ -32,36 +32,29 @@ static union {
 static void setup_sync(void)
 {
     if (pthread_mutex_init(&sync_ctl.global_mutex, NULL) != 0 ||
-         pthread_cond_init(&sync_ctl.global_cond, NULL) != 0) {
-        perror("mutex/cond initialization");
-        abort();
-    }
+         pthread_cond_init(&sync_ctl.global_cond, NULL) != 0)
+        stm_fatalerror("mutex/cond initialization: %m\n");
 }
 
 static void teardown_sync(void)
 {
     if (pthread_mutex_destroy(&sync_ctl.global_mutex) != 0 ||
-         pthread_cond_destroy(&sync_ctl.global_cond) != 0) {
-        perror("mutex/cond destroy");
-        abort();
-    }
+         pthread_cond_destroy(&sync_ctl.global_cond) != 0)
+        stm_fatalerror("mutex/cond destroy: %m\n");
+
     memset(&sync_ctl, 0, sizeof(sync_ctl.in_use));
 }
 
 static void set_gs_register(char *value)
 {
-    if (syscall(SYS_arch_prctl, ARCH_SET_GS, (uint64_t)value) != 0) {
-        perror("syscall(arch_prctl, ARCH_SET_GS)");
-        abort();
-    }
+    if (UNLIKELY(syscall(SYS_arch_prctl, ARCH_SET_GS, (uint64_t)value) != 0))
+        stm_fatalerror("syscall(arch_prctl, ARCH_SET_GS): %m\n");
 }
 
 static inline void mutex_lock(void)
 {
-    if (UNLIKELY(pthread_mutex_lock(&sync_ctl.global_mutex) != 0)) {
-        perror("pthread_mutex_lock");
-        abort();
-    }
+    if (UNLIKELY(pthread_mutex_lock(&sync_ctl.global_mutex) != 0))
+        stm_fatalerror("pthread_mutex_lock: %m\n");
 
     if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
         abort_with_mutex();
@@ -72,10 +65,8 @@ static inline void mutex_unlock(void)
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION ||
            STM_PSEGMENT->safe_point == SP_RUNNING);
 
-    if (UNLIKELY(pthread_mutex_unlock(&sync_ctl.global_mutex) != 0)) {
-        perror("pthread_mutex_unlock");
-        abort();
-    }
+    if (UNLIKELY(pthread_mutex_unlock(&sync_ctl.global_mutex) != 0))
+        stm_fatalerror("pthread_mutex_unlock: %m\n");
 }
 
 static inline bool _has_mutex(void)
@@ -97,10 +88,8 @@ static inline void cond_wait(void)
 #endif
 
     if (UNLIKELY(pthread_cond_wait(&sync_ctl.global_cond,
-                                   &sync_ctl.global_mutex) != 0)) {
-        perror("pthread_cond_wait");
-        abort();
-    }
+                                   &sync_ctl.global_mutex) != 0))
+        stm_fatalerror("pthread_cond_wait: %m\n");
 
     if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
         abort_with_mutex();
@@ -108,10 +97,8 @@ static inline void cond_wait(void)
 
 static inline void cond_broadcast(void)
 {
-    if (UNLIKELY(pthread_cond_broadcast(&sync_ctl.global_cond) != 0)) {
-        perror("pthread_cond_broadcast");
-        abort();
-    }
+    if (UNLIKELY(pthread_cond_broadcast(&sync_ctl.global_cond) != 0))
+        stm_fatalerror("pthread_cond_broadcast: %m\n");
 }
 
 static void acquire_thread_segment(stm_thread_local_t *tl)
