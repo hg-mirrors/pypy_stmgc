@@ -158,11 +158,15 @@ void setup_list(void)
         w_prev = w_newnode;
     }
 
-    //_stm_minor_collect();       /* hack.. */
-    //POP_ROOT(global_chained_list); --- remains in the shadowstack
+    POP_ROOT(global_chained_list);   /* update value */
+    assert(global_chained_list->value == -1);
+    PUSH_ROOT(global_chained_list);
 
     stm_commit_transaction();
 
+    POP_ROOT(global_chained_list);   /* update value */
+    assert(global_chained_list->value == -1);
+    PUSH_ROOT(global_chained_list);  /* remains forever in the shadow stack */
 
     printf("setup ok\n");
 }
@@ -175,11 +179,13 @@ void *demo2(void *arg)
 {
     int status;
     stm_register_thread_local(&stm_thread_local);
+    PUSH_ROOT(global_chained_list);  /* remains forever in the shadow stack */
 
     while (check_sorted() == -1) {
         bubble_run();
     }
 
+    POP_ROOT(global_chained_list);
     assert(stm_thread_local.shadowstack == stm_thread_local.shadowstack_base);
     stm_unregister_thread_local(&stm_thread_local);
     status = sem_post(&done); assert(status == 0);
