@@ -32,6 +32,7 @@ ffi.cdef("""
 typedef ... object_t;
 typedef ... stm_jmpbuf_t;
 #define SIZEOF_MYOBJ ...
+#define _STM_FAST_ALLOC ...
 
 typedef struct {
     object_t **shadowstack, **shadowstack_base;
