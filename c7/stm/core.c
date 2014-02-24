@@ -13,71 +13,93 @@ void _stm_write_slowpath(object_t *obj)
 {
     assert(_running_transaction());
     assert(!_is_in_nursery(obj));
-    abort();//...
-#if 0
 
-    /* for old objects from the same transaction, we are done now */
-    if (obj_from_same_transaction(obj)) {
-        obj->stm_flags |= GCFLAG_WRITE_BARRIER_CALLED;
-        LIST_APPEND(STM_PSEGMENT->old_objects_pointing_to_young, obj);
+    /* is this an object from the same transaction, outside the nursery? */
+    if ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) ==
+            STM_PSEGMENT->overflow_number) {
+
+        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+        assert(STM_PSEGMENT->overflow_objects_pointing_to_nursery != NULL);
+        LIST_APPEND(STM_PSEGMENT->overflow_objects_pointing_to_nursery, obj);
         return;
     }
 
-
-    /* otherwise, we need to privatize the pages containing the object,
-       if they are still SHARED_PAGE.  The common case is that there is
-       only one page in total. */
-    size_t obj_size = 0;
-    uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
-
-    /* If the object is in the uniform pages of small objects (outside the
-       nursery), then it fits into one page.  Otherwise, we need to compute
-       it based on its location and size. */
-    if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0) {
-        pages_privatize(first_page, 1, true);
-    }
-    else {
-        /* get the size of the object */
-        obj_size = stmcb_size_rounded_up(
-            (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
-
-        /* that's the page *following* the last page with the object */
-        uintptr_t end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
-
-        pages_privatize(first_page, end_page - first_page, true);
-    }
-
-
-    /* do a read-barrier *before* the safepoints that may be issued in
-       contention_management() */
+    /* do a read-barrier now.  Note that this must occur before the
+       safepoints that may be issued in contention_management(). */
     stm_read(obj);
 
-    /* claim the write-lock for this object */
- retry:;
+    /* claim the write-lock for this object.  In case we're running the
+       same transaction since a long while, the object can be already in
+       'modified_old_objects' (but, because it had GCFLAG_WRITE_BARRIER,
+       not in 'old_objects_pointing_to_nursery').  We'll detect this case
+       by finding that we already own the write-lock. */
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
     uint8_t lock_num = STM_PSEGMENT->write_lock_num;
-    uint8_t prev_owner;
     assert((intptr_t)lock_idx >= 0);
-    prev_owner = __sync_val_compare_and_swap(&write_locks[lock_idx],
-                                             0, lock_num);
+ retry:
+    if (write_locks[lock_idx] == 0) {
+        if (UNLIKELY(!__sync_bool_compare_and_swap(&write_locks[lock_idx],
+                                                   0, lock_num)))
+            goto retry;
 
-    /* if there was no lock-holder, we are done; otherwise... */
-    if (UNLIKELY(prev_owner != 0)) {
-        /* otherwise, call the contention manager, and then possibly retry.
-           By construction it should not be possible that the owner
-           of the object is already us */
+        /* First change to this old object from this transaction.
+           Add it to the list 'modified_old_objects'. */
+        LIST_APPEND(STM_PSEGMENT->modified_old_objects, obj);
+
+        /* We need to privatize the pages containing the object, if they
+           are still SHARED_PAGE.  The common case is that there is only
+           one page in total. */
+        size_t obj_size = 0;
+        uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
+
+        /* If the object is in the uniform pages of small objects
+           (outside the nursery), then it fits into one page.  This is
+           the common case. Otherwise, we need to compute it based on
+           its location and size. */
+        if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0) {
+            pages_privatize(first_page, 1, true);
+        }
+        else {
+            /* get the size of the object */
+            obj_size = stmcb_size_rounded_up(
+              (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
+
+            /* that's the page *following* the last page with the object */
+            uintptr_t end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
+
+            pages_privatize(first_page, end_page - first_page, true);
+        }
+    }
+    else if (write_locks[lock_idx] == lock_num) {
+        OPT_ASSERT(STM_PSEGMENT->old_objects_pointing_to_nursery != NULL);
+#ifdef STM_TESTS
+        bool found = false;
+        LIST_FOREACH_R(STM_PSEGMENT->modified_old_objects, object_t *,
+                       ({ if (item == obj) { found = true; break; } }));
+        assert(found);
+#endif
+    }
+    else {
+        /* call the contention manager, and then retry (unless we were
+           aborted). */
         mutex_lock();
-        contention_management(prev_owner - 1, true);
+        uint8_t prev_owner = ((volatile uint8_t *)write_locks)[lock_idx];
+        if (prev_owner != 0 && prev_owner != lock_num)
+            contention_management(prev_owner - 1, true);
         mutex_unlock();
         goto retry;
     }
 
+    /* A common case for write_locks[] that was either 0 or lock_num:
+       we need to add the object to 'old_objects_pointing_to_nursery'
+       if there is such a list. */
+    if (STM_PSEGMENT->old_objects_pointing_to_nursery != NULL)
+        LIST_APPEND(STM_PSEGMENT->old_objects_pointing_to_nursery, obj);
+
     /* add the write-barrier-already-called flag ONLY if we succeeded in
        getting the write-lock */
-    assert(!(obj->stm_flags & GCFLAG_WRITE_BARRIER_CALLED));
-    obj->stm_flags |= GCFLAG_WRITE_BARRIER_CALLED;
-    LIST_APPEND(STM_PSEGMENT->modified_objects, obj);
-#endif
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
 }
 
 static void reset_transaction_read_version(void)
@@ -143,6 +165,8 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
+    assert(STM_PSEGMENT->old_objects_pointing_to_nursery == NULL);
+    assert(STM_PSEGMENT->overflow_objects_pointing_to_nursery == NULL);
 
 #ifdef STM_TESTS
     check_nursery_at_transaction_start();
