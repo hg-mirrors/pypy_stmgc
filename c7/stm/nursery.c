@@ -60,85 +60,87 @@ bool _stm_in_nursery(object_t *obj)
 #define FLAG_SYNC_LARGE_NOW   0x01
 
 
-static void minor_young_outside_nursery(object_t *obj)
+static uintptr_t minor_record_large_overflow_object(object_t *nobj)
 {
-    tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)obj);
-
-    uintptr_t nobj_sync_now = (uintptr_t)obj;
+    uintptr_t nobj_sync_now = (uintptr_t)nobj;
     if (STM_PSEGMENT->minor_collect_will_commit_now)
         nobj_sync_now |= FLAG_SYNC_LARGE_NOW;
     else
-        LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
-
-    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
+        LIST_APPEND(STM_PSEGMENT->large_overflow_objects, nobj);
+    return nobj_sync_now;
 }
 
 static void minor_trace_if_young(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
     object_t *obj = *pobj;
-    if (obj == NULL)
-        return;
-    assert((uintptr_t)obj < NB_PAGES * 4096UL);
-    if (!_is_in_nursery(obj)) {
-        if (UNLIKELY(tree_contains(STM_PSEGMENT->young_outside_nursery,
-                                   (uintptr_t)obj))) {
-            minor_young_outside_nursery(obj);
-        }
-        return;   /* else old object, nothing to do */
-    }
-
-    /* If the object was already seen here, its first word was set
-       to GCWORD_MOVED.  In that case, the forwarding location, i.e.
-       where the object moved to, is stored in the second word in 'obj'. */
-    object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
-
-    if (pforwarded_array[0] == GCWORD_MOVED) {
-        *pobj = pforwarded_array[1];    /* already moved */
-        return;
-    }
-
-    /* We need to make a copy of this object.  It goes either in
-       a largemalloc.c-managed area, or if it's small enough, in
-       one of the small uniform pages from gcpage.c.
-    */
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
     object_t *nobj;
     uintptr_t nobj_sync_now;
 
-    if (1 /*size >= GC_MEDIUM_REQUEST*/) {
+    if (obj == NULL)
+        return;
+    assert((uintptr_t)obj < NB_PAGES * 4096UL);
 
-        /* case 1: object is not small enough.
-           Ask gcpage.c for an allocation via largemalloc. */
-        char *allocated = allocate_outside_nursery_large(size);
-        nobj = (object_t *)(allocated - stm_object_pages);
-        nobj_sync_now = (uintptr_t)nobj;
+    if (_is_in_nursery(obj)) {
+        /* If the object was already seen here, its first word was set
+           to GCWORD_MOVED.  In that case, the forwarding location, i.e.
+           where the object moved to, is stored in the second word in 'obj'. */
+        object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
 
-        /* Copy the object  */
-        char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
-        memcpy(realnobj, realobj, size);
+        if (pforwarded_array[0] == GCWORD_MOVED) {
+            *pobj = pforwarded_array[1];    /* already moved */
+            return;
+        }
 
-        if (STM_PSEGMENT->minor_collect_will_commit_now)
-            nobj_sync_now |= FLAG_SYNC_LARGE_NOW;
-        else
-            LIST_APPEND(STM_PSEGMENT->large_overflow_objects, nobj);
+        /* We need to make a copy of this object.  It goes either in
+           a largemalloc.c-managed area, or if it's small enough, in
+           one of the small uniform pages from gcpage.c.
+        */
+        char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+        size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+        if (1 /*size >= GC_MEDIUM_REQUEST*/) {
+
+            /* case 1: object is not small enough.
+               Ask gcpage.c for an allocation via largemalloc. */
+            char *allocated = allocate_outside_nursery_large(size);
+            nobj = (object_t *)(allocated - stm_object_pages);
+
+            /* Copy the object  */
+            char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
+            memcpy(realnobj, realobj, size);
+
+            nobj_sync_now = minor_record_large_overflow_object(nobj);
+        }
+        else {
+            /* case "small enough" */
+            abort();  //...
+        }
+
+        /* Done copying the object. */
+        //dprintf(("\t\t\t\t\t%p -> %p\n", obj, nobj));
+        pforwarded_array[0] = GCWORD_MOVED;
+        pforwarded_array[1] = nobj;
+        *pobj = nobj;
     }
+
     else {
-        /* case "small enough" */
-        abort();  //...
+        /* The object was not in the nursery at all */
+        if (LIKELY(!tree_contains(STM_PSEGMENT->young_outside_nursery,
+                                  (uintptr_t)obj)))
+            return;   /* common case: it was an old object, nothing to do */
+
+        /* a young object outside the nursery */
+        nobj = obj;
+        tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)nobj);
+        nobj_sync_now = minor_record_large_overflow_object(nobj);
     }
 
+    /* Set the overflow_number if nedeed */
     assert((nobj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) == 0);
     if (!STM_PSEGMENT->minor_collect_will_commit_now) {
         nobj->stm_flags |= STM_PSEGMENT->overflow_number;
     }
-
-    /* Done copying the object. */
-    //dprintf(("\t\t\t\t\t%p -> %p\n", obj, nobj));
-    pforwarded_array[0] = GCWORD_MOVED;
-    pforwarded_array[1] = nobj;
-    *pobj = nobj;
 
     /* Must trace the object later */
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
