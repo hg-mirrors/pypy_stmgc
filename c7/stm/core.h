@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <errno.h>
+#include <pthread.h>
 
 /************************************************************/
 
@@ -117,6 +118,11 @@ struct stm_priv_segment_info_s {
 
     /* In case of abort, we restore the 'shadowstack' field. */
     object_t **shadowstack_at_start_of_transaction;
+
+    /* For debugging */
+#ifndef NDEBUG
+    pthread_t running_pthread;
+#endif
 };
 
 enum /* safe_point */ {

@@ -1,4 +1,3 @@
-#include <pthread.h>
 #include <sys/syscall.h>
 #include <sys/prctl.h>
 #include <asm/prctl.h>
