@@ -93,7 +93,7 @@ static void privatize_range(uintptr_t pagenum, uintptr_t count, bool full)
     void *localpg = stm_object_pages + localpgoff * 4096UL;
     void *otherpg = stm_object_pages + otherpgoff * 4096UL;
 
-    memset(flag_page_private + pagenum, PRIVATE_PAGE, count);
+    memset(flag_page_private + pagenum, REMAPPING_PAGE, count);
     d_remap_file_pages(localpg, count * 4096, pgoff2);
     uintptr_t i;
     if (full) {
@@ -106,6 +106,8 @@ static void privatize_range(uintptr_t pagenum, uintptr_t count, bool full)
         if (count > 1)
             pagecopy(localpg + 4096 * (count-1), otherpg + 4096 * (count-1));
     }
+    write_fence();
+    memset(flag_page_private + pagenum, PRIVATE_PAGE, count);
 }
 
 static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
