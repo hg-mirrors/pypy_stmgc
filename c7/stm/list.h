@@ -1,5 +1,7 @@
 #include <stdlib.h>
 
+/************************************************************/
+
 struct list_s {
     uintptr_t count;
     uintptr_t last_allocated;
@@ -65,3 +67,121 @@ static inline uintptr_t list_item(struct list_s *lst, uintptr_t index)
             CODE;                               \
         }                                       \
     } while (0)
+
+/************************************************************/
+
+/* The tree_xx functions are, like the name hints, implemented as a tree,
+   supporting very high performance in TREE_FIND in the common case where
+   there are no or few elements in the tree, but scaling correctly
+   if the number of items becomes large. */
+
+#define TREE_BITS   4
+#define TREE_ARITY  (1 << TREE_BITS)
+
+#define TREE_DEPTH_MAX   ((sizeof(void*)*8 - 2 + TREE_BITS-1) / TREE_BITS)
+/* sizeof(void*) = total number of bits
+   2 = bits that we ignore anyway (2 or 3, conservatively 2)
+   (x + TREE_BITS-1) / TREE_BITS = divide by TREE_BITS, rounding up
+*/
+
+#define TREE_MASK   ((TREE_ARITY - 1) * sizeof(void*))
+
+typedef struct {
+    uintptr_t addr;
+    uintptr_t val;
+} wlog_t;
+
+typedef struct {
+    char *items[TREE_ARITY];
+} wlog_node_t;
+
+struct tree_s {
+    char *raw_start, *raw_current, *raw_end;
+    wlog_node_t toplevel;
+};
+
+static struct tree_s *tree_create(void);
+static void tree_free(struct tree_s *tree);
+static void tree_clear(struct tree_s *tree);
+//static inline void tree_delete_not_used_any_more(struct tree_s *tree)...
+
+static inline bool tree_any_entry(struct tree_s *tree) {
+    return tree->raw_current != tree->raw_start;
+}
+
+#define _TREE_LOOP(tree, item, INITIAL, _PLUS_)                         \
+{                                                                       \
+  struct { char **next; char **end; } _stack[TREE_DEPTH_MAX], *_stackp; \
+  char **_next, **_end, *_entry;                                        \
+  long _deleted_factor = 0;                                             \
+  struct tree_s *_tree = &(tree);                                       \
+  /* initialization */                                                  \
+  _stackp = _stack;      /* empty stack */                              \
+  _next = _tree->toplevel.items + INITIAL;                              \
+  _end = _next _PLUS_ TREE_ARITY;                                       \
+  /* loop */                                                            \
+  while (1)                                                             \
+    {                                                                   \
+      if (_next == _end)                                                \
+        {                                                               \
+          if (_stackp == _stack)                                        \
+            break;   /* done */                                         \
+          /* finished with this level, go to the next one */            \
+          _stackp--;                                                    \
+          _next = _stackp->next;                                        \
+          _end = _stackp->end;                                          \
+          continue;                                                     \
+        }                                                               \
+      _entry = *_next;                                                  \
+      _next = _next _PLUS_ 1;                                           \
+      if (_entry == NULL)   /* empty entry */                           \
+        continue;                                                       \
+      if (((long)_entry) & 1)                                           \
+        {  /* points to a further level: enter it */                    \
+          _stackp->next = _next;                                        \
+          _stackp->end = _end;                                          \
+          _stackp++;                                                    \
+          _next = ((wlog_node_t *)(_entry - 1))->items + INITIAL;       \
+          _end = _next _PLUS_ TREE_ARITY;                               \
+          continue;                                                     \
+        }                                                               \
+      /* points to a wlog_t item */                                     \
+      if (((wlog_t *)_entry)->addr == 0) {      /* deleted entry */     \
+          _deleted_factor += 3;                                         \
+          continue;                                                     \
+      }                                                                 \
+      _deleted_factor -= 4;                                             \
+      item = (wlog_t *)_entry;
+
+#define TREE_LOOP_FORWARD(tree, item)                             \
+                       _TREE_LOOP(tree, item, 0, +)
+#define TREE_LOOP_BACKWARD(tree, item)                            \
+                       _TREE_LOOP(tree, item, (TREE_ARITY-1), -)
+#define TREE_LOOP_END     } }
+#define TREE_LOOP_END_AND_COMPRESS                                       \
+                         } if (_deleted_factor > 9) _tree_compress(_tree); }
+#define TREE_LOOP_DELETE(item)  { (item)->addr = NULL; _deleted_factor += 6; }
+
+#define TREE_FIND(tree, addr1, result, goto_not_found)          \
+{                                                               \
+  uintptr_t _key = (addr1);                                     \
+  char *_p = (char *)((tree).toplevel.items);                   \
+  char *_entry = *(char **)(_p + (_key & TREE_MASK));           \
+  if (_entry == NULL)                                           \
+    goto_not_found;    /* common case, hopefully */             \
+  result = _tree_find(_entry, addr1);                           \
+  if (result == NULL || result->addr != (addr1))                \
+    goto_not_found;                                             \
+}
+
+static wlog_t *_tree_find(char *entry, uintptr_t addr);
+static void _tree_compress(struct tree_s *tree) __attribute__((unused));
+static void tree_insert(struct tree_s *tree, uintptr_t addr, uintptr_t val);
+static bool tree_delete_item(struct tree_s *tree, uintptr_t addr);
+
+static inline bool tree_contains(struct tree_s *tree, uintptr_t addr)
+{
+    wlog_t *result;
+    TREE_FIND(*tree, addr, result, return false);
+    return true;
+}

@@ -1,12 +1,8 @@
 import os
 import cffi, weakref
-import sys
-assert sys.maxint == 9223372036854775807, "requires a 64-bit environment"
+from common import parent_dir
 
 # ----------
-os.environ['CC'] = 'clang'
-
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 source_files = [os.path.join(parent_dir, "stmgc.c")]
 all_files = [os.path.join(parent_dir, "stmgc.h"),
