@@ -19,17 +19,21 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full);
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
 //static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count);
 
-inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
-                                   bool full) {
-    while (flag_page_private[pagenum] == PRIVATE_PAGE) {
-        if (!--count)
-            return;
-        pagenum++;
-    }
-    _pages_privatize(pagenum, count, full);
-}
-
 static void mutex_pages_lock(void);
 static void mutex_pages_unlock(void);
+
+inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
+                                   bool full) {
+    mutex_pages_lock();
+    while (flag_page_private[pagenum] == PRIVATE_PAGE) {
+        if (!--count) {
+            mutex_pages_unlock();
+            return;
+        }
+        pagenum++;
+    }
+    mutex_pages_unlock();
+    _pages_privatize(pagenum, count, full);
+}
 
 //static bool is_fully_in_shared_pages(object_t *obj);  -- not needed?

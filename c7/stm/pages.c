@@ -110,6 +110,7 @@ static void privatize_range(uintptr_t pagenum, uintptr_t count, bool full)
 
 static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
 {
+    /* narrow the range of pages to privatize from the end: */
     while (flag_page_private[pagenum + count - 1] == PRIVATE_PAGE) {
         if (!--count)
             return;
