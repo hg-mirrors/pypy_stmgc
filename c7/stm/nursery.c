@@ -310,10 +310,10 @@ object_t *_stm_allocate_external(ssize_t size_rounded_up)
     /* XXX force a minor/major collection if needed */
 
     char *result = allocate_outside_nursery_large(size_rounded_up);
-    memset(result, 0, size_rounded_up);
-
     object_t *o = (object_t *)(result - stm_object_pages);
     tree_insert(STM_PSEGMENT->young_outside_nursery, (intptr_t)o, 0);
+
+    memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
     return o;
 }
 
