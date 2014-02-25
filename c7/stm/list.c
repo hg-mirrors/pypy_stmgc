@@ -121,6 +121,7 @@ static char *_tree_grab(struct tree_s *tree, long size)
 
 static void tree_insert(struct tree_s *tree, uintptr_t addr, uintptr_t val)
 {
+    assert(addr != 0);    /* the NULL key is reserved */
  retry:;
     wlog_t *wlog;
     uintptr_t key = addr;
