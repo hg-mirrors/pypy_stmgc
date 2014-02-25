@@ -179,6 +179,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
+    assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
     assert(STM_PSEGMENT->objects_pointing_to_nursery == NULL);
     assert(STM_PSEGMENT->large_overflow_objects == NULL);
 
