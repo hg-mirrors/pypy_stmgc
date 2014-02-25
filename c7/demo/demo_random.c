@@ -7,7 +7,7 @@
 
 #include "stmgc.h"
 
-#define NUMTHREADS 2
+#define NUMTHREADS 3
 #define STEPS_PER_THREAD 5000
 #define THREAD_STARTS 100 // how many restarts of threads
 #define SHARED_ROOTS 3
