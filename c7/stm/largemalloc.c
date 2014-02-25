@@ -170,7 +170,7 @@ static void sort_bin(size_t index)
         really_sort_bin(index);
 }
 
-static char *large_malloc(size_t request_size)
+char *_stm_large_malloc(size_t request_size)
 {
     /* 'request_size' should already be a multiple of the word size here */
     assert((request_size & (sizeof(char *)-1)) == 0);
@@ -208,8 +208,6 @@ static char *large_malloc(size_t request_size)
     }
 
     /* not enough memory. */
-    fprintf(stderr, "not enough memory!\n");
-    abort();
     return NULL;
 
  found:
@@ -243,7 +241,7 @@ static char *large_malloc(size_t request_size)
     return (char *)&mscan->d;
 }
 
-static void large_free(char *data)
+void _stm_large_free(char *data)
 {
     mchunk_t *chunk = data2chunk(data);
     assert((chunk->size & (sizeof(char *) - 1)) == 0);
@@ -341,7 +339,12 @@ void _stm_large_dump(void)
     assert(data - 16 == (char *)last_chunk);
 }
 
-static void largemalloc_init_arena(char *data_start, size_t data_size)
+char *_stm_largemalloc_data_start(void)
+{
+    return (char *)first_chunk;
+}
+
+void _stm_largemalloc_init_arena(char *data_start, size_t data_size)
 {
     int i;
     for (i = 0; i < N_BINS; i++) {
@@ -362,7 +365,7 @@ static void largemalloc_init_arena(char *data_start, size_t data_size)
     insert_unsorted(first_chunk);
 }
 
-static int largemalloc_resize_arena(size_t new_size)
+int _stm_largemalloc_resize_arena(size_t new_size)
 {
     if (new_size < 2 * sizeof(struct malloc_chunk))
         return 0;
@@ -413,7 +416,7 @@ static int largemalloc_resize_arena(size_t new_size)
         assert(last_chunk == next_chunk_u(old_last_chunk));
 
         /* then free the last_chunk (turn it from "used" to "free) */
-        large_free((char *)&old_last_chunk->d);
+        _stm_large_free((char *)&old_last_chunk->d);
     }
     return 1;
 }

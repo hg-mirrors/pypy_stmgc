@@ -87,7 +87,8 @@ static void minor_trace_if_young(object_t **pobj)
 
         /* case 1: object is not small enough.
            Ask gcpage.c for an allocation via largemalloc. */
-        nobj = allocate_outside_nursery_large(size);
+        char *allocated = allocate_outside_nursery_large(size);
+        nobj = (object_t *)(allocated - stm_object_pages);
         nobj_sync_now = (uintptr_t)nobj;
 
         /* Copy the object  */
