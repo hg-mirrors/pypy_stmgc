@@ -12,7 +12,7 @@ static void teardown_core(void)
 void _stm_write_slowpath(object_t *obj)
 {
     assert(_running_transaction());
-    assert(!_is_in_nursery(obj));
+    assert(!_is_young(obj));
 
     /* is this an object from the same transaction, outside the nursery? */
     if ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) ==
@@ -225,7 +225,7 @@ static void detect_write_read_conflicts(void)
 
 static void synchronize_overflow_object_now(object_t *obj)
 {
-    assert(!_is_in_nursery(obj));
+    assert(!_is_young(obj));
     assert((obj->stm_flags & GCFLAG_SMALL_UNIFORM) == 0);
 
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
