@@ -160,6 +160,9 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     STM_PSEGMENT->transaction_state = (jmpbuf != NULL ? TS_REGULAR
                                                       : TS_INEVITABLE);
     STM_SEGMENT->jmpbuf_ptr = jmpbuf;
+#ifndef NDEBUG
+    STM_PSEGMENT->running_pthread = pthread_self();
+#endif
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
     STM_SEGMENT->nursery_end = NURSERY_END;
 
@@ -340,6 +343,7 @@ void stm_commit_transaction(void)
 {
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
+    assert(STM_PSEGMENT->running_pthread == pthread_self());
 
     bool has_any_overflow_object =
         (STM_PSEGMENT->objects_pointing_to_nursery != NULL);
@@ -449,6 +453,7 @@ static void abort_with_mutex(void)
     default:
         assert(!"abort: bad transaction_state");
     }
+    assert(STM_PSEGMENT->running_pthread == pthread_self());
 
     /* throw away the content of the nursery */
     throw_away_nursery();
