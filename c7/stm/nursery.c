@@ -42,6 +42,12 @@ static inline bool _is_in_nursery(object_t *obj)
     return (uintptr_t)obj < NURSERY_END;
 }
 
+static inline bool _is_young(object_t *obj)
+{
+    return (_is_in_nursery(obj) ||
+        tree_contains(STM_PSEGMENT->young_outside_nursery, (uintptr_t)obj));
+}
+
 bool _stm_in_nursery(object_t *obj)
 {
     return _is_in_nursery(obj);
@@ -54,6 +60,19 @@ bool _stm_in_nursery(object_t *obj)
 #define FLAG_SYNC_LARGE_NOW   0x01
 
 
+static void minor_young_outside_nursery(object_t *obj)
+{
+    tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)obj);
+
+    uintptr_t nobj_sync_now = (uintptr_t)obj;
+    if (STM_PSEGMENT->minor_collect_will_commit_now)
+        nobj_sync_now |= FLAG_SYNC_LARGE_NOW;
+    else
+        LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
+
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
+}
+
 static void minor_trace_if_young(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
@@ -61,8 +80,13 @@ static void minor_trace_if_young(object_t **pobj)
     if (obj == NULL)
         return;
     assert((uintptr_t)obj < NB_PAGES * 4096UL);
-    if (!_is_in_nursery(obj))
-        return;
+    if (!_is_in_nursery(obj)) {
+        if (UNLIKELY(tree_contains(STM_PSEGMENT->young_outside_nursery,
+                                   (uintptr_t)obj))) {
+            minor_young_outside_nursery(obj);
+        }
+        return;   /* else old object, nothing to do */
+    }
 
     /* If the object was already seen here, its first word was set
        to GCWORD_MOVED.  In that case, the forwarding location, i.e.
@@ -133,7 +157,7 @@ static void collect_roots_in_nursery(void)
 
 static inline void _collect_now(object_t *obj)
 {
-    assert(!_is_in_nursery(obj));
+    assert(!_is_young(obj));
 
     /* We must not have GCFLAG_WRITE_BARRIER so far.  Add it now. */
     assert(!(obj->stm_flags & GCFLAG_WRITE_BARRIER));

@@ -81,7 +81,7 @@ class TestBasic(BaseTest):
         assert old
         assert young
 
-    def test_larger_than_limit_for_nursery(self):
+    def test_larger_than_limit_for_nursery_die(self):
         obj_size = lib._STM_FAST_ALLOC + 16
 
         self.start_transaction()
@@ -92,6 +92,28 @@ class TestBasic(BaseTest):
             assert not is_in_nursery(new)
             seen.add(new)
         assert len(seen) < 5     # addresses are reused
+
+    def test_larger_than_limit_for_nursery_dont_die(self):
+        obj_nrefs = (lib._STM_FAST_ALLOC + 16) // 8
+
+        self.start_transaction()
+        lp1 = ffi.cast("object_t *", 0)
+        seen = set()
+        for i in range(100):
+            self.push_root(lp1)
+            stm_minor_collect()
+            lp1 = self.pop_root()
+            new = stm_allocate_refs(obj_nrefs)
+            assert not is_in_nursery(new)
+            seen.add(new)
+            stm_set_ref(new, i, lp1)
+            lp1 = new
+        assert len(seen) == 100     # addresses are not reused
+
+        for i in reversed(range(100)):
+            assert lp1
+            lp1 = stm_get_ref(lp1, i)
+        assert not lp1
 
     def test_reset_partial_alloc_pages(self):
         py.test.skip("a would-be-nice feature, but not actually needed: "
