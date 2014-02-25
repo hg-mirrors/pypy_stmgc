@@ -191,7 +191,7 @@ static inline void abort_if_needed(void) {
         break;
 
     case TS_MUST_ABORT:
-        abort_with_mutex();
+        stm_abort_transaction();
 
     default:
         assert(!"commit: bad transaction_state");
