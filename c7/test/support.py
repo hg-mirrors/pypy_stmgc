@@ -74,6 +74,13 @@ void _stm_start_safe_point(void);
 bool _check_stop_safe_point(void);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
+void _stm_largemalloc_init_arena(char *data_start, size_t data_size);
+int _stm_largemalloc_resize_arena(size_t new_size);
+char *_stm_largemalloc_data_start(void);
+char *_stm_large_malloc(size_t request_size);
+void _stm_large_free(char *data);
+void _stm_large_dump(void);
+void *memset(void *s, int c, size_t n);
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
 

@@ -9,7 +9,7 @@ static void setup_gcpage(void)
        reset_all_creation_markers() */
     char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL;
     uintptr_t length = (NB_PAGES - END_NURSERY_PAGE - 1) * 4096UL;
-    largemalloc_init_arena(base, length);
+    _stm_largemalloc_init_arena(base, length);
 
     uninitialized_page_start = stm_object_pages + END_NURSERY_PAGE * 4096UL;
     uninitialized_page_stop  = stm_object_pages + NB_PAGES * 4096UL;
@@ -40,8 +40,8 @@ static void grab_more_free_pages_for_small_allocations(void)
 
     uninitialized_page_stop -= decrease_by;
 
-    if (!largemalloc_resize_arena(uninitialized_page_stop -
-                                  uninitialized_page_start))
+    if (!_stm_largemalloc_resize_arena(uninitialized_page_stop -
+                                       uninitialized_page_start))
         goto out_of_memory;
 
     setup_N_pages(uninitialized_page_start, GCPAGE_NUM_PAGES);
@@ -70,14 +70,16 @@ static char *_allocate_small_slowpath(uint64_t size)
 }
 
 
-static object_t *allocate_outside_nursery_large(uint64_t size)
+static char *allocate_outside_nursery_large(uint64_t size)
 {
     /* thread-safe: use the lock of pages.c to prevent any remapping
        from occurring under our feet */
     mutex_pages_lock();
 
     /* Allocate the object with largemalloc.c from the lower addresses. */
-    char *addr = large_malloc(size);
+    char *addr = _stm_large_malloc(size);
+    if (addr == NULL)
+        stm_fatalerror("not enough memory!\n");
 
     if (addr + size > uninitialized_page_start) {
         uintptr_t npages;
@@ -93,14 +95,16 @@ static object_t *allocate_outside_nursery_large(uint64_t size)
 
     mutex_pages_unlock();
 
-    return (object_t *)(addr - stm_object_pages);
+    return addr;
 }
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
     /* only for tests */
-    object_t *o = allocate_outside_nursery_large(size_rounded_up);
-    memset(REAL_ADDRESS(stm_object_pages, o), 0, size_rounded_up);
+    char *p = allocate_outside_nursery_large(size_rounded_up);
+    memset(p, 0, size_rounded_up);
+
+    object_t *o = (object_t *)(p - stm_object_pages);
     o->stm_flags = STM_FLAGS_PREBUILT;
     return o;
 }
