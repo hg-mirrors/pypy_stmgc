@@ -3,23 +3,6 @@ import py
 
 class TestBasic(BaseTest):
 
-    def test_nursery_large(self):
-        py.test.skip("XXX later")
-        self.start_transaction()
-        lp1 = stm_allocate(SOME_LARGE_SIZE)
-        lp2 = stm_allocate(SOME_LARGE_SIZE)
-
-        u1 = int(ffi.cast("uintptr_t", lp1))
-        u2 = int(ffi.cast("uintptr_t", lp2))
-        assert (u1 & 255) == 0
-        assert (u2 & 255) == 0
-        assert stm_creation_marker(lp1) == 0xff
-        assert stm_creation_marker(lp2) == 0xff
-
-        self.commit_transaction()
-        assert stm_creation_marker(lp1) == 0
-        assert stm_creation_marker(lp2) == 0
-
     def test_nursery_full(self):
         lib._stm_set_nursery_free_count(2048)
         self.start_transaction()
@@ -99,7 +82,6 @@ class TestBasic(BaseTest):
         assert young
 
     def test_larger_than_limit_for_nursery(self):
-        py.test.skip("XXX later")
         obj_size = lib._STM_FAST_ALLOC + 16
 
         self.start_transaction()

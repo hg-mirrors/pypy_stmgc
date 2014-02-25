@@ -105,8 +105,8 @@ static void tree_free(struct tree_s *tree);
 static void tree_clear(struct tree_s *tree);
 //static inline void tree_delete_not_used_any_more(struct tree_s *tree)...
 
-static inline bool tree_any_entry(struct tree_s *tree) {
-    return tree->raw_current != tree->raw_start;
+static inline bool tree_is_cleared(struct tree_s *tree) {
+    return tree->raw_current == tree->raw_start;
 }
 
 #define _TREE_LOOP(tree, item, INITIAL, _PLUS_)                         \
@@ -177,7 +177,8 @@ static inline bool tree_any_entry(struct tree_s *tree) {
 static wlog_t *_tree_find(char *entry, uintptr_t addr);
 static void _tree_compress(struct tree_s *tree) __attribute__((unused));
 static void tree_insert(struct tree_s *tree, uintptr_t addr, uintptr_t val);
-static bool tree_delete_item(struct tree_s *tree, uintptr_t addr);
+static bool tree_delete_item(struct tree_s *tree, uintptr_t addr)
+     __attribute__((unused));
 
 static inline bool tree_contains(struct tree_s *tree, uintptr_t addr)
 {

@@ -182,6 +182,19 @@ static void throw_away_nursery(void)
     memset(realnursery, 0, size);
 
     STM_SEGMENT->nursery_current = (stm_char *)_stm_nursery_start;
+
+    /* free any object left from 'young_outside_nursery' */
+    if (!tree_is_cleared(STM_PSEGMENT->young_outside_nursery)) {
+        mutex_pages_lock();
+
+        wlog_t *item;
+        TREE_LOOP_FORWARD(*STM_PSEGMENT->young_outside_nursery, item) {
+            _stm_large_free(stm_object_pages + item->addr);
+        } TREE_LOOP_END;
+
+        tree_clear(STM_PSEGMENT->young_outside_nursery);
+        mutex_pages_unlock();
+    }
 }
 
 static void minor_collection(bool commit)
@@ -268,7 +281,14 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 
 object_t *_stm_allocate_external(ssize_t size_rounded_up)
 {
-    abort();//...
+    /* XXX force a minor/major collection if needed */
+
+    char *result = allocate_outside_nursery_large(size_rounded_up);
+    memset(result, 0, size_rounded_up);
+
+    object_t *o = (object_t *)(result - stm_object_pages);
+    tree_insert(STM_PSEGMENT->young_outside_nursery, (intptr_t)o, 0);
+    return o;
 }
 
 #ifdef STM_TESTS
