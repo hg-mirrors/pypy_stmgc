@@ -65,13 +65,17 @@ static void set_gs_register(char *value)
         stm_fatalerror("syscall(arch_prctl, ARCH_SET_GS): %m\n");
 }
 
-static inline void mutex_lock(void)
+static inline void mutex_lock_no_abort(void)
 {
     assert(!_has_mutex_here);
     if (UNLIKELY(pthread_mutex_lock(&sync_ctl.global_mutex) != 0))
         stm_fatalerror("pthread_mutex_lock: %m\n");
     assert((_has_mutex_here = true, 1));
+}
 
+static inline void mutex_lock(void)
+{
+    mutex_lock_no_abort();
     if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
         abort_with_mutex();
 }
@@ -87,7 +91,7 @@ static inline void mutex_unlock(void)
     assert((_has_mutex_here = false, 1));
 }
 
-static inline void cond_wait(enum cond_type_e ctype)
+static inline void cond_wait_no_abort(enum cond_type_e ctype)
 {
 #ifdef STM_NO_COND_WAIT
     stm_fatalerror("*** cond_wait/%d called!\n", (int)ctype);
@@ -97,7 +101,11 @@ static inline void cond_wait(enum cond_type_e ctype)
     if (UNLIKELY(pthread_cond_wait(&sync_ctl.cond[ctype],
                                    &sync_ctl.global_mutex) != 0))
         stm_fatalerror("pthread_cond_wait/%d: %m\n", (int)ctype);
+}
 
+static inline void cond_wait(enum cond_type_e ctype)
+{
+    cond_wait_no_abort(ctype);
     if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
         abort_with_mutex();
 }
@@ -148,7 +156,7 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
     /* Wait and retry.  It is guaranteed that any thread releasing its
        segment will do so by acquiring the mutex and calling
        cond_signal(C_RELEASE_THREAD_SEGMENT). */
-    cond_wait(C_RELEASE_THREAD_SEGMENT);
+    cond_wait_no_abort(C_RELEASE_THREAD_SEGMENT);
     goto retry;
 
  got_num:
