@@ -7,9 +7,11 @@ enum /* flag_page_private */ {
        physical page (the one that is within the segment 0 mmap address). */
     SHARED_PAGE,
 
-    /* Page is private for each segment.  If we obtain this value outside
-       a mutex_pages_lock(), there might be a race: the value can say
-       PRIVATE_PAGE before the page is really un-shared. */
+    /* For only one range of pages at a time, around the call to
+       remap_file_pages() that un-shares the pages (SHARED -> PRIVATE). */
+    REMAPPING_PAGE,
+
+    /* Page is private for each segment. */
     PRIVATE_PAGE,
 };
 
@@ -24,15 +26,14 @@ static void mutex_pages_unlock(void);
 
 inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
                                    bool full) {
-    mutex_pages_lock();
+    /* This is written a bit carefully so that a call with a constant
+       count == 1 will turn this loop into just one "if". */
     while (flag_page_private[pagenum] == PRIVATE_PAGE) {
         if (!--count) {
-            mutex_pages_unlock();
             return;
         }
         pagenum++;
     }
-    mutex_pages_unlock();
     _pages_privatize(pagenum, count, full);
 }
 
