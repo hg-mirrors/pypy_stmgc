@@ -486,7 +486,7 @@ def op_assert_modified(ex, global_state, thread_state):
     else:
         saved = [m for m in modified
                  if m in thread_state.saved_roots or m in global_state.prebuilt_roots]
-        ex.do("assert {%s}.issubset(set(modified))" % (
+        ex.do("assert set([%s]).issubset(set(modified))" % (
             ", ".join(saved)
         ))
 
