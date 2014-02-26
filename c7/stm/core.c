@@ -170,6 +170,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     STM_PSEGMENT->running_pthread = pthread_self();
 #endif
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
+    STM_PSEGMENT->threadlocal_at_start_of_transaction = tl->thread_local_obj;
     STM_SEGMENT->nursery_end = NURSERY_END;
 
     dprintf(("start_transaction\n"));
@@ -469,6 +470,7 @@ static void abort_with_mutex(void)
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     tl->shadowstack = STM_PSEGMENT->shadowstack_at_start_of_transaction;
+    tl->thread_local_obj = STM_PSEGMENT->threadlocal_at_start_of_transaction;
 
     _finish_transaction();
 

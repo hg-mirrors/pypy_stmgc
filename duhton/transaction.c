@@ -43,35 +43,34 @@ static void run_all_threads(void)
 
 /************************************************************/
 
-__thread DuObject *stm_thread_local_obj = NULL;  /* XXX temp */
-
+#define TLOBJ   (*((DuObject **)(&stm_thread_local.thread_local_obj)))
 
 void Du_TransactionAdd(DuObject *code, DuObject *frame)
 {
     DuObject *cell = DuCons_New(code, frame);
-    DuObject *pending = stm_thread_local_obj;
+    DuObject *pending = TLOBJ;
 
     if (pending == NULL) {
         pending = Du_None;
     }
     pending = DuCons_New(cell, pending);
-    stm_thread_local_obj = pending;
+    TLOBJ = pending;
 }
 
 void Du_TransactionRun(void)
 {
-    if (stm_thread_local_obj == NULL)
+    if (TLOBJ == NULL)
         return;
 
     stm_start_inevitable_transaction(&stm_thread_local);
 
     DuConsObject *root = du_pending_transactions;
     _du_write1(root);
-    root->cdr = stm_thread_local_obj;
+    root->cdr = TLOBJ;
 
     stm_commit_transaction();
 
-    stm_thread_local_obj = NULL;
+    TLOBJ = NULL;
 
     run_all_threads();
 }
@@ -80,7 +79,7 @@ void Du_TransactionRun(void)
 
 static DuObject *next_cell(void)
 {
-    DuObject *pending = stm_thread_local_obj;
+    DuObject *pending = TLOBJ;
 
     if (pending == NULL) {
         /* fish from the global list of pending transactions */
@@ -131,7 +130,7 @@ static DuObject *next_cell(void)
     }
 
     /* we have at least one thread-local transaction pending */
-    stm_thread_local_obj = NULL;
+    TLOBJ = NULL;
 
     stm_start_inevitable_transaction(&stm_thread_local);
 
@@ -175,21 +174,17 @@ void *run_thread(void *thread_id)
     stm_jmpbuf_t here;
     stm_register_thread_local(&stm_thread_local);
 
-    stm_thread_local_obj = NULL;
+    TLOBJ = NULL;
 
     while (1) {
         DuObject *cell = next_cell();
         if (cell == NULL)
             break;
-        assert(stm_thread_local_obj == NULL);
+        assert(TLOBJ == NULL);
 
         STM_START_TRANSACTION(&stm_thread_local, here);
 
         run_transaction(cell);
-
-        _du_save1(stm_thread_local_obj);
-        stm_collect(0);   /* hack.. */
-        _du_restore1(stm_thread_local_obj);
 
         stm_commit_transaction();
 

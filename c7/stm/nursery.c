@@ -145,6 +145,7 @@ static void collect_roots_in_nursery(void)
         assert(*current != (object_t *)-1);
         minor_trace_if_young(current);
     }
+    minor_trace_if_young(&tl->thread_local_obj);
 }
 
 static inline void _collect_now(object_t *obj)

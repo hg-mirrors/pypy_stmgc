@@ -117,8 +117,10 @@ struct stm_priv_segment_info_s {
     /* Temp for minor collection */
     bool minor_collect_will_commit_now;
 
-    /* In case of abort, we restore the 'shadowstack' field. */
+    /* In case of abort, we restore the 'shadowstack' field and the
+       'thread_local_obj' field. */
     object_t **shadowstack_at_start_of_transaction;
+    object_t *threadlocal_at_start_of_transaction;
 
     /* For debugging */
 #ifndef NDEBUG
