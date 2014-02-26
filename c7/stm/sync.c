@@ -122,14 +122,13 @@ static inline void cond_signal(enum cond_type_e ctype)
         stm_fatalerror("pthread_cond_signal/%d: %m\n", (int)ctype);
 }
 
-static void acquire_thread_segment(stm_thread_local_t *tl)
+static bool acquire_thread_segment(stm_thread_local_t *tl)
 {
     /* This function acquires a segment for the currently running thread,
        and set up the GS register if it changed. */
     assert(_has_mutex());
     assert(_is_tl_registered(tl));
 
- retry:;
     int num = tl->associated_segment_num;
     if (sync_ctl.in_use[num] == 0) {
         /* fast-path: we can get the same segment number than the one
@@ -157,7 +156,9 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
        segment will do so by acquiring the mutex and calling
        cond_signal(C_RELEASE_THREAD_SEGMENT). */
     cond_wait_no_abort(C_RELEASE_THREAD_SEGMENT);
-    goto retry;
+
+    /* Return false to the caller, which will call us again */
+    return false;
 
  got_num:
     sync_ctl.in_use[num] = 1;
@@ -165,6 +166,7 @@ static void acquire_thread_segment(stm_thread_local_t *tl)
     assert(STM_SEGMENT->running_thread == NULL);
     STM_SEGMENT->running_thread = tl;
     STM_PSEGMENT->start_time = ++sync_ctl.global_time;
+    return true;
 }
 
 static void release_thread_segment(stm_thread_local_t *tl)
@@ -176,6 +178,28 @@ static void release_thread_segment(stm_thread_local_t *tl)
 
     assert(sync_ctl.in_use[tl->associated_segment_num] == 1);
     sync_ctl.in_use[tl->associated_segment_num] = 0;
+}
+
+static void wait_for_end_of_inevitable_transaction(bool can_abort)
+{
+    assert(_has_mutex());
+
+    long i;
+  restart:
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        if (get_priv_segment(i)->transaction_state == TS_INEVITABLE) {
+            if (can_abort) {
+                /* XXX should we wait here?  or abort?  or a mix?
+                   for now, always abort */
+                abort_with_mutex();
+                //cond_wait(C_INEVITABLE_DONE);
+            }
+            else {
+                cond_wait_no_abort(C_INEVITABLE_DONE);
+            }
+            goto restart;
+        }
+    }
 }
 
 static bool _running_transaction(void) __attribute__((unused));

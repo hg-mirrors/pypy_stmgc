@@ -8,6 +8,7 @@ enum cond_type_e {
     C_RELEASE_THREAD_SEGMENT,
     C_SAFE_POINT,
     C_RESUME,
+    C_INEVITABLE_DONE,
     _C_TOTAL
 };
 static void mutex_lock(void);
@@ -21,8 +22,9 @@ static bool _has_mutex(void);
 
 /* acquire and release one of the segments for running the given thread
    (must have the mutex acquired!) */
-static void acquire_thread_segment(stm_thread_local_t *tl);
+static bool acquire_thread_segment(stm_thread_local_t *tl);
 static void release_thread_segment(stm_thread_local_t *tl);
+static void wait_for_end_of_inevitable_transaction(bool can_abort);
 
 /* see the source for an exact description */
 static void wait_for_other_safe_points(int requested_safe_point_kind);
