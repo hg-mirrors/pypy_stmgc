@@ -171,7 +171,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 #endif
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
     STM_PSEGMENT->threadlocal_at_start_of_transaction = tl->thread_local_obj;
-    STM_SEGMENT->nursery_end = NURSERY_END;
+    assert(STM_SEGMENT->nursery_end == NURSERY_END);
 
     dprintf(("start_transaction\n"));
 
@@ -478,11 +478,27 @@ static void abort_with_mutex(void)
        contention.c, we use a broadcast, to make sure that all threads are
        signalled, including the one that requested an abort, if any.
        Moreover, we wake up any thread waiting for this one to do a safe
-       point, if any.
+       point, if any (in _finish_transaction above).  Finally, it's
+       possible that we reach this place from the middle of a piece of
+       code like wait_for_other_safe_points() which ends in broadcasting
+       C_RESUME; we must make sure to broadcast it.
     */
     cond_broadcast(C_RELEASE_THREAD_SEGMENT);
+    cond_broadcast(C_RESUME);
 
     mutex_unlock();
+
+    /* It seems to be a good idea, at least in some examples, to sleep
+       one microsecond here before retrying.  Otherwise, what was
+       observed is that the transaction very often restarts too quickly
+       for contention.c to react, and before it can do anything, we have
+       again recreated in this thread a similar situation to the one
+       that caused contention.  Anyway, usleep'ing in case of abort
+       doesn't seem like a very bad idea.  If there are more threads
+       than segments, it should also make sure another thread gets the
+       segment next.
+    */
+    usleep(1);
 
     assert(jmpbuf_ptr != NULL);
     assert(jmpbuf_ptr != (stm_jmpbuf_t *)-1);    /* for tests only */

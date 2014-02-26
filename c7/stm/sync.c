@@ -323,6 +323,7 @@ static void collectable_safe_point(void)
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
 
     while (STM_SEGMENT->nursery_end == NSE_SIGNAL) {
+        dprintf(("collectable_safe_point...\n"));
         STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
         STM_SEGMENT->nursery_end = NURSERY_END;
 
@@ -334,4 +335,5 @@ static void collectable_safe_point(void)
 
         STM_PSEGMENT->safe_point = SP_RUNNING;
     }
+    dprintf(("collectable_safe_point done\n"));
 }
