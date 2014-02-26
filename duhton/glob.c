@@ -147,12 +147,12 @@ DuObject *du_xor(DuObject *cons, DuObject *locals)
     /* _du_read1(cons); IMMUTABLE */
     DuObject *expr = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
-        
+
     _du_save2(next, locals);
     DuObject *obj = Du_Eval(expr, locals);
     result = DuInt_AsInt(obj);
     _du_restore2(next, locals);
-    
+
     cons = next;
 
     while (cons != Du_None) {
@@ -167,7 +167,7 @@ DuObject *du_xor(DuObject *cons, DuObject *locals)
 
         cons = next;
     }
-    
+
     return DuInt_FromInt(result);
 }
 
@@ -177,12 +177,12 @@ DuObject *du_lshift(DuObject *cons, DuObject *locals)
     /* _du_read1(cons); IMMUTABLE */
     DuObject *expr = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
-        
+
     _du_save2(next, locals);
     DuObject *obj = Du_Eval(expr, locals);
     result = DuInt_AsInt(obj);
     _du_restore2(next, locals);
-    
+
     cons = next;
 
     while (cons != Du_None) {
@@ -197,7 +197,7 @@ DuObject *du_lshift(DuObject *cons, DuObject *locals)
 
         cons = next;
     }
-    
+
     return DuInt_FromInt(result);
 }
 
@@ -207,12 +207,12 @@ DuObject *du_rshift(DuObject *cons, DuObject *locals)
     /* _du_read1(cons); IMMUTABLE */
     DuObject *expr = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
-        
+
     _du_save2(next, locals);
     DuObject *obj = Du_Eval(expr, locals);
     result = DuInt_AsInt(obj);
     _du_restore2(next, locals);
-    
+
     cons = next;
 
     while (cons != Du_None) {
@@ -227,7 +227,7 @@ DuObject *du_rshift(DuObject *cons, DuObject *locals)
 
         cons = next;
     }
-    
+
     return DuInt_FromInt(result);
 }
 
@@ -686,14 +686,14 @@ DuObject *du_run_transactions(DuObject *cons, DuObject *locals)
         Du_FatalError("run-transactions: expected no argument");
 
     _du_save1(stm_thread_local_obj);
-    _stm_minor_collect();       /* hack... */
+    stm_collect(0);       /* hack... */
     _du_restore1(stm_thread_local_obj);
-    
-    stm_stop_transaction();
-    
+
+    stm_commit_transaction();
+
     Du_TransactionRun();
-    
-    stm_start_inevitable_transaction();
+
+    stm_start_inevitable_transaction(&stm_thread_local);
     return Du_None;
 }
 
@@ -718,7 +718,7 @@ DuObject *du_time(DuObject *cons, DuObject *locals)
     long mtime;
 
     gettimeofday(&current, NULL);
-    
+
     mtime = ((current.tv_sec) * 1000 + current.tv_usec/1000.0) + 0.5;
     return DuInt_FromInt(mtime & 0x7fffffff); /* make it always positive 32bit */
 }
@@ -771,15 +771,17 @@ extern void init_prebuilt_transaction_objects(void);
 void Du_Initialize(int num_threads)
 {
     stm_setup();
-    stm_setup_pthread();
+    stm_register_thread_local(&stm_thread_local);
 
-    stm_start_inevitable_transaction();
+    stm_start_inevitable_transaction(&stm_thread_local);
 
+    /* allocate old and push on shadowstack: */
     init_prebuilt_object_objects();
     init_prebuilt_symbol_objects();
     init_prebuilt_list_objects();
     init_prebuilt_frame_objects();
     init_prebuilt_transaction_objects();
+    /* prebuilt objs stay on the shadowstack forever */
 
     all_threads_count = num_threads;
     all_threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);
@@ -827,11 +829,11 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "pair?", du_pair);
     DuFrame_SetBuiltinMacro(Du_Globals, "assert", du_assert);
     DuFrame_SetSymbolStr(Du_Globals, "None", Du_None);
-    stm_stop_transaction();
+    stm_commit_transaction();
 }
 
 void Du_Finalize(void)
 {
-    stm_teardown_pthread();
+    stm_unregister_thread_local(&stm_thread_local);
     stm_teardown();
 }

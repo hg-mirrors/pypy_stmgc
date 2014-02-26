@@ -2,7 +2,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
-
+__thread stm_thread_local_t stm_thread_local;
 static DuConsObject *du_pending_transactions;
 
 void init_prebuilt_transaction_objects(void)
@@ -10,10 +10,12 @@ void init_prebuilt_transaction_objects(void)
     assert(Du_None);   /* already created */
 
     du_pending_transactions = (DuConsObject *)
-        stm_allocate_prebuilt(sizeof(DuConsObject));
+        _stm_allocate_old(sizeof(DuConsObject));
     du_pending_transactions->ob_base.type_id = DUTYPE_CONS;
     du_pending_transactions->car = NULL;
     du_pending_transactions->cdr = Du_None;
+
+    _du_save1(du_pending_transactions);
 };
 
 static pthread_mutex_t mutex_sleep = PTHREAD_MUTEX_INITIALIZER;
@@ -61,14 +63,14 @@ void Du_TransactionRun(void)
     if (stm_thread_local_obj == NULL)
         return;
 
-    stm_start_inevitable_transaction();
-    
+    stm_start_inevitable_transaction(&stm_thread_local);
+
     DuConsObject *root = du_pending_transactions;
     _du_write1(root);
     root->cdr = stm_thread_local_obj;
-    
-    stm_stop_transaction();
-    
+
+    stm_commit_transaction();
+
     stm_thread_local_obj = NULL;
 
     run_all_threads();
@@ -79,18 +81,15 @@ void Du_TransactionRun(void)
 static DuObject *next_cell(void)
 {
     DuObject *pending = stm_thread_local_obj;
-    jmpbufptr_t here;
 
     if (pending == NULL) {
         /* fish from the global list of pending transactions */
         DuConsObject *root;
 
-        while (__builtin_setjmp(here) == 1) { }
       restart:
-        // stm_start_transaction(&here);
         /* this code is critical enough so that we want it to
            be serialized perfectly using inevitable transactions */
-        stm_start_inevitable_transaction();
+        stm_start_inevitable_transaction(&stm_thread_local);
 
         root = du_pending_transactions;
         _du_read1(root);        /* not immutable... */
@@ -103,12 +102,12 @@ static DuObject *next_cell(void)
             DuObject *result = _DuCons_CAR(cell);
             root->cdr = _DuCons_NEXT(cell);
 
-            stm_stop_transaction();
+            stm_commit_transaction();
 
             return result;
         }
         else {
-            stm_stop_transaction();
+            stm_commit_transaction();
 
             /* nothing to do, wait */
             int ts = __sync_add_and_fetch(&thread_sleeping, 1);
@@ -134,10 +133,8 @@ static DuObject *next_cell(void)
     /* we have at least one thread-local transaction pending */
     stm_thread_local_obj = NULL;
 
-    while (__builtin_setjmp(here) == 1) { }
-    //stm_start_transaction(&here);
-    stm_start_inevitable_transaction();
-    
+    stm_start_inevitable_transaction(&stm_thread_local);
+
     /* _du_read1(pending); IMMUTABLE */
     DuObject *result = _DuCons_CAR(pending);
     DuObject *next = _DuCons_NEXT(pending);
@@ -161,7 +158,7 @@ static DuObject *next_cell(void)
         root->cdr = next;
     }
 
-    stm_stop_transaction();
+    stm_commit_transaction();
 
     return result;
 }
@@ -175,8 +172,8 @@ void run_transaction(DuObject *cell)
 
 void *run_thread(void *thread_id)
 {
-    jmpbufptr_t here;
-    stm_setup_pthread();
+    stm_jmpbuf_t here;
+    stm_register_thread_local(&stm_thread_local);
 
     stm_thread_local_obj = NULL;
 
@@ -186,20 +183,19 @@ void *run_thread(void *thread_id)
             break;
         assert(stm_thread_local_obj == NULL);
 
-        while (__builtin_setjmp(here) == 1) { }
-        stm_start_transaction(&here);
-        
+        STM_START_TRANSACTION(&stm_thread_local, here);
+
         run_transaction(cell);
-        
+
         _du_save1(stm_thread_local_obj);
-        _stm_minor_collect();   /* hack.. */
+        stm_collect(0);   /* hack.. */
         _du_restore1(stm_thread_local_obj);
-        
-        stm_stop_transaction();
+
+        stm_commit_transaction();
 
     }
 
-    stm_teardown_pthread();
+    stm_unregister_thread_local(&stm_thread_local);
 
     return NULL;
 }
