@@ -213,11 +213,15 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
    Use the macro STM_START_TRANSACTION() to start a transaction that
    can be restarted using the 'jmpbuf' (a local variable of type
    stm_jmpbuf_t). */
-#define STM_START_TRANSACTION(tl, jmpbuf)  ({           \
-    int _restart = __builtin_setjmp(jmpbuf);            \
-    _stm_start_transaction(tl, &jmpbuf);                \
-   _restart;                                            \
+#define STM_START_TRANSACTION(tl, jmpbuf)  ({                   \
+    int _restart = __builtin_setjmp(jmpbuf) ? _stm_duck() : 0;  \
+    _stm_start_transaction(tl, &jmpbuf);                        \
+   _restart;                                                    \
 })
+static inline int _stm_duck(void) {
+    asm("/* workaround for a llvm bug */");
+    return 1;
+}
 
 /* Start an inevitable transaction, if it's going to return from the
    current function immediately. */
