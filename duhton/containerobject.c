@@ -1,14 +1,14 @@
 #include "duhton.h"
 
-typedef struct {
-    DuOBJECT_HEAD
+typedef TLPREFIX struct DuContainerObject_s {
+    DuOBJECT_HEAD1
     DuObject *ob_reference;
 } DuContainerObject;
 
 
-void container_trace(DuContainerObject *ob, void visit(gcptr *))
+void container_trace(struct DuContainerObject_s *ob, void visit(object_t **))
 {
-    visit(&ob->ob_reference);
+    visit((object_t **)&ob->ob_reference);
 }
 
 void container_print(DuContainerObject *ob)

@@ -1,18 +1,26 @@
 #ifndef _DUHTON_H_
 #define _DUHTON_H_
 
-#include "../c4/stmgc.h"
-#include "../c4/fprintcolor.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include "../c7/stmgc.h"
+
+#define STM 1                   /* hackish removal of all read/write
+                                   barriers. synchronization is up to
+                                   the program */
+#define DEFAULT_NUM_THREADS 2
+
+extern __thread stm_thread_local_t stm_thread_local;
+
+struct DuObject_s {
+    struct object_s header;
+    uint32_t type_id;
+};
+typedef TLPREFIX struct DuObject_s DuObject;
 
 
-typedef struct stm_object_s DuObject;
-
-#define DuOBJECT_HEAD   DuObject ob_base;
-
-#define DuOBJECT_HEAD_INIT(type)   { type | PREBUILT_FLAGS, PREBUILT_REVISION }
+#define DuOBJECT_HEAD1   struct DuObject_s ob_base;
 
 
 #ifdef __GNUC__
@@ -22,8 +30,8 @@ typedef struct stm_object_s DuObject;
 #endif
 
 
-typedef void(*trace_fn)(DuObject *, void visit(gcptr *));
-typedef size_t(*bytesize_fn)(DuObject *);
+typedef void(*trace_fn)(struct DuObject_s *, void visit(object_t **));
+typedef size_t(*bytesize_fn)(struct DuObject_s *);
 typedef void(*print_fn)(DuObject *);
 typedef DuObject *(*eval_fn)(DuObject *, DuObject *);
 typedef int(*len_fn)(DuObject *);
@@ -65,16 +73,17 @@ extern DuType DuContainer_Type;
 
 extern DuType *Du_Types[_DUTYPE_TOTAL];
 
+#define ROUND_UP(size)  ((size) < 16 ? 16 : ((size) + 7) & ~7)
+
 
 DuObject *DuObject_New(DuType *tp);
 int DuObject_IsTrue(DuObject *ob);
 int DuObject_Length(DuObject *ob);
 
 
-extern DuObject _Du_NoneStruct;
-#define Du_None (&_Du_NoneStruct)
+extern DuObject *Du_None;
 
-#define _DuObject_TypeNum(ob) stm_get_tid((DuObject*)(ob))
+#define _DuObject_TypeNum(ob) (((DuObject*)(ob))->type_id)
 #define Du_TYPE(ob)           (Du_Types[_DuObject_TypeNum(ob)])
 #define DuInt_Check(ob)       (_DuObject_TypeNum(ob) == DUTYPE_INT)
 #define DuSymbol_Check(ob)    (_DuObject_TypeNum(ob) == DUTYPE_SYMBOL)
@@ -107,9 +116,10 @@ void DuContainer_SetRef(DuObject *container, DuObject *newobj);
 
 DuObject *DuSymbol_FromString(const char *name);
 char *DuSymbol_AsString(DuObject *ob);
+int DuSymbol_Id(DuObject *ob);
 
-typedef struct {
-    DuOBJECT_HEAD
+typedef TLPREFIX struct DuConsObject_s {
+    DuOBJECT_HEAD1
     DuObject *car, *cdr;
 } DuConsObject;
 
@@ -136,11 +146,10 @@ void DuFrame_SetUserFunction(DuObject *frame, DuObject *symbol,
                              DuObject *arglist, DuObject *progn);
 DuObject *_DuFrame_EvalCall(DuObject *frame, DuObject *symbol,
                             DuObject *rest, int execute_now);
-DuObject *_Du_GetGlobals(void);
 
 void Du_Initialize(int);
 void Du_Finalize(void);
-#define Du_Globals        (_Du_GetGlobals())
+extern DuObject *Du_Globals;
 
 void Du_TransactionAdd(DuObject *code, DuObject *frame);
 void Du_TransactionRun(void);
@@ -152,6 +161,11 @@ void Du_TransactionRun(void);
 #define _du_save3(p1,p2,p3)     (_push_root((DuObject *)(p1)),  \
                                  _push_root((DuObject *)(p2)),  \
                                  _push_root((DuObject *)(p3)))
+#define _du_save4(p1,p2,p3,p4)  (_push_root((DuObject *)(p1)), \
+                                 _push_root((DuObject *)(p2)),          \
+                                 _push_root((DuObject *)(p3)),          \
+                                 _push_root((DuObject *)(p4)))
+
 
 #define _du_restore1(p1)        (p1 = (typeof(p1))_pop_root())
 #define _du_restore2(p1,p2)     (p2 = (typeof(p2))_pop_root(),  \
@@ -159,30 +173,48 @@ void Du_TransactionRun(void);
 #define _du_restore3(p1,p2,p3)  (p3 = (typeof(p3))_pop_root(),  \
                                  p2 = (typeof(p2))_pop_root(),  \
                                  p1 = (typeof(p1))_pop_root())
+#define _du_restore4(p1,p2,p3,p4)(p4 = (typeof(p4))_pop_root(), \
+                                  p3 = (typeof(p3))_pop_root(),         \
+                                  p2 = (typeof(p2))_pop_root(),         \
+                                  p1 = (typeof(p1))_pop_root())
 
-#define _du_read1(p1)    (p1 = (typeof(p1))stm_read_barrier((DuObject *)(p1)))
-#define _du_write1(p1)   (p1 = (typeof(p1))stm_write_barrier((DuObject *)(p1)))
 
-
-#ifdef NDEBUG
-# define _push_root(ob)     stm_push_root(ob)
-# define _pop_root()        stm_pop_root()
+#if STM
+#define _du_read1(p1)           stm_read((object_t *)(p1))
+#define _du_write1(p1)          stm_write((object_t *)(p1))
 #else
+#define _du_read1(p1)
+#define _du_write1(p1)          {                                       \
+    if (UNLIKELY(((object_t *)(p1))->stm_flags & GCFLAG_WRITE_BARRIER)) { \
+        LIST_APPEND(_STM_TL->old_objects_to_trace, ((object_t *)(p1))); \
+        ((object_t *)(p1))->stm_flags &= ~GCFLAG_WRITE_BARRIER;         \
+    }}
+#endif
+
+
+#ifndef NDEBUG
 # define _check_not_free(ob)                                    \
-    assert(stm_get_tid((DuObject *)(ob)) > DUTYPE_INVALID &&    \
-           stm_get_tid((DuObject *)(ob)) < _DUTYPE_TOTAL)
-static inline void _push_root(gcptr ob) {
+    assert(_DuObject_TypeNum(ob) > DUTYPE_INVALID && \
+           _DuObject_TypeNum(ob) < _DUTYPE_TOTAL)
+#endif
+
+static inline void _push_root(DuObject *ob) {
+    #ifndef NDEBUG
     if (ob) _check_not_free(ob);
-    stm_push_root(ob);
+    #endif
+    STM_PUSH_ROOT(stm_thread_local, ob);
 }
-static inline gcptr _pop_root(void) {
-    gcptr ob = stm_pop_root();
+static inline object_t *_pop_root(void) {
+    object_t *ob;
+    STM_POP_ROOT(stm_thread_local, ob);
+    #ifndef NDEBUG
     if (ob) _check_not_free(ob);
+    #endif
     return ob;
 }
-#endif
 
 extern pthread_t *all_threads;
 extern int all_threads_count;
 
+extern __thread DuObject *stm_thread_local_obj;  /* XXX temp */
 #endif  /* _DUHTON_H_ */

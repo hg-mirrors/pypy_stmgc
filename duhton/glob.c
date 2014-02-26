@@ -1,5 +1,6 @@
 #include "duhton.h"
 #include <sys/select.h>
+#include <sys/time.h>
 
 pthread_t *all_threads;
 int all_threads_count;
@@ -11,7 +12,7 @@ static void _du_getargs1(const char *name, DuObject *cons, DuObject *locals,
 
     if (cons == Du_None) goto error;
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     expr1 = _DuCons_CAR(cons);
     cons = _DuCons_NEXT(cons);
     if (cons != Du_None) goto error;
@@ -31,12 +32,12 @@ static void _du_getargs2(const char *name, DuObject *cons, DuObject *locals,
 
     if (cons == Du_None) goto error;
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     expr1 = _DuCons_CAR(cons);
     cons = _DuCons_NEXT(cons);
     if (cons == Du_None) goto error;
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     expr2 = _DuCons_CAR(cons);
     cons = _DuCons_NEXT(cons);
     if (cons != Du_None) goto error;
@@ -64,7 +65,7 @@ DuObject *Du_Progn(DuObject *cons, DuObject *locals)
 {
     DuObject *result = Du_None;
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
         _du_save2(next, locals);
@@ -79,12 +80,12 @@ DuObject *du_setq(DuObject *cons, DuObject *locals)
 {
     DuObject *result = Du_None;
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *symbol = _DuCons_CAR(cons);
         cons = _DuCons_NEXT(cons);
         if (cons == Du_None)
             Du_FatalError("setq: number of arguments is odd");
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -109,7 +110,7 @@ DuObject *du_print(DuObject *cons, DuObject *locals)
     _du_restore2(cons, locals);
 
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -140,11 +141,101 @@ DuObject *du_print(DuObject *cons, DuObject *locals)
     return Du_None;
 }
 
+DuObject *du_xor(DuObject *cons, DuObject *locals)
+{
+    int result = 0;
+    /* _du_read1(cons); IMMUTABLE */
+    DuObject *expr = _DuCons_CAR(cons);
+    DuObject *next = _DuCons_NEXT(cons);
+
+    _du_save2(next, locals);
+    DuObject *obj = Du_Eval(expr, locals);
+    result = DuInt_AsInt(obj);
+    _du_restore2(next, locals);
+
+    cons = next;
+
+    while (cons != Du_None) {
+        /* _du_read1(cons); IMMUTABLE */
+        expr = _DuCons_CAR(cons);
+        next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        obj = Du_Eval(expr, locals);
+        result ^= DuInt_AsInt(obj);
+        _du_restore2(next, locals);
+
+        cons = next;
+    }
+
+    return DuInt_FromInt(result);
+}
+
+DuObject *du_lshift(DuObject *cons, DuObject *locals)
+{
+    int result = 0;
+    /* _du_read1(cons); IMMUTABLE */
+    DuObject *expr = _DuCons_CAR(cons);
+    DuObject *next = _DuCons_NEXT(cons);
+
+    _du_save2(next, locals);
+    DuObject *obj = Du_Eval(expr, locals);
+    result = DuInt_AsInt(obj);
+    _du_restore2(next, locals);
+
+    cons = next;
+
+    while (cons != Du_None) {
+        /* _du_read1(cons); IMMUTABLE */
+        expr = _DuCons_CAR(cons);
+        next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        obj = Du_Eval(expr, locals);
+        result <<= DuInt_AsInt(obj);
+        _du_restore2(next, locals);
+
+        cons = next;
+    }
+
+    return DuInt_FromInt(result);
+}
+
+DuObject *du_rshift(DuObject *cons, DuObject *locals)
+{
+    int result = 0;
+    /* _du_read1(cons); IMMUTABLE */
+    DuObject *expr = _DuCons_CAR(cons);
+    DuObject *next = _DuCons_NEXT(cons);
+
+    _du_save2(next, locals);
+    DuObject *obj = Du_Eval(expr, locals);
+    result = DuInt_AsInt(obj);
+    _du_restore2(next, locals);
+
+    cons = next;
+
+    while (cons != Du_None) {
+        /* _du_read1(cons); IMMUTABLE */
+        expr = _DuCons_CAR(cons);
+        next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        obj = Du_Eval(expr, locals);
+        result >>= DuInt_AsInt(obj);
+        _du_restore2(next, locals);
+
+        cons = next;
+    }
+
+    return DuInt_FromInt(result);
+}
+
 DuObject *du_add(DuObject *cons, DuObject *locals)
 {
     int result = 0;
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -163,7 +254,7 @@ DuObject *du_sub(DuObject *cons, DuObject *locals)
     int result = 0;
     int sign = 1;
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -182,7 +273,7 @@ DuObject *du_mul(DuObject *cons, DuObject *locals)
 {
     int result = 1;
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -202,7 +293,7 @@ DuObject *du_div(DuObject *cons, DuObject *locals)
     int first = 1;
 
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -221,6 +312,32 @@ DuObject *du_div(DuObject *cons, DuObject *locals)
     return DuInt_FromInt(result);
 }
 
+DuObject *du_mod(DuObject *cons, DuObject *locals)
+{
+    int result = 0;
+    int first = 1;
+
+    while (cons != Du_None) {
+        /* _du_read1(cons); IMMUTABLE */
+        DuObject *expr = _DuCons_CAR(cons);
+        DuObject *next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        DuObject *obj = Du_Eval(expr, locals);
+        if (first) {
+            result = DuInt_AsInt(obj);
+            first = 0;
+        } else {
+            result %= DuInt_AsInt(obj);
+        }
+        _du_restore2(next, locals);
+
+        cons = next;
+    }
+    return DuInt_FromInt(result);
+}
+
+
 static DuObject *_du_intcmp(DuObject *cons, DuObject *locals, int mode)
 {
     DuObject *obj_a, *obj_b;
@@ -236,6 +353,8 @@ static DuObject *_du_intcmp(DuObject *cons, DuObject *locals, int mode)
     case 3: r = a != b; break;
     case 4: r = a > b; break;
     case 5: r = a >= b; break;
+    case 6: r = a && b; break;
+    case 7: r = a || b; break;
     }
     return DuInt_FromInt(r);
 }
@@ -252,6 +371,12 @@ DuObject *du_gt(DuObject *cons, DuObject *locals)
 { return _du_intcmp(cons, locals, 4); }
 DuObject *du_ge(DuObject *cons, DuObject *locals)
 { return _du_intcmp(cons, locals, 5); }
+DuObject *du_and(DuObject *cons, DuObject *locals)
+{ return _du_intcmp(cons, locals, 6); }
+DuObject *du_or(DuObject *cons, DuObject *locals)
+{ return _du_intcmp(cons, locals, 7); }
+
+
 
 DuObject *du_type(DuObject *cons, DuObject *locals)
 {
@@ -263,7 +388,7 @@ DuObject *du_type(DuObject *cons, DuObject *locals)
 
 DuObject *du_quote(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
         Du_FatalError("quote: expected one argument");
     return _DuCons_CAR(cons);
@@ -275,7 +400,7 @@ DuObject *du_list(DuObject *cons, DuObject *locals)
     DuObject *list = DuList_New();
     _du_restore2(cons, locals);
     while (cons != Du_None) {
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         DuObject *expr = _DuCons_CAR(cons);
         DuObject *next = _DuCons_NEXT(cons);
 
@@ -301,10 +426,7 @@ DuObject *du_container(DuObject *cons, DuObject *locals)
     else
         _du_getargs1("container", cons, locals, &obj);
 
-    _du_save2(cons, locals);
     DuObject *container = DuContainer_New(obj);
-    _du_restore2(cons, locals);
-
     return container;
 }
 
@@ -313,7 +435,7 @@ DuObject *du_get(DuObject *cons, DuObject *locals)
     if (cons == Du_None)
         Du_FatalError("get: expected at least one argument");
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     DuObject *expr = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
 
@@ -322,7 +444,7 @@ DuObject *du_get(DuObject *cons, DuObject *locals)
     _du_restore2(next, locals);
 
     if (DuList_Check(obj)) {
-        _du_read1(next);
+        /* _du_read1(next); IMMUTABLE */
         if (next == Du_None || _DuCons_NEXT(next) != Du_None)
             Du_FatalError("get with a list: expected two arguments");
 
@@ -344,7 +466,7 @@ DuObject *du_get(DuObject *cons, DuObject *locals)
 
 DuObject *du_set(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     if (cons == Du_None || _DuCons_NEXT(cons) == Du_None)
         Du_FatalError("set: expected at least two arguments");
 
@@ -355,12 +477,12 @@ DuObject *du_set(DuObject *cons, DuObject *locals)
     DuObject *obj = Du_Eval(expr, locals);
     _du_restore2(next, locals);
 
-    _du_read1(next);
+    /* _du_read1(next); IMMUTABLE */
     DuObject *expr2 = _DuCons_CAR(next);
     DuObject *next2 = _DuCons_NEXT(next);
 
     if (DuList_Check(obj)) {
-        _du_read1(next2);
+        /* _du_read1(next2); IMMUTABLE */
         if (next2 == Du_None || _DuCons_NEXT(next2) != Du_None)
             Du_FatalError("set with a list: expected three arguments");
 
@@ -395,8 +517,10 @@ DuObject *du_append(DuObject *cons, DuObject *locals)
     DuObject *lst, *newobj;
     _du_getargs2("append", cons, locals, &lst, &newobj);
 
+    _du_save1(lst);
     DuList_Append(lst, newobj);
-    return newobj;
+    _du_restore1(lst);
+    return lst;
 }
 
 DuObject *du_pop(DuObject *cons, DuObject *locals)
@@ -404,7 +528,7 @@ DuObject *du_pop(DuObject *cons, DuObject *locals)
     if (cons == Du_None)
         Du_FatalError("pop: expected at least one argument");
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     DuObject *expr = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
 
@@ -419,7 +543,7 @@ DuObject *du_pop(DuObject *cons, DuObject *locals)
             Du_FatalError("pop: empty list");
     }
     else {
-        _du_read1(next);
+        /* _du_read1(next); IMMUTABLE */
         DuObject *expr2 = _DuCons_CAR(next);
         DuObject *next2 = _DuCons_NEXT(next);
 
@@ -447,7 +571,7 @@ DuObject *du_len(DuObject *cons, DuObject *locals)
 
 DuObject *du_if(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     if (cons == Du_None || _DuCons_NEXT(cons) == Du_None)
         Du_FatalError("if: expected at least two arguments");
 
@@ -458,7 +582,7 @@ DuObject *du_if(DuObject *cons, DuObject *locals)
     DuObject *cond = Du_Eval(expr, locals);
     _du_restore2(next, locals);
 
-    _du_read1(next);
+    /* _du_read1(next); IMMUTABLE */
     if (DuObject_IsTrue(cond) != 0) {
         /* true path */
         return Du_Eval(_DuCons_CAR(next), locals);
@@ -474,7 +598,7 @@ DuObject *du_while(DuObject *cons, DuObject *locals)
     if (cons == Du_None)
         Du_FatalError("while: expected at least one argument");
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     DuObject *expr = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
 
@@ -495,14 +619,14 @@ DuObject *du_while(DuObject *cons, DuObject *locals)
 
 DuObject *du_defun(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     if (cons == Du_None || _DuCons_NEXT(cons) == Du_None)
         Du_FatalError("defun: expected at least two arguments");
 
     DuObject *name = _DuCons_CAR(cons);
     DuObject *next = _DuCons_NEXT(cons);
 
-    _du_read1(next);
+    /* _du_read1(next); IMMUTABLE */
     DuObject *arglist = _DuCons_CAR(next);
     DuObject *progn = _DuCons_NEXT(next);
 
@@ -549,10 +673,27 @@ DuObject *du_transaction(DuObject *cons, DuObject *locals)
     if (cons == Du_None)
         Du_FatalError("transaction: expected at least one argument");
 
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     DuObject *sym = _DuCons_CAR(cons);
     DuObject *rest = _DuCons_NEXT(cons);
     _DuFrame_EvalCall(locals, sym, rest, 0);
+    return Du_None;
+}
+
+DuObject *du_run_transactions(DuObject *cons, DuObject *locals)
+{
+    if (cons != Du_None)
+        Du_FatalError("run-transactions: expected no argument");
+
+    _du_save1(stm_thread_local_obj);
+    stm_collect(0);       /* hack... */
+    _du_restore1(stm_thread_local_obj);
+
+    stm_commit_transaction();
+
+    Du_TransactionRun();
+
+    stm_start_inevitable_transaction(&stm_thread_local);
     return Du_None;
 }
 
@@ -571,9 +712,21 @@ DuObject *du_sleepms(DuObject *cons, DuObject *locals)
     return Du_None;
 }
 
+DuObject *du_time(DuObject *cons, DuObject *locals)
+{
+    struct timeval current;
+    long mtime;
+
+    gettimeofday(&current, NULL);
+
+    mtime = ((current.tv_sec) * 1000 + current.tv_usec/1000.0) + 0.5;
+    return DuInt_FromInt(mtime & 0x7fffffff); /* make it always positive 32bit */
+}
+
+
 DuObject *du_defined(DuObject *cons, DuObject *locals)
 {
-    _du_read1(cons);
+    /* _du_read1(cons); IMMUTABLE */
     if (cons == Du_None || _DuCons_NEXT(cons) != Du_None)
         Du_FatalError("defined?: expected one argument");
     DuObject *ob = _DuCons_CAR(cons);
@@ -602,16 +755,34 @@ DuObject *du_assert(DuObject *cons, DuObject *locals)
 
     if (!DuInt_AsInt(obj)) {
         printf("assert failed: ");
-        _du_read1(cons);
+        /* _du_read1(cons); IMMUTABLE */
         Du_Print(_DuCons_CAR(cons), 1);
         Du_FatalError("assert failed");
     }
     return Du_None;
 }
 
+extern void init_prebuilt_frame_objects(void);
+extern void init_prebuilt_list_objects(void);
+extern void init_prebuilt_object_objects(void);
+extern void init_prebuilt_symbol_objects(void);
+extern void init_prebuilt_transaction_objects(void);
+
 void Du_Initialize(int num_threads)
 {
-    stm_initialize();
+    stm_setup();
+    stm_register_thread_local(&stm_thread_local);
+
+    stm_start_inevitable_transaction(&stm_thread_local);
+
+    /* allocate old and push on shadowstack: */
+    init_prebuilt_object_objects();
+    init_prebuilt_symbol_objects();
+    init_prebuilt_list_objects();
+    init_prebuilt_frame_objects();
+    init_prebuilt_transaction_objects();
+    /* prebuilt objs stay on the shadowstack forever */
+
     all_threads_count = num_threads;
     all_threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);
 
@@ -619,9 +790,15 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "setq", du_setq);
     DuFrame_SetBuiltinMacro(Du_Globals, "print", du_print);
     DuFrame_SetBuiltinMacro(Du_Globals, "+", du_add);
+    DuFrame_SetBuiltinMacro(Du_Globals, "^", du_xor);
+    DuFrame_SetBuiltinMacro(Du_Globals, "<<", du_lshift);
+    DuFrame_SetBuiltinMacro(Du_Globals, ">>", du_rshift);
+    DuFrame_SetBuiltinMacro(Du_Globals, "%", du_mod);
     DuFrame_SetBuiltinMacro(Du_Globals, "-", du_sub);
     DuFrame_SetBuiltinMacro(Du_Globals, "*", du_mul);
     DuFrame_SetBuiltinMacro(Du_Globals, "/", du_div);
+    DuFrame_SetBuiltinMacro(Du_Globals, "||", du_or);
+    DuFrame_SetBuiltinMacro(Du_Globals, "&&", du_and);
     DuFrame_SetBuiltinMacro(Du_Globals, "<", du_lt);
     DuFrame_SetBuiltinMacro(Du_Globals, "<=", du_le);
     DuFrame_SetBuiltinMacro(Du_Globals, "==", du_eq);
@@ -645,14 +822,18 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "cons", du_cons);
     DuFrame_SetBuiltinMacro(Du_Globals, "not", du_not);
     DuFrame_SetBuiltinMacro(Du_Globals, "transaction", du_transaction);
+    DuFrame_SetBuiltinMacro(Du_Globals, "run-transactions", du_run_transactions);
     DuFrame_SetBuiltinMacro(Du_Globals, "sleepms", du_sleepms);
+    DuFrame_SetBuiltinMacro(Du_Globals, "time", du_time);
     DuFrame_SetBuiltinMacro(Du_Globals, "defined?", du_defined);
     DuFrame_SetBuiltinMacro(Du_Globals, "pair?", du_pair);
     DuFrame_SetBuiltinMacro(Du_Globals, "assert", du_assert);
     DuFrame_SetSymbolStr(Du_Globals, "None", Du_None);
+    stm_commit_transaction();
 }
 
 void Du_Finalize(void)
 {
-    stm_finalize();
+    stm_unregister_thread_local(&stm_thread_local);
+    stm_teardown();
 }

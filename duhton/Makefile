@@ -1,11 +1,20 @@
 
-all: duhton_debug duhton
+C7SOURCES = ../c7/stmgc.c ../c7/stm/*.c
 
-duhton: *.c *.h ../c4/*.c ../c4/*.h
-	gcc -pthread -g -O2 -o duhton *.c ../c4/stmgc.c -Wall -lrt 
+C7HEADERS = ../c7/stmgc.h ../c7/stm/*.h
 
-duhton_debug: *.c *.h ../c4/*.c ../c4/*.h
-	gcc -pthread -g -DDu_DEBUG -D_GC_DEBUGPRINTS=1 -DGC_NURSERY=2048 -o duhton_debug *.c ../c4/stmgc.c -Wall -lrt 
+
+all: duhton_debug duhton 
+
+duhton: *.c *.h $(C7SOURCES) $(C7HEADERS)
+	clang -pthread -g -O2 -o duhton *.c ../c7/stmgc.c -Wall
+
+duhton_release: *.c *.h $(C7SOURCES) $(C7HEADERS)
+	clang -pthread -g -DNDEBUG -O2 -o duhton_release *.c ../c7/stmgc.c -Wall
+
+
+duhton_debug: *.c *.h $(C7SOURCES) $(C7HEADERS)
+	clang -DSTM_DEBUGPRINT -pthread -g -DDu_DEBUG -o duhton_debug *.c ../c7/stmgc.c -Wall
 
 clean:
-	rm -f duhton duhton_debug
+	rm -f duhton duhton_debug duhton_release

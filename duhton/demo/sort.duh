@@ -1,0 +1,197 @@
+
+
+
+
+(setq c (container (list 1 2 3 4)))
+
+
+(setq _rand (container (list 133542157 362436069 521288629 88675123)))
+(defun xor128 ()
+  (setq lst (get _rand))
+  (setq x (get lst 0))
+  (setq y (get lst 1))
+  (setq z (get lst 2))
+  (setq w (get lst 3))
+  
+  (setq t (^ x (<< x 11)))
+  (setq x y)
+  (setq y z)
+  (setq z w)
+
+  (setq w (^ w (^ (>> w 19) (^ t (>> t 8)))))
+  (set lst 0 x)
+  (set lst 1 y)
+  (set lst 2 z)
+  (set lst 3 w)
+  w
+  )
+
+
+(defun random_list (n)
+  (setq i n)
+  (setq res (list))
+  (while (> i 0)
+    (append res (% (xor128) 10))
+    (setq i (- i 1))
+    )
+  res
+  )
+
+
+
+(defun merge_lists (as bs)
+  ;; merges the two lists and returns a new one
+  (setq res (list))
+  (setq idxa 0)
+  (setq idxb 0)
+  (while (&& (< idxa (len as))
+             (< idxb (len bs)))
+    (if (> (get as idxa) (get bs idxb))
+        (progn
+          (append res (get bs idxb))
+          (setq idxb (+ idxb 1))
+          )
+      (append res (get as idxa))
+      (setq idxa (+ idxa 1))
+      )
+    )
+
+  (if (< idxa (len as))
+      (progn
+        (setq xs as)
+        (setq idxx idxa)
+        )
+    (setq xs bs)
+    (setq idxx idxb))
+  
+  (while (< idxx (len xs))
+    (append res (get xs idxx))
+    (setq idxx (+ idxx 1)))
+  
+  res
+  )
+
+
+(defun split_list (xs)
+  ;; empties xs and fills 2 new lists to be returned
+  (setq half_len (/ (len xs) 2))
+  (setq first (list))
+  (setq second (list))
+  (setq xidx 0)
+  
+  (while (< xidx (len xs))
+    (if (< xidx half_len)
+        (append first (get xs xidx))
+      (append second (get xs xidx))
+      )
+    (setq xidx (+ xidx 1))
+    )
+
+  (list first second)
+  )
+
+
+
+(defun merge_sort (xs)
+  (if (<= (len xs) 1)                   ; 1 elem
+      xs
+    (progn                              ; many elems
+      (setq lists (split_list xs))
+      
+      (setq left (merge_sort (get lists 0)))
+      (setq right (merge_sort (get lists 1)))
+      ;; (print left right)
+      (merge_lists left right)
+      )
+    )
+  )
+
+(defun merge_sort_transaction (xs res-cont)
+  (set res-cont (merge_sort xs))
+  )
+
+(defun merge_sort_parallel (xs)
+  (if (<= (len xs) 1)                   ; 1 elem
+      xs
+    (progn                              ; many elems
+      (setq lists (split_list xs))
+      (setq left-c (container None))
+      (setq right-c (container None))
+      
+      (transaction merge_sort_transaction
+                   (get lists 0) left-c)
+      (transaction merge_sort_transaction
+                   (get lists 1) right-c)
+      
+      (setq current (time))
+      (print (quote before-parallel))
+      (run-transactions)
+      (print (quote time-parallel:) (- (time) current))
+      
+      (setq left (get left-c))
+      (setq right (get right-c))
+      (assert (<= (len left) (+ (len right) 2)))
+      (assert (<= (len right) (+ (len left) 2)))
+      ;; (print left right)
+      (merge_lists left right)
+      )
+    )
+  )
+
+
+(defun copy_list (xs)
+  (setq res (list))
+  (setq idx 0)
+  (while (< idx (len xs))
+    (append res (get xs idx))
+    (setq idx (+ idx 1))
+    )
+  res
+  )
+
+(defun print_list (xs)
+  (print (quote len:) (len xs) (quote ->) xs)
+  )
+
+(defun is_sorted (xs)
+  (setq idx 0)
+  (while (< idx (- (len xs) 1))
+    (assert (<=
+             (get xs idx)
+             (get xs (+ idx 1))))
+    (setq idx (+ idx 1))
+    )
+  (quote true)
+  )
+
+
+;; (setq as (random_list 20))
+;; (setq bs (random_list 20))
+;; (print as)
+;; (print bs)
+;; (print (split_list as))
+
+(setq current (time))
+(print (quote before-random))
+(setq cs (random_list 300000))
+(print (quote time-random:) (- (time) current))
+
+;; (print_list cs)
+
+;; (setq res (container None))
+;; (transaction merge_sort_transaction cs res)
+;; (run-transactions)
+;; (print (is_sorted (get res)))
+
+(setq current (time))
+(print (quote before-sorting))
+(setq sorted (merge_sort_parallel cs))
+(print (quote time-sorting:) (- (time) current))
+
+
+(setq current (time))
+(print (quote before-check))
+(print (quote sorted:) (is_sorted sorted))
+(print (quote time-check:) (- (time) current))
+
+

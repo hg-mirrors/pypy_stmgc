@@ -1,0 +1,98 @@
+
+
+
+(defun clean_list (n)
+  (setq i n)
+  (setq res (list))
+  (while (> i 0)
+    (append res 0)
+    (setq i (- i 1))
+    )
+  res
+  )
+
+
+(setq _rand (container (list 133542157 362436069 521288629 88675123)))
+(defun xor128 ()
+  (setq lst (get _rand))
+  (setq x (get lst 0))
+  (setq y (get lst 1))
+  (setq z (get lst 2))
+  (setq w (get lst 3))
+  
+  (setq t (^ x (<< x 11)))
+  (setq x y)
+  (setq y z)
+  (setq z w)
+
+  (setq w (^ w (^ (>> w 19) (^ t (>> t 8)))))
+  (set lst 0 x)
+  (set lst 1 y)
+  (set lst 2 z)
+  (set lst 3 w)
+  w
+  )
+
+
+(defun random_list (n max)
+  (setq i n)
+  (setq res (list))
+  (while (> i 0)
+    (append res (% (xor128) max))
+    (setq i (- i 1))
+    )
+  res
+  )
+
+
+
+
+(defun worker (shared private)
+  (setq i 1)
+  (while (< i 10000)
+    ;; every 200th modification is on 'shared'
+    (if (== (% i 200) 0)
+        (set shared (+ (get shared) 1))
+      (set private (+ (get private) 1))
+      )
+    
+    (setq i (+ i 1))
+    )
+  )
+
+
+
+(setq N 1000)
+;; CONFL_IF_BELOW / RAND_MAX == ratio of conflicting transactions
+;;                              to non conflicting ones
+(setq RAND_MAX 8)
+(setq CONFL_IF_BELOW 1)
+
+(print (quote N:) N)
+(print (quote RAND_MAX:) RAND_MAX)
+(print (quote CONFL_IF_BELOW:) CONFL_IF_BELOW)
+
+(setq timer (time))
+(print (quote setup-transactions:) timer)
+
+(setq shared (container 0))
+(setq rand-list (random_list N RAND_MAX))
+(setq i 0)
+(while (< i N)
+  (setq private (container 0))
+  (if (< (get rand-list i) CONFL_IF_BELOW)
+      ;; conflicting transaction
+      (transaction worker shared private)
+    ;; else non-conflicting
+    (transaction worker private private)
+    )
+
+  (setq i (+ i 1))
+  )
+
+(print (quote setup-time-diff:) (- (time) timer))
+(setq timer (time))
+(run-transactions)
+(print (quote run-time-diff:) (- (time) timer))
+(print (quote shared) (get shared))
+

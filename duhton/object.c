@@ -17,29 +17,31 @@ DuType *Du_Types[_DUTYPE_TOTAL] = {
 
 
 /* callback: get the size of an object */
-size_t stmcb_size(gcptr obj)
+ssize_t stmcb_size_rounded_up(struct object_s *obj)
 {
-    DuType *tp = Du_TYPE(obj);
+    DuType *tp = Du_Types[((struct DuObject_s *)obj)->type_id];
     size_t result = tp->dt_size;
     if (result == 0)
-        result = tp->dt_bytesize(obj);
-    return result;
+        result = tp->dt_bytesize((struct DuObject_s *)obj);
+    return ROUND_UP(result);
 }
 
 /* callback: trace the content of an object */
-void stmcb_trace(gcptr obj, void visit(gcptr *))
+void stmcb_trace(struct object_s *obj, void visit(object_t **))
 {
-    trace_fn trace = Du_TYPE(obj)->dt_trace;
+    DuType *tp = Du_Types[((struct DuObject_s *)obj)->type_id];
+    trace_fn trace = tp->dt_trace;
     if (trace)
-        trace(obj, visit);
+        trace((struct DuObject_s *)obj, visit);
 }
 
 
 DuObject *DuObject_New(DuType *tp)
 {
     assert(tp->dt_size >= sizeof(DuObject));
-    DuObject *ob = stm_allocate(tp->dt_size, tp->dt_typeindex);
+    DuObject *ob = (DuObject *)stm_allocate(ROUND_UP(tp->dt_size));
     assert(ob);
+    ob->type_id = tp->dt_typeindex;
     return ob;
 }
 
@@ -63,8 +65,14 @@ DuType DuNone_Type = {
     none_is_true,
 };
 
-DuObject _Du_NoneStruct =
-    DuOBJECT_HEAD_INIT(DUTYPE_NONE);
+DuObject *Du_None;
+
+void init_prebuilt_object_objects(void)
+{
+    Du_None = (DuObject *)_stm_allocate_old(sizeof(DuObject));
+    Du_None->type_id = DUTYPE_NONE;
+    _du_save1(Du_None);
+}
 
 void Du_FatalError(char *msg, ...)
 {

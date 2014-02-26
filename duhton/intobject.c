@@ -1,19 +1,19 @@
 #include "duhton.h"
 
-typedef struct {
-    DuOBJECT_HEAD
+typedef TLPREFIX struct DuIntObject_s {
+    DuOBJECT_HEAD1
     int ob_intval;
 } DuIntObject;
 
 void int_print(DuIntObject *ob)
 {
-    _du_read1(ob);
+    /* _du_read1(ob); IMMUTABLE */
     printf("%d", ob->ob_intval);
 }
 
 int int_is_true(DuIntObject *ob)
 {
-    _du_read1(ob);
+    /* _du_read1(ob); IMMUTABLE */
     return ob->ob_intval;
 }
 
@@ -38,7 +38,7 @@ DuObject *DuInt_FromInt(int value)
 int DuInt_AsInt(DuObject *ob)
 {
     DuInt_Ensure("DuInt_AsInt", ob);
-    _du_read1(ob);
+    /* _du_read1(ob); IMMUTABLE */
     return ((DuIntObject *)ob)->ob_intval;
 }
 

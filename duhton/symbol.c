@@ -2,26 +2,26 @@
 #include <stdlib.h>
 #include "duhton.h"
 
-typedef struct _Du_Symbol {
-    DuOBJECT_HEAD
+typedef TLPREFIX struct DuSymbolObject_s DuSymbolObject;
+
+struct DuSymbolObject_s {
+    DuOBJECT_HEAD1
+    int myid;
     char *name;
-    struct _Du_Symbol *next;
-} DuSymbolObject;
+    DuSymbolObject *next;
+};
 
-static DuSymbolObject _Du_AllSymbols = {
-    DuOBJECT_HEAD_INIT(DUTYPE_SYMBOL),
-    "",
-    NULL};
+static DuSymbolObject *_Du_AllSymbols;
 
 
-void symbol_trace(DuSymbolObject *ob, void visit(gcptr *))
+void symbol_trace(struct DuSymbolObject_s *ob, void visit(object_t **))
 {
-    visit((gcptr *)&ob->next);
+    visit((object_t **)&ob->next);
 }
 
 void symbol_print(DuSymbolObject *ob)
 {
-    _du_read1(ob);
+    /* _du_read1(ob); IMMUTABLE name */
     printf("'%s'", ob->name);
 }
 
@@ -50,9 +50,24 @@ DuType DuSymbol_Type = {
     (eval_fn)symbol_eval,
 };
 
+
+static int next_id = 1;
+
+void init_prebuilt_symbol_objects(void)
+{
+    _Du_AllSymbols = (DuSymbolObject *)
+        _stm_allocate_old(sizeof(DuSymbolObject));
+    _Du_AllSymbols->ob_base.type_id = DUTYPE_SYMBOL;
+    _Du_AllSymbols->myid = 0;
+    _Du_AllSymbols->name = "";
+    _Du_AllSymbols->next = NULL;
+    _du_save1(_Du_AllSymbols);
+}
+
 DuObject *DuSymbol_FromString(const char *name)
 {
-    DuSymbolObject *p, *head = &_Du_AllSymbols;
+    DuSymbolObject *p, *head = _Du_AllSymbols;
+    _du_read1(head);
     for (p=head; p != NULL; p=p->next) {
         _du_read1(p);
         if (strcmp(name, p->name) == 0) {
@@ -61,6 +76,7 @@ DuObject *DuSymbol_FromString(const char *name)
     }
     p = (DuSymbolObject *)DuObject_New(&DuSymbol_Type);
     p->name = strdup(name);
+    p->myid = __sync_fetch_and_add(&next_id, 1);
 
     _du_write1(head);
     p->next = head->next;
@@ -72,8 +88,14 @@ DuObject *DuSymbol_FromString(const char *name)
 char *DuSymbol_AsString(DuObject *ob)
 {
     DuSymbol_Ensure("DuSymbol_AsString", ob);
-    _du_read1(ob);
+    /* _du_read1(ob); IMMUTABLE name */
     return ((DuSymbolObject *)ob)->name;
+}
+
+int DuSymbol_Id(DuObject *ob)
+{
+    DuSymbol_Ensure("DuSymbol_Id", ob);
+    return ((DuSymbolObject *)ob)->myid;
 }
 
 void DuSymbol_Ensure(char *where, DuObject *ob)
