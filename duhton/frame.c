@@ -48,15 +48,17 @@ static DuFrameNodeObject *du_empty_framenode;
 void init_prebuilt_frame_objects(void)
 {
     du_empty_framenode = (DuFrameNodeObject *)
-        stm_allocate_prebuilt(sizeof(DuFrameNodeObject));
+        _stm_allocate_old(sizeof(DuFrameNodeObject));
     du_empty_framenode->ob_base.type_id = DUTYPE_FRAMENODE;
     du_empty_framenode->ob_count = 0;
 
     DuFrameObject *g = (DuFrameObject *)
-        stm_allocate_prebuilt(sizeof(DuFrameObject));
+        _stm_allocate_old(sizeof(DuFrameObject));
     g->ob_base.type_id = DUTYPE_FRAME;
     g->ob_nodes = du_empty_framenode;
     Du_Globals = (DuObject *)g;
+
+    _du_save2(du_empty_framenode, Du_Globals);
 }
 
 DuObject *DuFrame_New()
@@ -203,7 +205,7 @@ void DuFrame_SetBuiltinMacro(DuObject *frame, char *name, eval_fn func)
     _du_save1(frame);
     dictentry_t *e = find_entry((DuFrameObject *)frame, sym, 1);
     _du_restore1(frame);
-    
+
     _du_write1(frame);          /* e is part of frame or a new object */
     e->builtin_macro = func;
 }

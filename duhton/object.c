@@ -17,7 +17,7 @@ DuType *Du_Types[_DUTYPE_TOTAL] = {
 
 
 /* callback: get the size of an object */
-size_t stmcb_size(struct object_s *obj)
+ssize_t stmcb_size_rounded_up(struct object_s *obj)
 {
     DuType *tp = Du_Types[((struct DuObject_s *)obj)->type_id];
     size_t result = tp->dt_size;
@@ -69,8 +69,9 @@ DuObject *Du_None;
 
 void init_prebuilt_object_objects(void)
 {
-    Du_None = (DuObject *)stm_allocate_prebuilt(sizeof(DuObject));
+    Du_None = (DuObject *)_stm_allocate_old(sizeof(DuObject));
     Du_None->type_id = DUTYPE_NONE;
+    _du_save1(Du_None);
 }
 
 void Du_FatalError(char *msg, ...)

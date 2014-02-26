@@ -66,16 +66,17 @@ void _stm_become_inevitable(char*);
 void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *);
 void _stm_collectable_safe_point(void);
 
+/* for tests, but also used in duhton: */
+object_t *_stm_allocate_old(ssize_t size_rounded_up);
+char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 uint8_t _stm_creation_marker(object_t *obj);
 bool _stm_in_nursery(object_t *obj);
 bool _stm_in_transaction(stm_thread_local_t *tl);
-char *_stm_real_address(object_t *o);
 char *_stm_get_segment_base(long index);
 void _stm_test_switch(stm_thread_local_t *tl);
-object_t *_stm_allocate_old(ssize_t size_rounded_up);
 void _stm_largemalloc_init_arena(char *data_start, size_t data_size);
 int _stm_largemalloc_resize_arena(size_t new_size);
 char *_stm_largemalloc_data_start(void);
