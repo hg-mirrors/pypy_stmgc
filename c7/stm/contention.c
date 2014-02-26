@@ -82,7 +82,9 @@ static void write_write_contention_management(uintptr_t lock_idx)
 
         /* wait, hopefully until the other thread broadcasts "I'm
            done aborting" (spurious wake-ups are ok). */
+        dprintf(("contention: wait C_SAFE_POINT...\n"));
         cond_wait(C_SAFE_POINT);
+        dprintf(("contention: done\n"));
 
         cond_broadcast(C_RESUME);
 

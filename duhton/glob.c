@@ -705,9 +705,11 @@ DuObject *du_sleepms(DuObject *cons, DuObject *locals)
     int ms = DuInt_AsInt(obj);
 
     struct timeval t;
+    fprintf(stderr, "[sleeping %d ms]\n", ms);
     t.tv_sec = ms / 1000;
     t.tv_usec = (ms % 1000) * 1000;
     select(0, (fd_set *)0, (fd_set *)0, (fd_set *)0, &t);
+    fprintf(stderr, "[slept %d ms]\n", ms);
 
     return Du_None;
 }
