@@ -57,18 +57,8 @@ bool _stm_in_nursery(object_t *obj)
 /************************************************************/
 
 #define GCWORD_MOVED  ((object_t *) -42)
-#define FLAG_SYNC_LARGE_NOW   0x01
+#define FLAG_SYNC_LARGE       0x01
 
-
-static uintptr_t minor_record_large_overflow_object(object_t *nobj)
-{
-    uintptr_t nobj_sync_now = (uintptr_t)nobj;
-    if (STM_PSEGMENT->minor_collect_will_commit_now)
-        nobj_sync_now |= FLAG_SYNC_LARGE_NOW;
-    else
-        LIST_APPEND(STM_PSEGMENT->large_overflow_objects, nobj);
-    return nobj_sync_now;
-}
 
 static void minor_trace_if_young(object_t **pobj)
 {
@@ -110,7 +100,7 @@ static void minor_trace_if_young(object_t **pobj)
             char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
             memcpy(realnobj, realobj, size);
 
-            nobj_sync_now = minor_record_large_overflow_object(nobj);
+            nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
         }
         else {
             /* case "small enough" */
@@ -133,7 +123,7 @@ static void minor_trace_if_young(object_t **pobj)
         /* a young object outside the nursery */
         nobj = obj;
         tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)nobj);
-        nobj_sync_now = minor_record_large_overflow_object(nobj);
+        nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
     }
 
     /* Set the overflow_number if nedeed */
@@ -178,15 +168,20 @@ static void collect_oldrefs_to_nursery(void)
 
     while (!list_is_empty(lst)) {
         uintptr_t obj_sync_now = list_pop_item(lst);
-        object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE_NOW);
+        object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE);
 
         _collect_now(obj);
 
-        if (obj_sync_now & FLAG_SYNC_LARGE_NOW) {
-            /* synchronize the object to other segments *now* -- which
-               means, just after we added the WRITE_BARRIER flag and
-               traced into it, because tracing might change it again. */
-            synchronize_overflow_object_now(obj);
+        if (obj_sync_now & FLAG_SYNC_LARGE) {
+            /* this was a large object.  We must either synchronize the
+               object to other segments now (after we added the
+               WRITE_BARRIER flag and traced into it to fix its
+               content); or add the object to 'large_overflow_objects'.
+            */
+            if (STM_PSEGMENT->minor_collect_will_commit_now)
+                synchronize_overflow_object_now(obj);
+            else
+                LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
         }
     }
 }
