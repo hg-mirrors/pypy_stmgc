@@ -77,6 +77,8 @@ static void write_write_contention_management(uintptr_t lock_idx)
 
         /* we will issue a safe point and wait: */
         STM_PSEGMENT->safe_point = SP_SAFE_POINT_CANNOT_COLLECT;
+        // XXX do we really need a safe_point here?  It seems we can
+        // kill it and the whole SP_SAFE_POINT_CANNOT_COLLECT
 
         /* wait, hopefully until the other thread broadcasts "I'm
            done aborting" (spurious wake-ups are ok). */
