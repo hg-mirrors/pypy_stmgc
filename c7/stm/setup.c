@@ -103,6 +103,22 @@ void stm_teardown(void)
     teardown_nursery();
 }
 
+void _init_shadow_stack(stm_thread_local_t *tl)
+{
+    object_t **s = (object_t **)malloc(SHADOW_STACK_SIZE * sizeof(object_t *));
+    assert(s);
+    tl->shadowstack = s;
+    tl->shadowstack_base = s;
+}
+
+void _done_shadow_stack(stm_thread_local_t *tl)
+{
+    free(tl->shadowstack_base);
+    tl->shadowstack = NULL;
+    tl->shadowstack_base = NULL;
+}
+
+
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
     int num;
@@ -123,12 +139,14 @@ void stm_register_thread_local(stm_thread_local_t *tl)
        numbers automatically. */
     num = num % NB_SEGMENTS;
     tl->associated_segment_num = num;
+    _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num));
 }
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)
 {
     assert(tl->next != NULL);
+    _done_shadow_stack(tl);
     if (tl == stm_all_thread_locals) {
         stm_all_thread_locals = stm_all_thread_locals->next;
         if (tl == stm_all_thread_locals) {
