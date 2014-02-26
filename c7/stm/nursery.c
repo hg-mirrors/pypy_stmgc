@@ -183,6 +183,9 @@ static void collect_oldrefs_to_nursery(void)
             else
                 LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
         }
+
+        /* the list could have moved while appending */
+        lst = STM_PSEGMENT->objects_pointing_to_nursery;
     }
 }
 
