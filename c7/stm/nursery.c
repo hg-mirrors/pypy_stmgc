@@ -209,15 +209,20 @@ static void throw_away_nursery(void)
 
     /* free any object left from 'young_outside_nursery' */
     if (!tree_is_cleared(STM_PSEGMENT->young_outside_nursery)) {
-        mutex_pages_lock();
-
+        bool locked = false;
         wlog_t *item;
         TREE_LOOP_FORWARD(*STM_PSEGMENT->young_outside_nursery, item) {
+            if (!locked) {
+                mutex_pages_lock();
+                locked = true;
+            }
             _stm_large_free(stm_object_pages + item->addr);
         } TREE_LOOP_END;
 
+        if (locked)
+            mutex_pages_unlock();
+
         tree_clear(STM_PSEGMENT->young_outside_nursery);
-        mutex_pages_unlock();
     }
 }
 
