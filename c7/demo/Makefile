@@ -20,7 +20,7 @@ C_FILES = ../stmgc.c ../stm/*.c
 
 # note that 'build' is optimized but still contains all asserts
 debug-%: %.c ${H_FILES} ${C_FILES}
-	clang -I.. -pthread -DSTM_DEBUGPRINT -g $< -o debug-$* \
+	clang -I.. -pthread -DSTM_DEBUGPRINT -g -O0 $< -o debug-$* \
         -Wall -Werror ../stmgc.c
 
 build-%: %.c ${H_FILES} ${C_FILES}
