@@ -22,7 +22,7 @@ typedef object_t* objptr_t;
 
 struct node_s {
     struct object_s hdr;
-    long value;
+    long my_size;
     nodeptr_t next;
 };
 
@@ -65,14 +65,24 @@ void done_shadow_stack(void)
 
 ssize_t stmcb_size_rounded_up(struct object_s *ob)
 {
-    return sizeof(struct node_s);
+    return ((struct node_s*)ob)->my_size;
 }
 
 void stmcb_trace(struct object_s *obj, void visit(object_t **))
 {
     struct node_s *n;
     n = (struct node_s*)obj;
+
+    /* and the same value at the end: */
+    /* note, ->next may be the same as last_next */
+    nodeptr_t *last_next = (nodeptr_t*)((char*)n + n->my_size - sizeof(void*));
+
+    assert(n->next == *last_next);
+
     visit((object_t **)&n->next);
+    visit((object_t **)last_next);
+
+    assert(n->next == *last_next);
 }
 
 void _push_shared_roots()
@@ -176,11 +186,33 @@ void write_barrier(objptr_t p)
     }
 }
 
+void set_next(objptr_t p, objptr_t v)
+{
+    if (p != NULL) {
+        nodeptr_t n = (nodeptr_t)p;
+
+        /* and the same value at the end: */
+        nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n + n->my_size - sizeof(void*));
+        assert(n->next == *last_next);
+        n->next = (nodeptr_t)v;
+        *last_next = (nodeptr_t)v;
+    }
+}
+
+nodeptr_t get_next(objptr_t p)
+{
+    nodeptr_t n = (nodeptr_t)p;
+
+    /* and the same value at the end: */
+    nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n + n->my_size - sizeof(void*));
+    assert(n->next == *last_next);
+
+    return n->next;
+}
 
 
 objptr_t simple_events(objptr_t p, objptr_t _r)
 {
-    nodeptr_t w_r;
     int k = get_rand(8);
     int num;
 
@@ -201,7 +233,13 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
         break;
     case 3: // allocate fresh 'p'
         push_roots();
-        p = stm_allocate(sizeof(struct node_s));
+        size_t sizes[4] = {sizeof(struct node_s),
+                           sizeof(struct node_s) + 48,
+                           sizeof(struct node_s) + 4096,
+                           sizeof(struct node_s) + 4096*70};
+        size_t size = sizes[get_rand(4)];
+        p = stm_allocate(size);
+        ((nodeptr_t)p)->my_size = size;
         pop_roots();
         /* reload_roots not necessary, all are old after start_transaction */
         break;
@@ -214,13 +252,12 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
     case 6: // follow p->next
         if (p) {
             read_barrier(p);
-            p = (objptr_t)(((nodeptr_t)(p))->next);
+            p = (objptr_t)(get_next(p));
         }
         break;
     case 7: // set 'p' as *next in one of the roots
         write_barrier(_r);
-        w_r = (nodeptr_t)_r;
-        w_r->next = (nodeptr_t)p;
+        set_next(_r, p);
         break;
     }
     return p;
@@ -330,6 +367,7 @@ void setup_globals()
     stm_start_inevitable_transaction(&stm_thread_local);
     for (i = 0; i < SHARED_ROOTS; i++) {
         shared_roots[i] = stm_allocate(sizeof(struct node_s));
+        ((nodeptr_t)shared_roots[i])->my_size = sizeof(struct node_s);
         PUSH_ROOT(shared_roots[i]);
     }
     stm_commit_transaction();
