@@ -11,6 +11,7 @@
                                    the program */
 #define DEFAULT_NUM_THREADS 2
 
+extern __thread stm_thread_local_t stm_thread_local;
 
 struct DuObject_s {
     struct object_s header;
@@ -191,23 +192,26 @@ void Du_TransactionRun(void);
 #endif
 
 
-#ifdef NDEBUG
-# define _push_root(ob)     stm_push_root((object_t *)ob)
-# define _pop_root()        stm_pop_root()
-#else
+#ifndef NDEBUG
 # define _check_not_free(ob)                                    \
     assert(_DuObject_TypeNum(ob) > DUTYPE_INVALID && \
            _DuObject_TypeNum(ob) < _DUTYPE_TOTAL)
+#endif
+
 static inline void _push_root(DuObject *ob) {
+    #ifndef NDEBUG
     if (ob) _check_not_free(ob);
-    stm_push_root((object_t *)ob);
+    #endif
+    STM_PUSH_ROOT(stm_thread_local, ob);
 }
 static inline object_t *_pop_root(void) {
-    object_t *ob = stm_pop_root();
+    object_t *ob;
+    STM_POP_ROOT(stm_thread_local, ob);
+    #ifndef NDEBUG
     if (ob) _check_not_free(ob);
+    #endif
     return ob;
 }
-#endif
 
 extern pthread_t *all_threads;
 extern int all_threads_count;

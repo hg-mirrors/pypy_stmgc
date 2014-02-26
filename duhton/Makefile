@@ -14,7 +14,7 @@ duhton_release: *.c *.h $(C7SOURCES) $(C7HEADERS)
 
 
 duhton_debug: *.c *.h $(C7SOURCES) $(C7HEADERS)
-	clang -pthread -g -DDu_DEBUG -o duhton_debug *.c ../c7/stmgc.c -Wall
+	clang -DSTM_DEBUGPRINT -pthread -g -DDu_DEBUG -o duhton_debug *.c ../c7/stmgc.c -Wall
 
 clean:
-	rm -f duhton duhton_debug
+	rm -f duhton duhton_debug duhton_release
