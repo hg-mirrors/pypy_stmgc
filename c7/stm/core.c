@@ -151,8 +151,14 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 {
     mutex_lock_no_abort();
 
+  retry:
+    if (jmpbuf == NULL) {
+        wait_for_end_of_inevitable_transaction(false);
+    }
+
+    if (!acquire_thread_segment(tl))
+        goto retry;
     /* GS invalid before this point! */
-    acquire_thread_segment(tl);
 
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
@@ -376,6 +382,10 @@ void stm_commit_transaction(void)
         STM_PSEGMENT->overflow_number = highest_overflow_number;
     }
 
+    /* if we were inevitable, signal */
+    if (STM_PSEGMENT->transaction_state == TS_INEVITABLE)
+        cond_signal(C_INEVITABLE_DONE);
+
     /* done */
     _finish_transaction();
 
@@ -479,8 +489,6 @@ static void abort_with_mutex(void)
 
 void _stm_become_inevitable(char *msg)
 {
-    long i;
-
     mutex_lock();
     switch (STM_PSEGMENT->transaction_state) {
 
@@ -489,11 +497,7 @@ void _stm_become_inevitable(char *msg)
 
     case TS_REGULAR:
         /* become inevitable */
-        for (i = 0; i < NB_SEGMENTS; i++) {
-            if (get_priv_segment(i)->transaction_state == TS_INEVITABLE) {
-                abort_with_mutex();
-            }
-        }
+        wait_for_end_of_inevitable_transaction(true);
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
         break;
 
