@@ -191,6 +191,12 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
 void stm_setup(void);
 void stm_teardown(void);
 
+/* Push and pop roots from/to the shadow stack. Only allowed inside
+   transaction. */
+#define STM_PUSH_ROOT(tl, p)   (*((tl).shadowstack++) = (object_t *)(p))
+#define STM_POP_ROOT(tl, p)    ((p) = (typeof(p))*(--(tl).shadowstack))
+
+
 /* Every thread needs to have a corresponding stm_thread_local_t
    structure.  It may be a "__thread" global variable or something else.
    Use the following functions at the start and at the end of a thread.

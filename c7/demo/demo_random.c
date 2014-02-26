@@ -44,25 +44,6 @@ struct thread_data {
 __thread struct thread_data td;
 
 
-#define PUSH_ROOT(p)   (*(stm_thread_local.shadowstack++) = (object_t *)(p))
-#define POP_ROOT(p)    ((p) = (typeof(p))*(--stm_thread_local.shadowstack))
-
-void init_shadow_stack(void)
-{
-    object_t **s = (object_t **)malloc(1000 * sizeof(object_t *));
-    assert(s);
-    stm_thread_local.shadowstack = s;
-    stm_thread_local.shadowstack_base = s;
-}
-
-void done_shadow_stack(void)
-{
-    free(stm_thread_local.shadowstack_base);
-    stm_thread_local.shadowstack = NULL;
-    stm_thread_local.shadowstack_base = NULL;
-}
-
-
 ssize_t stmcb_size_rounded_up(struct object_s *ob)
 {
     return ((struct node_s*)ob)->my_size;
@@ -89,7 +70,7 @@ void _push_shared_roots()
 {
     int i;
     for (i = 0; i < SHARED_ROOTS; i++) {
-        PUSH_ROOT(shared_roots[i]);
+        STM_PUSH_ROOT(stm_thread_local, shared_roots[i]);
     }
 }
 
@@ -97,7 +78,7 @@ void _pop_shared_roots()
 {
     int i;
     for (i = 0; i < SHARED_ROOTS; i++) {
-        POP_ROOT(shared_roots[SHARED_ROOTS - i - 1]);
+        STM_POP_ROOT(stm_thread_local, shared_roots[SHARED_ROOTS - i - 1]);
     }
 }
 
@@ -127,12 +108,12 @@ void reload_roots()
     assert(td.num_roots == td.num_roots_at_transaction_start);
     for (i = td.num_roots_at_transaction_start - 1; i >= 0; i--) {
         if (td.roots[i])
-            POP_ROOT(td.roots[i]);
+            STM_POP_ROOT(stm_thread_local, td.roots[i]);
     }
 
     for (i = 0; i < td.num_roots_at_transaction_start; i++) {
         if (td.roots[i])
-            PUSH_ROOT(td.roots[i]);
+            STM_PUSH_ROOT(stm_thread_local, td.roots[i]);
     }
 }
 
@@ -141,7 +122,7 @@ void push_roots()
     int i;
     for (i = td.num_roots_at_transaction_start; i < td.num_roots; i++) {
         if (td.roots[i])
-            PUSH_ROOT(td.roots[i]);
+            STM_PUSH_ROOT(stm_thread_local, td.roots[i]);
     }
 }
 
@@ -150,7 +131,7 @@ void pop_roots()
     int i;
     for (i = td.num_roots - 1; i >= td.num_roots_at_transaction_start; i--) {
         if (td.roots[i])
-            POP_ROOT(td.roots[i]);
+            STM_POP_ROOT(stm_thread_local, td.roots[i]);
     }
 }
 
@@ -304,7 +285,6 @@ void *demo_random(void *arg)
 {
     int status;
     stm_register_thread_local(&stm_thread_local);
-    init_shadow_stack();
 
     /* forever on the shadowstack: */
     _push_shared_roots();
@@ -342,7 +322,6 @@ void *demo_random(void *arg)
     }
     stm_commit_transaction();
 
-    done_shadow_stack();
     stm_unregister_thread_local(&stm_thread_local);
 
     status = sem_post(&done); assert(status == 0);
@@ -368,7 +347,7 @@ void setup_globals()
     for (i = 0; i < SHARED_ROOTS; i++) {
         shared_roots[i] = stm_allocate(sizeof(struct node_s));
         ((nodeptr_t)shared_roots[i])->my_size = sizeof(struct node_s);
-        PUSH_ROOT(shared_roots[i]);
+        STM_PUSH_ROOT(stm_thread_local, shared_roots[i]);
     }
     stm_commit_transaction();
 
@@ -398,7 +377,6 @@ int main(void)
 
     stm_setup();
     stm_register_thread_local(&stm_thread_local);
-    init_shadow_stack();
 
     setup_globals();
 
@@ -421,7 +399,6 @@ int main(void)
     printf("Test OK!\n");
 
     _pop_shared_roots();
-    done_shadow_stack();
     stm_unregister_thread_local(&stm_thread_local);
     stm_teardown();
 

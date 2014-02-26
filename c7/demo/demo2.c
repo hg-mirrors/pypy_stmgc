@@ -21,24 +21,6 @@ struct node_s {
 
 __thread stm_thread_local_t stm_thread_local;
 
-#define PUSH_ROOT(p)   (*stm_thread_local.shadowstack++ = (object_t *)(p))
-#define POP_ROOT(p)    ((p) = (typeof(p))*--stm_thread_local.shadowstack)
-
-void init_shadow_stack(void)
-{
-    object_t **s = (object_t **)malloc(1000 * sizeof(object_t *));
-    assert(s);
-    stm_thread_local.shadowstack = s;
-    stm_thread_local.shadowstack_base = s;
-}
-
-void done_shadow_stack(void)
-{
-    free(stm_thread_local.shadowstack_base);
-    stm_thread_local.shadowstack = NULL;
-    stm_thread_local.shadowstack_base = NULL;
-}
-
 
 ssize_t stmcb_size_rounded_up(struct object_s *ob)
 {
@@ -157,14 +139,14 @@ void setup_list(void)
     global_chained_list->value = -1;
     global_chained_list->next = NULL;
 
-    PUSH_ROOT(global_chained_list);
+    STM_PUSH_ROOT(stm_thread_local, global_chained_list);
 
     w_prev = global_chained_list;
     for (i = 0; i < LIST_LENGTH; i++) {
-        PUSH_ROOT(w_prev);
+        STM_PUSH_ROOT(stm_thread_local, w_prev);
         w_newnode = (nodeptr_t)stm_allocate(sizeof(struct node_s));
 
-        POP_ROOT(w_prev);
+        STM_POP_ROOT(stm_thread_local, w_prev);
         w_newnode->value = LIST_LENGTH - i;
         w_newnode->next = NULL;
 
@@ -173,16 +155,16 @@ void setup_list(void)
         w_prev = w_newnode;
     }
 
-    POP_ROOT(global_chained_list);   /* update value */
+    STM_POP_ROOT(stm_thread_local, global_chained_list);   /* update value */
     assert(global_chained_list->value == -1);
-    PUSH_ROOT(global_chained_list);
+    STM_PUSH_ROOT(stm_thread_local, global_chained_list);
 
     stm_commit_transaction();
 
     stm_start_inevitable_transaction(&stm_thread_local);
-    POP_ROOT(global_chained_list);   /* update value */
+    STM_POP_ROOT(stm_thread_local, global_chained_list);   /* update value */
     assert(global_chained_list->value == -1);
-    PUSH_ROOT(global_chained_list);  /* remains forever in the shadow stack */
+    STM_PUSH_ROOT(stm_thread_local, global_chained_list);  /* remains forever in the shadow stack */
     stm_commit_transaction();
 
     printf("setup ok\n");
@@ -196,16 +178,16 @@ void *demo2(void *arg)
 {
     int status;
     stm_register_thread_local(&stm_thread_local);
-    init_shadow_stack();
-    PUSH_ROOT(global_chained_list);  /* remains forever in the shadow stack */
+
+    STM_PUSH_ROOT(stm_thread_local, global_chained_list);  /* remains forever in the shadow stack */
 
     while (check_sorted() == -1) {
         bubble_run();
     }
 
-    POP_ROOT(global_chained_list);
+    STM_POP_ROOT(stm_thread_local, global_chained_list);
     assert(stm_thread_local.shadowstack == stm_thread_local.shadowstack_base);
-    done_shadow_stack();
+
     stm_unregister_thread_local(&stm_thread_local);
     status = sem_post(&done); assert(status == 0);
     return NULL;
@@ -216,9 +198,9 @@ void final_check(void)
     long sum;
 
     printf("final check\n");
-    
+
     sum = check_sorted();
-    
+
     // little Gauss:
     if (sum == (1 + LIST_LENGTH) * (LIST_LENGTH / 2))
         printf("check ok\n");
@@ -247,7 +229,7 @@ int main(void)
 
     stm_setup();
     stm_register_thread_local(&stm_thread_local);
-    init_shadow_stack();
+
 
     setup_list();
 
@@ -259,7 +241,7 @@ int main(void)
 
     final_check();
 
-    done_shadow_stack();
+
     stm_unregister_thread_local(&stm_thread_local);
     stm_teardown();
 
