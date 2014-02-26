@@ -138,6 +138,7 @@ static inline bool tree_is_cleared(struct tree_s *tree) {
         continue;                                                       \
       if (((long)_entry) & 1)                                           \
         {  /* points to a further level: enter it */                    \
+          assert(_stackp - _stack < TREE_DEPTH_MAX);                    \
           _stackp->next = _next;                                        \
           _stackp->end = _end;                                          \
           _stackp++;                                                    \

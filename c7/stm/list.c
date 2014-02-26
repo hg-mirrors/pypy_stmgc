@@ -54,23 +54,23 @@ static struct tree_s *tree_create(void)
 static void tree_free(struct tree_s *tree)
 {
     free(tree->raw_start);
+    assert(memset(tree, 0xDD, sizeof(struct tree_s)));
     free(tree);
 }
 
 static void _tree_compress(struct tree_s *tree)
 {
-  wlog_t *item;
-  struct tree_s tree_copy;
-  memset(&tree_copy, 0, sizeof(struct tree_s));
+    wlog_t *item;
+    struct tree_s tree_copy;
+    memset(&tree_copy, 0, sizeof(struct tree_s));
 
-  TREE_LOOP_FORWARD(*tree, item)
-    {
-      tree_insert(&tree_copy, item->addr, item->val);
+    TREE_LOOP_FORWARD(*tree, item) {
+        tree_insert(&tree_copy, item->addr, item->val);
 
     } TREE_LOOP_END;
 
-  free(tree->raw_start);
-  *tree = tree_copy;
+    free(tree->raw_start);
+    *tree = tree_copy;
 }
 
 static wlog_t *_tree_find(char *entry, uintptr_t addr)
@@ -122,6 +122,7 @@ static char *_tree_grab(struct tree_s *tree, long size)
 static void tree_insert(struct tree_s *tree, uintptr_t addr, uintptr_t val)
 {
     assert(addr != 0);    /* the NULL key is reserved */
+    assert(!(addr & (sizeof(void *) - 1)));    /* the key must be aligned */
  retry:;
     wlog_t *wlog;
     uintptr_t key = addr;
@@ -129,6 +130,7 @@ static void tree_insert(struct tree_s *tree, uintptr_t addr, uintptr_t val)
     char *p = (char *)(tree->toplevel.items);
     char *entry;
     while (1) {
+        assert(shift < TREE_DEPTH_MAX * TREE_BITS);
         p += (key >> shift) & TREE_MASK;
         shift += TREE_BITS;
         entry = *(char **)p;
