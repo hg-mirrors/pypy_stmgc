@@ -54,9 +54,9 @@ int main(int argc, char **argv)
             Du_Print(res, 1);
         }
 
-        _du_save1(stm_thread_local_obj);
-        stm_collect(0);   /* hack... */
-        _du_restore1(stm_thread_local_obj);
+        //_du_save1(stm_thread_local_obj);
+        //stm_collect(0);   /* hack... */
+        //_du_restore1(stm_thread_local_obj);
 
         stm_commit_transaction();
 

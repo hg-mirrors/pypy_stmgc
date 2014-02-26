@@ -52,6 +52,8 @@ struct stm_segment_info_s {
 typedef struct stm_thread_local_s {
     /* every thread should handle the shadow stack itself */
     object_t **shadowstack, **shadowstack_base;
+    /* a generic optional thread-local object */
+    object_t *thread_local_obj;
     /* the next fields are handled automatically by the library */
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
