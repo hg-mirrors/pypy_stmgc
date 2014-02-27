@@ -27,5 +27,5 @@ static void release_thread_segment(stm_thread_local_t *tl);
 static void wait_for_end_of_inevitable_transaction(bool can_abort);
 
 /* see the source for an exact description */
-static void wait_for_other_safe_points(int requested_safe_point_kind);
+static void wait_for_other_safe_points(void);
 static void collectable_safe_point(void);
