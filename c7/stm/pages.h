@@ -25,6 +25,7 @@ static void mutex_pages_lock(void);
 static void mutex_pages_unlock(void);
 static uint64_t increment_total_allocated(ssize_t add_or_remove);
 static bool is_major_collection_requested(void);
+static void force_major_collection_request(void);
 static void reset_major_collection_requested(void);
 
 inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
