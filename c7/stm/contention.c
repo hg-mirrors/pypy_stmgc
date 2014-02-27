@@ -75,11 +75,6 @@ static void write_write_contention_management(uintptr_t lock_idx)
         assert(other_pseg->transaction_state == TS_MUST_ABORT);
         other_pseg->pub.nursery_end = NSE_SIGNAL;
 
-        /* we will issue a safe point and wait: */
-        STM_PSEGMENT->safe_point = SP_SAFE_POINT_CANNOT_COLLECT;
-        // XXX do we really need a safe_point here?  It seems we can
-        // kill it and the whole SP_SAFE_POINT_CANNOT_COLLECT
-
         /* wait, hopefully until the other thread broadcasts "I'm
            done aborting" (spurious wake-ups are ok). */
         dprintf(("contention: wait C_SAFE_POINT...\n"));
@@ -90,7 +85,7 @@ static void write_write_contention_management(uintptr_t lock_idx)
 
         /* now we return into _stm_write_slowpath() and will try again
            to acquire the write lock on our object. */
-        STM_PSEGMENT->safe_point = SP_RUNNING;
+        assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     }
 
     mutex_unlock();

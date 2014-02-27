@@ -353,10 +353,10 @@ void stm_commit_transaction(void)
     minor_collection(/*commit=*/ true);
 
     mutex_lock();
-    STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
+    STM_PSEGMENT->safe_point = SP_SAFE_POINT;
 
     /* wait until the other thread is at a safe-point */
-    wait_for_other_safe_points(SP_SAFE_POINT_CANNOT_COLLECT);
+    wait_for_other_safe_points();
 
     /* the rest of this function either runs atomically without
        releasing the mutex, or aborts the current thread. */

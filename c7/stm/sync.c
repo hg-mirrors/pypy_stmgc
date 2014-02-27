@@ -226,12 +226,12 @@ void _stm_test_switch(stm_thread_local_t *tl)
 void _stm_start_safe_point(void)
 {
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
-    STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
+    STM_PSEGMENT->safe_point = SP_SAFE_POINT;
 }
 
 void _stm_stop_safe_point(void)
 {
-    assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT_CAN_COLLECT);
+    assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT);
     STM_PSEGMENT->safe_point = SP_RUNNING;
 
     if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
@@ -240,7 +240,7 @@ void _stm_stop_safe_point(void)
 #endif
 
 
-static void wait_for_other_safe_points(int requested_safe_point_kind)
+static void wait_for_other_safe_points(void)
 {
     /* Must be called with the mutex.  When all other threads are in a
        safe point of at least the requested kind, returns.  Otherwise,
@@ -261,12 +261,9 @@ static void wait_for_other_safe_points(int requested_safe_point_kind)
        in the cond_wait() in this same function.
     */
 
-    /* XXX review what occurs for the other kind! */
-           assert(requested_safe_point_kind == SP_SAFE_POINT_CANNOT_COLLECT);
-
  restart:
     assert(_has_mutex());
-    assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT_CAN_COLLECT);
+    assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT);
 
     if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
         abort_with_mutex();
@@ -282,10 +279,7 @@ static void wait_for_other_safe_points(int requested_safe_point_kind)
            SP_RUNNING, or at the wrong kind of safe point.
         */
         struct stm_priv_segment_info_s *other_pseg = get_priv_segment(i);
-        if (other_pseg->safe_point == SP_RUNNING ||
-            (requested_safe_point_kind == SP_SAFE_POINT_CAN_COLLECT &&
-                other_pseg->safe_point == SP_SAFE_POINT_CANNOT_COLLECT)) {
-
+        if (other_pseg->safe_point == SP_RUNNING) {
             /* we need to wait for this thread.  Use NSE_SIGNAL to ask
                it (and possibly all other threads in the same case) to
                enter a safe-point soon. */
@@ -324,7 +318,7 @@ static void collectable_safe_point(void)
 
     while (STM_SEGMENT->nursery_end == NSE_SIGNAL) {
         dprintf(("collectable_safe_point...\n"));
-        STM_PSEGMENT->safe_point = SP_SAFE_POINT_CAN_COLLECT;
+        STM_PSEGMENT->safe_point = SP_SAFE_POINT;
         STM_SEGMENT->nursery_end = NURSERY_END;
 
         /* signal all the threads blocked in

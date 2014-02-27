@@ -131,8 +131,7 @@ struct stm_priv_segment_info_s {
 enum /* safe_point */ {
     SP_NO_TRANSACTION=0,
     SP_RUNNING,
-    SP_SAFE_POINT_CANNOT_COLLECT,
-    SP_SAFE_POINT_CAN_COLLECT,
+    SP_SAFE_POINT,
 };
 enum /* transaction_state */ {
     TS_NONE=0,
