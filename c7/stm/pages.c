@@ -8,11 +8,19 @@
 static union {
     struct {
         uint8_t mutex_pages;
+        bool major_collection_requested;
         uint64_t total_allocated;  /* keep track of how much memory we're
                                       using, ignoring nurseries */
+        uint64_t total_allocated_bound;
     };
     char reserved[64];
 } pages_ctl __attribute__((aligned(64)));
+
+
+static void setup_pages(void)
+{
+    pages_ctl.total_allocated_bound = GC_MIN;
+}
 
 static void teardown_pages(void)
 {
@@ -41,7 +49,29 @@ static uint64_t increment_total_allocated(ssize_t add_or_remove)
 {
     assert(_has_mutex_pages());
     pages_ctl.total_allocated += add_or_remove;
+
+    if (pages_ctl.total_allocated >= pages_ctl.total_allocated_bound)
+        pages_ctl.major_collection_requested = true;
+
     return pages_ctl.total_allocated;
+}
+
+static bool is_major_collection_requested(void)
+{
+    return pages_ctl.major_collection_requested;
+}
+
+static void reset_major_collection_requested(void)
+{
+    assert(_has_mutex());
+
+    uint64_t next_bound = (uint64_t)((double)pages_ctl.total_allocated *
+                                     GC_MAJOR_COLLECT);
+    if (next_bound < GC_MIN)
+        next_bound = GC_MIN;
+
+    pages_ctl.total_allocated_bound = next_bound;
+    pages_ctl.major_collection_requested = false;
 }
 
 /************************************************************/

@@ -28,4 +28,5 @@ static void wait_for_end_of_inevitable_transaction(bool can_abort);
 
 /* see the source for an exact description */
 static void wait_for_other_safe_points(void);
+static bool try_wait_for_other_safe_points(void);
 static void collectable_safe_point(void);

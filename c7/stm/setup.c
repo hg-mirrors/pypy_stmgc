@@ -77,6 +77,7 @@ void stm_setup(void)
     setup_sync();
     setup_nursery();
     setup_gcpage();
+    setup_pages();
 }
 
 void stm_teardown(void)

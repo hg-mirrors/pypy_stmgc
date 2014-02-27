@@ -240,7 +240,7 @@ void _stm_stop_safe_point(void)
 #endif
 
 
-static void wait_for_other_safe_points(void)
+static bool try_wait_for_other_safe_points(void)
 {
     /* Must be called with the mutex.  When all other threads are in a
        safe point of at least the requested kind, returns.  Otherwise,
@@ -257,11 +257,10 @@ static void wait_for_other_safe_points(void)
 
        This function requires that the calling thread is in a safe-point
        right now, so there is no deadlock if one thread calls
-       wait_for_other_safe_points() while another is currently blocked
+       try_wait_for_other_safe_points() while another is currently blocked
        in the cond_wait() in this same function.
     */
 
- restart:
     assert(_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT);
 
@@ -290,12 +289,20 @@ static void wait_for_other_safe_points(void)
 
     if (wait) {
         cond_wait(C_SAFE_POINT);
-        goto restart;
+        return false;
     }
 
     /* all threads are at a safe-point now.  Broadcast C_RESUME, which
        will allow them to resume --- but only when we release the mutex. */
     cond_broadcast(C_RESUME);
+    return true;
+}
+
+static void wait_for_other_safe_points(void)
+{
+    while (!try_wait_for_other_safe_points()) {
+        /* loop */
+    }
 }
 
 void _stm_collectable_safe_point(void)
