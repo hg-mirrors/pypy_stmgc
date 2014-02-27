@@ -89,7 +89,7 @@ static void minor_trace_if_young(object_t **pobj)
         char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
 
-        if (1 /*size >= GC_MEDIUM_REQUEST*/) {
+        if (1 /*size >= GC_N_SMALL_REQUESTS*8*/) {
 
             /* case 1: object is not small enough.
                Ask gcpage.c for an allocation via largemalloc. */
