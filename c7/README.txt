@@ -54,175 +54,98 @@ if it is feasible.
 Memory organization
 -------------------
 
-We allocate a big mmap that contains enough addresses for N times M
-bytes, where N is the number of threads and M is an upper bound on the
-total size of the objects.  Then we use remap_file_pages() to make these
-N regions all map to the same physical memory.  In each thread,
-%gs is made to point to the start of the corresponding region.  This
-means that %gs-relative accesses will go to different addresses in
-each thread, but these addresses are then (initially) mapped to the
-same physical memory, so the effect is as if we used neither %gs nor
-remap_file_pages().
+We have a small, fixed number of big pieces of memory called "segments".
+Each segment has enough (virtual) address space for all the objects that
+the program needs.  This is actually allocated from a single big mmap()
+so that pages can be exchanged between segments with remap_file_pages().
+We call N the number of segments.  Actual threads are not limited in
+number; they grab one segment in order to run GC-manipulating code, and
+release it afterwards.  This is similar to what occurs with the GIL,
+except we have up to N threads that can run in parallel, instead of 1.
 
-The exception comes from pages that contain objects that are already
-committed, but are being modified by the current transaction.  Such
-changes must not be visible to other threads before the current
-transaction commits.  This is done by using another remap_file_pages()
-to "unshare" the page, i.e. stop the corresponding %gs-relative,
-thread-local page from mapping to the same physical page as others.  We
-get a fresh new physical page, and duplicate its content --- much like
-the OS does after a fork() for pages modified by one or the other
-process.
+The first step when the process starts is to use remap_file_pages() to
+make these N regions all map to the same physical memory.  In each
+thread, when it grabs a segment, %gs is made to point to the start of
+the segment.  This means that %gs-relative accesses will go to different
+real addresses in each thread, but these addresses are then (initially)
+mapped to the same physical memory, so the effect is as if we used
+neither %gs nor remap_file_pages().
+
+The interesting exception to that rule comes from pages that contain
+objects that are already committed, but are being modified by the
+current transaction.  Such changes must not be visible to other threads
+before the current transaction commits.  This is done by using another
+remap_file_pages() to "unshare" the page, i.e. stop the corresponding
+%gs-relative, thread-local page from mapping to the same physical page
+as others.  We get a fresh new physical page, and duplicate its content
+--- much like the OS does after a fork() for pages modified by one or
+the other process.
 
 In more details: the first page of addresses in each thread-local region
 (4096 bytes) is made non-accessible, to detect errors of accessing the
 NULL pointer.  The second page is reserved for thread-local data.  The
 rest is divided into 1/16 for thread-local read markers, followed by
 15/16 for the real objects.  We initially use remap_file_pages() on this
-15/16 range.
+15/16 range.  The read markers are described below.
 
 Each transaction records the objects that it changed.  These are
-necessarily within unshared pages.  When other threads are about to
-commit their own transaction, they first copy these objects into their
-version of the page.  The point is that, from another thread's point of
-view, the memory didn't appear to change unexpectedly, but only when
-that other thread decides to copy the change explicitly.
+necessarily within unshared pages.  When we want to commit a
+transaction, we ask for a safe-point (suspending the other threads in a
+known state), and then we copy again the modified objects into the other
+version(s) of that data.  The point is that, from another thread's point
+of view, the memory didn't appear to change unexpectedly, but only when
+waiting in a safe-point.
 
-Each transaction uses their own (private) read markers to track which
-objects have been read.  When a thread "imports" changes done to some
-objects, it can quickly check if these objects have also been read by
-the current transaction, and if so, we know we have a conflict.
+Moreover, we detect read-write conflicts when trying to commit.  To do
+this, each transaction needs to track in their own (private) read
+markers which objects it has read.  When we try to commit one segment's
+version, when we would write a modified object to the other segments, we
+can check the other segments' read markers.  If a conflict is detected,
+we either abort the committing thread, or mark the other thread as
+requiring an abort (which it will do when trying to leave the
+safe-point).
 
-
-STM details
------------
-
-Here is how the STM works in terms that are hopefully common in STM
-research.  The transactions run from a "start time" to a "commit time",
-but these are not explicitly represented numerically.  The start time
-defines the initial state of the objects as seen in this thread.  We use
-the "extendable timestamps" approach in order to regularly bump the
-start time of running transactions (not only when a potential conflict
-is detected, but more eagerly).
-
-Each thread records privately its read objects (using a byte-map) and
-publicly its written objects (using an array of pointers as well as a
-global flag in the object).  Read-write conflicts are detected during
-the start time bumps.  Write-write conflicts are detected eagerly ---
-only one transaction can be concurrently running with a given object
-modified.  (In the case of write-write conficts, there are several
-possible contention management policies; for now we always abort the
-transaction that comes later in its attempt to modify the object.)
-
-Special care is taken for objects allocated in the current transaction.
-We expect these objects to be the vast majority of modified objects, and
-also most of them to die quickly.  More about it below.
-
-We use what looks like an "undo log" approach, where objects are
-modified in-place and aborts cause them to be copied back from somewhere
-else.  However, it is implemented without any explicit undo log, but by
-copying objects between multiple thread-local copies.  Memory pages
-containing modified objects are duplicated anyway, and so we already
-have around several copies of the objects at potentially different
-versions.
-
-
-(The rest of this section defines the "leader".  It's a complicated way
-to make sure we always have an object to copy back in case this
-transaction is aborted.  At first, what will be implemented in core.c
-will simply be waiting if necessary until two threads reach the latest
-version; then each thread can use the other's original object.)
-
-
-At most one thread is called the "leader" (this is new terminology as
-far as I know).  The leader is:
-
-- a thread that runs a transaction right now (as opposed to being
-  in some blocking syscall between two transactions, for example);
-
-- not alone: there are other threads running a transaction concurrently
-  (when only one thread is running, there is no leader);
-
-- finally, the start time of this thread's transaction is strictly
-  higher than the start time of any other running transaction.  (If there
-  are several threads with the same highest start time, we have no
-  leader.)
-
-Leadership is a temporary condition: it is acquired (typically) by the
-thread whose transaction commits and whose next transaction starts; but
-it is lost again as soon as any other thread updates its transaction's
-start time to match.
-
-The point of the notion of leadership is that when the leader wants to
-modify an object, it must first make sure that the original version is
-also present somewhere else.  Only the leader thread, if there is any,
-needs to worry about it.  We don't need to remember the original version
-of an older object, because if we need to abort a transaction, we may as
-well update all objects to the latest version.  And if there are several
-threads with the same highest start time, we can be sure that the
-original version of the object is somewhere among them --- this is the
-point of detecting write-write conflicts eagerly.  Finally, if there is
-only one thread running, as soon as it was updated, it cannot abort any
-more, so we don't need to record the old version of anything.
-
-The only remaining case is the one in which there is a leader thread,
-this leader thread has the only latest version of an object, and it
-tries to further modify this object.  To handle this precise case, for
-now, we simply wait until another thread updates and we are no longer
-the leader.  (*)
-
-(*) the code in core.c contains, or contained, or will again contain, an
-explicit undo log that would be filled in this case only.
+On the other hand, write-write conflicts are detected eagerly, which is
+necessary to avoid that all segments contain a modified version of the
+object and no segment is left with the original version.  It is done
+with a compare-and-swap into an array of write locks (only the first
+time a given old object is modified by a given transaction).
 
 
 Object creation and GC
 ----------------------
 
-draft:
+We use a GC that is similar to the one in PyPy:
 
-- pages need to be unshared when they contain already-committed objects
-  that are then modified.
+- a generational GC, with one nursery per segment containing
+  transaction-local objects only, and moved outside when full or when the
+  transaction commits.
 
-- pages can remain shared if a fraction of (or all) their space was not
-  used previously, but is used by new allocations; any changes to these
-  fresh objects during the same transaction do *not* need to unshare the
-  page.  This should ensure that in the common case the majority of pages
-  are not unshared.
+- nomenclature: objects are either "young" or "old" depending on whether
+  they were created by the current transaction or not.  Old objects are
+  always outside the nursery.  We call "overflow" objects the young
+  objects that are also outside the nursery.
 
-- minor collection: occurs regularly, and maybe always at the end of
-  transactions (we'll see).  Should work by marking the young objects
-  that survive.  Non-marked objects are then sweeped lazily by the
-  next allocation requests (as in "mark-and-don't-sweep" GCs, here
-  for the minor collection only).  Needs a write barrier to detect
-  old-objects-pointing-to-young objects (the old object may be fresh
-  from the same running transaction as well, or be already committed).
+- pages need to be unshared when they contain old objects that are then
+  modified.
 
-- the numbers and flags stored in the objects need to be designed with
-  the above goals in mind.
+- we need a write barrier to detect the changes done to any non-nursery
+  object (the first time only).  This is just a flag check.  Then the
+  slow-path of this write barrier distinguishes between overflow
+  objects and old objects, and the latter need to be unshared.
 
-- unclear yet: the minor collections may be triggered only when the
-  memory is full, or whenever a few MBs of memory was allocated.  It is
-  not important for small-to-medium transactions that only allocate a
-  few MBs anyway, but it might be for long-running transactions.
-
-- the major collections walk *all* objects.  They'll probably require
-  all threads to be synchronized.  Ideally the threads should then proceed
-  to do a parallel GC, but as a first step, blocking all threads but one
-  should be fine.
+- the old generation is collected with mark-and-sweep, during a major
+  collection step that walks *all* objects.  This requires all threads
+  to be synchronized, but ideally the threads should then proceed
+  to do a parallel GC (i.e. mark in all threads in parallel, and
+  then sweep in al threads in parallel, with one arbitrary thread
+  taking on the additional coordination role needed).
 
 - the major collections should be triggered by the amount of really-used
   memory, which means: counting the unshared pages as N pages.  Major
-  collection should then re-share the pages as much as possible, after
-  making sure that all threads have their timestamp updated.  This is the
-  essential part that guarantees that large, old, no-longer-modified
+  collection should then re-share the pages as much as possible.  This is
+  the essential part that guarantees that old, no-longer-modified
   bunches of objects are eventually present in only one copy in memory,
   in shared pages --- while at the same time bounding the number of
-  calls to remap_file_pages() for each page at 2 per major collection
+  calls to remap_file_pages() for each page at N-1 per major collection
   cycle.
-
-
-Misc
-----
-
-Use __builtin_setjmp() and __builtin_longjmp() rather than setjmp()
-and longjmp().
