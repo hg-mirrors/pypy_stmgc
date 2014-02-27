@@ -36,9 +36,9 @@ typedef struct malloc_chunk {
 
     /* The chunk has a total size of 'size'.  It is immediately followed
        in memory by another chunk.  This list ends with the last "chunk"
-       being actually only one word long, 'size_t prev_size'.  Both this
-       last chunk and the theoretical chunk before the first one are
-       considered "not free". */
+       being actually only two words long, with END_MARKER as 'size'.
+       Both this last chunk and the theoretical chunk before the first
+       one are considered "not free". */
 } mchunk_t;
 
 #define FLAG_SORTED          1
@@ -64,7 +64,7 @@ static mchunk_t *next_chunk_u(mchunk_t *p)
 
 /* The free chunks are stored in "bins".  Each bin is a doubly-linked
    list of chunks.  There are 84 bins, with largebin_index() giving the
-   correspondence between sizes are bin indices.
+   correspondence between sizes and bin indices.
 
    Each free chunk is preceeded in memory by a non-free chunk (or no
    chunk at all).  Each free chunk is followed in memory by a non-free
