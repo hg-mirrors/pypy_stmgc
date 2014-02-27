@@ -370,6 +370,10 @@ void stm_commit_transaction(void)
     assert(STM_PSEGMENT->transaction_state != TS_MUST_ABORT);
     STM_SEGMENT->jmpbuf_ptr = NULL;
 
+    /* if a major collection is required, do it here */
+    if (is_major_collection_requested())
+        major_collection_now_at_safe_point();
+
     /* synchronize overflow objects living in privatized pages */
     push_overflow_objects_from_privatized_pages();
 

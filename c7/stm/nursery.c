@@ -282,8 +282,8 @@ static void minor_collection(bool commit)
 
 void stm_collect(long level)
 {
-    assert(level == 0);
     minor_collection(/*commit=*/ false);
+    major_collection(/*forced=*/ level > 0);
 }
 
 
@@ -309,13 +309,19 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
         return (object_t *)p;
     }
 
-    minor_collection(/*commit=*/ false);
+    stm_collect(0);
     goto restart;
 }
 
 object_t *_stm_allocate_external(ssize_t size_rounded_up)
 {
-    /* XXX force a minor/major collection if needed */
+    /* first, force a collection if needed */
+    if (is_major_collection_requested()) {
+        /* use stm_collect() with level 0: if another thread does a major GC
+           in-between, is_major_collection_requested() will become false
+           again, and we'll avoid doing yet another one afterwards. */
+        stm_collect(0);
+    }
 
     char *result = allocate_outside_nursery_large(size_rounded_up);
     object_t *o = (object_t *)(result - stm_object_pages);

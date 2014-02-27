@@ -9,6 +9,11 @@
 
 #define GC_N_SMALL_REQUESTS    36
 
+/* More parameters fished directly from PyPy's default GC
+   XXX document me */
+#define GC_MIN                 (NB_NURSERY_PAGES * 4096 * 8)
+#define GC_MAJOR_COLLECT       1.82
+
 
 static char *uninitialized_page_start;   /* within segment 0 */
 static char *uninitialized_page_stop;
@@ -27,6 +32,9 @@ static char *free_uniform_pages;
 static void setup_gcpage(void);
 static void teardown_gcpage(void);
 static char *allocate_outside_nursery_large(uint64_t size);
+
+static void major_collection(bool forced);
+static void major_collection_now_at_safe_point(void);
 
 
 static char *_allocate_small_slowpath(uint64_t size);

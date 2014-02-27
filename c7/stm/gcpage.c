@@ -105,3 +105,42 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
     o->stm_flags = STM_FLAGS_PREBUILT;
     return o;
 }
+
+
+/************************************************************/
+
+
+static void major_collection(bool forced)
+{
+    assert(!_has_mutex());
+    if (!forced && !is_major_collection_requested())
+        return;
+
+    mutex_lock();
+
+    assert(STM_PSEGMENT->safe_point == SP_RUNNING);
+    STM_PSEGMENT->safe_point = SP_SAFE_POINT;
+
+    while (forced || is_major_collection_requested()) {
+        /* wait until the other thread is at a safe-point */
+        if (try_wait_for_other_safe_points()) {
+            /* ok */
+            major_collection_now_at_safe_point();
+            break;
+        }
+    }
+
+    assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT);
+    STM_PSEGMENT->safe_point = SP_RUNNING;
+
+    mutex_unlock();
+}
+
+static void major_collection_now_at_safe_point(void)
+{
+    assert(_has_mutex());
+
+    fprintf(stderr, "hi, I should be doing a major GC here\n");
+
+    reset_major_collection_requested();
+}
