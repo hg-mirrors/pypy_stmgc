@@ -8,7 +8,7 @@
 static union {
     struct {
         uint8_t mutex_pages;
-        bool major_collection_requested;
+        volatile bool major_collection_requested;
         uint64_t total_allocated;  /* keep track of how much memory we're
                                       using, ignoring nurseries */
         uint64_t total_allocated_bound;
@@ -59,6 +59,11 @@ static uint64_t increment_total_allocated(ssize_t add_or_remove)
 static bool is_major_collection_requested(void)
 {
     return pages_ctl.major_collection_requested;
+}
+
+static void force_major_collection_request(void)
+{
+    pages_ctl.major_collection_requested = true;
 }
 
 static void reset_major_collection_requested(void)

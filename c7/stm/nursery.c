@@ -282,8 +282,11 @@ static void minor_collection(bool commit)
 
 void stm_collect(long level)
 {
+    if (level > 0)
+        force_major_collection_request();
+
     minor_collection(/*commit=*/ false);
-    major_collection(/*forced=*/ level > 0);
+    major_collection_if_requested();
 }
 
 

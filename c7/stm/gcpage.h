@@ -33,7 +33,7 @@ static void setup_gcpage(void);
 static void teardown_gcpage(void);
 static char *allocate_outside_nursery_large(uint64_t size);
 
-static void major_collection(bool forced);
+static void major_collection_if_requested(void);
 static void major_collection_now_at_safe_point(void);
 
 

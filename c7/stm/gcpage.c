@@ -110,10 +110,10 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
 /************************************************************/
 
 
-static void major_collection(bool forced)
+static void major_collection_if_requested(void)
 {
     assert(!_has_mutex());
-    if (!forced && !is_major_collection_requested())
+    if (!is_major_collection_requested())
         return;
 
     mutex_lock();
@@ -121,7 +121,7 @@ static void major_collection(bool forced)
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     STM_PSEGMENT->safe_point = SP_SAFE_POINT;
 
-    while (forced || is_major_collection_requested()) {
+    while (is_major_collection_requested()) {
         /* wait until the other thread is at a safe-point */
         if (try_wait_for_other_safe_points()) {
             /* ok */
