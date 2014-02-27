@@ -5,16 +5,12 @@
 
 static void setup_gcpage(void)
 {
-    /* NB. the very last page is not used, which allows a speed-up in
-       reset_all_creation_markers() */
     char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL;
-    uintptr_t length = (NB_PAGES - END_NURSERY_PAGE - 1) * 4096UL;
+    uintptr_t length = (NB_PAGES - END_NURSERY_PAGE) * 4096UL;
     _stm_largemalloc_init_arena(base, length);
 
     uninitialized_page_start = stm_object_pages + END_NURSERY_PAGE * 4096UL;
     uninitialized_page_stop  = stm_object_pages + NB_PAGES * 4096UL;
-
-    assert(GC_MEDIUM_REQUEST >= (1 << 8));
 }
 
 static void teardown_gcpage(void)

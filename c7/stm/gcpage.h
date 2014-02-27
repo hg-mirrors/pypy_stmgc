@@ -1,14 +1,14 @@
 
 /* Outside the nursery, we are taking from the highest addresses
-   complete pages, one at a time, which uniformly contain objects
-   of size "8 * N" for some N in range(2, GC_N_SMALL_REQUESTS).  We
-   are taking from the lowest addresses "large" objects, which are
-   guaranteed to be at least 256 bytes long (actually 288),
-   allocated by largemalloc.c.
+   complete pages, one at a time, which uniformly contain objects of
+   size "8 * N" for some N in range(2, GC_N_SMALL_REQUESTS).  We are
+   taking from the lowest addresses "large" objects, which are at least
+   128 bytes long, allocated by largemalloc.c.  The limit was picked
+   from a run a PyPy, showing that (in this case) the number of
+   allocations of at least 128 bytes is a lot below 1%.
 */
 
-#define GC_N_SMALL_REQUESTS    36
-#define GC_MEDIUM_REQUEST      (GC_N_SMALL_REQUESTS * 8)
+#define GC_N_SMALL_REQUESTS    16
 
 
 static char *uninitialized_page_start;   /* within segment 0 */

@@ -73,7 +73,8 @@ static inline uintptr_t list_item(struct list_s *lst, uintptr_t index)
 /* The tree_xx functions are, like the name hints, implemented as a tree,
    supporting very high performance in TREE_FIND in the common case where
    there are no or few elements in the tree, but scaling correctly
-   if the number of items becomes large. */
+   if the number of items becomes large (logarithmically, rather
+   than almost-constant-time with hash maps, but with low constants). */
 
 #define TREE_BITS   4
 #define TREE_ARITY  (1 << TREE_BITS)
