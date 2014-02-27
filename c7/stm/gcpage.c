@@ -71,12 +71,12 @@ static char *allocate_outside_nursery_large(uint64_t size)
     /* thread-safe: use the lock of pages.c to prevent any remapping
        from occurring under our feet */
     mutex_pages_lock();
+    increment_total_allocated(size + LARGE_MALLOC_OVERHEAD);
 
     /* Allocate the object with largemalloc.c from the lower addresses. */
     char *addr = _stm_large_malloc(size);
     if (addr == NULL)
         stm_fatalerror("not enough memory!\n");
-    increment_total_allocated(size + LARGE_MALLOC_OVERHEAD);
 
     if (addr + size > uninitialized_page_start) {
         uintptr_t npages;
