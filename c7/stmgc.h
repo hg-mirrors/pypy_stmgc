@@ -64,7 +64,7 @@ typedef struct stm_thread_local_s {
 void _stm_write_slowpath(object_t *);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
-void _stm_become_inevitable(char*);
+void _stm_become_inevitable(const char*);
 void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *);
 void _stm_collectable_safe_point(void);
 
@@ -236,7 +236,7 @@ void stm_abort_transaction(void) __attribute__((noreturn));
 /* Turn the current transaction inevitable.  The 'jmpbuf' passed to
    STM_START_TRANSACTION() is not going to be used any more after
    this call (but the stm_become_inevitable() itself may still abort). */
-static inline void stm_become_inevitable(char* msg) {
+static inline void stm_become_inevitable(const char* msg) {
     if (STM_SEGMENT->jmpbuf_ptr != NULL)
         _stm_become_inevitable(msg);
 }

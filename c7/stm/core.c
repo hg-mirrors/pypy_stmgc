@@ -505,7 +505,7 @@ static void abort_with_mutex(void)
     __builtin_longjmp(*jmpbuf_ptr, 1);
 }
 
-void _stm_become_inevitable(char *msg)
+void _stm_become_inevitable(const char *msg)
 {
     mutex_lock();
     switch (STM_PSEGMENT->transaction_state) {
@@ -517,6 +517,7 @@ void _stm_become_inevitable(char *msg)
         /* become inevitable */
         wait_for_end_of_inevitable_transaction(true);
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
+        STM_SEGMENT->jmpbuf_ptr = NULL;
         break;
 
     case TS_MUST_ABORT:
@@ -525,5 +526,6 @@ void _stm_become_inevitable(char *msg)
     default:
         assert(!"invalid transaction_state in become_inevitable");
     }
+    dprintf(("become_inevitable: %s\n", msg));
     mutex_unlock();
 }
