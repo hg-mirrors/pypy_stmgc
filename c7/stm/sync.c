@@ -289,6 +289,12 @@ static bool try_wait_for_other_safe_points(void)
 
     if (wait) {
         cond_wait(C_SAFE_POINT);
+        /* XXX think: I believe this can end in a busy-loop, with this thread
+           setting NSE_SIGNAL on the other thread; then the other thread
+           commits, sends C_SAFE_POINT, finish the transaction, start
+           the next one, and only then this thread resumes; then we're back
+           in the same situation as before with no progress here.
+        */
         return false;
     }
 
