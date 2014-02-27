@@ -10,6 +10,7 @@ typedef ... object_t;
 typedef ... stm_jmpbuf_t;
 #define SIZEOF_MYOBJ ...
 #define _STM_FAST_ALLOC ...
+#define _STM_GCFLAG_WRITE_BARRIER ...
 
 typedef struct {
     object_t **shadowstack, **shadowstack_base;
@@ -36,6 +37,8 @@ char *_stm_real_address(object_t *obj);
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 void _stm_test_switch(stm_thread_local_t *tl);
+uint8_t _stm_get_page_flag(uintptr_t index);
+int _stm_get_flags(object_t *obj);
 
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 bool _check_commit_transaction(void);
@@ -70,6 +73,11 @@ void stm_collect(long level);
 """)
 
 
+GC_N_SMALL_REQUESTS = 36      # from gcpage.c
+SHARED_PAGE         = 1       # from pages.h
+PRIVATE_PAGE        = 3       # from pages.h
+
+
 lib = ffi.verify('''
 #include <stdlib.h>
 #include <string.h>
@@ -85,7 +93,7 @@ typedef TLPREFIX struct myobj_s myobj_t;
 #define SIZEOF_MYOBJ sizeof(struct myobj_s)
 
 
-uint8_t _stm_get_flags(object_t *obj) {
+int _stm_get_flags(object_t *obj) {
     return obj->stm_flags;
 }
 
@@ -231,7 +239,9 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
                     ('STM_NO_COND_WAIT', '1'),
-                    ('STM_DEBUGPRINT', '1')],
+                    ('STM_DEBUGPRINT', '1'),
+                    ('GC_N_SMALL_REQUESTS', str(GC_N_SMALL_REQUESTS)), #check
+                    ],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
      extra_compile_args=['-g', '-O0', '-Werror', '-ferror-limit=1'],
@@ -241,6 +251,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 WORD = 8
 HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
+GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 
 
 class Conflict(Exception):
@@ -331,7 +342,7 @@ def stm_minor_collect():
     lib.stm_collect(0)
 
 def stm_get_page_flag(pagenum):
-    return lib.stm_get_page_flag(pagenum)
+    return lib._stm_get_page_flag(pagenum)
 
 def stm_get_obj_size(o):
     return lib.stmcb_size_rounded_up(stm_get_real_address(o))
