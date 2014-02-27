@@ -71,4 +71,12 @@ object_t *_stm_enum_objects_pointing_to_nursery(long index)
     return (object_t *)list_item(
         STM_PSEGMENT->objects_pointing_to_nursery, index);
 }
+
+uint64_t _stm_total_allocated(void)
+{
+    mutex_pages_lock();
+    uint64_t result = increment_total_allocated(0);
+    mutex_pages_unlock();
+    return result;
+}
 #endif

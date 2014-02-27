@@ -213,10 +213,14 @@ static void throw_away_nursery(void)
         bool locked = false;
         wlog_t *item;
         TREE_LOOP_FORWARD(*STM_PSEGMENT->young_outside_nursery, item) {
+            assert(!_is_in_nursery((object_t *)item->addr));
             if (!locked) {
                 mutex_pages_lock();
                 locked = true;
             }
+            char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base,item->addr);
+            ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+            increment_total_allocated(-(size + LARGE_MALLOC_OVERHEAD));
             _stm_large_free(stm_object_pages + item->addr);
         } TREE_LOOP_END;
 

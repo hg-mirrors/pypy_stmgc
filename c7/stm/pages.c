@@ -6,9 +6,18 @@
 /************************************************************/
 
 static union {
-    uint8_t mutex_pages;
+    struct {
+        uint8_t mutex_pages;
+        uint64_t total_allocated;  /* keep track of how much memory we're
+                                      using, ignoring nurseries */
+    };
     char reserved[64];
 } pages_ctl __attribute__((aligned(64)));
+
+static void teardown_pages(void)
+{
+    memset(&pages_ctl, 0, sizeof(pages_ctl));
+}
 
 static void mutex_pages_lock(void)
 {
@@ -26,6 +35,13 @@ static bool _has_mutex_pages(void) __attribute__((unused));
 static bool _has_mutex_pages(void)
 {
     return pages_ctl.mutex_pages != 0;
+}
+
+static uint64_t increment_total_allocated(ssize_t add_or_remove)
+{
+    assert(_has_mutex_pages());
+    pages_ctl.total_allocated += add_or_remove;
+    return pages_ctl.total_allocated;
 }
 
 /************************************************************/
@@ -108,6 +124,7 @@ static void privatize_range(uintptr_t pagenum, uintptr_t count, bool full)
     }
     write_fence();
     memset(flag_page_private + pagenum, PRIVATE_PAGE, count);
+    increment_total_allocated(4096 * count);
 }
 
 static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
