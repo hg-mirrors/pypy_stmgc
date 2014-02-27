@@ -12,3 +12,6 @@ char *_stm_large_malloc(size_t request_size);
 void _stm_large_free(char *data);
 
 void _stm_large_dump(void);
+
+
+#define LARGE_MALLOC_OVERHEAD   (2 * sizeof(size_t))   /* estimate */

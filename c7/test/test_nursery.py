@@ -85,13 +85,17 @@ class TestBasic(BaseTest):
         obj_size = lib._STM_FAST_ALLOC + 16
 
         self.start_transaction()
+        assert lib._stm_total_allocated() == 0
         seen = set()
         for i in range(10):
             stm_minor_collect()
             new = stm_allocate(obj_size)
             assert not is_in_nursery(new)
+            assert lib._stm_total_allocated() == obj_size + 16
             seen.add(new)
         assert len(seen) < 5     # addresses are reused
+        stm_minor_collect()
+        assert lib._stm_total_allocated() == 0
 
     def test_larger_than_limit_for_nursery_dont_die(self):
         obj_nrefs = (lib._STM_FAST_ALLOC + 16) // 8
@@ -114,6 +118,19 @@ class TestBasic(BaseTest):
             assert lp1
             lp1 = stm_get_ref(lp1, i)
         assert not lp1
+
+    def test_account_for_privatized_page(self):
+        self.start_transaction()
+        obj = stm_allocate(16)
+        self.push_root(obj)
+        self.commit_transaction()
+        obj = self.pop_root()
+        base = lib._stm_total_allocated()
+        assert base <= 4096
+
+        self.start_transaction()
+        stm_write(obj)
+        assert lib._stm_total_allocated() == base + 4096
 
     def test_reset_partial_alloc_pages(self):
         py.test.skip("a would-be-nice feature, but not actually needed: "

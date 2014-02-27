@@ -101,6 +101,7 @@ void stm_teardown(void)
     teardown_sync();
     teardown_gcpage();
     teardown_nursery();
+    teardown_pages();
 }
 
 void _init_shadow_stack(stm_thread_local_t *tl)

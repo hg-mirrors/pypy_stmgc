@@ -70,6 +70,7 @@ object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
 
 void stm_collect(long level);
+uint64_t _stm_total_allocated(void);
 """)
 
 
@@ -215,7 +216,7 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj)
     }
     else {
         int nrefs = myobj->type_id - 421420;
-        assert(nrefs < 100);
+        assert(nrefs < 10000);     /* artificial limit, to check for garbage */
         if (nrefs == 0)   /* weakrefs */
             nrefs = 1;
         return sizeof(struct myobj_s) + nrefs * sizeof(void*);

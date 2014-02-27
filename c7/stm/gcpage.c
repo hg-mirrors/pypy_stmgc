@@ -76,6 +76,7 @@ static char *allocate_outside_nursery_large(uint64_t size)
     char *addr = _stm_large_malloc(size);
     if (addr == NULL)
         stm_fatalerror("not enough memory!\n");
+    increment_total_allocated(size + LARGE_MALLOC_OVERHEAD);
 
     if (addr + size > uninitialized_page_start) {
         uintptr_t npages;
