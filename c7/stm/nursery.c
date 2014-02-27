@@ -231,21 +231,18 @@ static void throw_away_nursery(void)
     }
 }
 
-static void minor_collection(bool commit)
+#define MINOR_NOTHING_TO_DO(pseg)                                       \
+    ((pseg)->pub.nursery_current == (stm_char *)_stm_nursery_start &&   \
+     tree_is_cleared((pseg)->young_outside_nursery))
+
+
+static void _do_minor_collection(bool commit)
 {
-    assert(!_has_mutex());
-
-    stm_safe_point();
-    abort_if_needed();
-
     /* We must move out of the nursery any object found within the
        nursery.  All objects touched are either from the current
        transaction, or are from 'modified_old_objects'.  In all cases,
        we should only read and change objects belonging to the current
        segment.
-
-       XXX improve: it might be possible to run this function in
-       a safe-point but without the mutex, if we are careful
     */
 
     dprintf(("minor_collection commit=%d\n", (int)commit));
@@ -277,7 +274,18 @@ static void minor_collection(bool commit)
 
     throw_away_nursery();
 
+    assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
+}
+
+static void minor_collection(bool commit)
+{
+    assert(!_has_mutex());
+
+    stm_safe_point();
+    abort_if_needed();
+
+    _do_minor_collection(commit);
 }
 
 void stm_collect(long level)
@@ -363,4 +371,25 @@ static void check_nursery_at_transaction_start(void)
         _duck();
     }
 #endif
+}
+
+static void major_do_minor_collections(void)
+{
+    int original_num = STM_SEGMENT->segment_num;
+    long i;
+
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+        if (MINOR_NOTHING_TO_DO(pseg))  /*TS_NONE segments have NOTHING_TO_DO*/
+            continue;
+
+        assert(pseg->transaction_state != TS_NONE);
+        assert(pseg->safe_point == SP_SAFE_POINT);
+
+        set_gs_register(get_segment_base(i));
+        _do_minor_collection(/*commit=*/ false);
+        assert(MINOR_NOTHING_TO_DO(pseg));
+    }
+
+    set_gs_register(get_segment_base(original_num));
 }

@@ -87,3 +87,18 @@ class TestGCPage(BaseTest):
 
         assert stm_get_page_flag(stm_get_obj_pages(newer)[0]) == SHARED_PAGE
         assert stm_get_flags(newer) & GCFLAG_WRITE_BARRIER
+
+    def test_major_collection(self):
+        self.start_transaction()
+        new = stm_allocate(5000)
+        self.push_root(new)
+        stm_minor_collect()
+        assert 5000 <= lib._stm_total_allocated() <= 8192
+
+        self.pop_root()
+        stm_minor_collect()
+        assert 5000 <= lib._stm_total_allocated() <= 8192
+
+        stm_major_collect()
+        py.test.skip("in-progress")
+        assert lib._stm_total_allocated() == 0

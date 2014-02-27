@@ -342,6 +342,9 @@ def stm_become_inevitable():
 def stm_minor_collect():
     lib.stm_collect(0)
 
+def stm_major_collect():
+    lib.stm_collect(1)
+
 def stm_get_page_flag(pagenum):
     return lib._stm_get_page_flag(pagenum)
 
