@@ -138,7 +138,14 @@ static void major_collection_if_requested(void)
 
 static void major_collection_now_at_safe_point(void)
 {
+    dprintf((" .----- major_collection_now_at_safe_point -----\n"));
     assert(_has_mutex());
+
+    /* first, force a minor collection in each of the other segments */
+    major_do_minor_collections();
+
+    dprintf((" | used before collection: %ld\n",
+             (long)pages_ctl.total_allocated));
 
     fprintf(stderr, "hi, I should be doing a major GC here\n");
 

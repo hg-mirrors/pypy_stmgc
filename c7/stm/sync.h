@@ -19,6 +19,7 @@ static void cond_signal(enum cond_type_e);
 #ifndef NDEBUG
 static bool _has_mutex(void);
 #endif
+static void set_gs_register(char *value);
 
 /* acquire and release one of the segments for running the given thread
    (must have the mutex acquired!) */
