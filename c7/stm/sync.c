@@ -16,7 +16,7 @@
 static union {
     struct {
         pthread_mutex_t global_mutex;
-        pthread_cond_t cond[_C_TOTAL];
+        pthread_cond_t global_cond;
         /* some additional pieces of global state follow */
         uint8_t in_use[NB_SEGMENTS];   /* 1 if running a pthread */
         uint64_t global_time;
@@ -30,11 +30,8 @@ static void setup_sync(void)
     if (pthread_mutex_init(&sync_ctl.global_mutex, NULL) != 0)
         stm_fatalerror("mutex initialization: %m\n");
 
-    long i;
-    for (i = 0; i < _C_TOTAL; i++) {
-        if (pthread_cond_init(&sync_ctl.cond[i], NULL) != 0)
-            stm_fatalerror("cond initialization: %m\n");
-    }
+    if (pthread_cond_init(&sync_ctl.global_cond, NULL) != 0)
+        stm_fatalerror("cond initialization: %m\n");
 }
 
 static void teardown_sync(void)
@@ -42,11 +39,8 @@ static void teardown_sync(void)
     if (pthread_mutex_destroy(&sync_ctl.global_mutex) != 0)
         stm_fatalerror("mutex destroy: %m\n");
 
-    long i;
-    for (i = 0; i < _C_TOTAL; i++) {
-        if (pthread_cond_destroy(&sync_ctl.cond[i]) != 0)
-            stm_fatalerror("cond destroy: %m\n");
-    }
+    if (pthread_cond_destroy(&sync_ctl.global_cond) != 0)
+        stm_fatalerror("cond destroy: %m\n");
 
     memset(&sync_ctl, 0, sizeof(sync_ctl.in_use));
 }
@@ -91,35 +85,29 @@ static inline void mutex_unlock(void)
     assert((_has_mutex_here = false, 1));
 }
 
-static inline void cond_wait_no_abort(enum cond_type_e ctype)
+static inline void cond_wait_no_abort(void)
 {
 #ifdef STM_NO_COND_WAIT
-    stm_fatalerror("*** cond_wait/%d called!\n", (int)ctype);
+    stm_fatalerror("*** cond_wait called!\n");
 #endif
 
     assert(_has_mutex_here);
-    if (UNLIKELY(pthread_cond_wait(&sync_ctl.cond[ctype],
+    if (UNLIKELY(pthread_cond_wait(&sync_ctl.global_cond,
                                    &sync_ctl.global_mutex) != 0))
-        stm_fatalerror("pthread_cond_wait/%d: %m\n", (int)ctype);
+        stm_fatalerror("pthread_cond_wait: %m\n");
 }
 
-static inline void cond_wait(enum cond_type_e ctype)
+static inline void cond_wait(void)
 {
-    cond_wait_no_abort(ctype);
+    cond_wait_no_abort();
     if (STM_PSEGMENT->transaction_state == TS_MUST_ABORT)
         abort_with_mutex();
 }
 
-static inline void cond_broadcast(enum cond_type_e ctype)
+static inline void cond_broadcast(void)
 {
-    if (UNLIKELY(pthread_cond_broadcast(&sync_ctl.cond[ctype]) != 0))
-        stm_fatalerror("pthread_cond_broadcast/%d: %m\n", (int)ctype);
-}
-
-static inline void cond_signal(enum cond_type_e ctype)
-{
-    if (UNLIKELY(pthread_cond_signal(&sync_ctl.cond[ctype]) != 0))
-        stm_fatalerror("pthread_cond_signal/%d: %m\n", (int)ctype);
+    if (UNLIKELY(pthread_cond_broadcast(&sync_ctl.global_cond) != 0))
+        stm_fatalerror("pthread_cond_broadcast: %m\n");
 }
 
 static bool acquire_thread_segment(stm_thread_local_t *tl)
@@ -154,8 +142,8 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
     }
     /* Wait and retry.  It is guaranteed that any thread releasing its
        segment will do so by acquiring the mutex and calling
-       cond_signal(C_RELEASE_THREAD_SEGMENT). */
-    cond_wait_no_abort(C_RELEASE_THREAD_SEGMENT);
+       cond_broadcast(). */
+    cond_wait_no_abort();
 
     /* Return false to the caller, which will call us again */
     return false;
@@ -192,10 +180,10 @@ static void wait_for_end_of_inevitable_transaction(bool can_abort)
                 /* XXX should we wait here?  or abort?  or a mix?
                    for now, always abort */
                 abort_with_mutex();
-                //cond_wait(C_INEVITABLE_DONE);
+                //cond_wait();
             }
             else {
-                cond_wait_no_abort(C_INEVITABLE_DONE);
+                cond_wait_no_abort();
             }
             goto restart;
         }
@@ -288,7 +276,7 @@ static bool try_wait_for_other_safe_points(void)
     }
 
     if (wait) {
-        cond_wait(C_SAFE_POINT);
+        cond_wait();
         /* XXX think: I believe this can end in a busy-loop, with this thread
            setting NSE_SIGNAL on the other thread; then the other thread
            commits, sends C_SAFE_POINT, finish the transaction, start
@@ -300,7 +288,7 @@ static bool try_wait_for_other_safe_points(void)
 
     /* all threads are at a safe-point now.  Broadcast C_RESUME, which
        will allow them to resume --- but only when we release the mutex. */
-    cond_broadcast(C_RESUME);
+    cond_broadcast();
     return true;
 }
 
@@ -336,9 +324,9 @@ static void collectable_safe_point(void)
 
         /* signal all the threads blocked in
            wait_for_other_safe_points() */
-        cond_broadcast(C_SAFE_POINT);
+        cond_broadcast();
 
-        cond_wait(C_RESUME);
+        cond_wait();
 
         STM_PSEGMENT->safe_point = SP_RUNNING;
     }

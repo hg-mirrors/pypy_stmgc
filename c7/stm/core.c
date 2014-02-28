@@ -326,7 +326,6 @@ static void _finish_transaction(void)
     /* signal all the threads blocked in wait_for_other_safe_points() */
     if (STM_SEGMENT->nursery_end == NSE_SIGNAL) {
         STM_SEGMENT->nursery_end = NURSERY_END;
-        cond_broadcast(C_SAFE_POINT);
     }
 
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
@@ -339,6 +338,9 @@ static void _finish_transaction(void)
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
+
+    /* wake up other threads waiting. */
+    cond_broadcast();
 }
 
 void stm_commit_transaction(void)
@@ -387,15 +389,8 @@ void stm_commit_transaction(void)
         STM_PSEGMENT->overflow_number = highest_overflow_number;
     }
 
-    /* if we were inevitable, signal */
-    if (STM_PSEGMENT->transaction_state == TS_INEVITABLE)
-        cond_broadcast(C_INEVITABLE_DONE);
-
     /* done */
     _finish_transaction();
-
-    /* wake up one other thread waiting for a segment. */
-    cond_signal(C_RELEASE_THREAD_SEGMENT);
 
     mutex_unlock();
 }
@@ -477,18 +472,6 @@ static void abort_with_mutex(void)
     tl->thread_local_obj = STM_PSEGMENT->threadlocal_at_start_of_transaction;
 
     _finish_transaction();
-
-    /* wake up one other thread waiting for a segment.  In order to support
-       contention.c, we use a broadcast, to make sure that all threads are
-       signalled, including the one that requested an abort, if any.
-       Moreover, we wake up any thread waiting for this one to do a safe
-       point, if any (in _finish_transaction above).  Finally, it's
-       possible that we reach this place from the middle of a piece of
-       code like wait_for_other_safe_points() which ends in broadcasting
-       C_RESUME; we must make sure to broadcast it.
-    */
-    cond_broadcast(C_RELEASE_THREAD_SEGMENT);
-    cond_broadcast(C_RESUME);
 
     mutex_unlock();
 
