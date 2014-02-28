@@ -3,19 +3,11 @@
 static void setup_sync(void);
 static void teardown_sync(void);
 
-/* all synchronization is done via a mutex and a few condition variables */
-enum cond_type_e {
-    C_RELEASE_THREAD_SEGMENT,
-    C_SAFE_POINT,
-    C_RESUME,
-    C_INEVITABLE_DONE,
-    _C_TOTAL
-};
+/* all synchronization is done via a mutex and a condition variable */
 static void mutex_lock(void);
 static void mutex_unlock(void);
-static void cond_wait(enum cond_type_e);
-static void cond_broadcast(enum cond_type_e);
-static void cond_signal(enum cond_type_e);
+static void cond_wait(void);
+static void cond_broadcast(void);
 #ifndef NDEBUG
 static bool _has_mutex(void);
 #endif

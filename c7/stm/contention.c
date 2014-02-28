@@ -44,7 +44,7 @@ static void contention_management(uint8_t other_segment_num)
            cond_wait(C_SAFE_POINT).  Thus broadcasting C_SAFE_POINT is
            enough to wake it up in the second case.
         */
-        cond_broadcast(C_SAFE_POINT);
+        cond_broadcast();
     }
 }
 
@@ -78,10 +78,10 @@ static void write_write_contention_management(uintptr_t lock_idx)
         /* wait, hopefully until the other thread broadcasts "I'm
            done aborting" (spurious wake-ups are ok). */
         dprintf(("contention: wait C_SAFE_POINT...\n"));
-        cond_wait(C_SAFE_POINT);
+        cond_wait();
         dprintf(("contention: done\n"));
 
-        cond_broadcast(C_RESUME);
+        cond_broadcast();
 
         /* now we return into _stm_write_slowpath() and will try again
            to acquire the write lock on our object. */
