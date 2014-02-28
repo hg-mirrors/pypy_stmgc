@@ -3,13 +3,24 @@
 #include <asm/prctl.h>
 
 
-/* XXX Getting the most efficient locks is hard, but the following
-   simplification is probably good enough for small numbers of threads:
-   when a thread wants to check or change any global state (e.g. start
-   running a transaction, etc.), it acquires this single mutex.  If
-   additionally it wants to wait until the global state is changed by
-   someone else, it waits on the condition variable.  This should be
-   all we need for synchronization.
+/* Each segment can be in one of three possible states, described by
+   the segment variable 'safe_point':
+
+   - SP_NO_TRANSACTION: no thread is running any transaction using this
+     segment.
+
+   - SP_RUNNING: a thread is running a transaction using this segment.
+
+   - SP_SAFE_POINT: the thread that owns this segment is currently
+     suspended in a safe-point.  (A safe-point means that it is not
+     changing anything right now, and the current shadowstack is correct.)
+
+   Synchronization is done with a single mutex / condition variable.  A
+   thread needs to have acquired the mutex in order to do things like
+   acquiring or releasing ownership of a segment or updating this
+   segment's state.  No other thread can acquire the mutex concurrently,
+   and so there is no race: the (single) thread owning the mutex can
+   freely inspect or even change the state of other segments too.
 */
 
 
@@ -268,8 +279,7 @@ static bool try_wait_for_other_safe_points(void)
         struct stm_priv_segment_info_s *other_pseg = get_priv_segment(i);
         if (other_pseg->safe_point == SP_RUNNING) {
             /* we need to wait for this thread.  Use NSE_SIGNAL to ask
-               it (and possibly all other threads in the same case) to
-               enter a safe-point soon. */
+               it to enter a safe-point soon. */
             other_pseg->pub.nursery_end = NSE_SIGNAL;
             wait = true;
         }
@@ -292,13 +302,6 @@ static bool try_wait_for_other_safe_points(void)
     return true;
 }
 
-static void wait_for_other_safe_points(void)
-{
-    while (!try_wait_for_other_safe_points()) {
-        /* loop */
-    }
-}
-
 void _stm_collectable_safe_point(void)
 {
     /* If _stm_nursery_end was set to NSE_SIGNAL by another thread,
@@ -315,6 +318,7 @@ void _stm_collectable_safe_point(void)
 
 static void collectable_safe_point(void)
 {
+    assert(_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
 
     while (STM_SEGMENT->nursery_end == NSE_SIGNAL) {
@@ -330,5 +334,6 @@ static void collectable_safe_point(void)
 
         STM_PSEGMENT->safe_point = SP_RUNNING;
     }
+    assert(STM_SEGMENT->nursery_end == NURSERY_END);
     dprintf(("collectable_safe_point done\n"));
 }
