@@ -389,7 +389,7 @@ void stm_commit_transaction(void)
 
     /* if we were inevitable, signal */
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE)
-        cond_signal(C_INEVITABLE_DONE);
+        cond_broadcast(C_INEVITABLE_DONE);
 
     /* done */
     _finish_transaction();
