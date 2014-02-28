@@ -323,11 +323,6 @@ static void push_modified_to_other_segments(void)
 
 static void _finish_transaction(void)
 {
-    /* signal all the threads blocked in wait_for_other_safe_points() */
-    if (STM_SEGMENT->nursery_end == NSE_SIGNAL) {
-        STM_SEGMENT->nursery_end = NURSERY_END;
-    }
-
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
 
@@ -355,10 +350,18 @@ void stm_commit_transaction(void)
     minor_collection(/*commit=*/ true);
 
     mutex_lock();
+
+ retry:
+    if (STM_SEGMENT->nursery_end != NURSERY_END)
+        collectable_safe_point();
+
     STM_PSEGMENT->safe_point = SP_SAFE_POINT;
 
     /* wait until the other thread is at a safe-point */
-    wait_for_other_safe_points();
+    if (!try_wait_for_other_safe_points()) {
+        STM_PSEGMENT->safe_point = SP_RUNNING;
+        goto retry;
+    }
 
     /* the rest of this function either runs atomically without
        releasing the mutex, or aborts the current thread. */
@@ -369,6 +372,7 @@ void stm_commit_transaction(void)
     /* cannot abort any more from here */
     dprintf(("commit_transaction\n"));
 
+    assert(STM_SEGMENT->nursery_end == NURSERY_END);
     assert(STM_PSEGMENT->transaction_state != TS_MUST_ABORT);
     STM_SEGMENT->jmpbuf_ptr = NULL;
 
@@ -391,6 +395,8 @@ void stm_commit_transaction(void)
 
     /* done */
     _finish_transaction();
+
+    assert(STM_SEGMENT->nursery_end == NURSERY_END);
 
     mutex_unlock();
 }
@@ -472,6 +478,8 @@ static void abort_with_mutex(void)
     tl->thread_local_obj = STM_PSEGMENT->threadlocal_at_start_of_transaction;
 
     _finish_transaction();
+
+    STM_SEGMENT->nursery_end = NURSERY_END;
 
     mutex_unlock();
 
