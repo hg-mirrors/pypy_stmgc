@@ -137,6 +137,7 @@ class TestGCPage(BaseTest):
         self.start_transaction()
         x = stm_allocate(5000)
         stm_set_char(x, 'A')
+        stm_set_char(x, 'a', 4999)
         self.push_root(x)
         self.commit_transaction()
         assert lib._stm_total_allocated() == 5000 + LMO
@@ -146,15 +147,37 @@ class TestGCPage(BaseTest):
         self.push_root(x)
         assert lib._stm_total_allocated() == 5000 + LMO
         stm_set_char(x, 'B')
+        stm_set_char(x, 'b', 4999)
         assert lib._stm_total_allocated() == 5000 + LMO + 2 * 4096  # 2 pages
         stm_major_collect()
 
-        assert stm_get_char(x) == 'B'
+        assert stm_get_char(x)       == 'B'
+        assert stm_get_char(x, 4999) == 'b'
 
         self.switch(1)
         self.start_transaction()
-        assert stm_get_char(x) == 'A'
+        assert stm_get_char(x)       == 'A'
+        assert stm_get_char(x, 4999) == 'a'
 
         self.switch(0)
-        assert stm_get_char(x) == 'B'
+        assert stm_get_char(x)       == 'B'
+        assert stm_get_char(x, 4999) == 'b'
         assert lib._stm_total_allocated() == 5000 + LMO + 2 * 4096  # 2 pages
+
+    def test_trace_correct_version_of_overflow_objects_1(self, size=32):
+        self.start_transaction()
+        #
+        self.switch(1)
+        self.start_transaction()
+        x = stm_allocate(size)
+        stm_set_char(x, 'E', size - 1)
+        self.push_root(x)
+        #
+        self.switch(0)
+        stm_major_collect()
+        #
+        self.switch(1)
+        assert stm_get_char(x, size - 1) == 'E'
+
+    def test_trace_correct_version_of_overflow_objects_2(self):
+        self.test_trace_correct_version_of_overflow_objects_1(size=5000)

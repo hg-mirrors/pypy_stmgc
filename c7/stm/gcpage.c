@@ -277,8 +277,10 @@ static void mark_collect_roots(void)
         tl = tl->next;
     } while (tl != stm_all_thread_locals);
 
-    LIST_FOREACH_R(testing_prebuilt_objs, object_t * /*item*/,
-                   mark_record_trace(&item));
+    if (testing_prebuilt_objs != NULL) {
+        LIST_FOREACH_R(testing_prebuilt_objs, object_t * /*item*/,
+                       mark_record_trace(&item));
+    }
 }
 
 static void mark_visit_all_objects(void)
