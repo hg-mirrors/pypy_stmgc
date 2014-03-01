@@ -236,6 +236,7 @@ static void synchronize_overflow_object_now(object_t *obj)
 
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
+    assert(obj_size >= 16);
     uintptr_t start = (uintptr_t)obj;
     uintptr_t end = start + obj_size;
     uintptr_t first_page = start / 4096UL;

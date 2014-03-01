@@ -217,7 +217,7 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj)
         return myobj->type_id - 42;
     }
     else {
-        int nrefs = myobj->type_id - 421420;
+        uint64_t nrefs = myobj->type_id - 421420;
         assert(nrefs < 10000);     /* artificial limit, to check for garbage */
         if (nrefs == 0)   /* weakrefs */
             nrefs = 1;

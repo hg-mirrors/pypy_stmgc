@@ -95,6 +95,8 @@ static char *allocate_outside_nursery_large(uint64_t size)
     return addr;
 }
 
+static struct list_s *testing_prebuilt_objs = NULL;
+
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
     /* only for tests */
@@ -103,6 +105,11 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
 
     object_t *o = (object_t *)(p - stm_object_pages);
     o->stm_flags = STM_FLAGS_PREBUILT;
+
+    if (testing_prebuilt_objs == NULL)
+        testing_prebuilt_objs = list_create();
+    LIST_APPEND(testing_prebuilt_objs, o);
+
     return o;
 }
 
@@ -145,6 +152,13 @@ static inline uintptr_t mark_loc(object_t *obj)
     assert(lock_idx >= 0);
     assert(lock_idx < sizeof(write_locks));
     return lock_idx;
+}
+
+static inline bool mark_visited_test(object_t *obj)
+{
+    uintptr_t lock_idx = mark_loc(obj);
+    assert(write_locks[lock_idx] == 0 || write_locks[lock_idx] == WL_VISITED);
+    return write_locks[lock_idx] != 0;
 }
 
 static inline bool mark_visited_test_and_set(object_t *obj)
@@ -228,6 +242,7 @@ static void reset_write_locks(void)
             object_t * /*item*/,
             ({
                 uintptr_t lock_idx = mark_loc(item);
+                assert(write_locks[lock_idx] == 0);
                 write_locks[lock_idx] = pseg->write_lock_num;
             }));
     }
@@ -261,6 +276,9 @@ static void mark_collect_roots(void)
 
         tl = tl->next;
     } while (tl != stm_all_thread_locals);
+
+    LIST_FOREACH_R(testing_prebuilt_objs, object_t * /*item*/,
+                   mark_record_trace(&item));
 }
 
 static void mark_visit_all_objects(void)
@@ -283,6 +301,43 @@ static void sweep_large_objects(void)
     _stm_largemalloc_sweep();
 }
 
+static void clean_up_segment_lists(void)
+{
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+        struct list_s *lst;
+
+        /* 'objects_pointing_to_nursery' should be empty, but isn't
+           necessarily because it also lists objects that have been
+           written to but don't actually point to the nursery.  Clear
+           it up and set GCFLAG_WRITE_BARRIER again on the objects. */
+        lst = pseg->objects_pointing_to_nursery;
+        if (lst != NULL) {
+            LIST_FOREACH_R(lst, uintptr_t /*item*/,
+                ({
+                    struct object_s *realobj = (struct object_s *)
+                        REAL_ADDRESS(pseg->pub.segment_base, item);
+                    assert(!(realobj->stm_flags & GCFLAG_WRITE_BARRIER));
+                    realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
+                }));
+            list_clear(lst);
+        }
+
+        /* Remove from 'large_overflow_objects' all objects that die */
+        lst = pseg->large_overflow_objects;
+        if (lst != NULL) {
+            uintptr_t n = list_count(lst);
+            while (n > 0) {
+                object_t *obj = (object_t *)list_item(lst, --n);
+                if (!mark_visited_test(obj)) {
+                    list_set_item(lst, n, list_pop_item(lst));
+                }
+            }
+        }
+    }
+}
+
 static void major_collection_now_at_safe_point(void)
 {
     dprintf(("\n"));
@@ -302,6 +357,9 @@ static void major_collection_now_at_safe_point(void)
     mark_visit_all_objects();
     list_free(mark_objects_to_trace);
     mark_objects_to_trace = NULL;
+
+    /* cleanup */
+    clean_up_segment_lists();
 
     /* sweeping */
     mutex_pages_lock();
