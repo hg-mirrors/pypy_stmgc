@@ -251,6 +251,12 @@ void _stm_large_free(char *data)
     assert((chunk->size & (sizeof(char *) - 1)) == 0);
     assert(chunk->prev_size != THIS_CHUNK_FREE);
 
+#ifndef NDEBUG
+    assert(chunk->size >= sizeof(dlist_t));
+    assert(chunk->size <= (((char *)last_chunk) - (char *)data));
+    memset(data, 0xDD, chunk->size);
+#endif
+
     /* try to merge with the following chunk in memory */
     size_t msize = chunk->size + CHUNK_HEADER_SIZE;
     mchunk_t *mscan = chunk_at_offset(chunk, msize);

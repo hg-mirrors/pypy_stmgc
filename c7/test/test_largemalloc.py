@@ -136,10 +136,14 @@ class TestLargeMalloc(BaseTest):
         from_before = set()
 
         r = random.Random(1000)
-        for j in range(50):
+        for j in range(500):
             sizes = [random.choice(range(104, 500, 8)) for i in range(20)]
             all = [lib._stm_large_malloc(size) for size in sizes]
             print all
+
+            for i in range(len(all)):
+                all[i][50] = chr(65 + i)
+            all_orig = all[:]
 
             keep_me = set()
             for i in range(len(all)):
@@ -152,10 +156,16 @@ class TestLargeMalloc(BaseTest):
 
             seen_for = set()
             lib._stm_largemalloc_sweep()
+            if errors:
+                raise errors[0]
             assert seen_for == set([i for i in range(len(all))
                                       if all[i] is not None])
             lib._stm_large_dump()
+
             from_before = [all[i] for i in keep_me]
 
-            if errors:
-                raise errors[0]
+            for i in range(len(all)):
+                if i in keep_me:
+                    assert all[i][50] == chr(65 + i)
+                else:
+                    assert all_orig[i][50] == '\xDD'

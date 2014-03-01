@@ -58,6 +58,12 @@ static inline uintptr_t list_item(struct list_s *lst, uintptr_t index)
     return lst->items[index];
 }
 
+static inline void list_set_item(struct list_s *lst, uintptr_t index,
+                                 uintptr_t newitem)
+{
+    lst->items[index] = newitem;
+}
+
 #define LIST_FOREACH_R(lst, TYPE, CODE)         \
     do {                                        \
         struct list_s *_lst = (lst);            \

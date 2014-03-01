@@ -384,6 +384,12 @@ def op_minor_collect(ex, global_state, thread_state):
     thread_state.pop_roots(ex)
     thread_state.reload_roots(ex)
 
+def op_major_collect(ex, global_state, thread_state):
+    thread_state.push_roots(ex)
+    ex.do('stm_major_collect()')
+    thread_state.pop_roots(ex)
+    thread_state.reload_roots(ex)
+
 
 def op_forget_root(ex, global_state, thread_state):
     r = thread_state.forget_random_root()
@@ -566,6 +572,7 @@ class TestRandom(BaseTest):
             op_assert_size,
             op_assert_modified,
             op_minor_collect,
+            op_major_collect,
         ]
         for _ in range(200):
             # make sure we are in a transaction:
