@@ -96,7 +96,7 @@ uint64_t _stm_total_allocated(void);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
-#define _STM_NSE_SIGNAL                   0
+#define _STM_NSE_SIGNAL_MAX               1
 #define _STM_FAST_ALLOC           (66*1024)
 #define STM_FLAGS_PREBUILT   _STM_GCFLAG_WRITE_BARRIER
 
@@ -244,7 +244,7 @@ static inline void stm_become_inevitable(const char* msg) {
 /* Forces a safe-point if needed.  Normally not needed: this is
    automatic if you call stm_allocate(). */
 static inline void stm_safe_point(void) {
-    if (STM_SEGMENT->nursery_end == _STM_NSE_SIGNAL)
+    if (STM_SEGMENT->nursery_end <= _STM_NSE_SIGNAL_MAX)
         _stm_collectable_safe_point();
 }
 

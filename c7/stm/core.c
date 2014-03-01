@@ -149,7 +149,7 @@ static void reset_transaction_read_version(void)
 
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 {
-    mutex_lock_no_abort();
+    s_mutex_lock();
 
   retry:
     if (jmpbuf == NULL) {
@@ -171,12 +171,18 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 #endif
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
     STM_PSEGMENT->threadlocal_at_start_of_transaction = tl->thread_local_obj;
-    assert(STM_SEGMENT->nursery_end == NURSERY_END);
 
     dprintf(("start_transaction\n"));
 
-    mutex_unlock();
+    enter_safe_point_if_requested();
+    s_mutex_unlock();
 
+    /* Now running the SP_RUNNING start.  We can set our
+       'transaction_read_version' after releasing the mutex,
+       because it is only read by a concurrent thread in
+       stm_commit_transaction(), which waits until SP_RUNNING
+       threads are paused.
+    */
     uint8_t old_rv = STM_SEGMENT->transaction_read_version;
     STM_SEGMENT->transaction_read_version = old_rv + 1;
     if (UNLIKELY(old_rv == 0xff)) {
@@ -204,12 +210,8 @@ static void detect_write_read_conflicts(void)
     char *remote_base = get_segment_base(remote_num);
     uint8_t remote_version = get_segment(remote_num)->transaction_read_version;
 
-    switch (get_priv_segment(remote_num)->transaction_state) {
-    case TS_NONE:
-    case TS_MUST_ABORT:
-        return;    /* no need to do any check */
-    default:;
-    }
+    if (get_priv_segment(remote_num)->transaction_state == TS_NONE)
+        return;    /* no need to check */
 
     LIST_FOREACH_R(
         STM_PSEGMENT->modified_old_objects,
@@ -219,10 +221,9 @@ static void detect_write_read_conflicts(void)
                 /* A write-read conflict! */
                 contention_management(remote_num);
 
-                /* If we reach this point, it means we aborted the other
-                   thread.  We're done here. */
-                assert(get_priv_segment(remote_num)->transaction_state ==
-                       TS_MUST_ABORT);
+                /* If we reach this point, it means that we would like
+                   the other thread to abort.  We're done here. */
+                assert(get_segment(remote_num)->nursery_end == NSE_SIGABORT);
                 return;
             }
         }));
@@ -288,8 +289,8 @@ static void push_modified_to_other_segments(void)
     char *local_base = STM_SEGMENT->segment_base;
     char *remote_base = get_segment_base(remote_num);
     bool remote_active =
-        (get_priv_segment(remote_num)->transaction_state == TS_REGULAR ||
-         get_priv_segment(remote_num)->transaction_state == TS_INEVITABLE);
+        (get_priv_segment(remote_num)->transaction_state != TS_NONE &&
+         get_segment(remote_num)->nursery_end != NSE_SIGABORT);
 
     LIST_FOREACH_R(
         STM_PSEGMENT->modified_old_objects,
@@ -333,9 +334,6 @@ static void _finish_transaction(void)
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
-
-    /* wake up other threads waiting. */
-    cond_broadcast();
 }
 
 void stm_commit_transaction(void)
@@ -349,22 +347,12 @@ void stm_commit_transaction(void)
 
     minor_collection(/*commit=*/ true);
 
-    mutex_lock();
+    s_mutex_lock();
 
- retry:
-    if (STM_SEGMENT->nursery_end != NURSERY_END)
-        collectable_safe_point();
-
-    STM_PSEGMENT->safe_point = SP_SAFE_POINT;
-
-    /* wait until the other thread is at a safe-point */
-    if (!try_wait_for_other_safe_points()) {
-        STM_PSEGMENT->safe_point = SP_RUNNING;
-        goto retry;
-    }
-
-    /* the rest of this function either runs atomically without
-       releasing the mutex, or aborts the current thread. */
+    /* force all other threads to be paused.  They will unpause
+       automatically when we are done here, i.e. at mutex_unlock().
+       Important: we should not call cond_wait() in the meantime. */
+    synchronize_all_threads();
 
     /* detect conflicts */
     detect_write_read_conflicts();
@@ -373,7 +361,6 @@ void stm_commit_transaction(void)
     dprintf(("commit_transaction\n"));
 
     assert(STM_SEGMENT->nursery_end == NURSERY_END);
-    assert(STM_PSEGMENT->transaction_state != TS_MUST_ABORT);
     STM_SEGMENT->jmpbuf_ptr = NULL;
 
     /* if a major collection is required, do it here */
@@ -393,17 +380,22 @@ void stm_commit_transaction(void)
         STM_PSEGMENT->overflow_number = highest_overflow_number;
     }
 
+    /* send what is hopefully the correct signals */
+    if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+        /* wake up one thread in wait_for_end_of_inevitable_transaction() */
+        cond_signal(C_INEVITABLE);
+    }
+
     /* done */
     _finish_transaction();
+    /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
-    assert(STM_SEGMENT->nursery_end == NURSERY_END);
-
-    mutex_unlock();
+    s_mutex_unlock();
 }
 
 void stm_abort_transaction(void)
 {
-    mutex_lock();
+    s_mutex_lock();
     abort_with_mutex();
 }
 
@@ -457,12 +449,12 @@ static void abort_with_mutex(void)
 
     switch (STM_PSEGMENT->transaction_state) {
     case TS_REGULAR:
-    case TS_MUST_ABORT:
         break;
     case TS_INEVITABLE:
-        assert(!"abort: transaction_state == TS_INEVITABLE");
+        stm_fatalerror("abort: transaction_state == TS_INEVITABLE");
     default:
-        assert(!"abort: bad transaction_state");
+        stm_fatalerror("abort: bad transaction_state == %d",
+                       (int)STM_PSEGMENT->transaction_state);
     }
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
@@ -478,10 +470,12 @@ static void abort_with_mutex(void)
     tl->thread_local_obj = STM_PSEGMENT->threadlocal_at_start_of_transaction;
 
     _finish_transaction();
+    /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
-    STM_SEGMENT->nursery_end = NURSERY_END;
+    /* Broadcast C_ABORTED to wake up contention.c */
+    cond_broadcast(C_ABORTED);
 
-    mutex_unlock();
+    s_mutex_unlock();
 
     /* It seems to be a good idea, at least in some examples, to sleep
        one microsecond here before retrying.  Otherwise, what was
@@ -502,25 +496,16 @@ static void abort_with_mutex(void)
 
 void _stm_become_inevitable(const char *msg)
 {
-    mutex_lock();
-    switch (STM_PSEGMENT->transaction_state) {
+    s_mutex_lock();
+    enter_safe_point_if_requested();
 
-    case TS_INEVITABLE:
-        break;   /* already good */
+    if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
+        dprintf(("become_inevitable: %s\n", msg));
 
-    case TS_REGULAR:
-        /* become inevitable */
         wait_for_end_of_inevitable_transaction(true);
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
         STM_SEGMENT->jmpbuf_ptr = NULL;
-        break;
-
-    case TS_MUST_ABORT:
-        abort_with_mutex();
-
-    default:
-        assert(!"invalid transaction_state in become_inevitable");
     }
-    dprintf(("become_inevitable: %s\n", msg));
-    mutex_unlock();
+
+    s_mutex_unlock();
 }
