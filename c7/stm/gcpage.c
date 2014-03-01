@@ -147,17 +147,30 @@ static inline uintptr_t mark_loc(object_t *obj)
     return lock_idx;
 }
 
-static inline bool mark_is_visited(object_t *obj)
+static inline bool mark_visited_test_and_set(object_t *obj)
 {
     uintptr_t lock_idx = mark_loc(obj);
     assert(write_locks[lock_idx] == 0 || write_locks[lock_idx] == WL_VISITED);
-    return write_locks[lock_idx] != 0;
+    if (write_locks[lock_idx] != 0) {
+        return true;
+    }
+    else {
+        write_locks[lock_idx] = WL_VISITED;
+        return false;
+    }
 }
 
-static inline void mark_set_visited(object_t *obj)
+static inline bool mark_visited_test_and_clear(object_t *obj)
 {
     uintptr_t lock_idx = mark_loc(obj);
-    write_locks[lock_idx] = WL_VISITED;
+    assert(write_locks[lock_idx] == 0 || write_locks[lock_idx] == WL_VISITED);
+    if (write_locks[lock_idx] != 0) {
+        write_locks[lock_idx] = 0;
+        return true;
+    }
+    else {
+        return false;
+    }
 }
 
 static void mark_record_modified_objects(void)
@@ -190,15 +203,19 @@ static void mark_record_modified_objects(void)
 static void reset_write_locks(void)
 {
     /* the write_locks array, containing the visit marker during
-       major collection, is cleared now, with two memsets (to avoid
-       clearing the never-used range in the middle corresponding to
-       uninitialized pages) */
-    object_t *loc1 = (object_t *)(uninitialized_page_start - stm_object_pages);
+       major collection, is cleared in sweep_large_objects() for
+       large objects, but is not cleared for small objects.
+       Clear it now. */
     object_t *loc2 = (object_t *)(uninitialized_page_stop  - stm_object_pages);
-    uintptr_t lock1_idx = mark_loc(loc1);
     uintptr_t lock2_idx = mark_loc(loc2 - 1) + 1;
 
-    memset(write_locks, 0, lock1_idx);
+#ifdef STM_TESTS
+    long _i;
+    for (_i=0; _i<lock2_idx; _i++) {
+        assert(write_locks[_i] == 0);
+        if (_i == 1000000) break;  /* ok, stop testing */
+    }
+#endif
     memset(write_locks + lock2_idx, 0, sizeof(write_locks) - lock2_idx);
 
     /* restore the write locks on the modified objects */
@@ -223,10 +240,10 @@ static inline void mark_record_trace(object_t **pobj)
 
     if (obj == NULL)
         return;
-    if (mark_is_visited(obj))
+
+    if (mark_visited_test_and_set(obj))
         return;    /* already visited this object */
 
-    mark_set_visited(obj);
     LIST_APPEND(mark_objects_to_trace, REAL_ADDRESS(stm_object_pages, obj));
 }
 
@@ -258,7 +275,7 @@ static void mark_visit_all_objects(void)
 static inline bool largemalloc_keep_object_at(char *data)
 {
     /* this is called by _stm_largemalloc_sweep() */
-    return mark_is_visited((object_t *)(data - stm_object_pages));
+    return mark_visited_test_and_clear((object_t *)(data - stm_object_pages));
 }
 
 static void sweep_large_objects(void)
