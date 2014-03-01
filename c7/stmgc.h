@@ -85,6 +85,8 @@ char *_stm_largemalloc_data_start(void);
 char *_stm_large_malloc(size_t request_size);
 void _stm_large_free(char *data);
 void _stm_large_dump(void);
+bool (*_stm_largemalloc_keep)(char *data);
+void _stm_largemalloc_sweep(void);
 void _stm_start_safe_point(void);
 void _stm_stop_safe_point(void);
 void _stm_set_nursery_free_count(uint64_t free_count);

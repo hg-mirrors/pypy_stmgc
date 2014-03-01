@@ -47,7 +47,6 @@ static bool _has_mutex_pages(void)
 
 static uint64_t increment_total_allocated(ssize_t add_or_remove)
 {
-    assert(_has_mutex_pages());
     pages_ctl.total_allocated += add_or_remove;
 
     if (pages_ctl.total_allocated >= pages_ctl.total_allocated_bound)
@@ -197,6 +196,7 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
     mutex_pages_unlock();
 }
 
+#if 0
 static bool is_fully_in_shared_pages(object_t *obj)
 {
     uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
@@ -216,3 +216,4 @@ static bool is_fully_in_shared_pages(object_t *obj)
 
     return true;
 }
+#endif

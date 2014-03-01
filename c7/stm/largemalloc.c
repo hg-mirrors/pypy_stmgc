@@ -348,6 +348,10 @@ char *_stm_largemalloc_data_start(void)
     return (char *)first_chunk;
 }
 
+#ifdef STM_TESTS
+bool (*_stm_largemalloc_keep)(char *data);   /* a hook for tests */
+#endif
+
 void _stm_largemalloc_init_arena(char *data_start, size_t data_size)
 {
     int i;
@@ -367,6 +371,10 @@ void _stm_largemalloc_init_arena(char *data_start, size_t data_size)
     assert(last_chunk == next_chunk_u(first_chunk));
 
     insert_unsorted(first_chunk);
+
+#ifdef STM_TESTS
+    _stm_largemalloc_keep = NULL;
+#endif
 }
 
 int _stm_largemalloc_resize_arena(size_t new_size)
@@ -426,10 +434,6 @@ int _stm_largemalloc_resize_arena(size_t new_size)
 }
 
 
-#ifdef STM_TESTS
-bool (*_stm_largemalloc_keep)(char *data) = NULL;
-#endif
-
 static inline bool _largemalloc_sweep_keep(mchunk_t *chunk)
 {
 #ifdef STM_TESTS
@@ -439,7 +443,7 @@ static inline bool _largemalloc_sweep_keep(mchunk_t *chunk)
     return largemalloc_keep_object_at((char *)&chunk->d);
 }
 
-static void largemalloc_sweep(void)
+void _stm_largemalloc_sweep(void)
 {
     /* This may be slightly optimized by inlining _stm_large_free() and
        making cases, e.g. we might know already if the previous block

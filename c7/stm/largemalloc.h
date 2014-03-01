@@ -10,10 +10,9 @@ char *_stm_largemalloc_data_start(void);
    major collections, which have their own synchronization mecanisms. */
 char *_stm_large_malloc(size_t request_size);
 void _stm_large_free(char *data);
+void _stm_largemalloc_sweep(void);
 
 void _stm_large_dump(void);
-
-static void largemalloc_sweep(void);
 
 
 #define LARGE_MALLOC_OVERHEAD   (2 * sizeof(size_t))   /* estimate */

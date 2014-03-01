@@ -61,6 +61,8 @@ char *_stm_large_malloc(size_t request_size);
 void _stm_large_free(char *data);
 void _stm_large_dump(void);
 void *memset(void *s, int c, size_t n);
+bool (*_stm_largemalloc_keep)(char *data);
+void _stm_largemalloc_sweep(void);
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
