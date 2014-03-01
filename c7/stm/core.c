@@ -469,6 +469,9 @@ static void abort_with_mutex(void)
     tl->shadowstack = STM_PSEGMENT->shadowstack_at_start_of_transaction;
     tl->thread_local_obj = STM_PSEGMENT->threadlocal_at_start_of_transaction;
 
+    if (STM_SEGMENT->nursery_end == NSE_SIGABORT)
+        STM_SEGMENT->nursery_end = NURSERY_END;   /* done aborting */
+
     _finish_transaction();
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
