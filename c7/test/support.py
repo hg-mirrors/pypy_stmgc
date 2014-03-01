@@ -324,13 +324,6 @@ def stm_was_read(o):
 def stm_was_written(o):
     return lib._stm_was_written(o)
 
-def stm_creation_marker(o):
-    return lib._stm_creation_marker(o)
-
-def stm_stop_transaction():
-    if lib._stm_stop_transaction():
-        raise Conflict()
-
 
 def stm_start_safe_point():
     lib._stm_start_safe_point()

@@ -164,7 +164,9 @@ class ThreadState(object):
     def pop_roots(self, ex):
         for r in reversed(self.saved_roots[self.roots_on_transaction_start:]):
             ex.do('%s = self.pop_root()' % r)
-            ex.do('# 0x%x' % (int(ffi.cast("uintptr_t", ex.content[r])),))
+            ex.do('# 0x%x, size %d' % (
+                int(ffi.cast("uintptr_t", ex.content[r])),
+                stm_get_obj_size(ex.content[r])))
             self.roots_on_stack -= 1
         assert self.roots_on_stack == self.roots_on_transaction_start
 
@@ -176,8 +178,9 @@ class ThreadState(object):
             for r in reversed(to_reload):
                 ex.do('%s = self.pop_root()' % r)
             for r in to_reload:
-                ex.do('self.push_root(%s)  # 0x%x' % (
-                    r, int(ffi.cast("uintptr_t", ex.content[r]))))
+                ex.do('self.push_root(%s)  # 0x%x, size %d' % (
+                    r, int(ffi.cast("uintptr_t", ex.content[r])),
+                    stm_get_obj_size(ex.content[r])))
 
     def start_transaction(self):
         assert self.transaction_state is None

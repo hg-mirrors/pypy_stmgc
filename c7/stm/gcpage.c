@@ -3,6 +3,9 @@
 #endif
 
 
+static struct list_s *testing_prebuilt_objs = NULL;
+
+
 static void setup_gcpage(void)
 {
     char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL;
@@ -17,6 +20,7 @@ static void teardown_gcpage(void)
 {
     memset(small_alloc, 0, sizeof(small_alloc));
     free_uniform_pages = NULL;
+    LIST_FREE(testing_prebuilt_objs);
 }
 
 
@@ -94,8 +98,6 @@ static char *allocate_outside_nursery_large(uint64_t size)
 
     return addr;
 }
-
-static struct list_s *testing_prebuilt_objs = NULL;
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
@@ -198,11 +200,8 @@ static inline void mark_record_trace(object_t **pobj)
     LIST_APPEND(mark_objects_to_trace, obj);
 }
 
-static void mark_from_object(object_t *obj, char *segment_base)
+static void mark_trace(object_t *obj, char *segment_base)
 {
-    if (obj == NULL || mark_visited_test_and_set(obj))
-        return;
-
     assert(list_is_empty(mark_objects_to_trace));
 
     while (1) {
@@ -215,6 +214,13 @@ static void mark_from_object(object_t *obj, char *segment_base)
 
         obj = (object_t *)list_pop_item(mark_objects_to_trace);
     }
+}
+
+static inline void mark_visit_object(object_t *obj, char *segment_base)
+{
+    if (obj == NULL || mark_visited_test_and_set(obj))
+        return;
+    mark_trace(obj, segment_base);
 }
 
 static void mark_visit_from_roots(void)
@@ -232,16 +238,16 @@ static void mark_visit_from_roots(void)
         object_t **base = tl->shadowstack_base;
         while (current-- != base) {
             assert(*current != (object_t *)-1);
-            mark_from_object(*current, segment_base);
+            mark_visit_object(*current, segment_base);
         }
-        mark_from_object(tl->thread_local_obj, segment_base);
+        mark_visit_object(tl->thread_local_obj, segment_base);
 
         tl = tl->next;
     } while (tl != stm_all_thread_locals);
 
     if (testing_prebuilt_objs != NULL) {
         LIST_FOREACH_R(testing_prebuilt_objs, object_t * /*item*/,
-                       mark_from_object(item, get_segment_base(0)));
+                       mark_visit_object(item, get_segment_base(0)));
     }
 }
 
@@ -259,8 +265,9 @@ static void mark_visit_from_modified_objects(void)
             get_priv_segment(i)->modified_old_objects,
             object_t * /*item*/,
             ({
-                mark_from_object(item, base1);
-                mark_from_object(item, base2);
+                mark_visited_test_and_set(item);
+                mark_trace(item, base1);
+                mark_trace(item, base2);
             }));
     }
 }
