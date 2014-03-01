@@ -187,120 +187,82 @@ static inline bool mark_visited_test_and_clear(object_t *obj)
     }
 }
 
-static void mark_record_modified_objects(void)
-{
-    /* The modified objects are the ones that may exist in two different
-       versions: one in the segment that modified it, and another in
-       all other segments. */
-    long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
-        char *base1 = get_segment_base(i);   /* two different segments */
-        char *base2 = get_segment_base(!i);
-
-        LIST_FOREACH_R(
-            pseg->modified_old_objects,
-            object_t * /*item*/,
-            ({
-                assert(item != NULL);
-
-                uintptr_t lock_idx = mark_loc(item);
-                assert(write_locks[lock_idx] == pseg->write_lock_num);
-
-                write_locks[lock_idx] = WL_VISITED;
-                LIST_APPEND(mark_objects_to_trace, REAL_ADDRESS(base1, item));
-                LIST_APPEND(mark_objects_to_trace, REAL_ADDRESS(base2, item));
-            }));
-    }
-}
-
-static void reset_write_locks(void)
-{
-    /* the write_locks array, containing the visit marker during
-       major collection, is cleared in sweep_large_objects() for
-       large objects, but is not cleared for small objects.
-       Clear it now. */
-    object_t *loc2 = (object_t *)(uninitialized_page_stop  - stm_object_pages);
-    uintptr_t lock2_idx = mark_loc(loc2 - 1) + 1;
-
-#ifdef STM_TESTS
-    long _i;
-    for (_i=0; _i<lock2_idx; _i++) {
-        assert(write_locks[_i] == 0);
-        if (_i == 1000000) break;  /* ok, stop testing */
-    }
-#endif
-    memset(write_locks + lock2_idx, 0, sizeof(write_locks) - lock2_idx);
-
-    /* restore the write locks on the modified objects */
-    long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
-
-        LIST_FOREACH_R(
-            pseg->modified_old_objects,
-            object_t * /*item*/,
-            ({
-                uintptr_t lock_idx = mark_loc(item);
-                assert(write_locks[lock_idx] == 0);
-                write_locks[lock_idx] = pseg->write_lock_num;
-            }));
-    }
-}
-
 static inline void mark_record_trace(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
     object_t *obj = *pobj;
 
-    if (obj == NULL)
-        return;
-
-    if (mark_visited_test_and_set(obj))
+    if (obj == NULL || mark_visited_test_and_set(obj))
         return;    /* already visited this object */
 
-    LIST_APPEND(mark_objects_to_trace, REAL_ADDRESS(stm_object_pages, obj));
+    LIST_APPEND(mark_objects_to_trace, obj);
 }
 
-static void mark_collect_roots(void)
+static void mark_from_object(object_t *obj, char *segment_base)
+{
+    if (obj == NULL || mark_visited_test_and_set(obj))
+        return;
+
+    assert(list_is_empty(mark_objects_to_trace));
+
+    while (1) {
+        struct object_s *realobj =
+            (struct object_s *)REAL_ADDRESS(segment_base, obj);
+        stmcb_trace(realobj, &mark_record_trace);
+
+        if (list_is_empty(mark_objects_to_trace))
+            break;
+
+        obj = (object_t *)list_pop_item(mark_objects_to_trace);
+    }
+}
+
+static void mark_visit_from_roots(void)
 {
     stm_thread_local_t *tl = stm_all_thread_locals;
     do {
+        /* If 'tl' is currently running, its 'associated_segment_num'
+           field is the segment number that contains the correct
+           version of its overflowed objects.  If not, then the
+           field is still some correct segment number, and it doesn't
+           matter which one we pick. */
+        char *segment_base = get_segment_base(tl->associated_segment_num);
+
         object_t **current = tl->shadowstack;
         object_t **base = tl->shadowstack_base;
         while (current-- != base) {
             assert(*current != (object_t *)-1);
-            mark_record_trace(current);
+            mark_from_object(*current, segment_base);
         }
-        mark_record_trace(&tl->thread_local_obj);
+        mark_from_object(tl->thread_local_obj, segment_base);
 
         tl = tl->next;
     } while (tl != stm_all_thread_locals);
 
     if (testing_prebuilt_objs != NULL) {
         LIST_FOREACH_R(testing_prebuilt_objs, object_t * /*item*/,
-                       mark_record_trace(&item));
+                       mark_from_object(item, get_segment_base(0)));
     }
 }
 
-static void mark_visit_all_objects(void)
+static void mark_visit_from_modified_objects(void)
 {
-    while (!list_is_empty(mark_objects_to_trace)) {
-        struct object_s *obj =
-            (struct object_s *)list_pop_item(mark_objects_to_trace);
-        stmcb_trace(obj, &mark_record_trace);
+    /* The modified objects are the ones that may exist in two different
+       versions: one in the segment that modified it, and another in
+       all other segments. */
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        char *base1 = get_segment_base(i);   /* two different segments */
+        char *base2 = get_segment_base(!i);
+
+        LIST_FOREACH_R(
+            get_priv_segment(i)->modified_old_objects,
+            object_t * /*item*/,
+            ({
+                mark_from_object(item, base1);
+                mark_from_object(item, base2);
+            }));
     }
-}
-
-static inline bool largemalloc_keep_object_at(char *data)
-{
-    /* this is called by _stm_largemalloc_sweep() */
-    return mark_visited_test_and_clear((object_t *)(data - stm_object_pages));
-}
-
-static void sweep_large_objects(void)
-{
-    _stm_largemalloc_sweep();
 }
 
 static void clean_up_segment_lists(void)
@@ -340,6 +302,73 @@ static void clean_up_segment_lists(void)
     }
 }
 
+static inline bool largemalloc_keep_object_at(char *data)
+{
+    /* this is called by _stm_largemalloc_sweep() */
+    return mark_visited_test_and_clear((object_t *)(data - stm_object_pages));
+}
+
+static void sweep_large_objects(void)
+{
+    _stm_largemalloc_sweep();
+}
+
+static void clean_write_locks(void)
+{
+    /* the write_locks array, containing the visit marker during
+       major collection, is cleared in sweep_large_objects() for
+       large objects, but is not cleared for small objects.
+       Clear it now. */
+    object_t *loc2 = (object_t *)(uninitialized_page_stop  - stm_object_pages);
+    uintptr_t lock2_idx = mark_loc(loc2 - 1) + 1;
+
+#ifdef STM_TESTS
+    long _i;
+    for (_i=0; _i<lock2_idx; _i++) {
+        assert(write_locks[_i] == 0);
+        if (_i == 1000000) break;  /* ok, stop testing */
+    }
+#endif
+    memset(write_locks + lock2_idx, 0, sizeof(write_locks) - lock2_idx);
+}
+
+static void major_clear_write_locks(void)
+{
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+
+        LIST_FOREACH_R(
+            pseg->modified_old_objects,
+            object_t * /*item*/,
+            ({
+                assert(item != NULL);
+
+                uintptr_t lock_idx = mark_loc(item);
+                assert(write_locks[lock_idx] == pseg->write_lock_num);
+                write_locks[lock_idx] = 0;
+            }));
+    }
+}
+
+static void major_set_write_locks(void)
+{
+    /* restore the write locks on the modified objects */
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+
+        LIST_FOREACH_R(
+            pseg->modified_old_objects,
+            object_t * /*item*/,
+            ({
+                uintptr_t lock_idx = mark_loc(item);
+                assert(write_locks[lock_idx] == 0);
+                write_locks[lock_idx] = pseg->write_lock_num;
+            }));
+    }
+}
+
 static void major_collection_now_at_safe_point(void)
 {
     dprintf(("\n"));
@@ -352,11 +381,12 @@ static void major_collection_now_at_safe_point(void)
     dprintf((" | used before collection: %ld\n",
              (long)pages_ctl.total_allocated));
 
+    major_clear_write_locks();
+
     /* marking */
     mark_objects_to_trace = list_create();
-    mark_record_modified_objects();
-    mark_collect_roots();
-    mark_visit_all_objects();
+    mark_visit_from_modified_objects();
+    mark_visit_from_roots();
     list_free(mark_objects_to_trace);
     mark_objects_to_trace = NULL;
 
@@ -369,7 +399,8 @@ static void major_collection_now_at_safe_point(void)
     //sweep_uniform_pages();
     mutex_pages_unlock();
 
-    reset_write_locks();
+    clean_write_locks();
+    major_set_write_locks();
 
     dprintf((" | used after collection:  %ld\n",
              (long)pages_ctl.total_allocated));
