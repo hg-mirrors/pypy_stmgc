@@ -463,8 +463,8 @@ static void largemalloc_sweep(void)
            survives or dies */
         if (!_largemalloc_sweep_keep(chunk)) {
             size_t size = chunk->size;
-            _stm_large_free((char *)&chunk->d);     /* dies */
             increment_total_allocated(-(size + LARGE_MALLOC_OVERHEAD));
+            _stm_large_free((char *)&chunk->d);     /* dies */
         }
         chunk = mnext;
     }
