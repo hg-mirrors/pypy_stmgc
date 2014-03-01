@@ -1,6 +1,10 @@
 from support import *
 import py
 
+
+LMO = LARGE_MALLOC_OVERHEAD
+
+
 class TestGCPage(BaseTest):
 
     def test_large_obj_alloc(self):
@@ -93,11 +97,29 @@ class TestGCPage(BaseTest):
         new = stm_allocate(5000)
         self.push_root(new)
         stm_minor_collect()
-        assert 5000 <= lib._stm_total_allocated() <= 8192
+        assert lib._stm_total_allocated() == 5000 + LMO
 
         self.pop_root()
         stm_minor_collect()
-        assert 5000 <= lib._stm_total_allocated() <= 8192
+        assert lib._stm_total_allocated() == 5000 + LMO
 
         stm_major_collect()
         assert lib._stm_total_allocated() == 0
+
+    def test_mark_recursive(self):
+        def make_chain(sz):
+            prev = ffi.cast("object_t *", ffi.NULL)
+            for i in range(10):
+                self.push_root(prev)
+                new = stm_allocate_refs(sz/8-1)
+                prev = self.pop_root()
+                stm_set_ref(new, 42, prev)
+                prev = new
+            return new
+
+        self.start_transaction()
+        self.push_root(make_chain(5000))
+        self.push_root(make_chain(4312))
+        stm_minor_collect()
+        assert lib._stm_total_allocated() == (10 * (5000 + LMO) +
+                                              10 * (4312 + LMO))

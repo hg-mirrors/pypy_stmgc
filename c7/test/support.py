@@ -77,7 +77,7 @@ uint64_t _stm_total_allocated(void);
 GC_N_SMALL_REQUESTS = 36      # from gcpage.c
 SHARED_PAGE         = 1       # from pages.h
 PRIVATE_PAGE        = 3       # from pages.h
-
+LARGE_MALLOC_OVERHEAD = 16    # from largemalloc.h
 
 lib = ffi.verify('''
 #include <stdlib.h>
