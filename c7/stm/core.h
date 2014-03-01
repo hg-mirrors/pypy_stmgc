@@ -104,10 +104,8 @@ struct stm_priv_segment_info_s {
 
     /* The thread's safe-point state, one of the SP_xxx constants.  The
        thread is in a "safe point" if it is not concurrently doing any
-       change that might cause race conditions in other threads.  A
-       thread may enter but not *leave* the safe point it is in without
-       getting hold of the mutex.  Broadly speaking, any value other
-       than SP_RUNNING means a safe point of some kind. */
+       read or change in this data structure that might cause race
+       conditions in other threads. */
     uint8_t safe_point;
 
     /* The transaction status, one of the TS_xxx constants.  This is
@@ -131,13 +129,16 @@ struct stm_priv_segment_info_s {
 enum /* safe_point */ {
     SP_NO_TRANSACTION=0,
     SP_RUNNING,
-    SP_SAFE_POINT,
+    SP_WAIT_FOR_C_REQUEST_REMOVED,
+    SP_WAIT_FOR_C_AT_SAFE_POINT,
+#ifdef STM_TESTS
+    SP_WAIT_FOR_OTHER_THREAD,
+#endif
 };
 enum /* transaction_state */ {
     TS_NONE=0,
     TS_REGULAR,
     TS_INEVITABLE,
-    TS_MUST_ABORT,
 };
 
 static char *stm_object_pages;
@@ -190,20 +191,6 @@ static inline void _duck(void) {
        This is not needed any more after applying the patch
        llvmfix/no-memset-creation-with-addrspace.diff. */
     asm("/* workaround for llvm bug */");
-}
-
-static inline void abort_if_needed(void) {
-    switch (STM_PSEGMENT->transaction_state) {
-    case TS_REGULAR:
-    case TS_INEVITABLE:
-        break;
-
-    case TS_MUST_ABORT:
-        stm_abort_transaction();
-
-    default:
-        assert(!"commit: bad transaction_state");
-    }
 }
 
 static void synchronize_overflow_object_now(object_t *obj);

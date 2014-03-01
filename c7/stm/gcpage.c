@@ -116,24 +116,18 @@ static void major_collection_if_requested(void)
     if (!is_major_collection_requested())
         return;
 
-    mutex_lock();
+    s_mutex_lock();
 
-    assert(STM_PSEGMENT->safe_point == SP_RUNNING);
-    STM_PSEGMENT->safe_point = SP_SAFE_POINT;
+    if (is_major_collection_requested()) {   /* if still true */
 
-    while (is_major_collection_requested()) {
-        /* wait until the other thread is at a safe-point */
-        if (try_wait_for_other_safe_points()) {
-            /* ok */
+        synchronize_all_threads();
+
+        if (is_major_collection_requested()) {   /* if *still* true */
             major_collection_now_at_safe_point();
-            break;
         }
     }
 
-    assert(STM_PSEGMENT->safe_point == SP_SAFE_POINT);
-    STM_PSEGMENT->safe_point = SP_RUNNING;
-
-    mutex_unlock();
+    s_mutex_unlock();
 }
 
 static void major_collection_now_at_safe_point(void)

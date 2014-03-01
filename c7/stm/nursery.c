@@ -283,7 +283,6 @@ static void minor_collection(bool commit)
     assert(!_has_mutex());
 
     stm_safe_point();
-    abort_if_needed();
 
     _do_minor_collection(commit);
 }
@@ -384,7 +383,7 @@ static void major_do_minor_collections(void)
             continue;
 
         assert(pseg->transaction_state != TS_NONE);
-        assert(pseg->safe_point == SP_SAFE_POINT);
+        assert(pseg->safe_point != SP_RUNNING);
 
         set_gs_register(get_segment_base(i));
         _do_minor_collection(/*commit=*/ false);
