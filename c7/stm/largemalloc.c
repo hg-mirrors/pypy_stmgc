@@ -60,6 +60,10 @@ static mchunk_t *next_chunk_u(mchunk_t *p)
     assert(!(p->size & FLAG_SORTED));
     return chunk_at_offset(p, CHUNK_HEADER_SIZE + p->size);
 }
+static mchunk_t *next_chunk_a(mchunk_t *p)
+{
+    return chunk_at_offset(p, CHUNK_HEADER_SIZE + (p->size & ~FLAG_SORTED));
+}
 
 
 /* The free chunks are stored in "bins".  Each bin is a doubly-linked
@@ -419,4 +423,49 @@ int _stm_largemalloc_resize_arena(size_t new_size)
         _stm_large_free((char *)&old_last_chunk->d);
     }
     return 1;
+}
+
+
+#ifdef STM_TESTS
+bool (*_stm_largemalloc_keep)(char *data) = NULL;
+#endif
+
+static inline bool _largemalloc_sweep_keep(mchunk_t *chunk)
+{
+#ifdef STM_TESTS
+    if (_stm_largemalloc_keep != NULL)
+        return _stm_largemalloc_keep((char *)&chunk->d);
+#endif
+    return largemalloc_keep_object_at((char *)&chunk->d);
+}
+
+static void largemalloc_sweep(void)
+{
+    /* This may be slightly optimized by inlining _stm_large_free() and
+       making cases, e.g. we might know already if the previous block
+       was free or not.  It's probably not really worth it. */
+    mchunk_t *mnext, *chunk = first_chunk;
+
+    if (chunk->prev_size == THIS_CHUNK_FREE)
+        chunk = next_chunk_a(chunk);   /* go to the first non-free chunk */
+
+    while (chunk != last_chunk) {
+
+        /* here, the chunk we're pointing to is not free */
+        assert(chunk->prev_size != THIS_CHUNK_FREE);
+
+        /* first figure out the next non-free chunk */
+        mnext = next_chunk_u(chunk);
+        if (mnext->prev_size == THIS_CHUNK_FREE)
+            mnext = next_chunk_a(mnext);
+
+        /* use the callback to know if 'chunk' contains an object that
+           survives or dies */
+        if (!_largemalloc_sweep_keep(chunk)) {
+            size_t size = chunk->size;
+            _stm_large_free((char *)&chunk->d);     /* dies */
+            increment_total_allocated(-(size + LARGE_MALLOC_OVERHEAD));
+        }
+        chunk = mnext;
+    }
 }

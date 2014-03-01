@@ -41,4 +41,4 @@ inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
     _pages_privatize(pagenum, count, full);
 }
 
-//static bool is_fully_in_shared_pages(object_t *obj);  -- not needed?
+static bool is_fully_in_shared_pages(object_t *obj);

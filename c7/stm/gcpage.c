@@ -130,8 +130,94 @@ static void major_collection_if_requested(void)
     s_mutex_unlock();
 }
 
+
+/************************************************************/
+
+
+static struct list_s *mark_objects_to_trace;
+
+
+static inline struct object_s *mark_first_seg(object_t *obj)
+{
+    return (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
+}
+
+static inline bool mark_is_visited(object_t *obj)
+{
+    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
+    assert(lock_idx >= 0);
+    assert(lock_idx < sizeof(write_locks));
+    return write_locks[lock_idx] != 0;
+}
+
+static inline void mark_set_visited(object_t *obj)
+{
+    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
+    write_locks[lock_idx] = 0xff;
+}
+
+static inline void mark_record_trace(object_t **pobj)
+{
+    /* takes a normal pointer to a thread-local pointer to an object */
+    object_t *obj = *pobj;
+
+    if (obj == NULL)
+        return;
+    if (mark_is_visited(obj))
+        return;    /* already visited this object */
+
+    mark_set_visited(obj);
+    LIST_APPEND(mark_objects_to_trace, obj);
+}
+
+static void mark_collect_modified_objects(void)
+{
+    //...
+}
+
+static void mark_collect_roots(void)
+{
+    stm_thread_local_t *tl = stm_all_thread_locals;
+    do {
+        object_t **current = tl->shadowstack;
+        object_t **base = tl->shadowstack_base;
+        while (current-- != base) {
+            assert(*current != (object_t *)-1);
+            mark_record_trace(current);
+        }
+        mark_record_trace(&tl->thread_local_obj);
+
+        tl = tl->next;
+    } while (tl != stm_all_thread_locals);
+}
+
+static void mark_visit_all_objects(void)
+{
+    while (!list_is_empty(mark_objects_to_trace)) {
+        object_t *obj = (object_t *)list_pop_item(mark_objects_to_trace);
+
+        stmcb_trace(mark_first_seg(obj), &mark_record_trace);
+
+        if (!is_fully_in_shared_pages(obj)) {
+            abort();//xxx;
+        }
+    }
+}
+
+static inline bool largemalloc_keep_object_at(char *data)
+{
+    /* this is called by largemalloc_sweep() */
+    return mark_is_visited((object_t *)(data - stm_object_pages));
+}
+
+static void sweep_large_objects(void)
+{
+    largemalloc_sweep();
+}
+
 static void major_collection_now_at_safe_point(void)
 {
+    dprintf(("\n"));
     dprintf((" .----- major_collection_now_at_safe_point -----\n"));
     assert(_has_mutex());
 
@@ -141,7 +227,23 @@ static void major_collection_now_at_safe_point(void)
     dprintf((" | used before collection: %ld\n",
              (long)pages_ctl.total_allocated));
 
-    fprintf(stderr, "hi, I should be doing a major GC here\n");
+    /* marking */
+    mark_objects_to_trace = list_create();
+    mark_collect_modified_objects();
+    mark_collect_roots();
+    mark_visit_all_objects();
+    list_free(mark_objects_to_trace);
+    mark_objects_to_trace = NULL;
+
+    /* sweeping */
+    mutex_pages_lock();
+    sweep_large_objects();
+    //sweep_uniform_pages();
+    mutex_pages_unlock();
+
+    dprintf((" | used after collection:  %ld\n",
+             (long)pages_ctl.total_allocated));
+    dprintf((" `----------------------------------------------\n"));
 
     reset_major_collection_requested();
 }

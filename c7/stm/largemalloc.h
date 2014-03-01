@@ -13,5 +13,7 @@ void _stm_large_free(char *data);
 
 void _stm_large_dump(void);
 
+static void largemalloc_sweep(void);
+
 
 #define LARGE_MALLOC_OVERHEAD   (2 * sizeof(size_t))   /* estimate */
