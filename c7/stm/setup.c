@@ -49,7 +49,7 @@ void stm_setup(void)
                      PROT_NONE);
 
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
-        assert(i + 1 < 0xff);   /* 0xff (255) is used by major collections */
+        assert(i + 1 <= 255);
         pr->write_lock_num = i + 1;
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;

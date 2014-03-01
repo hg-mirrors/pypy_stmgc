@@ -136,24 +136,84 @@ static void major_collection_if_requested(void)
 
 static struct list_s *mark_objects_to_trace;
 
+#define WL_VISITED   42
 
-static inline struct object_s *mark_first_seg(object_t *obj)
-{
-    return (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
-}
 
-static inline bool mark_is_visited(object_t *obj)
+static inline uintptr_t mark_loc(object_t *obj)
 {
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
     assert(lock_idx >= 0);
     assert(lock_idx < sizeof(write_locks));
+    return lock_idx;
+}
+
+static inline bool mark_is_visited(object_t *obj)
+{
+    uintptr_t lock_idx = mark_loc(obj);
+    assert(write_locks[lock_idx] == 0 || write_locks[lock_idx] == WL_VISITED);
     return write_locks[lock_idx] != 0;
 }
 
 static inline void mark_set_visited(object_t *obj)
 {
-    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
-    write_locks[lock_idx] = 0xff;
+    uintptr_t lock_idx = mark_loc(obj);
+    write_locks[lock_idx] = WL_VISITED;
+}
+
+static void mark_record_modified_objects(void)
+{
+    /* The modified objects are the ones that may exist in two different
+       versions: one in the segment that modified it, and another in
+       all other segments. */
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+        char *base1 = get_segment_base(i);   /* two different segments */
+        char *base2 = get_segment_base(!i);
+
+        LIST_FOREACH_R(
+            pseg->modified_old_objects,
+            object_t * /*item*/,
+            ({
+                assert(item != NULL);
+
+                uintptr_t lock_idx = mark_loc(item);
+                assert(write_locks[lock_idx] == pseg->write_lock_num);
+
+                write_locks[lock_idx] = WL_VISITED;
+                LIST_APPEND(mark_objects_to_trace, REAL_ADDRESS(base1, item));
+                LIST_APPEND(mark_objects_to_trace, REAL_ADDRESS(base2, item));
+            }));
+    }
+}
+
+static void reset_write_locks(void)
+{
+    /* the write_locks array, containing the visit marker during
+       major collection, is cleared now, with two memsets (to avoid
+       clearing the never-used range in the middle corresponding to
+       uninitialized pages) */
+    object_t *loc1 = (object_t *)(uninitialized_page_start - stm_object_pages);
+    object_t *loc2 = (object_t *)(uninitialized_page_stop  - stm_object_pages);
+    uintptr_t lock1_idx = mark_loc(loc1);
+    uintptr_t lock2_idx = mark_loc(loc2 - 1) + 1;
+
+    memset(write_locks, 0, lock1_idx);
+    memset(write_locks + lock2_idx, 0, sizeof(write_locks) - lock2_idx);
+
+    /* restore the write locks on the modified objects */
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+
+        LIST_FOREACH_R(
+            pseg->modified_old_objects,
+            object_t * /*item*/,
+            ({
+                uintptr_t lock_idx = mark_loc(item);
+                write_locks[lock_idx] = pseg->write_lock_num;
+            }));
+    }
 }
 
 static inline void mark_record_trace(object_t **pobj)
@@ -167,12 +227,7 @@ static inline void mark_record_trace(object_t **pobj)
         return;    /* already visited this object */
 
     mark_set_visited(obj);
-    LIST_APPEND(mark_objects_to_trace, obj);
-}
-
-static void mark_collect_modified_objects(void)
-{
-    //...
+    LIST_APPEND(mark_objects_to_trace, REAL_ADDRESS(stm_object_pages, obj));
 }
 
 static void mark_collect_roots(void)
@@ -194,25 +249,21 @@ static void mark_collect_roots(void)
 static void mark_visit_all_objects(void)
 {
     while (!list_is_empty(mark_objects_to_trace)) {
-        object_t *obj = (object_t *)list_pop_item(mark_objects_to_trace);
-
-        stmcb_trace(mark_first_seg(obj), &mark_record_trace);
-
-        if (!is_fully_in_shared_pages(obj)) {
-            abort();//xxx;
-        }
+        struct object_s *obj =
+            (struct object_s *)list_pop_item(mark_objects_to_trace);
+        stmcb_trace(obj, &mark_record_trace);
     }
 }
 
 static inline bool largemalloc_keep_object_at(char *data)
 {
-    /* this is called by largemalloc_sweep() */
+    /* this is called by _stm_largemalloc_sweep() */
     return mark_is_visited((object_t *)(data - stm_object_pages));
 }
 
 static void sweep_large_objects(void)
 {
-    largemalloc_sweep();
+    _stm_largemalloc_sweep();
 }
 
 static void major_collection_now_at_safe_point(void)
@@ -229,7 +280,7 @@ static void major_collection_now_at_safe_point(void)
 
     /* marking */
     mark_objects_to_trace = list_create();
-    mark_collect_modified_objects();
+    mark_record_modified_objects();
     mark_collect_roots();
     mark_visit_all_objects();
     list_free(mark_objects_to_trace);
@@ -240,6 +291,8 @@ static void major_collection_now_at_safe_point(void)
     sweep_large_objects();
     //sweep_uniform_pages();
     mutex_pages_unlock();
+
+    reset_write_locks();
 
     dprintf((" | used after collection:  %ld\n",
              (long)pages_ctl.total_allocated));

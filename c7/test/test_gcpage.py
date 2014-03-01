@@ -115,7 +115,7 @@ class TestGCPage(BaseTest):
                 prev = self.pop_root()
                 stm_set_ref(new, 42, prev)
                 prev = new
-            return new
+            return prev
 
         self.start_transaction()
         self.push_root(make_chain(5000))
@@ -123,3 +123,15 @@ class TestGCPage(BaseTest):
         stm_minor_collect()
         assert lib._stm_total_allocated() == (10 * (5000 + LMO) +
                                               10 * (4312 + LMO))
+        stm_major_collect()
+        assert lib._stm_total_allocated() == (10 * (5000 + LMO) +
+                                              10 * (4312 + LMO))
+        stm_major_collect()
+        assert lib._stm_total_allocated() == (10 * (5000 + LMO) +
+                                              10 * (4312 + LMO))
+        self.pop_root()
+        stm_major_collect()
+        assert lib._stm_total_allocated() == 10 * (5000 + LMO)
+
+    def test_trace_all_versions(self):
+        pass #xxx in-progress

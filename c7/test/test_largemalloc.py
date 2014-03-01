@@ -118,3 +118,44 @@ class TestLargeMalloc(BaseTest):
                 ra(d)[sz - 1] = content2
                 p.append((d, sz, content1, content2))
         lib._stm_large_dump()
+
+    def test_random_largemalloc_sweep(self):
+        @ffi.callback("bool(char *)")
+        def keep(data):
+            try:
+                if data in from_before:
+                    return False
+                index = all.index(data)
+                seen_for.add(index)
+                return index in keep_me
+            except Exception, e:
+                errors.append(e)
+                raise
+        lib._stm_largemalloc_keep = keep
+        errors = []
+        from_before = set()
+
+        r = random.Random(1000)
+        for j in range(50):
+            sizes = [random.choice(range(104, 500, 8)) for i in range(20)]
+            all = [lib._stm_large_malloc(size) for size in sizes]
+            print all
+
+            keep_me = set()
+            for i in range(len(all)):
+                if r.random() < 0.5:
+                    print 'free:', all[i]
+                    lib._stm_large_free(all[i])
+                    all[i] = None
+                elif r.random() < 0.5:
+                    keep_me.add(i)
+
+            seen_for = set()
+            lib._stm_largemalloc_sweep()
+            assert seen_for == set([i for i in range(len(all))
+                                      if all[i] is not None])
+            lib._stm_large_dump()
+            from_before = [all[i] for i in keep_me]
+
+            if errors:
+                raise errors[0]
