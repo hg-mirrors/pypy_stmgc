@@ -177,6 +177,7 @@ class TestGCPage(BaseTest):
         stm_major_collect()
         #
         self.switch(1)
+        x = self.pop_root()
         assert stm_get_char(x, size - 1) == 'E'
 
     def test_trace_correct_version_of_overflow_objects_2(self):
