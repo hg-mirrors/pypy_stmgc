@@ -134,4 +134,27 @@ class TestGCPage(BaseTest):
         assert lib._stm_total_allocated() == 10 * (5000 + LMO)
 
     def test_trace_all_versions(self):
-        pass #xxx in-progress
+        self.start_transaction()
+        x = stm_allocate(5000)
+        stm_set_char(x, 'A')
+        self.push_root(x)
+        self.commit_transaction()
+        assert lib._stm_total_allocated() == 5000 + LMO
+
+        self.start_transaction()
+        x = self.pop_root()
+        self.push_root(x)
+        assert lib._stm_total_allocated() == 5000 + LMO
+        stm_set_char(x, 'B')
+        assert lib._stm_total_allocated() == 5000 + LMO + 2 * 4096  # 2 pages
+        stm_major_collect()
+
+        assert stm_get_char(x) == 'B'
+
+        self.switch(1)
+        self.start_transaction()
+        assert stm_get_char(x) == 'A'
+
+        self.switch(0)
+        assert stm_get_char(x) == 'B'
+        assert lib._stm_total_allocated() == 5000 + LMO + 2 * 4096  # 2 pages
