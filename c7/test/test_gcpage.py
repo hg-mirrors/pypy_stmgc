@@ -100,5 +100,4 @@ class TestGCPage(BaseTest):
         assert 5000 <= lib._stm_total_allocated() <= 8192
 
         stm_major_collect()
-        py.test.skip("in-progress")
         assert lib._stm_total_allocated() == 0

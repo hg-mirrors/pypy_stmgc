@@ -197,7 +197,6 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
     mutex_pages_unlock();
 }
 
-#if 0
 static bool is_fully_in_shared_pages(object_t *obj)
 {
     uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
@@ -217,4 +216,3 @@ static bool is_fully_in_shared_pages(object_t *obj)
 
     return true;
 }
-#endif
