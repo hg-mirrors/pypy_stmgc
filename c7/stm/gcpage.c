@@ -403,6 +403,9 @@ static void major_collection_now_at_safe_point(void)
     clean_write_locks();
     major_set_write_locks();
 
+    /* XXX should re-share pages if possible; and each re-sharing
+       decreases total_allocated by 4096 */
+
     dprintf((" | used after collection:  %ld\n",
              (long)pages_ctl.total_allocated));
     dprintf((" `----------------------------------------------\n"));
