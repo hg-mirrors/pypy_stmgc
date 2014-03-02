@@ -96,7 +96,7 @@ static void minor_trace_if_young(object_t **pobj)
             char *allocated = allocate_outside_nursery_large(size);
             nobj = (object_t *)(allocated - stm_object_pages);
 
-            /* Copy the object  */
+            /* Copy the object */
             char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
             memcpy(realnobj, realobj, size);
 

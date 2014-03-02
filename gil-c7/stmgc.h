@@ -33,7 +33,6 @@ extern char *_stm_nursery_current, *_stm_nursery_end;
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
 #define _STM_FAST_ALLOC           (66*1024)
-#define STM_FLAGS_PREBUILT   _STM_GCFLAG_WRITE_BARRIER
 
 
 object_t *_stm_allocate_old(ssize_t size);

@@ -27,7 +27,7 @@ void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
-//void stm_copy_prebuilt_objects(object_t *target, char *source, ssize_t size);
+object_t *stm_setup_prebuilt(object_t *);
 
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
