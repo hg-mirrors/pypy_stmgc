@@ -61,6 +61,8 @@ class TestPrebuilt(BaseTest):
         print lp2
         assert lp2 != lp1
         assert stm_get_ref(lp2, 0) == lp1
+        assert lib._stm_get_flags(lp1) == lib._STM_GCFLAG_WRITE_BARRIER
+        assert lib._stm_get_flags(lp2) == lib._STM_GCFLAG_WRITE_BARRIER
 
     def test_multiple_calls_to_stm_setup_prebuilt_1(self, reverse=False):
         static1 = prebuilt_refs(1)
@@ -76,6 +78,8 @@ class TestPrebuilt(BaseTest):
         self.start_transaction()
         assert stm_get_ref(lp1, 0) == lp2
         assert stm_get_ref(lp2, 0) == ffi.NULL
+        assert lib._stm_get_flags(lp1) == lib._STM_GCFLAG_WRITE_BARRIER
+        assert lib._stm_get_flags(lp2) == lib._STM_GCFLAG_WRITE_BARRIER
 
     def test_multiple_calls_to_stm_setup_prebuilt_2(self):
         self.test_multiple_calls_to_stm_setup_prebuilt_1(reverse=True)
