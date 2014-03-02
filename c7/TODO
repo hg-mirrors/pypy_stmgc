@@ -3,4 +3,6 @@
 
 - write barrier for big arrays
 
-- prebuilt objects: stm_setup_prebuilt(array_of_"object_t*", length);
+- hash, id
+- weakrefs
+- finalizers
