@@ -1,6 +1,4 @@
 
-- major GC
-
 - use small uniform gcpages
 
 - write barrier for big arrays
