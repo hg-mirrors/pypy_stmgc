@@ -73,8 +73,10 @@ void stm_copy_prebuilt_objects(object_t *target, char *source, ssize_t size)
     memcpy(REAL_ADDRESS(segment_base, utarget), source, size);
 }
 
+#if 0
 static void reset_transaction_read_version_prebuilt(void)
 {
     memset(REAL_ADDRESS(STM_SEGMENT->segment_base, prebuilt_readmarkers_start),
            0, prebuilt_readmarkers_end - prebuilt_readmarkers_start);
 }
+#endif
