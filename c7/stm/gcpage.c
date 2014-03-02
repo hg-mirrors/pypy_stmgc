@@ -536,11 +536,10 @@ static void major_collection_now_at_safe_point(void)
     major_clear_write_locks();
 
     /* marking */
-    mark_objects_to_trace = list_create();
+    LIST_CREATE(mark_objects_to_trace);
     mark_visit_from_modified_objects();
     mark_visit_from_roots();
-    list_free(mark_objects_to_trace);
-    mark_objects_to_trace = NULL;
+    LIST_FREE(mark_objects_to_trace);
 
     /* cleanup */
     clean_up_segment_lists();

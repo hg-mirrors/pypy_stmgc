@@ -15,6 +15,7 @@ static inline void list_free(struct list_s *lst)
     free(lst);
 }
 
+#define LIST_CREATE(lst)  ((lst) = list_create())
 #define LIST_FREE(lst)  (list_free(lst), (lst) = NULL)
 
 
