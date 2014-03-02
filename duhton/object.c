@@ -69,9 +69,8 @@ DuObject *Du_None;
 
 void init_prebuilt_object_objects(void)
 {
-    Du_None = (DuObject *)_stm_allocate_old(sizeof(DuObject));
-    Du_None->type_id = DUTYPE_NONE;
-    _du_save1(Du_None);
+    static DuObject none = { { }, DUTYPE_NONE };
+    Du_None = INIT_PREBUILT(&none);
 }
 
 void Du_FatalError(char *msg, ...)

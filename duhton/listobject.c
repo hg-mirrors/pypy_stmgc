@@ -205,12 +205,8 @@ static DuTupleObject *du_empty_tuple;
 
 void init_prebuilt_list_objects(void)
 {
-    du_empty_tuple = (DuTupleObject *)
-        _stm_allocate_old(sizeof(DuTupleObject));
-    du_empty_tuple->ob_base.type_id = DUTYPE_TUPLE;
-    du_empty_tuple->ob_count = 0;
-    du_empty_tuple->ob_capacity = 0;
-    _du_save1(du_empty_tuple);
+    static DuTupleObject empty_tuple = { { { }, DUTYPE_TUPLE } };
+    du_empty_tuple = INIT_PREBUILT(&empty_tuple);
 }
 
 DuObject *DuList_New()

@@ -186,6 +186,8 @@ void Du_TransactionRun(void);
 #define _du_read1(p1)           stm_read((object_t *)(p1))
 #define _du_write1(p1)          stm_write((object_t *)(p1))
 
+#define INIT_PREBUILT(p)       ((typeof(p))stm_setup_prebuilt((object_t *)(p)))
+
 
 #ifndef NDEBUG
 # define _check_not_free(ob)                                    \

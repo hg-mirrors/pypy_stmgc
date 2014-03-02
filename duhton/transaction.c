@@ -7,15 +7,11 @@ static DuConsObject *du_pending_transactions;
 
 void init_prebuilt_transaction_objects(void)
 {
+    static DuConsObject pending = { {.type_id = DUTYPE_CONS} };
+    du_pending_transactions = INIT_PREBUILT(&pending);
+
     assert(Du_None);   /* already created */
-
-    du_pending_transactions = (DuConsObject *)
-        _stm_allocate_old(sizeof(DuConsObject));
-    du_pending_transactions->ob_base.type_id = DUTYPE_CONS;
-    du_pending_transactions->car = NULL;
     du_pending_transactions->cdr = Du_None;
-
-    _du_save1(du_pending_transactions);
 };
 
 static pthread_mutex_t mutex_sleep = PTHREAD_MUTEX_INITIALIZER;
