@@ -101,12 +101,12 @@ static char *allocate_outside_nursery_large(uint64_t size)
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
-    /* only for tests */
+    /* only for tests xxx but stm_setup_prebuilt() uses this now too */
     char *p = allocate_outside_nursery_large(size_rounded_up);
     memset(p, 0, size_rounded_up);
 
     object_t *o = (object_t *)(p - stm_object_pages);
-    o->stm_flags = STM_FLAGS_PREBUILT;
+    o->stm_flags = GCFLAG_WRITE_BARRIER;
 
     if (testing_prebuilt_objs == NULL)
         testing_prebuilt_objs = list_create();

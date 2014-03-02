@@ -100,7 +100,6 @@ uint64_t _stm_total_allocated(void);
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
 #define _STM_NSE_SIGNAL_MAX               1
 #define _STM_FAST_ALLOC           (66*1024)
-#define STM_FLAGS_PREBUILT   _STM_GCFLAG_WRITE_BARRIER
 
 
 /* ==================== HELPERS ==================== */
@@ -252,6 +251,15 @@ static inline void stm_safe_point(void) {
 
 /* Forces a collection. */
 void stm_collect(long level);
+
+/* Prepare an immortal "prebuilt" object managed by the GC.  Takes a
+   pointer to an 'object_t', which should not actually be a GC-managed
+   structure but a real static structure.  Returns the equivalent
+   GC-managed pointer.  Works by copying it into the GC pages, following
+   and fixing all pointers it contains, by doing stm_setup_prebuilt() on
+   each of them recursively.  (Note that this will leave garbage in the
+   static structure, but it should never be used anyway.) */
+object_t *stm_setup_prebuilt(object_t *);
 
 
 /* ==================== END ==================== */
