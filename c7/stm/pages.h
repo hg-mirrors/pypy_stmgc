@@ -14,9 +14,9 @@ enum /* flag_page_private */ {
     /* Page is private for each segment. */
     PRIVATE_PAGE,
 
-    /* Higher values are used by gcpage.c to mark pages that are privatized
-       but where so far only one segment was found. */
-    _SINGLE_SEGMENT_PAGE
+    /* gcpage.c: page contains objects that have been traced in the
+       segment > 0 */
+    SEGMENT1_PAGE,
 };
 
 static uint8_t flag_page_private[NB_PAGES];
