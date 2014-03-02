@@ -231,8 +231,6 @@ static inline void mark_flag_page_private(object_t *obj, char *segment_base)
 
 static void major_reshare_pages_range(uintptr_t first_page, uintptr_t end_page)
 {
-    return;  /* XXX DISABLED */
-
     uintptr_t i;
     for (i = first_page; i < end_page; i++) {
 
@@ -342,7 +340,7 @@ static void mark_trace(object_t *obj, char *segment_base)
         /* first, if we're not seeing segment 0, we must change the
            flags in flag_page_private[] from PRIVATE_PAGE to
            REMAPPING_PAGE, which will mean "can't re-share" */
-        if (segment_base != stm_object_pages && 0 /* XXX DISABLED */)
+        if (segment_base != stm_object_pages)
             mark_flag_page_private(obj, segment_base);
 
         /* trace into the object (the version from 'segment_base') */
