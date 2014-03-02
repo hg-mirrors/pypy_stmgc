@@ -55,13 +55,8 @@ static int next_id = 1;
 
 void init_prebuilt_symbol_objects(void)
 {
-    _Du_AllSymbols = (DuSymbolObject *)
-        _stm_allocate_old(sizeof(DuSymbolObject));
-    _Du_AllSymbols->ob_base.type_id = DUTYPE_SYMBOL;
-    _Du_AllSymbols->myid = 0;
-    _Du_AllSymbols->name = "";
-    _Du_AllSymbols->next = NULL;
-    _du_save1(_Du_AllSymbols);
+    static DuSymbolObject allsymbols = { {.type_id=DUTYPE_SYMBOL}, .name="" };
+    _Du_AllSymbols = INIT_PREBUILT(&allsymbols);
 }
 
 DuObject *DuSymbol_FromString(const char *name)

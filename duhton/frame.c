@@ -47,18 +47,12 @@ static DuFrameNodeObject *du_empty_framenode;
 
 void init_prebuilt_frame_objects(void)
 {
-    du_empty_framenode = (DuFrameNodeObject *)
-        _stm_allocate_old(sizeof(DuFrameNodeObject));
-    du_empty_framenode->ob_base.type_id = DUTYPE_FRAMENODE;
-    du_empty_framenode->ob_count = 0;
+    static DuFrameNodeObject empty_framenode = { {.type_id=DUTYPE_FRAMENODE} };
+    static DuFrameObject g = { {.type_id=DUTYPE_FRAME},
+                               .ob_nodes=&empty_framenode };
 
-    DuFrameObject *g = (DuFrameObject *)
-        _stm_allocate_old(sizeof(DuFrameObject));
-    g->ob_base.type_id = DUTYPE_FRAME;
-    g->ob_nodes = du_empty_framenode;
-    Du_Globals = (DuObject *)g;
-
-    _du_save2(du_empty_framenode, Du_Globals);
+    du_empty_framenode = INIT_PREBUILT(&empty_framenode);
+    Du_Globals = (DuObject *)INIT_PREBUILT(&g);
 }
 
 DuObject *DuFrame_New()
