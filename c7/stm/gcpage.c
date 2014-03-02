@@ -326,16 +326,10 @@ static void clean_write_locks(void)
        major collection, is cleared in sweep_large_objects() for
        large objects, but is not cleared for small objects.
        Clear it now. */
-    object_t *loc2 = (object_t *)(uninitialized_page_stop  - stm_object_pages);
+    object_t *loc2 = (object_t *)(uninitialized_page_stop - stm_object_pages);
     uintptr_t lock2_idx = mark_loc(loc2 - 1) + 1;
 
-#ifdef STM_TESTS
-    long _i;
-    for (_i=0; _i<lock2_idx; _i++) {
-        assert(write_locks[_i] == 0);
-        if (_i == 1000000) break;  /* ok, stop testing */
-    }
-#endif
+    assert_memset_zero(write_locks, lock2_idx);
     memset(write_locks + lock2_idx, 0, sizeof(write_locks) - lock2_idx);
 }
 

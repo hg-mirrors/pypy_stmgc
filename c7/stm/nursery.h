@@ -17,3 +17,5 @@ static void major_do_minor_collections(void);
 static inline bool must_abort(void) {
     return STM_SEGMENT->nursery_end == NSE_SIGABORT;
 }
+
+static void assert_memset_zero(void *s, size_t n);
