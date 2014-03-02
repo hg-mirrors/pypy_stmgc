@@ -182,3 +182,28 @@ class TestGCPage(BaseTest):
 
     def test_trace_correct_version_of_overflow_objects_2(self):
         self.test_trace_correct_version_of_overflow_objects_1(size=5000)
+
+    def test_reshare_if_no_longer_modified_0(self, invert=0):
+        if invert:
+            self.switch(1)
+        self.start_transaction()
+        x = stm_allocate(5000)
+        self.push_root(x)
+        self.commit_transaction()
+        x = self.pop_root()
+        #
+        self.switch(1 - invert)
+        self.start_transaction()
+        self.push_root(x)
+        stm_set_char(x, 'A')
+        stm_major_collect()
+        assert lib._stm_total_allocated() == 5000 + LMO + 2 * 4096  # 2 pages
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        stm_major_collect()
+        py.test.skip("XXX implement me")
+        assert lib._stm_total_allocated() == 5000 + LMO    # shared again
+
+    def test_reshare_if_no_longer_modified_1(self):
+        self.test_reshare_if_no_longer_modified_0(invert=1)

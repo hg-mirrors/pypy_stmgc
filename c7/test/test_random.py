@@ -364,6 +364,7 @@ def op_allocate(ex, global_state, thread_state):
     thread_state.push_roots(ex)
 
     ex.do('%s = stm_allocate(%s)' % (r, size))
+    ex.do('# 0x%x' % (int(ffi.cast("uintptr_t", ex.content[r]))))
     thread_state.transaction_state.add_root(r, 0, True)
 
     thread_state.pop_roots(ex)
@@ -375,6 +376,7 @@ def op_allocate_ref(ex, global_state, thread_state):
     r = global_state.get_new_root_name(True, num)
     thread_state.push_roots(ex)
     ex.do('%s = stm_allocate_refs(%s)' % (r, num))
+    ex.do('# 0x%x' % (int(ffi.cast("uintptr_t", ex.content[r]))))
     thread_state.transaction_state.add_root(r, "ffi.NULL", True)
 
     thread_state.pop_roots(ex)

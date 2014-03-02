@@ -189,6 +189,112 @@ static inline bool mark_visited_test_and_clear(object_t *obj)
     }
 }
 
+/************************************************************/
+
+
+static inline void mark_single_flag_private(uintptr_t pagenum, uint8_t flagnum)
+{
+    uint8_t old_flag = flag_page_private[pagenum];
+
+    if (old_flag == SHARED_PAGE)  /* nothing to do, page already shared */
+        return;
+
+    if (old_flag == flagnum)      /* page already marked for this segment */
+        return;
+
+    if (old_flag == PRIVATE_PAGE) {    /* a not-seen-before private page */
+        flag_page_private[pagenum] = flagnum;
+        return;
+    }
+
+    /* else, conflict: the page has been seen from two different segments.
+       Use REMAPPING_PAGE to mean this situation here. */
+    flag_page_private[pagenum] = REMAPPING_PAGE;
+}
+
+static inline void mark_flag_page_private(object_t *obj, uint8_t flag_num,
+                                          char *segment_base)
+{
+    uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
+
+    if (LIKELY((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0)) {
+        mark_single_flag_private(first_page, flag_num);
+    }
+    else {
+        char *realobj;
+        size_t obj_size;
+        uintptr_t end_page;
+
+        /* get the size of the object */
+        realobj = REAL_ADDRESS(segment_base, obj);
+        obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+        /* that's the page *following* the last page with the object */
+        end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
+
+        while (first_page < end_page)
+            mark_single_flag_private(first_page++, flag_num);
+    }
+}
+
+static void major_reshare_pages_range(uintptr_t first_page, uintptr_t end_page)
+{
+    uintptr_t i;
+    for (i = first_page; i < end_page; i++) {
+
+        uint8_t flag = flag_page_private[i];
+
+        if (flag == REMAPPING_PAGE) {
+            /* this page stays private after major collection */
+            flag_page_private[i] = PRIVATE_PAGE;
+        }
+        else if (flag >= PRIVATE_PAGE) {
+            /* this page becomes shared again */
+
+            /* XXX rather slow version here.  improve! */
+
+            abort(); /* doesn't work, actually.  we can't keep object data
+                        from segment 1 and largemalloc's chunk data from
+                        segment 0.  mess mess mess */
+
+            char buffer[4096 + 64];
+            char *pbuffer = buffer;
+            pbuffer += ((-(uintptr_t)pbuffer) & 63);   /* align */
+
+            char *ppage0 = get_segment_base(0) + i * 4096;
+            char *ppage1 = get_segment_base(1) + i * 4096;
+
+            /* do two copies: out of the page seen now as in the seg 0,
+               and then back into the same location after remapping */
+            pagecopy(pbuffer, ppage0);
+            /* a better approach is possible in which we don't have this */
+            madvise(ppage0, 4096, MADV_DONTNEED);
+            madvise(ppage1, 4096, MADV_DONTNEED);
+            d_remap_file_pages(ppage0, 4096, i);
+            d_remap_file_pages(ppage1, 4096, i);
+            pagecopy(ppage0, pbuffer);
+            flag_page_private[i] = SHARED_PAGE;
+
+            increment_total_allocated(-4096 * (NB_SEGMENTS-1));
+        }
+    }
+}
+
+static void major_reshare_pages(void)
+{
+    /* re-share pages if possible.  Each re-sharing decreases
+       total_allocated by 4096. */
+    major_reshare_pages_range(
+        END_NURSERY_PAGE,
+        (uninitialized_page_start - stm_object_pages) / 4096UL);
+    major_reshare_pages_range(
+        (uninitialized_page_stop - stm_object_pages) / 4096UL,
+        NB_PAGES);
+}
+
+/************************************************************/
+
+
 static inline void mark_record_trace(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
@@ -198,13 +304,34 @@ static inline void mark_record_trace(object_t **pobj)
         return;    /* already visited this object */
 
     LIST_APPEND(mark_objects_to_trace, obj);
+
+    /* Note: this obj might be visited already, but from a different
+       segment.  We ignore this case and skip re-visiting the object
+       anyway.  The idea is that such an object is old (not from the
+       current transaction), otherwise it would not be possible to see
+       it in two segments; and moreover it is not modified, otherwise
+       mark_trace() would have been called on two different segments
+       already.  That means that this object is identical in all
+       segments and only needs visiting once.  (It may actually be in a
+       shared page, or maybe not.)
+    */
 }
 
 static void mark_trace(object_t *obj, char *segment_base)
 {
+    uint8_t flag_num =
+        ((struct stm_priv_segment_info_s *)
+             REAL_ADDRESS(segment_base, STM_PSEGMENT))->write_lock_num;
+
     assert(list_is_empty(mark_objects_to_trace));
 
     while (1) {
+
+        /* first update the flag in flag_page_private[] to correspond
+           to this segment */
+        if (0) mark_flag_page_private(obj, flag_num, segment_base);
+
+        /* trace into the object (the version from 'segment_base') */
         struct object_s *realobj =
             (struct object_s *)REAL_ADDRESS(segment_base, obj);
         stmcb_trace(realobj, &mark_record_trace);
@@ -373,7 +500,7 @@ static void major_set_write_locks(void)
 static void major_collection_now_at_safe_point(void)
 {
     dprintf(("\n"));
-    dprintf((" .----- major_collection_now_at_safe_point -----\n"));
+    dprintf((" .----- major collection -----------------------\n"));
     assert(_has_mutex());
 
     /* first, force a minor collection in each of the other segments */
@@ -396,15 +523,13 @@ static void major_collection_now_at_safe_point(void)
 
     /* sweeping */
     mutex_pages_lock();
+    if (0) major_reshare_pages();
     sweep_large_objects();
     //sweep_uniform_pages();
     mutex_pages_unlock();
 
     clean_write_locks();
     major_set_write_locks();
-
-    /* XXX should re-share pages if possible; and each re-sharing
-       decreases total_allocated by 4096 */
 
     dprintf((" | used after collection:  %ld\n",
              (long)pages_ctl.total_allocated));
