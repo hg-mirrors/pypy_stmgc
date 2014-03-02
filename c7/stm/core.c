@@ -119,17 +119,6 @@ static void reset_transaction_read_version(void)
 {
     /* force-reset all read markers to 0 */
 
-    /* XXX measure the time taken by this madvise() and the following
-       zeroing of pages done lazily by the kernel; compare it with using
-       16-bit read_versions.
-    */
-    /* XXX try to use madvise() on smaller ranges of memory.  In my
-       measures, we could gain a factor 2 --- not really more, even if
-       the range of virtual addresses below is very large, as long as it
-       is already mostly non-reserved pages.  (The following call keeps
-       them non-reserved; apparently the kernel just skips them very
-       quickly.)
-    */
     char *readmarkers = REAL_ADDRESS(STM_SEGMENT->segment_base,
                                      FIRST_READMARKER_PAGE * 4096UL);
     dprintf(("reset_transaction_read_version: %p %ld\n", readmarkers,
@@ -143,7 +132,6 @@ static void reset_transaction_read_version(void)
 #endif
         memset(readmarkers, 0, NB_READMARKER_PAGES * 4096UL);
     }
-    reset_transaction_read_version_prebuilt();
     STM_SEGMENT->transaction_read_version = 1;
 }
 
