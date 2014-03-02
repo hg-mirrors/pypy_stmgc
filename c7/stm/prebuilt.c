@@ -35,6 +35,10 @@ static void prebuilt_trace(object_t **pstaticobj_invalid)
     char *realnobj = REAL_ADDRESS(stm_object_pages, nobj);
     memcpy(realnobj, (char *)objaddr, size);
 
+    /* Fix the flags in the copied object, asserting that it was zero so far */
+    assert(nobj->stm_flags == 0);
+    nobj->stm_flags = GCFLAG_WRITE_BARRIER;
+
     /* Mark the original object */
     pforwarded_array[0] = GCWORD_PREBUILT_MOVED;
     pforwarded_array[1] = nobj;
