@@ -355,21 +355,25 @@ void _stm_set_nursery_free_count(uint64_t free_count)
 }
 #endif
 
-static void check_nursery_at_transaction_start(void)
+static void assert_memset_zero(void *s, size_t n)
 {
 #ifndef NDEBUG
-    assert((uintptr_t)STM_SEGMENT->nursery_current == _stm_nursery_start);
-    uintptr_t i, limit;
-# ifdef STM_TESTS
-    limit = NURSERY_END - _stm_nursery_start;
-# else
-    limit = 64;
+    size_t i;
+# ifndef STM_TESTS
+    if (n > 5000) n = 5000;
 # endif
-    for (i = 0; i < limit; i += 8) {
-        assert(*(TLPREFIX uint64_t *)(STM_SEGMENT->nursery_current + i) == 0);
-        _duck();
-    }
+    n /= 8;
+    for (i = 0; i < n; i++)
+        assert(((uint64_t *)s)[i] == 0);
 #endif
+}
+
+static void check_nursery_at_transaction_start(void)
+{
+    assert((uintptr_t)STM_SEGMENT->nursery_current == _stm_nursery_start);
+    assert_memset_zero(REAL_ADDRESS(STM_SEGMENT->segment_base,
+                                    STM_SEGMENT->nursery_current),
+                       NURSERY_END - _stm_nursery_start);
 }
 
 static void major_do_minor_collections(void)
