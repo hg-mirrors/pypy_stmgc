@@ -53,8 +53,13 @@ static void write_write_contention_management(uintptr_t lock_idx)
         uint8_t other_segment_num = prev_owner - 1;
         assert(get_priv_segment(other_segment_num)->write_lock_num ==
                prev_owner);
+
+        /* Do generic contention management.  If found that we must abort,
+           calls abort_with_mutex() and never returns.  If found that the
+           other thread must abort, signal it with NSE_SIGABORT.  Note that
+           this can overwrite a NSE_SIGPAUSE, which is fine. */
         contention_management(other_segment_num);
-        assert(get_priv_segment(other_segment_num)->pub.nursery_end == NSE_SIGABORT);
+        assert(get_segment(other_segment_num)->nursery_end == NSE_SIGABORT);
 
         /* The rest of this code is for the case where we continue to
            run.  We have to signal the other thread to abort, and wait
@@ -64,12 +69,10 @@ static void write_write_contention_management(uintptr_t lock_idx)
         switch (sp) {
 
         case SP_RUNNING:
-            /* The other thread is running now, so if we set
-               NSE_SIGABORT in 'nursery_end', it will soon enter a
-               mutex_lock() and thus abort.  Note that this line can
-               overwrite a NSE_SIGPAUSE, which is fine.
+            /* The other thread is running now, so as NSE_SIGABORT was
+               set in its 'nursery_end', it will soon enter a
+               mutex_lock() and thus abort.
             */
-            get_segment(other_segment_num)->nursery_end = NSE_SIGABORT;
             break;
 
         /* The other cases are where the other thread is at a

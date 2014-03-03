@@ -168,4 +168,4 @@ class TestLargeMalloc(BaseTest):
                 if i in keep_me:
                     assert all[i][50] == chr(65 + i)
                 else:
-                    assert all_orig[i][50] == '\xDD'
+                    assert all_orig[i][50] == '\xDE'
