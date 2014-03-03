@@ -43,6 +43,11 @@ struct thread_data {
 };
 __thread struct thread_data td;
 
+struct thread_data *_get_td(void)
+{
+    return &td;     /* for gdb */
+}
+
 
 ssize_t stmcb_size_rounded_up(struct object_s *ob)
 {
