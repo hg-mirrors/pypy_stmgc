@@ -36,8 +36,8 @@ void stm_setup(void)
            NULL accesses land.  We mprotect it so that accesses fail. */
         mprotect(segment_base, 4096, PROT_NONE);
 
-        /* Fill the TLS page (page 1) with 0xDD, for debugging */
-        memset(REAL_ADDRESS(segment_base, 4096), 0xDD, 4096);
+        /* Fill the TLS page (page 1) with 0xDC, for debugging */
+        memset(REAL_ADDRESS(segment_base, 4096), 0xDC, 4096);
         /* Make a "hole" at STM_PSEGMENT */
         memset(REAL_ADDRESS(segment_base, STM_PSEGMENT), 0,
                sizeof(*STM_PSEGMENT));

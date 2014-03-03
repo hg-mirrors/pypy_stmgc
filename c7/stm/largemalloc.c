@@ -254,7 +254,7 @@ void _stm_large_free(char *data)
 #ifndef NDEBUG
     assert(chunk->size >= sizeof(dlist_t));
     assert(chunk->size <= (((char *)last_chunk) - (char *)data));
-    memset(data, 0xDD, chunk->size);
+    memset(data, 0xDE, chunk->size);
 #endif
 
     /* try to merge with the following chunk in memory */
