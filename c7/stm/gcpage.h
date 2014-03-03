@@ -14,6 +14,10 @@
 #define GC_MIN                 (NB_NURSERY_PAGES * 4096 * 8)
 #define GC_MAJOR_COLLECT       1.82
 
+/* re-share pages after major collections (1 or 0) */
+#define RESHARE_PAGES 1
+
+
 
 static char *uninitialized_page_start;   /* within segment 0 */
 static char *uninitialized_page_stop;

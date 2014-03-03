@@ -340,7 +340,7 @@ static void mark_trace(object_t *obj, char *segment_base)
         /* first, if we're not seeing segment 0, we must change the
            flags in flag_page_private[] from PRIVATE_PAGE to
            REMAPPING_PAGE, which will mean "can't re-share" */
-        if (segment_base != stm_object_pages)
+        if (segment_base != stm_object_pages && RESHARE_PAGES)
             mark_flag_page_private(obj, segment_base);
 
         /* trace into the object (the version from 'segment_base') */
@@ -546,7 +546,8 @@ static void major_collection_now_at_safe_point(void)
 
     /* sweeping */
     mutex_pages_lock();
-    major_reshare_pages();
+    if (RESHARE_PAGES)
+        major_reshare_pages();
     sweep_large_objects();
     //sweep_uniform_pages();
     mutex_pages_unlock();
