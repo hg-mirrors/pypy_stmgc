@@ -186,7 +186,7 @@ nodeptr_t get_next(objptr_t p)
 
     /* and the same value at the end: */
     nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n + n->my_size - sizeof(void*));
-    assert(n->next == *last_next);
+    OPT_ASSERT(n->next == *last_next);
 
     return n->next;
 }
