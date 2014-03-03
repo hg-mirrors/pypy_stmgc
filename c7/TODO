@@ -6,3 +6,6 @@
 - hash, id
 - weakrefs
 - finalizers
+
+- the highest_overflow_number can overflow after 2**30 non-collect-time
+  minor collections
