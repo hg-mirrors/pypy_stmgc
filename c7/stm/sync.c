@@ -156,6 +156,7 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
            they use only one thread */
         set_gs_register(get_segment_base(num));
 #endif
+        dprintf(("acquired same segment: %d\n", num));
         goto got_num;
     }
     /* Look for the next free segment.  If there is none, wait for
@@ -165,6 +166,7 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
         num = (num + 1) % NB_SEGMENTS;
         if (sync_ctl.in_use[num] == 0) {
             /* we're getting 'num', a different number. */
+            dprintf(("acquired different segment: %d->%d\n", tl->associated_segment_num, num));
             tl->associated_segment_num = num;
             set_gs_register(get_segment_base(num));
             goto got_num;
