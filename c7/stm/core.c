@@ -331,9 +331,6 @@ void stm_commit_transaction(void)
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
-    bool has_any_overflow_object =
-        (STM_PSEGMENT->objects_pointing_to_nursery != NULL);
-
     minor_collection(/*commit=*/ true);
 
     s_mutex_lock();
@@ -363,10 +360,11 @@ void stm_commit_transaction(void)
     push_modified_to_other_segments();
 
     /* update 'overflow_number' if needed */
-    if (has_any_overflow_object) {
+    if (STM_PSEGMENT->overflow_number_has_been_used) {
         highest_overflow_number += GCFLAG_OVERFLOW_NUMBER_bit0;
         assert(highest_overflow_number != 0);   /* XXX else, overflow! */
         STM_PSEGMENT->overflow_number = highest_overflow_number;
+        STM_PSEGMENT->overflow_number_has_been_used = false;
     }
 
     /* send what is hopefully the correct signals */
