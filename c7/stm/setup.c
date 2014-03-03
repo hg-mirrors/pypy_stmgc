@@ -84,6 +84,8 @@ void stm_teardown(void)
 {
     /* This function is called during testing, but normal programs don't
        need to call it. */
+    assert(!_has_mutex());
+
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
@@ -124,6 +126,7 @@ void _done_shadow_stack(stm_thread_local_t *tl)
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
     int num;
+    s_mutex_lock();
     if (stm_all_thread_locals == NULL) {
         stm_all_thread_locals = tl->next = tl->prev = tl;
         num = 0;
@@ -144,16 +147,19 @@ void stm_register_thread_local(stm_thread_local_t *tl)
     tl->associated_segment_num = num;
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num));
+    s_mutex_unlock();
 }
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)
 {
+    s_mutex_lock();
     assert(tl->next != NULL);
     _done_shadow_stack(tl);
     if (tl == stm_all_thread_locals) {
         stm_all_thread_locals = stm_all_thread_locals->next;
         if (tl == stm_all_thread_locals) {
             stm_all_thread_locals = NULL;
+            s_mutex_unlock();
             return;
         }
     }
@@ -161,6 +167,7 @@ void stm_unregister_thread_local(stm_thread_local_t *tl)
     tl->next->prev = tl->prev;
     tl->prev = NULL;
     tl->next = NULL;
+    s_mutex_unlock();
 }
 
 static bool _is_tl_registered(stm_thread_local_t *tl) __attribute__((unused));
