@@ -54,6 +54,7 @@ static void write_write_contention_management(uintptr_t lock_idx)
         assert(get_priv_segment(other_segment_num)->write_lock_num ==
                prev_owner);
         contention_management(other_segment_num);
+        assert(get_priv_segment(other_segment_num)->pub.nursery_end == NSE_SIGABORT);
 
         /* The rest of this code is for the case where we continue to
            run.  We have to signal the other thread to abort, and wait

@@ -258,10 +258,13 @@ static void major_reshare_pages_range(uintptr_t first_page, uintptr_t end_page)
             char *ppage0 = get_segment_base(0) + i * 4096;
             char *ppage1 = get_segment_base(1) + i * 4096;
 
-            /* two cases... either the mapping is (0->0, 1->1) or (0->1,
-               1->0).  Distinguish which case it is by hacking a lot */
+            /* two cases for mapping pages to file-pages (fpages):
+                - (0->0, 1->1)
+                - (0->1, 1->0)
+               Distinguish which case it is by hacking a lot */
 
             // 0->0,1->1 or 0->1,1->0
+            /* map page 1 to fpage 0: */
             d_remap_file_pages(ppage1, 4096, i);
             // 0->0,1->0 or 0->1,1->0
 
@@ -273,8 +276,13 @@ static void major_reshare_pages_range(uintptr_t first_page, uintptr_t end_page)
             char newvalue1 = *ppage1;
             asm("":::"memory");
             *ppage0 = oldvalue0;
+            /* if we are in 0->0,1->0, old and new are different:
+               In this case we are done. We keep the largemalloc
+               data structure and objects of ppage0/fpage0 */
             if (oldvalue1 == newvalue1) {
                 // 0->1,1->0
+                /* ppage0/fpage1 has the data structure that we want
+                   in ppage1/fpage0, so we copy it */
                 pagecopy(ppage1, ppage0);   // copy from page0 to page1,
                 //         i.e. from the underlying memory seg1 to seg0
                 d_remap_file_pages(ppage0, 4096, i);
@@ -339,7 +347,7 @@ static void mark_trace(object_t *obj, char *segment_base)
 
         /* first, if we're not seeing segment 0, we must change the
            flags in flag_page_private[] from PRIVATE_PAGE to
-           REMAPPING_PAGE, which will mean "can't re-share" */
+           SEGMENT1_PAGE, which will mean "can't re-share" */
         if (segment_base != stm_object_pages && RESHARE_PAGES)
             mark_flag_page_private(obj, segment_base);
 
