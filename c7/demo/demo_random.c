@@ -22,9 +22,12 @@ typedef object_t* objptr_t;
 
 struct node_s {
     struct object_s hdr;
+    int sig;
     long my_size;
     nodeptr_t next;
 };
+
+#define SIGNATURE 0x01234567
 
 
 static sem_t done;
@@ -225,6 +228,7 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
                            sizeof(struct node_s) + 4096*70};
         size_t size = sizes[get_rand(4)];
         p = stm_allocate(size);
+        ((nodeptr_t)p)->sig = SIGNATURE;
         ((nodeptr_t)p)->my_size = size;
         pop_roots();
         /* reload_roots not necessary, all are old after start_transaction */
@@ -310,6 +314,8 @@ void *demo_random(void *arg)
         if (td.steps_left % 8 == 0)
             fprintf(stdout, "#");
 
+        assert(p == NULL || ((nodeptr_t)p)->sig == SIGNATURE);
+
         p = do_step(p);
 
         if (p == (objptr_t)-1) {
@@ -351,6 +357,7 @@ void setup_globals()
     stm_start_inevitable_transaction(&stm_thread_local);
     for (i = 0; i < SHARED_ROOTS; i++) {
         shared_roots[i] = stm_allocate(sizeof(struct node_s));
+        ((nodeptr_t)shared_roots[i])->sig = SIGNATURE;
         ((nodeptr_t)shared_roots[i])->my_size = sizeof(struct node_s);
         STM_PUSH_ROOT(stm_thread_local, shared_roots[i]);
     }
