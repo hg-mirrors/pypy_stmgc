@@ -248,6 +248,11 @@ static void _do_minor_collection(bool commit)
     dprintf(("minor_collection commit=%d\n", (int)commit));
 
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
+    if (!commit) {
+        /* 'STM_PSEGMENT->overflow_number' is used now by this collection,
+           in the sense that it's copied to the overflow objects */
+        STM_PSEGMENT->overflow_number_has_been_used = true;
+    }
 
     /* We need this to track the large overflow objects for a future
        commit.  We don't need it if we're committing now. */

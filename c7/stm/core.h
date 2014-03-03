@@ -97,6 +97,7 @@ struct stm_priv_segment_info_s {
        transaction is done, but only if we actually overflowed any
        object; otherwise, no object has got this number. */
     uint32_t overflow_number;
+    bool overflow_number_has_been_used;
 
     /* The marker stored in the global 'write_locks' array to mean
        "this segment has modified this old object". */
