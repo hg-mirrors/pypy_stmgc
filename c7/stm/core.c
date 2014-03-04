@@ -448,6 +448,29 @@ reset_modified_from_other_segments(int segment_num)
     list_clear(pseg->modified_old_objects);
 }
 
+static void abort_data_structures_from_segment_num(int segment_num)
+{
+    /* This function clears the content of the given segment undergoing
+       an abort.  It is called from abort_with_mutex(), but also sometimes
+       from other threads that figure out that this segment should abort.
+       In the latter case, make sure that this segment is currently at
+       a safe point (not SP_RUNNING).
+    */
+    struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
+
+    /* throw away the content of the nursery */
+    throw_away_nursery(pseg);
+
+    /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
+    reset_modified_from_other_segments(segment_num);
+
+    /* reset the tl->shadowstack and thread_local_obj to their original
+       value before the transaction start */
+    stm_thread_local_t *tl = pseg->pub.running_thread;
+    tl->shadowstack = pseg->shadowstack_at_start_of_transaction;
+    tl->thread_local_obj = pseg->threadlocal_at_start_of_transaction;
+}
+
 static void abort_with_mutex(void)
 {
     dprintf(("~~~ ABORT\n"));
@@ -463,16 +486,9 @@ static void abort_with_mutex(void)
     }
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
-    /* throw away the content of the nursery */
-    throw_away_nursery();
-
-    /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
-    reset_modified_from_other_segments(STM_SEGMENT->segment_num);
+    abort_data_structures_from_segment_num(STM_SEGMENT->segment_num);
 
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
-    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
-    tl->shadowstack = STM_PSEGMENT->shadowstack_at_start_of_transaction;
-    tl->thread_local_obj = STM_PSEGMENT->threadlocal_at_start_of_transaction;
 
     if (STM_SEGMENT->nursery_end == NSE_SIGABORT)
         STM_SEGMENT->nursery_end = NURSERY_END;   /* done aborting */

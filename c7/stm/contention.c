@@ -215,8 +215,8 @@ static void contention_management(uint8_t other_segment_num,
                We don't have to wake it up right now, but we know it will
                abort as soon as it wakes up.  We can safely force it to
                reset its state now. */
-            dprintf(("reset other modified\n"));
-            reset_modified_from_other_segments(other_segment_num);
+            dprintf(("killing data structures\n"));
+            abort_data_structures_from_segment_num(other_segment_num);
         }
         dprintf(("killed other thread\n"));
     }
