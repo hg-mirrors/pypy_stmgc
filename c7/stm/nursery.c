@@ -196,29 +196,29 @@ static void collect_modified_old_objects(void)
                    _collect_now(item));
 }
 
-static void throw_away_nursery(void)
+static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 {
     /* reset the nursery by zeroing it */
     size_t size;
     char *realnursery;
 
-    realnursery = REAL_ADDRESS(STM_SEGMENT->segment_base, _stm_nursery_start);
-    size = STM_SEGMENT->nursery_current - (stm_char *)_stm_nursery_start;
+    realnursery = REAL_ADDRESS(pseg->pub.segment_base, _stm_nursery_start);
+    size = pseg->pub.nursery_current - (stm_char *)_stm_nursery_start;
     memset(realnursery, 0, size);
 
-    STM_SEGMENT->nursery_current = (stm_char *)_stm_nursery_start;
+    pseg->pub.nursery_current = (stm_char *)_stm_nursery_start;
 
     /* free any object left from 'young_outside_nursery' */
-    if (!tree_is_cleared(STM_PSEGMENT->young_outside_nursery)) {
+    if (!tree_is_cleared(pseg->young_outside_nursery)) {
         bool locked = false;
         wlog_t *item;
-        TREE_LOOP_FORWARD(*STM_PSEGMENT->young_outside_nursery, item) {
+        TREE_LOOP_FORWARD(*pseg->young_outside_nursery, item) {
             assert(!_is_in_nursery((object_t *)item->addr));
             if (!locked) {
                 mutex_pages_lock();
                 locked = true;
             }
-            char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base,item->addr);
+            char *realobj = REAL_ADDRESS(pseg->pub.segment_base, item->addr);
             ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
             increment_total_allocated(-(size + LARGE_MALLOC_OVERHEAD));
             _stm_large_free(stm_object_pages + item->addr);
@@ -227,7 +227,7 @@ static void throw_away_nursery(void)
         if (locked)
             mutex_pages_unlock();
 
-        tree_clear(STM_PSEGMENT->young_outside_nursery);
+        tree_clear(pseg->young_outside_nursery);
     }
 }
 
@@ -277,7 +277,7 @@ static void _do_minor_collection(bool commit)
 
     collect_oldrefs_to_nursery();
 
-    throw_away_nursery();
+    throw_away_nursery(get_priv_segment(STM_SEGMENT->segment_num));
 
     assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
@@ -404,6 +404,10 @@ static void major_do_minor_collections(void)
         if (!must_abort()) {
             _do_minor_collection(/*commit=*/ false);
             assert(MINOR_NOTHING_TO_DO(pseg));
+        }
+        else {
+            dprintf(("abort data structures\n"));
+            abort_data_structures_from_segment_num(i);
         }
     }
 

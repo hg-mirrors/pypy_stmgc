@@ -183,6 +183,7 @@ static bool _running_transaction(void);
 
 static void teardown_core(void);
 static void abort_with_mutex(void) __attribute__((noreturn));
+static void abort_data_structures_from_segment_num(int segment_num);
 
 static inline bool was_read_remote(char *base, object_t *obj,
                                    uint8_t other_transaction_read_version)
