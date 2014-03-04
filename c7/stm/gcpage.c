@@ -145,7 +145,7 @@ static void major_collection_if_requested(void)
 
 static struct list_s *mark_objects_to_trace;
 
-#define WL_VISITED   42
+#define WL_VISITED   255
 
 
 static inline uintptr_t mark_loc(object_t *obj)
@@ -159,15 +159,13 @@ static inline uintptr_t mark_loc(object_t *obj)
 static inline bool mark_visited_test(object_t *obj)
 {
     uintptr_t lock_idx = mark_loc(obj);
-    assert(write_locks[lock_idx] == 0 || write_locks[lock_idx] == WL_VISITED);
-    return write_locks[lock_idx] != 0;
+    return write_locks[lock_idx] == WL_VISITED;
 }
 
 static inline bool mark_visited_test_and_set(object_t *obj)
 {
     uintptr_t lock_idx = mark_loc(obj);
-    assert(write_locks[lock_idx] == 0 || write_locks[lock_idx] == WL_VISITED);
-    if (write_locks[lock_idx] != 0) {
+    if (write_locks[lock_idx] == WL_VISITED) {
         return true;
     }
     else {
@@ -179,8 +177,7 @@ static inline bool mark_visited_test_and_set(object_t *obj)
 static inline bool mark_visited_test_and_clear(object_t *obj)
 {
     uintptr_t lock_idx = mark_loc(obj);
-    assert(write_locks[lock_idx] == 0 || write_locks[lock_idx] == WL_VISITED);
-    if (write_locks[lock_idx] != 0) {
+    if (write_locks[lock_idx] == WL_VISITED) {
         write_locks[lock_idx] = 0;
         return true;
     }
@@ -492,25 +489,6 @@ static void clean_write_locks(void)
     memset(write_locks + lock2_idx, 0, sizeof(write_locks) - lock2_idx);
 }
 
-static void major_clear_write_locks(void)
-{
-    long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
-
-        LIST_FOREACH_R(
-            pseg->modified_old_objects,
-            object_t * /*item*/,
-            ({
-                assert(item != NULL);
-
-                uintptr_t lock_idx = mark_loc(item);
-                assert(write_locks[lock_idx] == pseg->write_lock_num);
-                write_locks[lock_idx] = 0;
-            }));
-    }
-}
-
 static void major_set_write_locks(void)
 {
     /* restore the write locks on the modified objects */
@@ -540,8 +518,6 @@ static void major_collection_now_at_safe_point(void)
 
     dprintf((" | used before collection: %ld\n",
              (long)pages_ctl.total_allocated));
-
-    major_clear_write_locks();
 
     /* marking */
     LIST_CREATE(mark_objects_to_trace);
