@@ -227,6 +227,7 @@ static void synchronize_overflow_object_now(object_t *obj)
 {
     assert(!_is_young(obj));
     assert((obj->stm_flags & GCFLAG_SMALL_UNIFORM) == 0);
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
