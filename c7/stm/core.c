@@ -109,9 +109,9 @@ void _stm_write_slowpath(object_t *obj)
        still have the flag */
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
-        assert(i == STM_SEGMENT->segment_num ||
-               (((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
-                ->stm_flags & GCFLAG_WRITE_BARRIER));
+        if (i != STM_SEGMENT->segment_num)
+            assert(((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
+                   ->stm_flags & GCFLAG_WRITE_BARRIER);
     }
 }
 
