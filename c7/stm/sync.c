@@ -127,14 +127,18 @@ static void wait_for_end_of_inevitable_transaction(bool can_abort)
     for (i = 0; i < NB_SEGMENTS; i++) {
         if (get_priv_segment(i)->transaction_state == TS_INEVITABLE) {
             if (can_abort) {
-                /* for now, always abort if we can.  We could also try
-                   sometimes to wait for the other thread (needs to
-                   take care about setting safe_point then) */
-                abort_with_mutex();
+                /* handle this case like a contention: it will either
+                   abort us (not the other thread, which is inevitable),
+                   or for a while.  If we go past this call, then we
+                   waited; in this case we have to re-check if no other
+                   thread is inevitable. */
+                inevitable_contention_management(i);
             }
-            /* wait for stm_commit_transaction() to finish this
-               inevitable transaction */
-            cond_wait(C_INEVITABLE);
+            else {
+                /* wait for stm_commit_transaction() to finish this
+                   inevitable transaction */
+                cond_wait(C_INEVITABLE);
+            }
             goto restart;
         }
     }
@@ -192,17 +196,23 @@ static void release_thread_segment(stm_thread_local_t *tl)
 {
     assert(_has_mutex());
 
+    /* wake up one of the threads waiting in acquire_thread_segment() */
+    cond_signal(C_SEGMENT_FREE);
+
+    /* if contention management asked for it, broadcast this thread's end */
+    if (STM_PSEGMENT->signal_when_done) {
+        cond_broadcast(C_TRANSACTION_DONE);
+        STM_PSEGMENT->signal_when_done = false;
+    }
+
     assert(STM_SEGMENT->running_thread == tl);
     STM_SEGMENT->running_thread = NULL;
 
     assert(sync_ctl.in_use[tl->associated_segment_num] == 1);
     sync_ctl.in_use[tl->associated_segment_num] = 0;
-
-    /* wake up one of the threads waiting in acquire_thread_segment() */
-    cond_signal(C_SEGMENT_FREE);
 }
 
-static bool _running_transaction(void) __attribute__((unused));
+__attribute__((unused))
 static bool _running_transaction(void)
 {
     return (STM_SEGMENT->running_thread != NULL);

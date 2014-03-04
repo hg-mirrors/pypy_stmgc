@@ -116,6 +116,9 @@ struct stm_priv_segment_info_s {
     /* Temp for minor collection */
     bool minor_collect_will_commit_now;
 
+    /* For sleeping contention management */
+    bool signal_when_done;
+
     /* In case of abort, we restore the 'shadowstack' field and the
        'thread_local_obj' field. */
     object_t **shadowstack_at_start_of_transaction;
@@ -132,6 +135,7 @@ enum /* safe_point */ {
     SP_RUNNING,
     SP_WAIT_FOR_C_REQUEST_REMOVED,
     SP_WAIT_FOR_C_AT_SAFE_POINT,
+    SP_WAIT_FOR_C_TRANSACTION_DONE,
 #ifdef STM_TESTS
     SP_WAIT_FOR_OTHER_THREAD,
 #endif

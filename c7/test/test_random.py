@@ -47,8 +47,6 @@ def contention_management(our_trs, other_trs, wait=False, objs_in_conflict=None)
         our_trs.set_must_abort(objs_in_conflict)
     elif wait:
         assert not our_trs.inevitable
-        # abort anyway:
-        our_trs.set_must_abort(objs_in_conflict)
 
 
 class TransactionState(object):
