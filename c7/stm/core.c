@@ -454,7 +454,9 @@ static void abort_data_structures_from_segment_num(int segment_num)
        an abort.  It is called from abort_with_mutex(), but also sometimes
        from other threads that figure out that this segment should abort.
        In the latter case, make sure that this segment is currently at
-       a safe point (not SP_RUNNING).
+       a safe point (not SP_RUNNING).  Note that in such cases this
+       function is called more than once for the same segment, but it
+       should not matter.
     */
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
 
