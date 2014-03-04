@@ -9,12 +9,16 @@
 
 /************************************************************/
 
+#ifndef STM_GC_NURSERY
+# define STM_GC_NURSERY     4096          // 4MB
+#endif
+
 
 #define NB_PAGES            (1500*256)    // 1500MB
 #define NB_SEGMENTS         2
 #define NB_SEGMENTS_MAX     240    /* don't increase NB_SEGMENTS past this */
 #define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
-#define NB_NURSERY_PAGES    1024          // 4MB
+#define NB_NURSERY_PAGES    (STM_GC_NURSERY/4)
 
 #define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_SEGMENTS)
 #define READMARKER_END        ((NB_PAGES * 4096UL) >> 4)
