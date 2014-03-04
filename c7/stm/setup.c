@@ -18,6 +18,7 @@ void stm_setup(void)
     assert((NB_PAGES * 4096UL) >> 8 <= (FIRST_OBJECT_PAGE * 4096UL) >> 4);
     assert((END_NURSERY_PAGE * 4096UL) >> 8 <=
            (FIRST_READMARKER_PAGE * 4096UL));
+    assert(_STM_FAST_ALLOC <= NB_NURSERY_PAGES * 4096);
 
     stm_object_pages = mmap(NULL, TOTAL_MEMORY,
                             PROT_READ | PROT_WRITE,
