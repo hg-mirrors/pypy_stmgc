@@ -26,7 +26,7 @@ void _stm_write_slowpath(object_t *obj)
     }
 
     /* do a read-barrier now.  Note that this must occur before the
-       safepoints that may be issued in contention_management(). */
+       safepoints that may be issued in write_write_contention_management(). */
     stm_read(obj);
 
     /* claim the write-lock for this object.  In case we're running the
@@ -192,14 +192,17 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 # error "The logic in the functions below only works with two segments"
 #endif
 
-static void detect_write_read_conflicts(void)
+static bool detect_write_read_conflicts(void)
 {
     long remote_num = 1 - STM_SEGMENT->segment_num;
     char *remote_base = get_segment_base(remote_num);
     uint8_t remote_version = get_segment(remote_num)->transaction_read_version;
 
     if (get_priv_segment(remote_num)->transaction_state == TS_NONE)
-        return;    /* no need to check */
+        return false;    /* no need to check */
+
+    if (is_aborting_now(remote_num))
+        return false;    /* no need to check: is pending immediate abort */
 
     LIST_FOREACH_R(
         STM_PSEGMENT->modified_old_objects,
@@ -207,14 +210,17 @@ static void detect_write_read_conflicts(void)
         ({
             if (was_read_remote(remote_base, item, remote_version)) {
                 /* A write-read conflict! */
-                contention_management(remote_num);
+                write_read_contention_management(remote_num);
 
-                /* If we reach this point, it means that we would like
-                   the other thread to abort.  We're done here. */
-                assert(get_segment(remote_num)->nursery_end == NSE_SIGABORT);
-                return;
+                /* If we reach this point, we didn't abort, but maybe we
+                   had to wait for the other thread to commit.  If we
+                   did, then we have to restart committing from our call
+                   to synchronize_all_threads(). */
+                return true;
             }
         }));
+
+    return false;
 }
 
 static void synchronize_overflow_object_now(object_t *obj)
@@ -335,13 +341,15 @@ void stm_commit_transaction(void)
 
     s_mutex_lock();
 
+ restart:
     /* force all other threads to be paused.  They will unpause
        automatically when we are done here, i.e. at mutex_unlock().
        Important: we should not call cond_wait() in the meantime. */
     synchronize_all_threads();
 
     /* detect conflicts */
-    detect_write_read_conflicts();
+    if (detect_write_read_conflicts())
+        goto restart;
 
     /* cannot abort any more from here */
     dprintf(("commit_transaction\n"));
@@ -386,16 +394,25 @@ void stm_abort_transaction(void)
     abort_with_mutex();
 }
 
-static void reset_modified_from_other_segments(void)
+static void
+reset_modified_from_other_segments(int segment_num)
 {
     /* pull the right versions from other threads in order
-       to reset our pages as part of an abort */
-    long remote_num = 1 - STM_SEGMENT->segment_num;
-    char *local_base = STM_SEGMENT->segment_base;
+       to reset our pages as part of an abort.
+
+       Note that this function is also sometimes called from
+       contention.c to clean up the state of a different thread,
+       when we would really like it to be aborted now and it is
+       suspended at a safe-point.
+
+    */
+    struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
+    long remote_num = !segment_num;
+    char *local_base = get_segment_base(segment_num);
     char *remote_base = get_segment_base(remote_num);
 
     LIST_FOREACH_R(
-        STM_PSEGMENT->modified_old_objects,
+        pseg->modified_old_objects,
         object_t * /*item*/,
         ({
             /* memcpy in the opposite direction than
@@ -423,11 +440,11 @@ static void reset_modified_from_other_segments(void)
             /* clear the write-lock */
             uintptr_t lock_idx = (((uintptr_t)item) >> 4) - WRITELOCK_START;
             assert((intptr_t)lock_idx >= 0);
-            assert(write_locks[lock_idx] == STM_PSEGMENT->write_lock_num);
+            assert(write_locks[lock_idx] == pseg->write_lock_num);
             write_locks[lock_idx] = 0;
         }));
 
-    list_clear(STM_PSEGMENT->modified_old_objects);
+    list_clear(pseg->modified_old_objects);
 }
 
 static void abort_with_mutex(void)
@@ -449,7 +466,7 @@ static void abort_with_mutex(void)
     throw_away_nursery();
 
     /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
-    reset_modified_from_other_segments();
+    reset_modified_from_other_segments(STM_SEGMENT->segment_num);
 
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;

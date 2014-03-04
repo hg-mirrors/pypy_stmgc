@@ -170,7 +170,7 @@ void stm_unregister_thread_local(stm_thread_local_t *tl)
     s_mutex_unlock();
 }
 
-static bool _is_tl_registered(stm_thread_local_t *tl) __attribute__((unused));
+__attribute__((unused))
 static bool _is_tl_registered(stm_thread_local_t *tl)
 {
     return tl->next != NULL;

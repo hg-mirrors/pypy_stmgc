@@ -10,6 +10,7 @@ enum cond_type_e {
     C_REQUEST_REMOVED,
     C_INEVITABLE,
     C_ABORTED,
+    C_TRANSACTION_DONE,
     _C_TOTAL
 };
 static void s_mutex_lock(void);
