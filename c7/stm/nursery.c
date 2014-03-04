@@ -393,10 +393,18 @@ static void major_do_minor_collections(void)
 
         assert(pseg->transaction_state != TS_NONE);
         assert(pseg->safe_point != SP_RUNNING);
+        assert(pseg->safe_point != SP_NO_TRANSACTION);
 
         set_gs_register(get_segment_base(i));
-        _do_minor_collection(/*commit=*/ false);
-        assert(MINOR_NOTHING_TO_DO(pseg));
+
+        /* Other segments that will abort immediately after resuming: we
+           have to ignore them, not try to collect them anyway!
+           Collecting might fail due to invalid state.
+        */
+        if (!must_abort()) {
+            _do_minor_collection(/*commit=*/ false);
+            assert(MINOR_NOTHING_TO_DO(pseg));
+        }
     }
 
     set_gs_register(get_segment_base(original_num));
