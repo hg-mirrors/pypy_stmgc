@@ -261,6 +261,14 @@ void stm_collect(long level);
    static structure, but it should never be used anyway.) */
 object_t *stm_setup_prebuilt(object_t *);
 
+/* Hash, id.  The id is just the address of the object (of the address
+   where it *will* be after the next minor collection).  The hash is the
+   same, mangled -- except on prebuilt objects, where it can be
+   controlled for each prebuilt object individually.  (Useful uor PyPy) */
+long stm_identityhash(object_t *obj);
+long stm_id(object_t *obj);
+void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
+
 
 /* ==================== END ==================== */
 

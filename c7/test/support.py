@@ -74,6 +74,10 @@ object_t *_stm_enum_objects_pointing_to_nursery(long index);
 
 void stm_collect(long level);
 uint64_t _stm_total_allocated(void);
+
+long stm_identityhash(object_t *obj);
+long stm_id(object_t *obj);
+void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
 """)
 
 
