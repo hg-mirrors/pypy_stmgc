@@ -9,10 +9,9 @@
 
 #define NUMTHREADS 3
 #define STEPS_PER_THREAD 500
-#define THREAD_STARTS 100 // how many restarts of threads
-#define SHARED_ROOTS 3
+#define THREAD_STARTS 1000 // how many restarts of threads
+#define PREBUILT_ROOTS 3
 #define MAXROOTS 1000
-
 
 // SUPPORT
 struct node_s;
@@ -37,7 +36,7 @@ __thread stm_thread_local_t stm_thread_local;
 
 // global and per-thread-data
 time_t default_seed;
-objptr_t shared_roots[SHARED_ROOTS];
+objptr_t prebuilt_roots[PREBUILT_ROOTS];
 
 struct thread_data {
     unsigned int thread_seed;
@@ -76,22 +75,6 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     assert(n->next == *last_next);
 }
 
-void _push_shared_roots()
-{
-    int i;
-    for (i = 0; i < SHARED_ROOTS; i++) {
-        STM_PUSH_ROOT(stm_thread_local, shared_roots[i]);
-    }
-}
-
-void _pop_shared_roots()
-{
-    int i;
-    for (i = 0; i < SHARED_ROOTS; i++) {
-        STM_POP_ROOT(stm_thread_local, shared_roots[SHARED_ROOTS - i - 1]);
-    }
-}
-
 int get_rand(int max)
 {
     if (max == 0)
@@ -107,8 +90,8 @@ objptr_t get_random_root()
         return td.roots[num];
     }
     else {
-        num = get_rand(SHARED_ROOTS);
-        return shared_roots[num];
+        num = get_rand(PREBUILT_ROOTS);
+        return prebuilt_roots[num];
     }
 }
 
@@ -325,9 +308,6 @@ void *demo_random(void *arg)
     int status;
     stm_register_thread_local(&stm_thread_local);
 
-    /* forever on the shadowstack: */
-    _push_shared_roots();
-
     setup_thread();
 
     objptr_t p = NULL;
@@ -384,25 +364,28 @@ void setup_globals()
 {
     int i;
 
+    struct node_s prebuilt_template = {
+        .sig = SIGNATURE,
+        .my_size = sizeof(struct node_s),
+        .my_id = -1,
+        .my_hash = -1,
+        .next = NULL
+    };
+
     stm_start_inevitable_transaction(&stm_thread_local);
-    for (i = 0; i < SHARED_ROOTS; i++) {
-        shared_roots[i] = stm_allocate(sizeof(struct node_s));
-        ((nodeptr_t)shared_roots[i])->sig = SIGNATURE;
-        ((nodeptr_t)shared_roots[i])->my_size = sizeof(struct node_s);
-        ((nodeptr_t)shared_roots[i])->my_id = -1;
-        ((nodeptr_t)shared_roots[i])->my_hash = -1;
-        STM_PUSH_ROOT(stm_thread_local, shared_roots[i]);
+    for (i = 0; i < PREBUILT_ROOTS; i++) {
+        void* new_templ = malloc(sizeof(struct node_s));
+        memcpy(new_templ, &prebuilt_template, sizeof(struct node_s));
+        prebuilt_roots[i] = stm_setup_prebuilt((objptr_t)new_templ);
+
+        if (i % 2 == 0) {
+            int hash = i;
+            stm_set_prebuilt_identityhash(prebuilt_roots[i],
+                                          hash);
+            ((nodeptr_t)prebuilt_roots[i])->my_hash = hash;
+        }
     }
     stm_commit_transaction();
-
-    /* make them OLD */
-
-    stm_start_inevitable_transaction(&stm_thread_local);
-    /* update now old references: */
-    _pop_shared_roots();
-    _push_shared_roots();
-    stm_commit_transaction();
-    /* leave them on this shadow stack forever for major collections */
 }
 
 int main(void)
@@ -442,7 +425,6 @@ int main(void)
 
     printf("Test OK!\n");
 
-    _pop_shared_roots();
     stm_unregister_thread_local(&stm_thread_local);
     stm_teardown();
 
