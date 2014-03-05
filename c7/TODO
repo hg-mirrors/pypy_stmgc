@@ -6,7 +6,6 @@ known-working revision: 5e4ec1af0e0c
 
 - write barrier for big arrays
 
-- hash, id
 - weakrefs
 - finalizers
 
