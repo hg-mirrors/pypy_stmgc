@@ -27,9 +27,10 @@ static void prebuilt_trace(object_t **pstaticobj_invalid)
         return;
     }
 
-    /* We need to make a copy of this object. */
+    /* We need to make a copy of this object.  The extra "long" is for
+       the prebuilt hash. */
     size_t size = stmcb_size_rounded_up(obj);
-    object_t *nobj = _stm_allocate_old(size);
+    object_t *nobj = _stm_allocate_old(size + sizeof(long));
 
     /* Copy the object */
     char *realnobj = REAL_ADDRESS(stm_object_pages, nobj);

@@ -22,6 +22,7 @@
 #include "stm/nursery.c"
 #include "stm/sync.c"
 #include "stm/setup.c"
+#include "stm/hash_id.c"
 #include "stm/core.c"
 #include "stm/contention.c"
 #include "stm/fprintcolor.c"

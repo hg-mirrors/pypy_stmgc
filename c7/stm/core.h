@@ -46,6 +46,14 @@ enum /* stm_flags */ {
     */
     GCFLAG_SMALL_UNIFORM = 0x02,
 
+    /* The following flag is set on nursery objects of which we asked
+       the id or the identityhash.  It means that a space of the size of
+       the object has already been allocated in the nonmovable part.
+       The same flag is abused to mark prebuilt objects whose hash has
+       been taken during translation and is statically recorded just
+       after the object. */
+    GCFLAG_HAS_SHADOW = 0x04,
+
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by
        the "overflow number".  This is a number that identifies the
        "overflow objects" from the current transaction among all old
@@ -53,7 +61,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x04   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x08   /* must be last */
 };
 
 
