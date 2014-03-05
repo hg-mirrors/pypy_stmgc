@@ -24,6 +24,8 @@ struct node_s {
     struct object_s hdr;
     int sig;
     long my_size;
+    long my_id;
+    long my_hash;
     nodeptr_t next;
 };
 
@@ -202,7 +204,7 @@ nodeptr_t get_next(objptr_t p)
 
 objptr_t simple_events(objptr_t p, objptr_t _r)
 {
-    int k = get_rand(8);
+    int k = get_rand(10);
     int num;
 
     switch (k) {
@@ -230,6 +232,8 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
         p = stm_allocate(size);
         ((nodeptr_t)p)->sig = SIGNATURE;
         ((nodeptr_t)p)->my_size = size;
+        ((nodeptr_t)p)->my_id = -1;
+        ((nodeptr_t)p)->my_hash = -1;
         pop_roots();
         /* reload_roots not necessary, all are old after start_transaction */
         break;
@@ -248,6 +252,32 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
     case 7: // set 'p' as *next in one of the roots
         write_barrier(_r);
         set_next(_r, p);
+        break;
+    case 8: // id checking
+        if (p) {
+            nodeptr_t n = (nodeptr_t)p;
+            if (n->my_id == -1) {
+                write_barrier(p);
+                n->my_id = stm_id(p);
+            }
+            else {
+                read_barrier(p);
+                assert(n->my_id == stm_id(p));
+            }
+        }
+        break;
+    case 9:
+        if (p) {
+            nodeptr_t n = (nodeptr_t)p;
+            if (n->my_hash == -1) {
+                write_barrier(p);
+                n->my_hash = stm_identityhash(p);
+            }
+            else {
+                read_barrier(p);
+                assert(n->my_hash == stm_identityhash(p));
+            }
+        }
         break;
     }
     return p;
@@ -359,6 +389,8 @@ void setup_globals()
         shared_roots[i] = stm_allocate(sizeof(struct node_s));
         ((nodeptr_t)shared_roots[i])->sig = SIGNATURE;
         ((nodeptr_t)shared_roots[i])->my_size = sizeof(struct node_s);
+        ((nodeptr_t)shared_roots[i])->my_id = -1;
+        ((nodeptr_t)shared_roots[i])->my_hash = -1;
         STM_PUSH_ROOT(stm_thread_local, shared_roots[i]);
     }
     stm_commit_transaction();
