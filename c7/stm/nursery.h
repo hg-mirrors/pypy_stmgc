@@ -19,3 +19,5 @@ static inline bool must_abort(void) {
 }
 
 static void assert_memset_zero(void *s, size_t n);
+
+static object_t *find_shadow(object_t *obj);

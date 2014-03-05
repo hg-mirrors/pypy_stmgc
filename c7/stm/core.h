@@ -95,10 +95,15 @@ struct stm_priv_segment_info_s {
        current transaction spanned a minor collection. */
     struct list_s *large_overflow_objects;
 
-    /* List of all young objects outside the nursery ("young" in the
+    /* Set of all young objects outside the nursery ("young" in the
        sense that they should be in the nursery, but were too big for
        that). */
     struct tree_s *young_outside_nursery;
+
+    /* Support for id and identityhash: this is a dict mapping nursery
+       objects with GCFLAG_HAS_SHADOW to their future location at the
+       next minor collection. */
+    struct tree_s *nursery_objects_shadows;
 
     /* Start time: to know approximately for how long a transaction has
        been running, in contention management */

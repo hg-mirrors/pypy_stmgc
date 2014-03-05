@@ -151,7 +151,6 @@ static struct list_s *mark_objects_to_trace;
 static inline uintptr_t mark_loc(object_t *obj)
 {
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
-    assert(lock_idx >= 0);
     assert(lock_idx < sizeof(write_locks));
     return lock_idx;
 }
