@@ -273,12 +273,17 @@ objptr_t do_step(objptr_t p)
     int k;
 
     _r = get_random_root();
-    k = get_rand(11);
+    k = get_rand(12);
 
-    if (k < 10)
+    if (k < 10) {
         p = simple_events(p, _r);
-    else if (get_rand(20) == 1) {
+    } else if (get_rand(20) == 1) {
         return (objptr_t)-1; // break current
+    } else if (get_rand(20) == 1) {
+        push_roots();
+        stm_become_inevitable("please");
+        pop_roots();
+        return NULL;
     }
     return p;
 }
