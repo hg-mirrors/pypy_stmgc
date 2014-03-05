@@ -208,15 +208,15 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
     case 3: // allocate fresh 'p'
         push_roots();
         size_t sizes[4] = {sizeof(struct node_s),
-                           sizeof(struct node_s) + 48,
+                           sizeof(struct node_s) + (get_rand(100000) & ~15),
                            sizeof(struct node_s) + 4096,
                            sizeof(struct node_s) + 4096*70};
         size_t size = sizes[get_rand(4)];
         p = stm_allocate(size);
         ((nodeptr_t)p)->sig = SIGNATURE;
         ((nodeptr_t)p)->my_size = size;
-        ((nodeptr_t)p)->my_id = -1;
-        ((nodeptr_t)p)->my_hash = -1;
+        ((nodeptr_t)p)->my_id = 0;
+        ((nodeptr_t)p)->my_hash = 0;
         pop_roots();
         /* reload_roots not necessary, all are old after start_transaction */
         break;
@@ -239,7 +239,7 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
     case 8: // id checking
         if (p) {
             nodeptr_t n = (nodeptr_t)p;
-            if (n->my_id == -1) {
+            if (n->my_id == 0) {
                 write_barrier(p);
                 n->my_id = stm_id(p);
             }
@@ -252,7 +252,7 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
     case 9:
         if (p) {
             nodeptr_t n = (nodeptr_t)p;
-            if (n->my_hash == -1) {
+            if (n->my_hash == 0) {
                 write_barrier(p);
                 n->my_hash = stm_identityhash(p);
             }
@@ -367,8 +367,8 @@ void setup_globals()
     struct node_s prebuilt_template = {
         .sig = SIGNATURE,
         .my_size = sizeof(struct node_s),
-        .my_id = -1,
-        .my_hash = -1,
+        .my_id = 0,
+        .my_hash = 0,
         .next = NULL
     };
 
@@ -379,7 +379,7 @@ void setup_globals()
         prebuilt_roots[i] = stm_setup_prebuilt((objptr_t)new_templ);
 
         if (i % 2 == 0) {
-            int hash = i;
+            int hash = i + 5;
             stm_set_prebuilt_identityhash(prebuilt_roots[i],
                                           hash);
             ((nodeptr_t)prebuilt_roots[i])->my_hash = hash;
