@@ -207,3 +207,25 @@ class TestGCPage(BaseTest):
 
     def test_reshare_if_no_longer_modified_1(self):
         self.test_reshare_if_no_longer_modified_0(invert=1)
+
+    def test_threadlocal_at_start_of_transaction(self):
+        self.start_transaction()
+        x = stm_allocate(16)
+        stm_set_char(x, 'L')
+        self.set_thread_local_obj(x)
+        self.commit_transaction()
+
+        self.start_transaction()
+        assert stm_get_char(self.get_thread_local_obj()) == 'L'
+        self.set_thread_local_obj(stm_allocate(32))
+        stm_minor_collect()
+        self.abort_transaction()
+
+        self.start_transaction()
+        assert stm_get_char(self.get_thread_local_obj()) == 'L'
+        self.set_thread_local_obj(stm_allocate(32))
+        stm_major_collect()
+        self.abort_transaction()
+
+        self.start_transaction()
+        assert stm_get_char(self.get_thread_local_obj()) == 'L'

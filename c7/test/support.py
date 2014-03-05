@@ -14,6 +14,7 @@ typedef ... stm_jmpbuf_t;
 
 typedef struct {
     object_t **shadowstack, **shadowstack_base;
+    object_t *thread_local_obj;
     int associated_segment_num;
     ...;
 } stm_thread_local_t;
@@ -465,3 +466,11 @@ class BaseTest(object):
             addr = lib._stm_get_segment_base(i)
             content = addr[int(ffi.cast("uintptr_t", obj)) + offset]
             assert content == expected_content
+
+    def get_thread_local_obj(self):
+        tl = self.tls[self.current_thread]
+        return tl.thread_local_obj
+
+    def set_thread_local_obj(self, newobj):
+        tl = self.tls[self.current_thread]
+        tl.thread_local_obj = newobj
