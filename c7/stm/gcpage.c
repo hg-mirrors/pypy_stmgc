@@ -405,6 +405,14 @@ static void mark_visit_from_roots(void)
             tl = tl->next;
         } while (tl != stm_all_thread_locals);
     }
+
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        if (get_priv_segment(i)->transaction_state != TS_NONE)
+            mark_visit_object(
+                get_priv_segment(i)->threadlocal_at_start_of_transaction,
+                get_segment_base(i));
+    }
 }
 
 static void mark_visit_from_modified_objects(void)
