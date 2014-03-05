@@ -53,10 +53,12 @@ bool _stm_in_nursery(object_t *obj)
     return _is_in_nursery(obj);
 }
 
+static object_t *find_existing_shadow(object_t *obj);
+
 
 /************************************************************/
 
-#define GCWORD_MOVED  ((object_t *) -42)
+#define GCWORD_MOVED  ((object_t *) -1)
 #define FLAG_SYNC_LARGE       0x01
 
 
@@ -76,18 +78,33 @@ static void minor_trace_if_young(object_t **pobj)
            to GCWORD_MOVED.  In that case, the forwarding location, i.e.
            where the object moved to, is stored in the second word in 'obj'. */
         object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
+        char *realobj;
+        size_t size;
 
-        if (pforwarded_array[0] == GCWORD_MOVED) {
-            *pobj = pforwarded_array[1];    /* already moved */
-            return;
+        if (obj->stm_flags & GCFLAG_HAS_SHADOW) {
+            /* ^^ the single check above detects both already-moved objects
+               and objects with HAS_SHADOW.  This is because GCWORD_MOVED
+               overrides completely the stm_flags field with 1's bits. */
+
+            if (LIKELY(pforwarded_array[0] == GCWORD_MOVED)) {
+                *pobj = pforwarded_array[1];    /* already moved */
+                return;
+            }
+            else {
+                /* really has a shadow */
+                nobj = find_existing_shadow(obj);
+                obj->stm_flags &= ~GCFLAG_HAS_SHADOW;
+                realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+                size = stmcb_size_rounded_up((struct object_s *)realobj);
+                goto copy_large_object;
+            }
         }
-
         /* We need to make a copy of this object.  It goes either in
            a largemalloc.c-managed area, or if it's small enough, in
            one of the small uniform pages from gcpage.c.
         */
-        char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-        size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+        realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+        size = stmcb_size_rounded_up((struct object_s *)realobj);
 
         if (1 /*size >= GC_N_SMALL_REQUESTS*8*/) {
 
@@ -97,6 +114,7 @@ static void minor_trace_if_young(object_t **pobj)
             nobj = (object_t *)(allocated - stm_object_pages);
 
             /* Copy the object */
+         copy_large_object:;
             char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
             memcpy(realnobj, realobj, size);
 
@@ -229,6 +247,8 @@ static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 
         tree_clear(pseg->young_outside_nursery);
     }
+
+    tree_clear(pseg->nursery_objects_shadows);
 }
 
 #define MINOR_NOTHING_TO_DO(pseg)                                       \
@@ -340,7 +360,7 @@ object_t *_stm_allocate_external(ssize_t size_rounded_up)
 
     char *result = allocate_outside_nursery_large(size_rounded_up);
     object_t *o = (object_t *)(result - stm_object_pages);
-    tree_insert(STM_PSEGMENT->young_outside_nursery, (intptr_t)o, 0);
+    tree_insert(STM_PSEGMENT->young_outside_nursery, (uintptr_t)o, 0);
 
     memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
     return o;
@@ -412,4 +432,61 @@ static void major_do_minor_collections(void)
     }
 
     set_gs_register(get_segment_base(original_num));
+}
+
+static object_t *allocate_shadow(object_t *obj)
+{
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+    /* always gets outside as a large object for now */
+    char *allocated = allocate_outside_nursery_large(size);
+    object_t *nobj = (object_t *)(allocated - stm_object_pages);
+
+    /* Initialize the shadow enough to be considered a valid gc object.
+       If the original object stays alive at the next minor collection,
+       it will anyway be copied over the shadow and overwrite the
+       following fields.  But if the object dies, then the shadow will
+       stay around and only be freed at the next major collection, at
+       which point we want it to look valid (but ready to be freed).
+
+       Here, in the general case, it requires copying the whole object.
+       It could be more optimized in special cases like in PyPy, by
+       copying only the typeid and (for var-sized objects) the length
+       field.  It's probably overkill to add a special stmcb_xxx
+       interface just for that.
+    */
+    char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
+    memcpy(realnobj, realobj, size);
+
+    obj->stm_flags |= GCFLAG_HAS_SHADOW;
+    tree_insert(STM_PSEGMENT->nursery_objects_shadows,
+                (uintptr_t)obj, (uintptr_t)nobj);
+    return nobj;
+}
+
+static object_t *find_existing_shadow(object_t *obj)
+{
+    wlog_t *item;
+
+    TREE_FIND(*STM_PSEGMENT->nursery_objects_shadows,
+              (uintptr_t)obj, item, goto not_found);
+
+    /* The answer is the address of the shadow. */
+    return (object_t *)item->val;
+
+ not_found:
+    stm_fatalerror("GCFLAG_HAS_SHADOW but no shadow found");
+}
+
+static object_t *find_shadow(object_t *obj)
+{
+    /* The object 'obj' is still in the nursery.  Find or allocate a
+        "shadow" object, which is where the object will be moved by the
+        next minor collection
+    */
+    if (obj->stm_flags & GCFLAG_HAS_SHADOW)
+        return find_existing_shadow(obj);
+    else
+        return allocate_shadow(obj);
 }

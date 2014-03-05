@@ -36,7 +36,7 @@ void _stm_write_slowpath(object_t *obj)
        by finding that we already own the write-lock. */
     uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
     uint8_t lock_num = STM_PSEGMENT->write_lock_num;
-    assert((intptr_t)lock_idx >= 0);
+    assert(lock_idx < sizeof(write_locks));
  retry:
     if (write_locks[lock_idx] == 0) {
         if (UNLIKELY(!__sync_bool_compare_and_swap(&write_locks[lock_idx],
@@ -179,6 +179,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
+    assert(tree_is_cleared(STM_PSEGMENT->nursery_objects_shadows));
     assert(STM_PSEGMENT->objects_pointing_to_nursery == NULL);
     assert(STM_PSEGMENT->large_overflow_objects == NULL);
 
@@ -300,7 +301,7 @@ static void push_modified_to_other_segments(void)
             /* clear the write-lock (note that this runs with all other
                threads paused, so no need to be careful about ordering) */
             uintptr_t lock_idx = (((uintptr_t)item) >> 4) - WRITELOCK_START;
-            assert((intptr_t)lock_idx >= 0);
+            assert(lock_idx < sizeof(write_locks));
             assert(write_locks[lock_idx] == STM_PSEGMENT->write_lock_num);
             write_locks[lock_idx] = 0;
 
@@ -371,7 +372,8 @@ void stm_commit_transaction(void)
     /* update 'overflow_number' if needed */
     if (STM_PSEGMENT->overflow_number_has_been_used) {
         highest_overflow_number += GCFLAG_OVERFLOW_NUMBER_bit0;
-        assert(highest_overflow_number != 0);   /* XXX else, overflow! */
+        assert(highest_overflow_number !=        /* XXX else, overflow! */
+               (uint32_t)-GCFLAG_OVERFLOW_NUMBER_bit0);
         STM_PSEGMENT->overflow_number = highest_overflow_number;
         STM_PSEGMENT->overflow_number_has_been_used = false;
     }
@@ -440,7 +442,7 @@ reset_modified_from_other_segments(int segment_num)
 
             /* clear the write-lock */
             uintptr_t lock_idx = (((uintptr_t)item) >> 4) - WRITELOCK_START;
-            assert((intptr_t)lock_idx >= 0);
+            assert(lock_idx < sizeof(write_locks));
             assert(write_locks[lock_idx] == pseg->write_lock_num);
             write_locks[lock_idx] = 0;
         }));

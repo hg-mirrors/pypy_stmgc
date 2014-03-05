@@ -17,7 +17,7 @@ static long id_or_identityhash(object_t *obj, bool is_hash)
 
     if (obj != NULL) {
         if (_is_in_nursery(obj)) {
-            abort();//obj = find_shadow(obj);
+            obj = find_shadow(obj);
         }
         else if (is_hash) {
             if (obj->stm_flags & GCFLAG_HAS_SHADOW) {
