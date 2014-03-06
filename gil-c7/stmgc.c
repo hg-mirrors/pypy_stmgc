@@ -138,7 +138,7 @@ object_t *_stm_allocate_old(ssize_t size)
     char *p = malloc(size);
     assert(p);
     memset(p, 0, size);
-    ((object_t *)p)->gil_flags = STM_FLAGS_PREBUILT;
+    ((object_t *)p)->gil_flags = _STM_GCFLAG_WRITE_BARRIER;
     return (object_t *)p;
 }
 

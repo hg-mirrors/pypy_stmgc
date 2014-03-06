@@ -339,7 +339,11 @@ void *demo_random(void *arg)
 
             td.num_roots_at_transaction_start = td.num_roots;
 
-            STM_START_TRANSACTION(&stm_thread_local, here);
+            if (get_rand(100) < 98) {
+                STM_START_TRANSACTION(&stm_thread_local, here);
+            } else {
+                stm_start_inevitable_transaction(&stm_thread_local);
+            }
             td.num_roots = td.num_roots_at_transaction_start;
             p = NULL;
             pop_roots();
