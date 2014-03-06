@@ -184,3 +184,16 @@ class TestBasic(BaseTest):
         stm_write(old) # old objs to trace
         stm_set_char(old, 'y')
         self.commit_transaction()
+
+    def test_can_move(self):
+        self.start_transaction()
+        new = stm_allocate(16)
+        assert lib.stm_can_move(new) == 1
+        self.push_root(new)
+        stm_minor_collect()
+        old = self.pop_root()
+        assert lib.stm_can_move(old) == 0
+        self.commit_transaction()
+
+        self.start_transaction()
+        assert lib.stm_can_move(old) == 0

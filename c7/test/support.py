@@ -33,7 +33,6 @@ object_t *stm_setup_prebuilt(object_t *);
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
-bool _stm_in_nursery(object_t *obj);
 char *_stm_real_address(object_t *obj);
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
@@ -78,6 +77,8 @@ uint64_t _stm_total_allocated(void);
 long stm_identityhash(object_t *obj);
 long stm_id(object_t *obj);
 void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
+
+int stm_can_move(object_t *);
 """)
 
 
@@ -269,7 +270,7 @@ class EmptyStack(Exception):
     pass
 
 def is_in_nursery(o):
-    return lib._stm_in_nursery(o)
+    return lib.stm_can_move(o)
 
 def stm_allocate_old(size):
     o = lib._stm_allocate_old(size)
