@@ -102,3 +102,9 @@ inline static char *_stm_real_address(object_t *ob) { return (char *)ob; }
 
 extern ssize_t stmcb_size_rounded_up(struct object_s *);
 extern void stmcb_trace(struct object_s *, void (object_t **));
+
+inline static object_t *stm_setup_prebuilt(object_t *preb)
+{
+    preb->gil_flags |= _STM_GCFLAG_WRITE_BARRIER;
+    return preb;
+}
