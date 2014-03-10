@@ -64,9 +64,8 @@ void Du_TransactionRun(void)
     _du_write1(root);
     root->cdr = TLOBJ;
 
-    stm_commit_transaction();
-
     TLOBJ = NULL;
+    stm_commit_transaction();
 
     run_all_threads();
 }
@@ -96,8 +95,6 @@ static DuObject *next_cell(void)
             /* _du_read1(cell); IMMUTABLE */
             DuObject *result = _DuCons_CAR(cell);
             root->cdr = _DuCons_NEXT(cell);
-
-            stm_commit_transaction();
 
             return result;
         }
@@ -153,8 +150,6 @@ static DuObject *next_cell(void)
         root->cdr = next;
     }
 
-    stm_commit_transaction();
-
     return result;
 }
 
@@ -174,11 +169,16 @@ void *run_thread(void *thread_id)
 
     while (1) {
         DuObject *cell = next_cell();
-        if (cell == NULL)
+
+        if (cell == NULL)       /* no transaction */
             break;
         assert(TLOBJ == NULL);
 
+        TLOBJ = cell;
+        stm_commit_transaction(); /* inevitable */
         STM_START_TRANSACTION(&stm_thread_local, here);
+        cell = TLOBJ;
+        TLOBJ = NULL;
 
         run_transaction(cell);
 

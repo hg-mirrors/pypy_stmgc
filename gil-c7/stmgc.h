@@ -75,7 +75,9 @@ inline static void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
     if (pthread_mutex_lock(&_stm_gil) != 0) abort();
     _stm_tloc = tl;
 }
+void do_minor_collect(void);
 inline static void stm_commit_transaction(void) {
+    do_minor_collect();
     _stm_tloc = NULL;
     if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
 }
