@@ -267,7 +267,7 @@ object_t *stm_setup_prebuilt(object_t *);
    controlled for each prebuilt object individually.  (Useful uor PyPy) */
 long stm_identityhash(object_t *obj);
 long stm_id(object_t *obj);
-void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
+void stm_set_prebuilt_identityhash(object_t *obj, long hash);
 
 /* Returns 1 if the object can still move (it's in the nursery), or 0
    otherwise.  After a minor collection no object can move any more. */
