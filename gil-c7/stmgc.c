@@ -264,13 +264,18 @@ static void throw_away_nursery(void)
     memset(_stm_nursery_base, 0, NURSERY_SIZE);
 }
 
+void do_minor_collect(void)
+{
+    collect_roots_in_nursery();
+    collect_oldrefs_to_nursery();
+    throw_away_nursery();
+}
+
 object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 {
     /* run minor collection */
     //fprintf(stderr, "minor collect\n");
-    collect_roots_in_nursery();
-    collect_oldrefs_to_nursery();
-    throw_away_nursery();
+    do_minor_collect();
 
     char *p = _stm_nursery_current;
     char *end = p + size_rounded_up;
