@@ -39,17 +39,17 @@ class TestExtra(BaseTest):
             p[0] = chr(ord(p[0]) + 1)
         #
         self.start_transaction()
-        lib.stm_call_on_abort(p0, clear_me)
+        lib.stm_call_on_abort(self.get_stm_thread_local(), p0, clear_me)
         # the registered callbacks are removed on
         # successful commit
         self.commit_transaction()
         assert ffi.string(p0) == "aaa"
         #
         self.start_transaction()
-        lib.stm_call_on_abort(p1, clear_me)
-        lib.stm_call_on_abort(p2, clear_me)
-        lib.stm_call_on_abort(p3, clear_me)
-        lib.stm_call_on_abort(p2, ffi.NULL)
+        lib.stm_call_on_abort(self.get_stm_thread_local(), p1, clear_me)
+        lib.stm_call_on_abort(self.get_stm_thread_local(), p2, clear_me)
+        lib.stm_call_on_abort(self.get_stm_thread_local(), p3, clear_me)
+        lib.stm_call_on_abort(self.get_stm_thread_local(), p2, ffi.NULL)
         assert ffi.string(p0) == "aaa"
         assert ffi.string(p1) == "hello"
         assert ffi.string(p2) == "removed"
@@ -68,3 +68,15 @@ class TestExtra(BaseTest):
         assert ffi.string(p1) == "iello"
         assert ffi.string(p2) == "removed"
         assert ffi.string(p3) == "xorld"
+
+    def test_ignores_if_outside_transaction(self):
+        @ffi.callback("void(void *)")
+        def dont_see_me(p):
+            seen.append(p)
+        #
+        seen = []
+        p0 = ffi_new_aligned("aaa")
+        lib.stm_call_on_abort(self.get_stm_thread_local(), p0, dont_see_me)
+        self.start_transaction()
+        self.abort_transaction()
+        assert seen == []
