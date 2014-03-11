@@ -277,6 +277,13 @@ void stm_set_prebuilt_identityhash(object_t *obj, long hash);
    otherwise.  After a minor collection no object can move any more. */
 long stm_can_move(object_t *);
 
+/* If the current transaction aborts later, invoke 'callback(key)'.  If
+   the current transaction commits, then the callback is forgotten.  You
+   can only register one callback per key.  You can call
+   'stm_call_on_abort(key, NULL)' to cancel an existing callback.
+   Note: 'key' must be aligned to a multiple of 8 bytes. */
+void stm_call_on_abort(void *key, void callback(void *));
+
 
 /* ==================== END ==================== */
 

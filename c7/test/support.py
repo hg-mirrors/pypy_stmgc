@@ -81,6 +81,7 @@ long stm_id(object_t *obj);
 void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
 
 int stm_can_move(object_t *);
+void stm_call_on_abort(void *key, void callback(void *));
 """)
 
 
