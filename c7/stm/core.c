@@ -498,6 +498,11 @@ static void abort_with_mutex(void)
 
     stm_jmpbuf_t *jmpbuf_ptr = STM_SEGMENT->jmpbuf_ptr;
 
+    /* clear memory registered on the thread-local */
+    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+    if (tl->mem_clear_on_abort)
+        memset(tl->mem_clear_on_abort, 0, tl->mem_bytes_to_clear_on_abort);
+
     if (STM_SEGMENT->nursery_end == NSE_SIGABORT)
         STM_SEGMENT->nursery_end = NURSERY_END;   /* done aborting */
 
