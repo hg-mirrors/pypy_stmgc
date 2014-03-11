@@ -15,6 +15,8 @@ typedef ... stm_jmpbuf_t;
 typedef struct {
     object_t **shadowstack, **shadowstack_base;
     object_t *thread_local_obj;
+    char *mem_clear_on_abort;
+    size_t mem_bytes_to_clear_on_abort;
     int associated_segment_num;
     ...;
 } stm_thread_local_t;
@@ -404,6 +406,9 @@ class BaseTest(object):
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
         lib.stm_teardown()
+
+    def get_stm_thread_local(self):
+        return self.tls[self.current_thread]
 
     def start_transaction(self):
         tl = self.tls[self.current_thread]

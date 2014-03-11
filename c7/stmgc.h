@@ -53,6 +53,10 @@ typedef struct stm_thread_local_s {
     object_t **shadowstack, **shadowstack_base;
     /* a generic optional thread-local object */
     object_t *thread_local_obj;
+    /* in case this thread runs a transaction that aborts,
+       the following raw region of memory is cleared. */
+    char *mem_clear_on_abort;
+    size_t mem_bytes_to_clear_on_abort;
     /* the next fields are handled automatically by the library */
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
