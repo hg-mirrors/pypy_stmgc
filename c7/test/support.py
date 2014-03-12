@@ -46,7 +46,8 @@ int _stm_get_flags(object_t *obj);
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
-bool _check_become_inevitable();
+bool _check_become_inevitable(void);
+int stm_is_inevitable(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
@@ -110,75 +111,46 @@ int _stm_get_flags(object_t *obj) {
     return obj->stm_flags;
 }
 
+#define CHECKED(CALL)                                           \
+    stm_jmpbuf_t here;                                          \
+    stm_segment_info_t *segment = STM_SEGMENT;                  \
+    if (__builtin_setjmp(here) == 0) { /* returned directly */  \
+        if (segment->jmpbuf_ptr != NULL) {                      \
+            assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);  \
+            segment->jmpbuf_ptr = &here;                        \
+        }                                                       \
+        CALL;                                                   \
+        if (segment->jmpbuf_ptr != NULL) {                      \
+            segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;           \
+        }                                                       \
+        return 0;                                               \
+    }                                                           \
+    if (segment->jmpbuf_ptr != NULL) {                          \
+        segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;               \
+    }                                                           \
+    return 1
+
 bool _checked_stm_write(object_t *object) {
-    stm_jmpbuf_t here;
-    stm_segment_info_t *segment = STM_SEGMENT;
-    if (__builtin_setjmp(here) == 0) { // returned directly
-        assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
-        segment->jmpbuf_ptr = &here;
-        stm_write(object);
-        segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
-        return 0;
-    }
-    segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
-    return 1;
+    CHECKED(stm_write(object));
 }
 
 bool _check_stop_safe_point(void) {
-    stm_jmpbuf_t here;
-    stm_segment_info_t *segment = STM_SEGMENT;
-    if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
-         segment->jmpbuf_ptr = &here;
-         _stm_stop_safe_point();
-         segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
-         return 0;
-    }
-    segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
-    return 1;
+    CHECKED(_stm_stop_safe_point());
 }
 
 bool _check_commit_transaction(void) {
-    stm_jmpbuf_t here;
-    stm_segment_info_t *segment = STM_SEGMENT;
-    if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
-         segment->jmpbuf_ptr = &here;
-         stm_commit_transaction();
-         segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
-         return 0;
-    }
-    segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
-    return 1;
+    CHECKED(stm_commit_transaction());
 }
 
 bool _check_abort_transaction(void) {
-    stm_jmpbuf_t here;
-    stm_segment_info_t *segment = STM_SEGMENT;
-    if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
-         segment->jmpbuf_ptr = &here;
-         stm_abort_transaction();
-         segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
-         return 0;   // but should be unreachable in this case
-    }
-    segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
-    return 1;
+    CHECKED(stm_abort_transaction());
 }
 
 bool _check_become_inevitable() {
-    stm_jmpbuf_t here;
-    stm_segment_info_t *segment = STM_SEGMENT;
-    if (__builtin_setjmp(here) == 0) { // returned directly
-         assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);
-         segment->jmpbuf_ptr = &here;
-         stm_become_inevitable("TEST");
-         segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
-         return 0;   // but should be unreachable in this case
-    }
-    segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;
-    return 1;
+    CHECKED(stm_become_inevitable("TEST"));
 }
+
+#undef CHECKED
 
 
 void _set_type_id(object_t *obj, uint32_t h)
