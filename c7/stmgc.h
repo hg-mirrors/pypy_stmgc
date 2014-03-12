@@ -248,6 +248,9 @@ static inline void stm_become_inevitable(const char* msg) {
     if (STM_SEGMENT->jmpbuf_ptr != NULL)
         _stm_become_inevitable(msg);
 }
+static inline int stm_is_inevitable(void) {
+    return (STM_SEGMENT->jmpbuf_ptr == NULL);
+}
 
 /* Forces a safe-point if needed.  Normally not needed: this is
    automatic if you call stm_allocate(). */
