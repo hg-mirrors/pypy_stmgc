@@ -10,16 +10,36 @@ class TestMinorCollection(BaseTest):
         self.start_transaction()
 
         self.push_root_no_gc()
-        lp1 = stm_allocate_weakref(ffi.NULL)    # no collection here
+        lp2 = stm_allocate(48)
+        lp1 = stm_allocate_weakref(lp2)    # no collection here
         self.pop_root()
 
-        assert stm_get_weakref(lp1) == ffi.NULL
+        assert stm_get_weakref(lp1) == lp2
 
         self.push_root(lp1)
         stm_minor_collect()
         lp1 = self.pop_root()
-
+        # lp2 died
         assert stm_get_weakref(lp1) == ffi.NULL
+
+    def test_still_simple(self):
+        lib._stm_set_nursery_free_count(2048)
+        self.start_transaction()
+
+        self.push_root_no_gc()
+        lp2 = stm_allocate(48)
+        lp1 = stm_allocate_weakref(lp2)    # no collection here
+        self.pop_root()
+
+        assert stm_get_weakref(lp1) == lp2
+
+        self.push_root(lp1)
+        self.push_root(lp2)
+        stm_minor_collect()
+        lp2 = self.pop_root()
+        lp1 = self.pop_root()
+        # lp2 survived
+        assert stm_get_weakref(lp1) == lp2
 
     # def test_weakref_invalidate(self):
     #     p2 = nalloc(HDR)
