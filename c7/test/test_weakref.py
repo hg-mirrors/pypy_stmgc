@@ -22,6 +22,12 @@ class TestMinorCollection(BaseTest):
         # lp2 died
         assert stm_get_weakref(lp1) == ffi.NULL
 
+        self.push_root(lp1)
+        stm_minor_collect()
+        lp1 = self.pop_root()
+        # lp2 died
+        assert stm_get_weakref(lp1) == ffi.NULL
+
     def test_still_simple(self):
         lib._stm_set_nursery_free_count(2048)
         self.start_transaction()
@@ -41,94 +47,39 @@ class TestMinorCollection(BaseTest):
         # lp2 survived
         assert stm_get_weakref(lp1) == lp2
 
-    # def test_weakref_invalidate(self):
-    #     p2 = nalloc(HDR)
-    #     p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
-    #     assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE | GCFLAG_WEAKREF
-    #     assert p1.h_revision == lib.get_private_rev_num()
-    #     assert lib.rawgetptr(p1, 0) == p2
-    #     lib.stm_push_root(p1)
-    #     minor_collect()
-    #     p1 = lib.stm_pop_root()
-    #     assert lib.rawgetptr(p1, 0) == ffi.NULL
+        self.push_root(lp1)
+        self.push_root(lp2)
+        stm_minor_collect()
+        lp2 = self.pop_root()
+        lp1 = self.pop_root()
+        # lp2 survived
+        assert stm_get_weakref(lp1) == lp2
 
-    # def test_weakref_itself_dies(self):
-    #     p2 = nalloc(HDR)
-    #     p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
-    #     minor_collect()
+    def test_weakref_itself_dies(self):
+        self.start_transaction()
 
-    # def test_weakref_keep(self):
-    #     p2 = nalloc(HDR)
-    #     p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
-    #     assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE | GCFLAG_WEAKREF
-    #     assert p1.h_revision == lib.get_private_rev_num()
-    #     assert lib.rawgetptr(p1, 0) == p2
-    #     lib.stm_push_root(p1)
-    #     lib.stm_push_root(p2)
-    #     minor_collect()
-    #     p2 = lib.stm_pop_root()
-    #     p1 = lib.stm_pop_root()
-    #     assert lib.rawgetptr(p1, 0) == p2
-
-    # def test_weakref_old_keep(self):
-    #     p2 = oalloc(HDR)
-    #     p1 = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p2)
-    #     assert p1.h_tid == WEAKREF_TID | GCFLAG_IMMUTABLE | GCFLAG_WEAKREF
-    #     assert p1.h_revision == lib.get_private_rev_num()
-    #     assert lib.rawgetptr(p1, 0) == p2
-    #     lib.stm_push_root(p1)
-    #     lib.stm_push_root(p2)
-    #     minor_collect()
-    #     p2 = lib.stm_pop_root()
-    #     p1 = lib.stm_pop_root()
-    #     assert lib.rawgetptr(p1, 0) == p2
+        self.push_root_no_gc()
+        lp2 = stm_allocate(48)
+        stm_allocate_weakref(lp2)    # no collection here
+        self.pop_root()
+        stm_minor_collect()
+        assert lib._stm_total_allocated() == 0
 
 
-    # def test_old_private_not_keep_alive_weakref(self):
-    #     p = palloc(HDR + WORD)
-    #     q = palloc_refs(1)
+    def test_weakref_old_keep(self):
+        lp0 = stm_allocate_old(48)
 
-    #     def f1(c):
-    #         if c == 1:
-    #             # currently fails because:
-    #             # p1 still in old_objects_to_trace
-    #             # -> keeps alive weakp1w
-    #             # -> stm_move_young_weakrefs() sees a weakref pointing
-    #             #    to an aborted object
-    #             minor_collect()
-    #             return
+        self.start_transaction()
+        self.push_root_no_gc()
+        lp1 = stm_allocate_weakref(lp0)    # no collection here
+        self.pop_root()
 
-    #         # allocate the "container" as old, private q1
-    #         q1 = lib.stm_write_barrier(q)
-    #         assert classify(q1) == "private"
-    #         lib.stm_push_root(q1)
-    #         minor_collect()
-    #         q1 = lib.stm_pop_root()
-    #         assert classify(q1) == "private"
-    #         assert q1.h_tid & GCFLAG_OLD
-    #         assert q1.h_tid & GCFLAG_WRITE_BARRIER
+        self.push_root(lp1)
+        stm_minor_collect()
+        lp1 = self.pop_root()
 
-    #         # allocate young private p1 to point to
-    #         p1 = lib.stm_write_barrier(p)
-    #         assert ffi.cast("gcptr", p1.h_original) == p
-    #         assert classify(p1) == "private"
-    #         assert not (p1.h_tid & GCFLAG_OLD)
+        assert stm_get_weakref(lp1) == lp0
 
-    #         lib.stm_push_root(p1)
-    #         lib.stm_push_root(q1)
-    #         weakp1w = lib.stm_weakref_allocate(WEAKREF_SIZE, WEAKREF_TID, p1)
-    #         q1 = lib.stm_pop_root()
-    #         p1 = lib.stm_pop_root()
-    #         # q1 still old, p1 still young, weakp1w also young
-
-    #         q1w = lib.stm_write_barrier(q1)
-    #         # add q1 to old_objects_to_trace
-    #         assert q1 == q1w # was and is private
-    #         lib.rawsetptr(q1, 0, weakp1w)
-
-    #         abort_and_retry()
-
-    #     perform_transaction(f1)
 
 
 
