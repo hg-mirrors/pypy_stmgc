@@ -86,141 +86,38 @@ void stm_move_young_weakrefs()
 
 /***** Major collection *****/
 
-/* static _Bool is_partially_visited(gcptr obj) */
-/* { */
-/*     /\* Based on gcpage.c:visit_public().  Check the code here if we change */
-/*        visit_public().  Returns True or False depending on whether we find any */
-/*        version of 'obj' to be MARKED or not. */
-/*     *\/ */
-/*     assert(IMPLIES(obj->h_tid & GCFLAG_VISITED, */
-/*                    obj->h_tid & GCFLAG_MARKED)); */
-/*     if (obj->h_tid & GCFLAG_MARKED) */
-/*         return 1; */
 
-/*     /\* if (!(obj->h_tid & GCFLAG_PUBLIC)) *\/ */
-/*     /\*     return 0; *\/ */
-/*     assert(!(obj->h_tid & GCFLAG_PREBUILT_ORIGINAL)); */
-/*     if (obj->h_original != 0) { */
-/*         gcptr original = (gcptr)obj->h_original; */
-/*         assert(IMPLIES(original->h_tid & GCFLAG_VISITED, */
-/*                        original->h_tid & GCFLAG_MARKED)); */
-/*         if (original->h_tid & GCFLAG_MARKED) */
-/*             return 1; */
-/*     } */
-/*     return 0; */
-/* } */
+void stm_visit_old_weakrefs(void)
+{
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+        struct list_s *lst;
 
-/* static void update_old_weakrefs_list(struct tx_public_descriptor *gcp) */
-/* { */
-/*     long i, size = gcp->old_weakrefs.size; */
-/*     gcptr *items = gcp->old_weakrefs.items; */
+        lst = pseg->old_weakrefs;
+        uintptr_t n = list_count(lst);
+        while (n > 0) {
+            object_t *weakref = (object_t *)list_item(lst, --n);
+            if (!mark_visited_test(weakref)) {
+                /* weakref dies */
+                list_set_item(lst, n, list_pop_item(lst));
+                continue;
+            }
 
-/*     for (i = 0; i < size; i++) { */
-/*         gcptr weakref = items[i]; */
+            char *realobj = REAL_ADDRESS(pseg->pub.segment_base, weakref);
+            ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+            object_t *pointing_to = *WEAKREF_PTR(weakref, size);
+            assert(pointing_to != NULL);
+            if (!mark_visited_test(pointing_to)) {
+                *WEAKREF_PTR(weakref, size) = NULL;
 
-/*         /\* if a weakref moved, update its position in the list *\/ */
-/*         if (weakref->h_tid & GCFLAG_MOVED) { */
-/*             items[i] = (gcptr)weakref->h_original; */
-/*         } */
-/*     } */
-/* } */
-
-/* static void visit_old_weakrefs(struct tx_public_descriptor *gcp) */
-/* { */
-/*     /\* Note: it's possible that a weakref points to a public stub to a */
-/*        protected object, and only the protected object was marked as */
-/*        VISITED so far.  In this case, this function needs to mark the */
-/*        public stub as VISITED too. */
-/*     *\/ */
-/*     long i, size = gcp->old_weakrefs.size; */
-/*     gcptr *items = gcp->old_weakrefs.items; */
-
-/*     for (i = 0; i < size; i++) { */
-/*         gcptr weakref = items[i]; */
-
-/*         if (!(weakref->h_tid & GCFLAG_VISITED)) { */
-/*             /\* the weakref itself dies *\/ */
-/*         } */
-/*         else { */
-/*             /\* the weakref belongs to our thread, therefore we should */
-/*                always see the most current revision here: *\/ */
-/*             assert(weakref->h_revision & 1); */
-
-/*             size_t size = stmgc_size(weakref); */
-/*             gcptr pointing_to = *WEAKREF_PTR(weakref, size); */
-/*             assert(pointing_to != NULL); */
-/*             if (is_partially_visited(pointing_to)) { */
-/*                 pointing_to = stmgcpage_visit(pointing_to); */
-/*                 dprintf(("mweakref ptr moved %p->%p\n", */
-/*                          *WEAKREF_PTR(weakref, size), */
-/*                          pointing_to)); */
-
-/*                 assert(pointing_to->h_tid & GCFLAG_VISITED); */
-/*                 *WEAKREF_PTR(weakref, size) = pointing_to; */
-/*             } */
-/*             else { */
-/*                 /\* the weakref appears to be pointing to a dying object, */
-/*                    but we don't know for sure now.  Clearing it is left */
-/*                    to clean_old_weakrefs(). *\/ */
-/*             } */
-/*         } */
-/*     } */
-/* } */
-
-/* static void clean_old_weakrefs(struct tx_public_descriptor *gcp) */
-/* { */
-/*     long i, size = gcp->old_weakrefs.size; */
-/*     gcptr *items = gcp->old_weakrefs.items; */
-
-/*     for (i = size - 1; i >= 0; i--) { */
-/*         gcptr weakref = items[i]; */
-/*         assert(weakref->h_revision & 1); */
-/*         if (weakref->h_tid & GCFLAG_VISITED) { */
-/*             size_t size = stmgc_size(weakref); */
-/*             gcptr pointing_to = *WEAKREF_PTR(weakref, size); */
-/*             if (pointing_to->h_tid & GCFLAG_VISITED) { */
-/*                 continue;   /\* the target stays alive, the weakref remains *\/ */
-/*             } */
-/*             dprintf(("mweakref lost ptr %p\n", *WEAKREF_PTR(weakref, size))); */
-/*             *WEAKREF_PTR(weakref, size) = NULL;  /\* the target dies *\/ */
-/*         } */
-/*         /\* remove this weakref from the list *\/ */
-/*         items[i] = items[--gcp->old_weakrefs.size]; */
-/*     } */
-/*     gcptrlist_compress(&gcp->old_weakrefs); */
-/* } */
-
-/* static void for_each_public_descriptor( */
-/*                                   void visit(struct tx_public_descriptor *)) { */
-/*     struct tx_descriptor *d; */
-/*     for (d = stm_tx_head; d; d = d->tx_next) */
-/*         visit(d->public_descriptor); */
-
-/*     struct tx_public_descriptor *gcp; */
-/*     revision_t index = -1; */
-/*     while ((gcp = stm_get_free_public_descriptor(&index)) != NULL) */
-/*         visit(gcp); */
-/* } */
-
-/* void stm_update_old_weakrefs_lists(void) */
-/* { */
-/*     /\* go over old weakrefs lists and update the list with possibly */
-/*        new pointers because of copy_over_original *\/ */
-/*     for_each_public_descriptor(update_old_weakrefs_list); */
-/* } */
-
-
-/* void stm_visit_old_weakrefs(void) */
-/* { */
-/*     /\* Figure out which weakrefs survive, which possibly */
-/*        adds more objects to 'objects_to_trace'. */
-/*     *\/ */
-/*     for_each_public_descriptor(visit_old_weakrefs); */
-/* } */
-
-/* void stm_clean_old_weakrefs(void) */
-/* { */
-/*     /\* Clean up the non-surviving weakrefs */
-/*      *\/ */
-/*     for_each_public_descriptor(clean_old_weakrefs); */
-/* } */
+                /* we don't need it in this list anymore */
+                list_set_item(lst, n, list_pop_item(lst));
+                continue;
+            }
+            else {
+                /* it survives! */
+            }
+        }
+    }
+}
