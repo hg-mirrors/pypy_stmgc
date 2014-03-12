@@ -14,7 +14,7 @@ all_files = [os.path.join(parent_dir, "stmgc.h"),
              os.path.join(parent_dir, "stmgc.c")] + [
     os.path.join(parent_dir, 'stm', _n)
         for _n in os.listdir(os.path.join(parent_dir, 'stm'))
-            if _n.endswith('.h') or _n.endswith('.c')]
+                 if (_n.endswith('.h') or _n.endswith('.c')) and not _n.startswith('.')]
 
 _pycache_ = os.path.join(parent_dir, 'test', '__pycache__')
 if os.path.exists(_pycache_):

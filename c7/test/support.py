@@ -287,7 +287,7 @@ def stm_allocate(size):
     return o
 
 def stm_allocate_weakref(point_to_obj):
-    o = lib.stm_allocate(HDR + WORD)
+    o = lib.stm_allocate_weakref(HDR + WORD)
     tid = 421420
     lib._set_type_id(o, tid)
     lib._set_weakref(o, point_to_obj)
