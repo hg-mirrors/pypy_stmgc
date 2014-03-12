@@ -484,6 +484,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
     /* reset these lists to NULL too on abort */
     LIST_FREE(pseg->objects_pointing_to_nursery);
     LIST_FREE(pseg->large_overflow_objects);
+    list_clear(pseg->young_weakrefs);
 }
 
 static void abort_with_mutex(void)
