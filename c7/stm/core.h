@@ -54,11 +54,6 @@ enum /* stm_flags */ {
        after the object. */
     GCFLAG_HAS_SHADOW = 0x04,
 
-    /* This flag is set on weakref objects. Weakref objects have a
-       reference to the referenced object at the byte-offset
-           stmcb_size_rounded_up(obj) - sizeof(void*) */
-    GCFLAG_WEAKREF = 0x08,
-
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by
        the "overflow number".  This is a number that identifies the
        "overflow objects" from the current transaction among all old
@@ -66,7 +61,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x10   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x8   /* must be last */
 };
 
 

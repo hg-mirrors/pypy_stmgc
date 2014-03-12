@@ -7,7 +7,9 @@ object_t *stm_allocate_weakref(ssize_t size_rounded_up)
 {
     OPT_ASSERT(size_rounded_up > sizeof(struct object_s));
     object_t *obj = stm_allocate(size_rounded_up);
-    obj->stm_flags |= GCFLAG_WEAKREF;
+
+    assert(_is_in_nursery(obj)); /* see assert(0) which depends on it */
+
     LIST_APPEND(STM_PSEGMENT->young_weakrefs, obj);
     return obj;
 }
@@ -38,13 +40,16 @@ void stm_move_young_weakrefs()
                 item = pforwarded_array[1]; /* moved location */
             }
             else {
-                /* young outside nursery object */
-                if (tree_contains(STM_PSEGMENT->young_outside_nursery,
-                                  (uintptr_t)item)) {
-                    /* still in the tree -> wasn't seen by the minor collection,
-                       so it doesn't survive */
-                    continue;
-                }
+                /* tell me if we need this (requires synchronizing in case
+                   of private pages) */
+                assert(0);
+                /* /\* young outside nursery object *\/ */
+                /* if (tree_contains(STM_PSEGMENT->young_outside_nursery, */
+                /*                   (uintptr_t)item)) { */
+                /*     /\* still in the tree -> wasn't seen by the minor collection, */
+                /*        so it doesn't survive *\/ */
+                /*     continue; */
+                /* } */
             }
             assert(!_is_young(item));
 
@@ -109,7 +114,11 @@ void stm_visit_old_weakrefs(void)
             object_t *pointing_to = *WEAKREF_PTR(weakref, size);
             assert(pointing_to != NULL);
             if (!mark_visited_test(pointing_to)) {
+                //assert(flag_page_private[(uintptr_t)weakref / 4096UL] != PRIVATE_PAGE);
                 *WEAKREF_PTR(weakref, size) = NULL;
+                if (flag_page_private[(uintptr_t)weakref / 4096UL] == PRIVATE_PAGE) {
+                    synchronize_overflow_object_now(weakref);
+                }
 
                 /* we don't need it in this list anymore */
                 list_set_item(lst, n, list_pop_item(lst));
