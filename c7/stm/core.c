@@ -137,6 +137,8 @@ static void reset_transaction_read_version(void)
 
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 {
+    assert(!_stm_in_transaction(tl));
+
     s_mutex_lock();
 
   retry:
