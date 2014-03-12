@@ -111,11 +111,12 @@ struct stm_priv_segment_info_s {
     struct tree_s *nursery_objects_shadows;
 
     /* List of all young weakrefs to check in minor collections. These
-       are the only weakrefs that may point to young objects. */
+       are the only weakrefs that may point to young objects and never
+       contain NULL. */
     struct list_s *young_weakrefs;
 
     /* List of all old weakrefs to check in major collections. These
-       weakrefs never point to young objects */
+       weakrefs never point to young objects and never contain NULL. */
     struct list_s *old_weakrefs;
 
     /* Tree of 'key->callback' associations from stm_call_on_abort() */
