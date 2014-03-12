@@ -54,6 +54,11 @@ enum /* stm_flags */ {
        after the object. */
     GCFLAG_HAS_SHADOW = 0x04,
 
+    /* This flag is set on weakref objects. Weakref objects have a
+       reference to the referenced object at the byte-offset
+           stmcb_size_rounded_up(obj) - sizeof(void*) */
+    GCFLAG_WEAKREF = 0x08,
+
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by
        the "overflow number".  This is a number that identifies the
        "overflow objects" from the current transaction among all old
@@ -61,7 +66,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x08   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x10   /* must be last */
 };
 
 
@@ -104,6 +109,14 @@ struct stm_priv_segment_info_s {
        objects with GCFLAG_HAS_SHADOW to their future location at the
        next minor collection. */
     struct tree_s *nursery_objects_shadows;
+
+    /* List of all young weakrefs to check in minor collections. These
+       are the only weakrefs that may point to young objects. */
+    struct list_s *young_weakrefs;
+
+    /* List of all old weakrefs to check in major collections. These
+       weakrefs never point to young objects */
+    struct list_s *old_weakrefs;
 
     /* Tree of 'key->callback' associations from stm_call_on_abort() */
     struct tree_s *callbacks_on_abort;
