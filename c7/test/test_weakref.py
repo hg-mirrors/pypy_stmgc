@@ -113,6 +113,37 @@ class TestMinorCollection(BaseTest):
             self.abort_transaction()
 
 
+    def test_multiple_threads(self):
+        self.start_transaction()
+        lp0 = stm_allocate(1024)
+        self.push_root(lp0)
+        self.commit_transaction()
+
+        self.start_transaction()
+        lp0 = self.pop_root()
+        self.push_root(lp0)
+        stm_write(lp0) # privatize page
+
+        self.push_root_no_gc()
+        lp2 = stm_allocate(48)
+        lp1 = stm_allocate_weakref(lp2)    # no collection here
+        self.pop_root()
+
+        self.push_root(lp0)
+        self.push_root(lp1)
+        self.commit_transaction()
+        # lp2 dies
+        lp1 = self.pop_root()
+        self.push_root(lp1)
+
+        assert stm_get_weakref(lp1) == ffi.NULL
+
+        self.switch(1)
+
+        assert stm_get_weakref(lp1) == ffi.NULL
+
+
+
 
 class TestMajorCollection(BaseTest):
     def test_simple(self):
@@ -188,3 +219,35 @@ class TestMajorCollection(BaseTest):
         lp1 = self.pop_root()
         # lp2 died
         assert stm_get_weakref(lp1) == ffi.NULL
+
+    def test_multiple_threads(self):
+        self.start_transaction()
+        lp0 = stm_allocate(48)
+        lp1 = stm_allocate_weakref(lp0)    # no collection here
+        self.push_root(lp1)
+        self.push_root(lp0)
+        self.commit_transaction()
+
+        self.start_transaction()
+        lp0 = self.pop_root()
+        lp1 = self.pop_root()
+        self.push_root(lp1)
+
+        stm_write(lp0) # privatize page with weakref in it too
+
+        assert stm_get_page_flag(stm_get_obj_pages(lp1)[0]) == PRIVATE_PAGE
+        assert stm_get_weakref(lp1) == lp0
+
+        self.commit_transaction()
+        self.start_transaction()
+
+        # lp0 dies
+        stm_major_collect()
+
+        assert stm_get_weakref(lp1) == ffi.NULL
+        print stm_get_real_address(lp1)
+
+        self.switch(1)
+
+        assert stm_get_weakref(lp1) == ffi.NULL
+        print stm_get_real_address(lp1)
