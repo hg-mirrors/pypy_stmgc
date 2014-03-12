@@ -17,6 +17,7 @@ typedef struct {
     object_t *thread_local_obj;
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
+    long last_abort__bytes_in_nursery;
     int associated_segment_num;
     ...;
 } stm_thread_local_t;
