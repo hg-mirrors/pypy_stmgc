@@ -433,118 +433,16 @@ class TestBasic(BaseTest):
         lp1 = self.pop_root()
         self.check_char_everywhere(lp1, 'X')
 
-    # def test_resolve_write_write_no_conflict(self):
-    #     self.start_transaction()
-    #     p1 = stm_allocate(16)
-    #     p2 = stm_allocate(16)
-    #     p1[8] = 'a'
-    #     p2[8] = 'A'
-    #     self.commit_transaction(False)
-    #     self.start_transaction()
-    #     #
-    #     self.switch(1)
-    #     self.start_transaction()
-    #     stm_write(p1)
-    #     p1[8] = 'b'
-    #     self.commit_transaction(False)
-    #     #
-    #     self.switch(0)
-    #     stm_write(p2)
-    #     p2[8] = 'C'
-    #     self.commit_transaction(False)
-    #     assert p1[8] == 'b'
-    #     assert p2[8] == 'C'
-
-    # def test_page_extra_malloc_unchanged_page(self):
-    #     self.start_transaction()
-    #     p1 = stm_allocate(16)
-    #     p2 = stm_allocate(16)
-    #     p1[8] = 'A'
-    #     p2[8] = 'a'
-    #     self.commit_transaction(False)
-    #     self.start_transaction()
-    #     #
-    #     self.switch(1)
-    #     self.start_transaction()
-    #     stm_write(p1)
-    #     assert p1[8] == 'A'
-    #     p1[8] = 'B'
-    #     self.commit_transaction(False)
-    #     #
-    #     self.switch(0)
-    #     stm_read(p2)
-    #     assert p2[8] == 'a'
-    #     p3 = stm_allocate(16)   # goes into the same page, which is
-    #     p3[8] = ':'             #  not otherwise modified
-    #     self.commit_transaction(False)
-    #     #
-    #     assert p1[8] == 'B'
-    #     assert p2[8] == 'a'
-    #     assert p3[8] == ':'
-
-    # def test_page_extra_malloc_changed_page_before(self):
-    #     self.start_transaction()
-    #     p1 = stm_allocate(16)
-    #     p2 = stm_allocate(16)
-    #     p1[8] = 'A'
-    #     p2[8] = 'a'
-    #     self.commit_transaction(False)
-    #     self.start_transaction()
-    #     #
-    #     self.switch(1)
-    #     self.start_transaction()
-    #     stm_write(p1)
-    #     assert p1[8] == 'A'
-    #     p1[8] = 'B'
-    #     self.commit_transaction(False)
-    #     #
-    #     self.switch(0)
-    #     stm_write(p2)
-    #     assert p2[8] == 'a'
-    #     p2[8] = 'b'
-    #     p3 = stm_allocate(16)  # goes into the same page, which I already
-    #     p3[8] = ':'            #  modified just above
-    #     self.commit_transaction(False)
-    #     #
-    #     assert p1[8] == 'B'
-    #     assert p2[8] == 'b'
-    #     assert p3[8] == ':'
-
-    # def test_page_extra_malloc_changed_page_after(self):
-    #     self.start_transaction()
-    #     p1 = stm_allocate(16)
-    #     p2 = stm_allocate(16)
-    #     p1[8] = 'A'
-    #     p2[8] = 'a'
-    #     self.commit_transaction(False)
-    #     self.start_transaction()
-    #     #
-    #     self.switch(1)
-    #     self.start_transaction()
-    #     stm_write(p1)
-    #     assert p1[8] == 'A'
-    #     p1[8] = 'B'
-    #     self.commit_transaction(False)
-    #     #
-    #     self.switch(0)
-    #     p3 = stm_allocate(16)  # goes into the same page, which I will
-    #     p3[8] = ':'            #  modify just below
-    #     stm_write(p2)
-    #     assert p2[8] == 'a'
-    #     p2[8] = 'b'
-    #     self.commit_transaction(False)
-    #     #
-    #     assert p1[8] == 'B'
-    #     assert p2[8] == 'b'
-    #     assert p3[8] == ':'
-
-    # def test_overflow_write_history(self):
-    #     self.start_transaction()
-    #     plist = [stm_allocate(n) for n in range(16, 256, 8)]
-    #     self.commit_transaction(False)
-    #     #
-    #     for i in range(20):
-    #         self.start_transaction()
-    #         for p in plist:
-    #             stm_write(p)
-    #         self.commit_transaction(False)
+    def test_last_abort__bytes_in_nursery(self):
+        self.start_transaction()
+        stm_allocate(56)
+        self.abort_transaction()
+        assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 56
+        self.start_transaction()
+        assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 56
+        self.commit_transaction()
+        assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 56
+        self.start_transaction()
+        assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 56
+        self.abort_transaction()
+        assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 0
