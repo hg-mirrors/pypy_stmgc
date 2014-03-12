@@ -83,3 +83,17 @@ class TestPrebuilt(BaseTest):
 
     def test_multiple_calls_to_stm_setup_prebuilt_2(self):
         self.test_multiple_calls_to_stm_setup_prebuilt_1(reverse=True)
+
+    def test_prebuilt_align_4_byte(self):
+        static0 = prebuilt(16)
+        p0 = ffi.cast("char *", static0)
+        for i in reversed(range(12)):
+            p0[i + 4] = p0[i]
+        static1 = ffi.cast("object_t *", p0 + 4)
+        ffi.cast("char *", static1)[8:11] = 'ABC'
+        lp = lib.stm_setup_prebuilt(static1)
+        #
+        self.start_transaction()
+        assert stm_get_char(lp, 8) == 'A'
+        assert stm_get_char(lp, 9) == 'B'
+        assert stm_get_char(lp, 10) == 'C'
