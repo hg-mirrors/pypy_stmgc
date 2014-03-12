@@ -140,6 +140,7 @@ class TestMinorCollection(BaseTest):
 
         self.switch(1)
 
+        self.start_transaction()
         assert stm_get_weakref(lp1) == ffi.NULL
 
 

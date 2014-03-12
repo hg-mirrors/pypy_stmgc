@@ -65,11 +65,13 @@ void stm_move_young_weakrefs()
                     || (pforwarded_array[0] != GCWORD_MOVED)) {
                     /* pointing_to dies */
                     *WEAKREF_PTR(item, size) = NULL;
+                    synchronize_overflow_object_now(item);
                     continue;   /* no need to remember in old_weakrefs */
                 }
                 else {
                     /* moved location */
                     *WEAKREF_PTR(item, size) = pforwarded_array[1];
+                    synchronize_overflow_object_now(item);
                 }
             }
             else {
@@ -79,6 +81,7 @@ void stm_move_young_weakrefs()
                     /* still in the tree -> wasn't seen by the minor collection,
                        so it doesn't survive */
                     *WEAKREF_PTR(item, size) = NULL;
+                    synchronize_overflow_object_now(item);
                     continue;   /* no need to remember in old_weakrefs */
                 }
                 /* pointing_to was already old */
