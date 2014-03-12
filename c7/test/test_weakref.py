@@ -249,5 +249,6 @@ class TestMajorCollection(BaseTest):
 
         self.switch(1)
 
+        self.start_transaction()
         assert stm_get_weakref(lp1) == ffi.NULL
         print stm_get_real_address(lp1)
