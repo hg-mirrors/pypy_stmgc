@@ -91,6 +91,27 @@ class TestMinorCollection(BaseTest):
         self.abort_transaction()
         self.start_transaction()
 
+    def test_big_alloc_sizes(self):
+        sizes = [lib._STM_FAST_ALLOC + 16, 48,]
+
+        for osize in sizes:
+            self.start_transaction()
+            self.push_root_no_gc()
+            lp2 = stm_allocate(osize)
+            lp1 = stm_allocate_weakref(lp2)    # no collection here
+            self.pop_root()
+
+            assert stm_get_weakref(lp1) == lp2
+
+            self.push_root(lp1)
+            self.push_root(lp2)
+            stm_minor_collect()
+            lp2 = self.pop_root()
+            lp1 = self.pop_root()
+            # lp2 survived
+            assert stm_get_weakref(lp1) == lp2
+            self.abort_transaction()
+
 
 
 class TestMajorCollection(BaseTest):
