@@ -81,10 +81,48 @@ class TestMinorCollection(BaseTest):
         assert stm_get_weakref(lp1) == lp0
 
 
+    def test_abort_cleanup(self):
+        self.start_transaction()
+
+        self.push_root_no_gc()
+        lp1 = stm_allocate_weakref(ffi.NULL)    # no collection here
+        self.pop_root()
+
+        self.abort_transaction()
+        self.start_transaction()
 
 
 
+class TestMajorCollection(BaseTest):
+    def test_simple(self):
+        self.start_transaction()
 
+        self.push_root_no_gc()
+        lp2 = stm_allocate(48)
+        lp1 = stm_allocate_weakref(lp2)    # no collection here
+        self.pop_root()
+
+        assert stm_get_weakref(lp1) == lp2
+
+        self.push_root(lp1)
+        self.push_root(lp2)
+        stm_minor_collect()
+        lp2 = self.pop_root()
+        lp1 = self.pop_root()
+        # lp2 survived
+        assert stm_get_weakref(lp1) == lp2
+
+        self.push_root(lp1)
+        stm_minor_collect()
+        lp1 = self.pop_root()
+        # lp2 survived because no major collection
+        assert stm_get_weakref(lp1) == lp2
+
+        self.push_root(lp1)
+        stm_major_collect()
+        lp1 = self.pop_root()
+        # lp2 died
+        assert stm_get_weakref(lp1) == ffi.NULL
 
 
 
