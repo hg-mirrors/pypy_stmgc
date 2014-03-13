@@ -12,6 +12,7 @@
 #include "stm/contention.h"
 #include "stm/extra.h"
 #include "stm/fprintcolor.h"
+#include "stm/weakref.h"
 
 #include "stm/misc.c"
 #include "stm/list.c"
@@ -28,3 +29,4 @@
 #include "stm/contention.c"
 #include "stm/extra.c"
 #include "stm/fprintcolor.c"
+#include "stm/weakref.c"
