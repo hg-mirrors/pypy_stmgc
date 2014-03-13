@@ -13,9 +13,9 @@ object_t *stm_allocate_weakref(ssize_t size_rounded_up)
 }
 
 
-void _set_weakref_in_all_segments(object_t *weakref, object_t *value)
+void _set_weakref_in_all_segments(char* base, object_t *weakref, object_t *value)
 {
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, weakref);
+    char *realobj = REAL_ADDRESS(base, weakref);
     ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
 
     stm_char *point_to_loc = (stm_char*)WEAKREF_PTR(weakref, size);
@@ -68,7 +68,8 @@ void stm_move_young_weakrefs()
             }
             assert(!_is_young(item));
 
-            char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, item);
+            char *base = STM_SEGMENT->segment_base;
+            char *realobj = REAL_ADDRESS(base, item);
             ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
             object_t *pointing_to = *WEAKREF_PTR(item, size);
             assert(pointing_to != NULL);
@@ -79,12 +80,12 @@ void stm_move_young_weakrefs()
                 if (!(pointing_to->stm_flags & GCFLAG_HAS_SHADOW)
                     || (pforwarded_array[0] != GCWORD_MOVED)) {
                     /* pointing_to dies */
-                    _set_weakref_in_all_segments(item, NULL);
+                    _set_weakref_in_all_segments(base, item, NULL);
                     continue;   /* no need to remember in old_weakrefs */
                 }
                 else {
                     /* moved location */
-                    _set_weakref_in_all_segments(item, pforwarded_array[1]);
+                    _set_weakref_in_all_segments(base, item, pforwarded_array[1]);
                 }
             }
             else {
@@ -93,7 +94,7 @@ void stm_move_young_weakrefs()
                                   (uintptr_t)pointing_to)) {
                     /* still in the tree -> wasn't seen by the minor collection,
                        so it doesn't survive */
-                    _set_weakref_in_all_segments(item, NULL);
+                    _set_weakref_in_all_segments(base, item, NULL);
                     continue;   /* no need to remember in old_weakrefs */
                 }
                 /* pointing_to was already old */
@@ -130,7 +131,7 @@ void stm_visit_old_weakrefs(void)
             assert(pointing_to != NULL);
             if (!mark_visited_test(pointing_to)) {
                 //assert(flag_page_private[(uintptr_t)weakref / 4096UL] != PRIVATE_PAGE);
-                _set_weakref_in_all_segments(weakref, NULL);
+                _set_weakref_in_all_segments(pseg->pub.segment_base, weakref, NULL);
 
                 /* we don't need it in this list anymore */
                 list_set_item(lst, n, list_pop_item(lst));
