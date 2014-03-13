@@ -197,9 +197,10 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
 /* Allocate a weakref object. Weakref objects have a
    reference to an object at the byte-offset
        stmcb_size_rounded_up(obj) - sizeof(void*)
-   This reference becomes NULL if the referenced object was freed.
    You must assign the reference before the next collection may happen.
-   After that, they may be considered immutable. */
+   After that, you must not mutate the reference anymore. However,
+   it can become NULL after any GC if the reference dies during that
+   collection. */
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 
 
