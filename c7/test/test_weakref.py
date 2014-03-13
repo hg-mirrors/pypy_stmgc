@@ -143,6 +143,37 @@ class TestMinorCollection(BaseTest):
         self.start_transaction()
         assert stm_get_weakref(lp1) == ffi.NULL
 
+    def test_multiple_threads_w_big_weakref(self):
+        self.start_transaction()
+        lp0 = stm_allocate(1024)
+        self.push_root(lp0)
+        self.commit_transaction()
+
+        self.start_transaction()
+        lp0 = self.pop_root()
+        self.push_root(lp0)
+        stm_write(lp0) # privatize page
+
+        self.push_root_no_gc()
+        lp2 = stm_allocate(48)
+        lp1 = stm_allocate_weakref(
+            lp2, size=lib._STM_FAST_ALLOC + 16)    # no collection here
+        self.pop_root()
+
+        self.push_root(lp0)
+        self.push_root(lp1)
+        self.commit_transaction()
+        # lp2 dies
+        lp1 = self.pop_root()
+        self.push_root(lp1)
+
+        assert stm_get_weakref(lp1) == ffi.NULL
+
+        self.switch(1)
+
+        self.start_transaction()
+        assert stm_get_weakref(lp1) == ffi.NULL
+
 
 
 
