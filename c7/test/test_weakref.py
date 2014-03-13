@@ -253,3 +253,21 @@ class TestMajorCollection(BaseTest):
         self.start_transaction()
         assert stm_get_weakref(lp1) == ffi.NULL
         print stm_get_real_address(lp1)
+
+    def test_prebuit_weakref(self):
+        from test_prebuilt import prebuilt
+        static1 = prebuilt(16)     # a prebuit dead weakref
+        lp1 = lib.stm_setup_prebuilt_weakref(static1)
+        static2 = prebuilt(16)     # some random prebuilt object
+        ffi.cast("char *", static2)[8:11] = 'ABC'
+        lp2 = lib.stm_setup_prebuilt(static2)
+        static3 = prebuilt(16)     # a prebuilt weakref to static2
+        ffi.cast("object_t **", static3)[1] = static2
+        lp3 = lib.stm_setup_prebuilt_weakref(static3)
+        #
+        self.start_transaction()
+        assert stm_get_char(lp2, 8) == 'A'
+        assert stm_get_char(lp2, 9) == 'B'
+        assert stm_get_char(lp2, 10) == 'C'
+        assert stm_get_weakref(lp1) == ffi.NULL
+        assert stm_get_weakref(lp3) == lp2
