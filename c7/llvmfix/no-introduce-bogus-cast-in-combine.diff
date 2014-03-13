@@ -1,8 +1,8 @@
 Index: lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp
 ===================================================================
---- lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp	(revision 199602)
+--- lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp	(revision 203791)
 +++ lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp	(working copy)
-@@ -295,6 +295,17 @@
+@@ -299,6 +299,17 @@
  
      Type *SrcPTy = SrcTy->getElementType();
  
@@ -20,3 +20,16 @@ Index: lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp
      if (DestPTy->isIntegerTy() || DestPTy->isPointerTy() ||
           DestPTy->isVectorTy()) {
        // If the source is an array, the code below will not succeed.  Check to
+@@ -510,6 +521,12 @@
+       IC.getDataLayout()->getTypeSizeInBits(DestPTy))
+     return 0;
+ 
++  // XXX this is similar to the issue in InstCombineLoadCast
++  if (SrcPTy->isPointerTy() && DestPTy->isPointerTy() &&
++       cast<PointerType>(DestPTy)->getAddressSpace() !=
++       cast<PointerType>(SrcPTy)->getAddressSpace())
++    return 0;
++
+   // Okay, we are casting from one integer or pointer type to another of
+   // the same size.  Instead of casting the pointer before
+   // the store, cast the value to be stored.
