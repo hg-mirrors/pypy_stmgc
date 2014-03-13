@@ -25,6 +25,7 @@ typedef struct {
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
+object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
 void stm_setup(void);
@@ -53,6 +54,10 @@ void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
+
+void _set_weakref(object_t *obj, object_t *v);
+object_t* _get_weakref(object_t *obj);
+
 
 void _stm_start_safe_point(void);
 bool _check_stop_safe_point(void);
@@ -163,6 +168,21 @@ uint32_t _get_type_id(object_t *obj) {
 }
 
 
+#define WEAKREF_PTR(wr, sz)  ((object_t * TLPREFIX *)(((stm_char *)(wr)) + (sz) - sizeof(void*)))
+void _set_weakref(object_t *obj, object_t *v)
+{
+    char *realobj = _stm_real_address(obj);
+    ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+    *WEAKREF_PTR(obj, size) = v;
+}
+
+object_t * _get_weakref(object_t *obj)
+{
+    char *realobj = _stm_real_address(obj);
+    ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+    return *WEAKREF_PTR(obj, size);
+}
+
 void _set_ptr(object_t *obj, int n, object_t *v)
 {
     long nrefs = (long)((myobj_t*)obj)->type_id - 421420;
@@ -265,6 +285,18 @@ def stm_allocate(size):
     tid = 42 + size
     lib._set_type_id(o, tid)
     return o
+
+def stm_allocate_weakref(point_to_obj, size=None):
+    assert HDR+WORD == 16
+    o = lib.stm_allocate_weakref(HDR + WORD)
+
+    tid = 421420
+    lib._set_type_id(o, tid)
+    lib._set_weakref(o, point_to_obj)
+    return o
+
+def stm_get_weakref(o):
+    return lib._get_weakref(o)
 
 def stm_allocate_refs(n):
     o = lib.stm_allocate(HDR + n * WORD)
