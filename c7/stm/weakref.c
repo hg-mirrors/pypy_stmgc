@@ -17,7 +17,7 @@ object_t *stm_allocate_weakref(ssize_t size_rounded_up)
 }
 
 
-void _set_weakref_in_all_segments(object_t *weakref, object_t *value)
+static void _set_weakref_in_all_segments(object_t *weakref, object_t *value)
 {
     ssize_t size = 16;
 
@@ -38,7 +38,7 @@ void _set_weakref_in_all_segments(object_t *weakref, object_t *value)
 
 /***** Minor collection *****/
 
-void stm_move_young_weakrefs()
+static void stm_move_young_weakrefs()
 {
     /* The code relies on the fact that no weakref can be an old object
        weakly pointing to a young object.  Indeed, weakrefs are immutable
@@ -102,7 +102,7 @@ void stm_move_young_weakrefs()
 /***** Major collection *****/
 
 
-void stm_visit_old_weakrefs(void)
+static void stm_visit_old_weakrefs(void)
 {
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
