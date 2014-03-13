@@ -17,6 +17,16 @@ object_t *stm_allocate_weakref(ssize_t size_rounded_up)
 }
 
 
+object_t *stm_setup_prebuilt_weakref(object_t *obj)
+{
+    ssize_t size = 16;
+
+    obj = stm_setup_prebuilt(obj);
+    *WEAKREF_PTR(obj, size) = stm_setup_prebuilt(*WEAKREF_PTR(obj, size));
+    return obj;
+}
+
+
 static void _set_weakref_in_all_segments(object_t *weakref, object_t *value)
 {
     ssize_t size = 16;

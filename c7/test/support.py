@@ -33,6 +33,7 @@ void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
 object_t *stm_setup_prebuilt(object_t *);
+object_t *stm_setup_prebuilt_weakref(object_t *);
 
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
