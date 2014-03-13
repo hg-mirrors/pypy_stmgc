@@ -1,9 +1,9 @@
 #ifndef _SRCSTM_WEAKREF_H
 #define _SRCSTM_WEAKREF_H
 
-
-void stm_move_young_weakrefs(void);
-void stm_visit_old_weakrefs(void);
+object_t *stm_allocate_weakref(ssize_t size_rounded_up);
+static void stm_move_young_weakrefs(void);
+static void stm_visit_old_weakrefs(void);
 
 
 #endif
