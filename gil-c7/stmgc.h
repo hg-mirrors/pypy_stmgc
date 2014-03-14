@@ -52,6 +52,7 @@ object_t *_stm_allocate_external(ssize_t);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 
+__attribute__((always_inline))
 inline static object_t *stm_allocate(ssize_t size_rounded_up) {
     OPT_ASSERT(size_rounded_up >= 16);
     OPT_ASSERT((size_rounded_up & 7) == 0);
@@ -101,6 +102,7 @@ inline static void stm_read(object_t *ob) { }
 
 void _stm_write_slowpath(object_t *);
 
+__attribute__((always_inline))
 inline static void stm_write(object_t *ob) {
     if (UNLIKELY(ob->gil_flags & _STM_GCFLAG_WRITE_BARRIER))
         _stm_write_slowpath(ob);
