@@ -120,7 +120,8 @@ extern ssize_t stmcb_size_rounded_up(struct object_s *);
 extern void stmcb_trace(struct object_s *, void (object_t **));
 
 inline static object_t *stm_setup_prebuilt(object_t *preb) {
-    preb->gil_flags |= _STM_GCFLAG_WRITE_BARRIER;
+    if (preb != NULL)
+        preb->gil_flags |= _STM_GCFLAG_WRITE_BARRIER;
     return preb;
 }
 inline static object_t *stm_setup_prebuilt_weakref(object_t *preb) {
