@@ -28,7 +28,10 @@ typedef struct stm_thread_local_s {
 extern stm_thread_local_t *_stm_tloc;
 extern char *_stm_nursery_current, *_stm_nursery_end;
 
-struct stm_segment_info_s { stm_jmpbuf_t *jmpbuf_ptr; };
+struct stm_segment_info_s {
+    stm_jmpbuf_t *jmpbuf_ptr;  /* compat only -- always NULL */
+    char *nursery_current;     /* compat only -- always NULL */
+};
 extern struct stm_segment_info_s _stm_segment;
 #define STM_SEGMENT (&_stm_segment)
 
