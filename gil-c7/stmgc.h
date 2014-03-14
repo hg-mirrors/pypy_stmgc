@@ -1,3 +1,6 @@
+#ifndef _STMGC_H
+#define _STMGC_H
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -130,3 +133,5 @@ inline static void stm_call_on_abort(stm_thread_local_t *tl, void *key,
                                      void callback(void *)) {
     // XXX ignored
 }
+
+#endif
