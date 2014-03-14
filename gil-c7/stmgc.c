@@ -117,10 +117,12 @@ static struct list_s *_list_grow(struct list_s *lst, uintptr_t nalloc)
 #define GCFLAG_WRITE_BARRIER  _STM_GCFLAG_WRITE_BARRIER
 
 static struct list_s *objects_pointing_to_nursery;
+static struct list_s *young_weakrefs;
 
 void stm_setup(void)
 {
     objects_pointing_to_nursery = list_create();
+    young_weakrefs = list_create();
 }
 
 void stm_teardown(void)
@@ -271,11 +273,58 @@ static void throw_away_nursery(void)
     memset(_stm_nursery_base, 0, NURSERY_SIZE);
 }
 
+#define WEAKREF_PTR(wr, sz)  ((object_t * TLPREFIX *)(((char *)(wr)) + (sz) - sizeof(void*)))
+
+static void move_young_weakrefs(void)
+{
+    LIST_FOREACH_R(
+        young_weakrefs,
+        object_t * /*item*/,
+        ({
+            assert(_is_in_nursery(item));
+            object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)item;
+
+            /* the following checks are done like in nursery.c: */
+            if (pforwarded_array[0] != GCWORD_MOVED) {
+                /* weakref dies */
+                continue;
+            }
+
+            item = pforwarded_array[1]; /* moved location */
+
+            assert(!_is_in_nursery(item));
+
+            ssize_t size = 16;
+            object_t *pointing_to = *WEAKREF_PTR(item, size);
+            assert(pointing_to != NULL);
+
+            if (_is_in_nursery(pointing_to)) {
+                object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)pointing_to;
+                /* the following checks are done like in nursery.c: */
+                if (pforwarded_array[0] != GCWORD_MOVED) {
+                    /* pointing_to dies */
+                    *WEAKREF_PTR(item, size) = NULL;
+                    continue;   /* no need to remember in old_weakrefs */
+                }
+                else {
+                    /* moved location */
+                    *WEAKREF_PTR(item, size) = pforwarded_array[1];
+                }
+            }
+            else {
+                /* pointing_to was already old */
+            }
+            //LIST_APPEND(STM_PSEGMENT->old_weakrefs, item);
+        }));
+    list_clear(young_weakrefs);
+}
+
 void stm_collect(long level)
 {
     /* 'level' is ignored, only minor collections are implemented */
     collect_roots_in_nursery();
     collect_oldrefs_to_nursery();
+    move_young_weakrefs();
     throw_away_nursery();
 }
 
@@ -290,4 +339,12 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
     assert(end <= _stm_nursery_end);
     _stm_nursery_current = end;
     return (object_t *)p;
+}
+
+object_t *stm_allocate_weakref(ssize_t size_rounded_up)
+{
+    assert(size_rounded_up == 16);
+    object_t *obj = stm_allocate(size_rounded_up);
+    LIST_APPEND(young_weakrefs, obj);
+    return obj;
 }

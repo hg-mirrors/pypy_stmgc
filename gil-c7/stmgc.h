@@ -47,6 +47,7 @@ object_t *_stm_allocate_old(ssize_t size);
 
 object_t *_stm_allocate_external(ssize_t);
 object_t *_stm_allocate_slowpath(ssize_t);
+object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 
 inline static object_t *stm_allocate(ssize_t size_rounded_up) {
     OPT_ASSERT(size_rounded_up >= 16);
