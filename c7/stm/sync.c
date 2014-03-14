@@ -213,7 +213,7 @@ static void release_thread_segment(stm_thread_local_t *tl)
 }
 
 __attribute__((unused))
-static bool _running_transaction(void)
+static bool _seems_to_be_running_transaction(void)
 {
     return (STM_SEGMENT->running_thread != NULL);
 }
@@ -301,7 +301,7 @@ static void remove_requests_for_safe_point(void)
 
 static void enter_safe_point_if_requested(void)
 {
-    assert(_running_transaction());
+    assert(_seems_to_be_running_transaction());
     assert(_has_mutex());
     while (1) {
         if (must_abort())
