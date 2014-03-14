@@ -4,6 +4,7 @@
 
 pthread_mutex_t _stm_gil = PTHREAD_MUTEX_INITIALIZER;
 stm_thread_local_t *_stm_tloc;
+struct stm_segment_info_s _stm_segment;
 
 
 /************************************************************/
@@ -160,6 +161,7 @@ object_t *_stm_allocate_external(ssize_t size)
 char *_stm_nursery_base    = NULL;
 char *_stm_nursery_current = NULL;
 char *_stm_nursery_end     = NULL;
+#define _stm_nursery_start ((uintptr_t)_stm_nursery_base)
 
 static bool _is_in_nursery(object_t *obj)
 {
