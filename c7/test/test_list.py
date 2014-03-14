@@ -65,34 +65,34 @@ def test_tree_empty():
 
 def test_tree_add():
     t = lib.tree_create()
-    lib.tree_insert(t, 23000, 456)
-    for i in range(0, 100000, 1000):
-        assert lib.tree_contains(t, i) == (i == 23000)
+    lib.tree_insert(t, 23, 456)
+    for i in range(0, 100):
+        assert lib.tree_contains(t, i) == (i == 23)
     lib.tree_free(t)
 
 def test_tree_is_cleared():
     t = lib.tree_create()
     assert lib.tree_is_cleared(t)
-    lib.tree_insert(t, 23000, 456)
+    lib.tree_insert(t, 23, 456)
     assert not lib.tree_is_cleared(t)
     lib.tree_free(t)
 
 def test_tree_delete_item():
     t = lib.tree_create()
-    lib.tree_insert(t, 23000, 456)
-    lib.tree_insert(t, 42000, 34289)
+    lib.tree_insert(t, 23, 456)
+    lib.tree_insert(t, 42, 34289)
     assert not lib.tree_is_cleared(t)
-    assert lib.tree_contains(t, 23000)
-    res = lib.tree_delete_item(t, 23000)
+    assert lib.tree_contains(t, 23)
+    res = lib.tree_delete_item(t, 23)
     assert res
-    assert not lib.tree_contains(t, 23000)
-    res = lib.tree_delete_item(t, 23000)
+    assert not lib.tree_contains(t, 23)
+    res = lib.tree_delete_item(t, 23)
     assert not res
-    res = lib.tree_delete_item(t, 21000)
+    res = lib.tree_delete_item(t, 21)
     assert not res
     assert not lib.tree_is_cleared(t)
-    assert lib.tree_contains(t, 42000)
-    res = lib.tree_delete_item(t, 42000)
+    assert lib.tree_contains(t, 42)
+    res = lib.tree_delete_item(t, 42)
     assert res
     assert not lib.tree_is_cleared(t)   # not cleared, but still empty
     for i in range(100):
@@ -101,18 +101,18 @@ def test_tree_delete_item():
 
 def test_tree_walk():
     t = lib.tree_create()
-    lib.tree_insert(t, 23000, 456)
-    lib.tree_insert(t, 42000, 34289)
+    lib.tree_insert(t, 23, 456)
+    lib.tree_insert(t, 42, 34289)
     a = ffi.new("uintptr_t[10]")
     res = lib.test_tree_walk(t, a)
     assert res == 2
-    assert ((a[0] == 23000 and a[1] == 42000) or
-            (a[0] == 42000 and a[1] == 23000))
+    assert ((a[0] == 23 and a[1] == 42) or
+            (a[0] == 42 and a[1] == 23))
     lib.tree_free(t)
 
 def test_tree_walk_big():
     t = lib.tree_create()
-    values = random.sample(xrange(0, 1000000, 8), 300)
+    values = random.sample(xrange(1, 100000), 300)
     for x in values:
         lib.tree_insert(t, x, x)
     a = ffi.new("uintptr_t[1000]")
@@ -123,3 +123,7 @@ def test_tree_walk_big():
         found.add(a[i])
     assert found == set(values)
     lib.tree_free(t)
+
+def test_hash_permutation():
+    hashes = [((n ^ (n << 4)) & 0xFF0) for n in range(256)]
+    assert set(hashes) == set(range(0, 4096, 16))
