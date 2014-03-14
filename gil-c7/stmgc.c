@@ -157,13 +157,13 @@ object_t *_stm_allocate_external(ssize_t size)
 #define NB_NURSERY_PAGES    1024          // 4MB
 #define NURSERY_SIZE        (NB_NURSERY_PAGES * 4096UL)
 
-char *_stm_nursery_start   = NULL;
+char *_stm_nursery_base    = NULL;
 char *_stm_nursery_current = NULL;
 char *_stm_nursery_end     = NULL;
 
 static bool _is_in_nursery(object_t *obj)
 {
-    return ((char *)obj >= _stm_nursery_start &&
+    return ((char *)obj >= _stm_nursery_base &&
             (char *)obj < _stm_nursery_end);
 }
 
@@ -259,14 +259,14 @@ static void collect_oldrefs_to_nursery(void)
 
 static void throw_away_nursery(void)
 {
-    if (_stm_nursery_start == NULL) {
-        _stm_nursery_start = malloc(NURSERY_SIZE);
-        assert(_stm_nursery_start);
-        _stm_nursery_end = _stm_nursery_start + NURSERY_SIZE;
+    if (_stm_nursery_base == NULL) {
+        _stm_nursery_base = malloc(NURSERY_SIZE);
+        assert(_stm_nursery_base);
+        _stm_nursery_end = _stm_nursery_base + NURSERY_SIZE;
     }
 
-    _stm_nursery_current = _stm_nursery_start;
-    memset(_stm_nursery_start, 0, NURSERY_SIZE);
+    _stm_nursery_current = _stm_nursery_base;
+    memset(_stm_nursery_base, 0, NURSERY_SIZE);
 }
 
 void stm_collect(long level)
