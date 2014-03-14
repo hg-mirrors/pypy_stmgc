@@ -22,6 +22,7 @@ typedef struct stm_thread_local_s {
     object_t **shadowstack;
     object_t **shadowstack_base;
     object_t *thread_local_obj;
+    long last_abort__bytes_in_nursery;
 }  stm_thread_local_t;
 
 extern stm_thread_local_t *_stm_tloc;
@@ -64,6 +65,7 @@ inline static void stm_register_thread_local(stm_thread_local_t *tl) {
     tl->shadowstack_base = (object_t **)malloc(768*1024);
     assert(tl->shadowstack_base);
     tl->shadowstack = tl->shadowstack_base;
+    tl->last_abort__bytes_in_nursery = 0;
 }
 inline static void stm_unregister_thread_local(stm_thread_local_t *tl) {
     free(tl->shadowstack_base);
