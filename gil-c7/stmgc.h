@@ -91,6 +91,7 @@ inline static void stm_commit_transaction(void) {
     if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
 }
 inline static void stm_become_inevitable(const char *msg) { }
+inline static void _stm_become_inevitable(const char *msg) { }
 static inline int stm_is_inevitable(void) { return 1; }
 inline static void stm_read(object_t *ob) { }
 
@@ -111,6 +112,7 @@ static inline void stm_safe_point(void) { }
 
 #define STM_PUSH_ROOT(tl, p)   (*((tl).shadowstack++) = (object_t *)(p))
 #define STM_POP_ROOT(tl, p)    ((p) = (typeof(p))*(--(tl).shadowstack))
+#define STM_POP_ROOT_RET(tl)    (*(--(tl).shadowstack))
 
 
 extern ssize_t stmcb_size_rounded_up(struct object_s *);
