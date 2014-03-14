@@ -15,7 +15,7 @@ typedef struct object_s {
     uint32_t gil_flags;
 } object_t;
 
-typedef struct {
+typedef struct stm_thread_local_s {
     object_t **shadowstack;
     object_t **shadowstack_base;
     object_t *thread_local_obj;
