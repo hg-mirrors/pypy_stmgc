@@ -28,6 +28,10 @@ typedef struct stm_thread_local_s {
 extern stm_thread_local_t *_stm_tloc;
 extern char *_stm_nursery_current, *_stm_nursery_end;
 
+struct stm_segment_info_s { stm_jmpbuf_t *jmpbuf_ptr; };
+extern struct stm_segment_info_s _stm_segment;
+#define STM_SEGMENT (&_stm_segment)
+
 #ifdef NDEBUG
 #define OPT_ASSERT(cond) do { if (!(cond)) __builtin_unreachable(); } while (0)
 #else
