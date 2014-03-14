@@ -167,6 +167,11 @@ static bool _is_in_nursery(object_t *obj)
             (char *)obj < _stm_nursery_end);
 }
 
+long stm_can_move(object_t *obj)
+{
+    return _is_in_nursery(obj);
+}
+
 #define GCWORD_MOVED  ((object_t *) -42)
 
 static void minor_trace_if_young(object_t **pobj)
@@ -264,8 +269,9 @@ static void throw_away_nursery(void)
     memset(_stm_nursery_base, 0, NURSERY_SIZE);
 }
 
-void do_minor_collect(void)
+void stm_collect(long level)
 {
+    /* 'level' is ignored, only minor collections are implemented */
     collect_roots_in_nursery();
     collect_oldrefs_to_nursery();
     throw_away_nursery();
@@ -275,7 +281,7 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 {
     /* run minor collection */
     //fprintf(stderr, "minor collect\n");
-    do_minor_collect();
+    stm_collect(0);
 
     char *p = _stm_nursery_current;
     char *end = p + size_rounded_up;

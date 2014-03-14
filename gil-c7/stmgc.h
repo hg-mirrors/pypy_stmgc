@@ -70,18 +70,19 @@ extern pthread_mutex_t _stm_gil;
 
 void stm_setup(void);
 void stm_teardown(void);
+void stm_collect(long level);
 
 inline static void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
     if (pthread_mutex_lock(&_stm_gil) != 0) abort();
     _stm_tloc = tl;
 }
-void do_minor_collect(void);
 inline static void stm_commit_transaction(void) {
-    do_minor_collect();
+    stm_collect(0);
     _stm_tloc = NULL;
     if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
 }
 inline static void stm_become_inevitable(const char *msg) { }
+static inline int stm_is_inevitable(void) { return 1; }
 inline static void stm_read(object_t *ob) { }
 
 void _stm_write_slowpath(object_t *);
@@ -92,6 +93,7 @@ inline static void stm_write(object_t *ob) {
 }
 
 inline static char *_stm_real_address(object_t *ob) { return (char *)ob; }
+static inline void stm_safe_point(void) { }
 
 #define STM_START_TRANSACTION(tl, here)   do {  \
     (void)&(here);                              \
@@ -105,8 +107,26 @@ inline static char *_stm_real_address(object_t *ob) { return (char *)ob; }
 extern ssize_t stmcb_size_rounded_up(struct object_s *);
 extern void stmcb_trace(struct object_s *, void (object_t **));
 
-inline static object_t *stm_setup_prebuilt(object_t *preb)
-{
+inline static object_t *stm_setup_prebuilt(object_t *preb) {
     preb->gil_flags |= _STM_GCFLAG_WRITE_BARRIER;
     return preb;
+}
+inline static object_t *stm_setup_prebuilt_weakref(object_t *preb) {
+    return stm_setup_prebuilt(preb);
+}
+
+inline static long stm_identityhash(object_t *obj) {
+    return (long)obj;   // XXX fails after a minor collection
+}
+inline static long stm_id(object_t *obj) {
+    return (long)obj;
+}
+inline static void stm_set_prebuilt_identityhash(object_t *obj, long hash) {
+    // XXX ignored
+}
+long stm_can_move(object_t *);
+
+inline static void stm_call_on_abort(stm_thread_local_t *tl, void *key,
+                                     void callback(void *)) {
+    // XXX ignored
 }
