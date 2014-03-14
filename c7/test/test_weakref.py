@@ -144,6 +144,48 @@ class TestMinorCollection(BaseTest):
         assert stm_get_weakref(lp1) == ffi.NULL
 
 
+class TestIsolation(BaseTest):
+    def test_not_break(self):
+        lpold = stm_allocate_old_refs(1)
+
+        self.start_transaction()
+        toref = stm_allocate(16)
+        weakref = stm_allocate_weakref(toref)
+        stm_set_ref(lpold, 0, weakref)
+        self.push_root(toref)
+        self.commit_transaction()
+        # toref survives because it's on our shadowstack
+        # weakref is in a prebuilt old object
+
+        # get the new toref reference (old now)
+        toref = self.pop_root()
+        self.push_root(toref)
+
+        self.switch(1)
+        # in another thread, we start a transaction
+
+        self.start_transaction()
+        weakref = stm_get_ref(lpold, 0)
+        # everyone is still alive, so we still have toref in the weakref:
+        assert stm_get_weakref(weakref) == toref
+
+
+        self.switch(0)
+
+        # back in thread 0, we pop toref from the shadowstack
+        # in an inevitable transaction
+        self.start_transaction()
+        stm_become_inevitable()
+        self.pop_root() # forget toref
+        stm_major_collect()
+
+        self.switch(1)
+
+        # toref should still be alive and stored in the
+        # weakref...
+        # should not be NULLed, otherwise this means we can
+        # communicate between the inevitable and this transaction!
+        assert stm_get_weakref(weakref) == toref
 
 
 class TestMajorCollection(BaseTest):
