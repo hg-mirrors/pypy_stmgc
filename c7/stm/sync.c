@@ -301,6 +301,7 @@ static void remove_requests_for_safe_point(void)
 
 static void enter_safe_point_if_requested(void)
 {
+    assert(_running_transaction());
     assert(_has_mutex());
     while (1) {
         if (must_abort())
