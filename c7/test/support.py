@@ -12,8 +12,12 @@ typedef ... stm_jmpbuf_t;
 #define _STM_FAST_ALLOC ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
 
+struct stm_shadowentry_s {
+    object_t *ss;
+};
+
 typedef struct {
-    object_t **shadowstack, **shadowstack_base;
+    struct stm_shadowentry_s *shadowstack, *shadowstack_base;
     object_t *thread_local_obj;
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
@@ -389,7 +393,7 @@ _keepalive = weakref.WeakKeyDictionary()
 
 def _allocate_thread_local():
     tl = ffi.new("stm_thread_local_t *")
-    ss = ffi.new("object_t *[]", SHADOWSTACK_LENGTH)
+    ss = ffi.new("struct stm_shadowentry_s[]", SHADOWSTACK_LENGTH)
     _keepalive[tl] = ss
     tl.shadowstack = ss
     tl.shadowstack_base = ss
@@ -462,7 +466,7 @@ class BaseTest(object):
         tl = self.tls[self.current_thread]
         curlength = tl.shadowstack - tl.shadowstack_base
         assert 0 <= curlength < SHADOWSTACK_LENGTH
-        tl.shadowstack[0] = ffi.cast("object_t *", o)
+        tl.shadowstack[0].ss = ffi.cast("object_t *", o)
         tl.shadowstack += 1
 
     def pop_root(self):
@@ -472,7 +476,7 @@ class BaseTest(object):
             raise EmptyStack
         assert 0 < curlength <= SHADOWSTACK_LENGTH
         tl.shadowstack -= 1
-        return ffi.cast("object_t *", tl.shadowstack[0])
+        return ffi.cast("object_t *", tl.shadowstack[0].ss)
 
     def push_root_no_gc(self):
         "Pushes an invalid object, to crash in case the GC is called"
