@@ -133,7 +133,7 @@ static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count)
 }
 #endif
 
-static void privatize_range(uintptr_t pagenum, uintptr_t count, bool full)
+static void privatize_range(uintptr_t pagenum, uintptr_t count)
 {
     ssize_t pgoff1 = pagenum;
     ssize_t pgoff2 = pagenum + NB_PAGES;
@@ -146,29 +146,16 @@ static void privatize_range(uintptr_t pagenum, uintptr_t count, bool full)
     memset(flag_page_private + pagenum, REMAPPING_PAGE, count);
     d_remap_file_pages(localpg, count * 4096, pgoff2);
     uintptr_t i;
-    if (full) {
-        for (i = 0; i < count; i++) {
-            pagecopy(localpg + 4096 * i, otherpg + 4096 * i);
-        }
-    }
-    else {
-        pagecopy(localpg, otherpg);
-        if (count > 1)
-            pagecopy(localpg + 4096 * (count-1), otherpg + 4096 * (count-1));
+    for (i = 0; i < count; i++) {
+        pagecopy(localpg + 4096 * i, otherpg + 4096 * i);
     }
     write_fence();
     memset(flag_page_private + pagenum, PRIVATE_PAGE, count);
     increment_total_allocated(4096 * count);
 }
 
-static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
+static void _pages_privatize(uintptr_t pagenum, uintptr_t count)
 {
-    /* narrow the range of pages to privatize from the end: */
-    while (flag_page_private[pagenum + count - 1] == PRIVATE_PAGE) {
-        if (!--count)
-            return;
-    }
-
     mutex_pages_lock();
 
     uintptr_t page_start_range = pagenum;
@@ -179,7 +166,7 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
         if (prev == PRIVATE_PAGE) {
             if (pagenum > page_start_range) {
                 privatize_range(page_start_range,
-                                pagenum - page_start_range, full);
+                                pagenum - page_start_range);
             }
             page_start_range = pagenum + 1;
         }
@@ -190,7 +177,7 @@ static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full)
 
     if (pagenum > page_start_range) {
         privatize_range(page_start_range,
-                        pagenum - page_start_range, full);
+                        pagenum - page_start_range);
     }
 
     mutex_pages_unlock();

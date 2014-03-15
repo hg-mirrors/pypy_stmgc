@@ -21,9 +21,8 @@ enum /* flag_page_private */ {
 
 static uint8_t flag_page_private[NB_PAGES];
 
-static void _pages_privatize(uintptr_t pagenum, uintptr_t count, bool full);
+static void _pages_privatize(uintptr_t pagenum, uintptr_t count);
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
-//static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count);
 
 static void mutex_pages_lock(void);
 static void mutex_pages_unlock(void);
@@ -32,8 +31,7 @@ static bool is_major_collection_requested(void);
 static void force_major_collection_request(void);
 static void reset_major_collection_requested(void);
 
-inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
-                                   bool full) {
+inline static void pages_privatize(uintptr_t pagenum, uintptr_t count) {
     /* This is written a bit carefully so that a call with a constant
        count == 1 will turn this loop into just one "if". */
     while (flag_page_private[pagenum] == PRIVATE_PAGE) {
@@ -42,7 +40,5 @@ inline static void pages_privatize(uintptr_t pagenum, uintptr_t count,
         }
         pagenum++;
     }
-    _pages_privatize(pagenum, count, full);
+    _pages_privatize(pagenum, count);
 }
-
-/* static bool is_fully_in_shared_pages(object_t *obj); */

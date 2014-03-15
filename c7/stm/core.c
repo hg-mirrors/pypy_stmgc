@@ -59,7 +59,7 @@ void _stm_write_slowpath(object_t *obj)
            the common case. Otherwise, we need to compute it based on
            its location and size. */
         if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0) {
-            pages_privatize(first_page, 1, true);
+            pages_privatize(first_page, 1);
         }
         else {
             char *realobj;
@@ -73,7 +73,7 @@ void _stm_write_slowpath(object_t *obj)
             /* that's the page *following* the last page with the object */
             end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
 
-            pages_privatize(first_page, end_page - first_page, true);
+            pages_privatize(first_page, end_page - first_page);
         }
     }
     else if (write_locks[lock_idx] == lock_num) {
