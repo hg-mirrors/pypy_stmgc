@@ -13,10 +13,6 @@ enum /* flag_page_private */ {
 
     /* Page is private for each segment. */
     PRIVATE_PAGE,
-
-    /* gcpage.c: page contains objects that have been traced in the
-       segment > 0 */
-    SEGMENT1_PAGE,
 };
 
 static uint8_t flag_page_private[NB_PAGES];

@@ -193,6 +193,7 @@ static inline bool mark_visited_test_and_clear(object_t *obj)
 /************************************************************/
 
 
+#if 0
 static inline void mark_single_flag_private(uintptr_t pagenum)
 {
     if (flag_page_private[pagenum] == PRIVATE_PAGE) {
@@ -314,6 +315,7 @@ static void major_reshare_pages(void)
         (uninitialized_page_stop - stm_object_pages) / 4096UL,
         NB_PAGES);
 }
+#endif
 
 /************************************************************/
 
@@ -346,11 +348,13 @@ static void mark_trace(object_t *obj, char *segment_base)
 
     while (1) {
 
+#if 0
         /* first, if we're not seeing segment 0, we must change the
            flags in flag_page_private[] from PRIVATE_PAGE to
            SEGMENT1_PAGE, which will mean "can't re-share" */
         if (segment_base != stm_object_pages && RESHARE_PAGES)
             mark_flag_page_private(obj, segment_base);
+#endif
 
         /* trace into the object (the version from 'segment_base') */
         struct object_s *realobj =
@@ -549,8 +553,10 @@ static void major_collection_now_at_safe_point(void)
 
     /* sweeping */
     mutex_pages_lock();
+#if 0
     if (RESHARE_PAGES)
         major_reshare_pages();
+#endif
     sweep_large_objects();
     //sweep_uniform_pages();
     mutex_pages_unlock();
