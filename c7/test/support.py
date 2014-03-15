@@ -413,7 +413,10 @@ class BaseTest(object):
             if lib._stm_in_transaction(tl):
                 if self.current_thread != n:
                     self.switch(n)
-                self.abort_transaction()
+                if lib.stm_is_inevitable():
+                    self.commit_transaction()   # must succeed!
+                else:
+                    self.abort_transaction()
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
         lib.stm_teardown()
