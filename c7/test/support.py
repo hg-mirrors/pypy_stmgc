@@ -9,6 +9,7 @@ ffi.cdef("""
 typedef ... object_t;
 typedef ... stm_jmpbuf_t;
 #define SIZEOF_MYOBJ ...
+#define STM_NB_SEGMENTS ...
 #define _STM_FAST_ALLOC ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
 
@@ -260,6 +261,7 @@ WORD = 8
 HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
+NB_SEGMENTS = lib.STM_NB_SEGMENTS
 
 
 class Conflict(Exception):
@@ -400,10 +402,11 @@ def _allocate_thread_local():
 
 
 class BaseTest(object):
+    NB_THREADS = 2
 
     def setup_method(self, meth):
         lib.stm_setup()
-        self.tls = [_allocate_thread_local(), _allocate_thread_local()]
+        self.tls = [_allocate_thread_local() for i in range(self.NB_THREADS)]
         self.current_thread = 0
 
     def teardown_method(self, meth):
