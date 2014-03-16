@@ -260,6 +260,7 @@ static void signal_everybody_to_pause_running(void)
 {
     assert(_safe_points_requested == false);
     assert((_safe_points_requested = true, 1));
+    assert(_has_mutex());
 
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {

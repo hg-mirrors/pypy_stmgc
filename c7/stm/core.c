@@ -529,6 +529,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
 static void abort_with_mutex(void)
 {
+    assert(_has_mutex());
     dprintf(("~~~ ABORT\n"));
 
     switch (STM_PSEGMENT->transaction_state) {
