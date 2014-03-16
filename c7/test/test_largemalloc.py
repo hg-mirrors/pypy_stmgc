@@ -14,6 +14,7 @@ class TestLargeMalloc(BaseTest):
 
         lib.memset(self.rawmem, 0xcd, self.size)
         lib._stm_largemalloc_init_arena(self.rawmem, self.size)
+        lib._stm_mutex_pages_lock()   # for this file
 
     def test_simple(self):
         d1 = lib._stm_large_malloc(7000)

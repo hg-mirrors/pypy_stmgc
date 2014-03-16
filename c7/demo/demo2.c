@@ -6,6 +6,7 @@
 
 #include "stmgc.h"
 
+#define NTHREADS    3
 #define LIST_LENGTH 2000
 #define BUNCH       100
 
@@ -223,7 +224,7 @@ void newthread(void*(*func)(void*), void *arg)
 
 int main(void)
 {
-    int status;
+    int status, i;
 
     status = sem_init(&done, 0, 0); assert(status == 0);
 
@@ -233,11 +234,13 @@ int main(void)
 
     setup_list();
 
-    newthread(demo2, (void*)1);
-    newthread(demo2, (void*)2);
+    for (i = 1; i <= NTHREADS; i++) {
+        newthread(demo2, (void*)(uintptr_t)i);
+    }
 
-    status = sem_wait(&done); assert(status == 0);
-    status = sem_wait(&done); assert(status == 0);
+    for (i = 1; i <= NTHREADS; i++) {
+        status = sem_wait(&done); assert(status == 0);
+    }
 
     final_check();
 
