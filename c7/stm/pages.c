@@ -102,85 +102,44 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
        segment 0. */
     uintptr_t i;
     assert(_has_mutex_pages());
-    for (i = 1; i < NB_SEGMENTS; i++) {
+    for (i = 1; i <= NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
         d_remap_file_pages(segment_base + pagenum * 4096UL,
                            count * 4096UL, pagenum);
     }
-    for (i = 0; i < count; i++)
-        flag_page_private[pagenum + i] = SHARED_PAGE;
 }
 
-#if 0
-static void pages_make_shared_again(uintptr_t pagenum, uintptr_t count)
+static void page_privatize(uintptr_t pagenum)
 {
-    /* Same as pages_initialize_shared(), but tries hard to minimize the
-       total number of pages that remap_file_pages() must handle, by
-       fragmenting calls as much as possible (the overhead of one system
-       call appears smaller as the overhead per page). */
-    uintptr_t start, i = 0;
-    while (i < count) {
-        if (flag_page_private[pagenum + (i++)] == SHARED_PAGE)
-            continue;
-        start = i;    /* first index of a private page */
-        while (1) {
-            i++;
-            if (i == count || flag_page_private[pagenum + i] == SHARED_PAGE)
-                break;
-        }
-        pages_initialize_shared(pagenum + start, i - start);
+    wlog_t *item;
+    TREE_FIND(*STM_PSEGMENT->private_page_mapping, pagenum, item,
+              goto not_found);
+
+    /* the page is already privatized */
+    return;
+
+ not_found:;
+    /* look up the next free page */
+    uintptr_t free_page_num = STM_PSEGMENT->private_free_page_num;
+
+    /* "mount" it in the segment */
+    char *new_page = STM_SEGMENT->segment_base + pagenum * 4096UL;
+    d_remap_file_pages(new_page, 4096,
+                       NB_PAGES * STM_SEGMENT->segment_num + free_page_num);
+    increment_total_allocated(4096);
+
+    /* update private_free_page_num */
+    uintptr_t future_page = *(uintptr_t *)new_page;
+    if (future_page == 0) {
+        future_page = free_page_num + 1;
     }
-}
-#endif
+    STM_PSEGMENT->private_free_page_num = future_page;
 
-static void privatize_range(uintptr_t pagenum, uintptr_t count)
-{
-    ssize_t pgoff1 = pagenum;
-    ssize_t pgoff2 = pagenum + NB_PAGES;
-    ssize_t localpgoff = pgoff1 + NB_PAGES * STM_SEGMENT->segment_num;
-    ssize_t otherpgoff = pgoff1 + NB_PAGES * (1 - STM_SEGMENT->segment_num);
+    /* copy the content from the shared (segment 0) source */
+    pagecopy(new_page, stm_object_pages + pagenum * 4096UL);
 
-    void *localpg = stm_object_pages + localpgoff * 4096UL;
-    void *otherpg = stm_object_pages + otherpgoff * 4096UL;
-
-    memset(flag_page_private + pagenum, REMAPPING_PAGE, count);
-    d_remap_file_pages(localpg, count * 4096, pgoff2);
-    uintptr_t i;
-    for (i = 0; i < count; i++) {
-        pagecopy(localpg + 4096 * i, otherpg + 4096 * i);
-    }
-    write_fence();
-    memset(flag_page_private + pagenum, PRIVATE_PAGE, count);
-    increment_total_allocated(4096 * count);
-}
-
-static void _pages_privatize(uintptr_t pagenum, uintptr_t count)
-{
-    mutex_pages_lock();
-
-    uintptr_t page_start_range = pagenum;
-    uintptr_t pagestop = pagenum + count;
-
-    for (; pagenum < pagestop; pagenum++) {
-        uint8_t prev = flag_page_private[pagenum];
-        if (prev == PRIVATE_PAGE) {
-            if (pagenum > page_start_range) {
-                privatize_range(page_start_range,
-                                pagenum - page_start_range);
-            }
-            page_start_range = pagenum + 1;
-        }
-        else {
-            assert(prev == SHARED_PAGE);
-        }
-    }
-
-    if (pagenum > page_start_range) {
-        privatize_range(page_start_range,
-                        pagenum - page_start_range);
-    }
-
-    mutex_pages_unlock();
+    /* update private_page_mapping */
+    tree_insert(STM_PSEGMENT->private_page_mapping, pagenum, free_page_num);
 }
 
 #if 0

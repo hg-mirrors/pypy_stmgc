@@ -29,6 +29,8 @@ void _stm_write_slowpath(object_t *obj)
        safepoints that may be issued in write_write_contention_management(). */
     stm_read(obj);
 
+    /* XXX XXX XXX make the logic of write-locking objects optional! */
+
     /* claim the write-lock for this object.  In case we're running the
        same transaction since a long while, the object can be already in
        'modified_old_objects' (but, because it had GCFLAG_WRITE_BARRIER,
@@ -59,12 +61,12 @@ void _stm_write_slowpath(object_t *obj)
            the common case. Otherwise, we need to compute it based on
            its location and size. */
         if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0) {
-            pages_privatize(first_page, 1);
+            page_privatize(first_page);
         }
         else {
             char *realobj;
             size_t obj_size;
-            uintptr_t end_page;
+            uintptr_t i, end_page;
 
             /* get the size of the object */
             realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
@@ -73,7 +75,9 @@ void _stm_write_slowpath(object_t *obj)
             /* that's the page *following* the last page with the object */
             end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
 
-            pages_privatize(first_page, end_page - first_page);
+            for (i = first_page; i < end_page; i++) {
+                page_privatize(i);
+            }
         }
     }
     else if (write_locks[lock_idx] == lock_num) {
@@ -108,7 +112,7 @@ void _stm_write_slowpath(object_t *obj)
     /* for sanity, check that all other segment copies of this object
        still have the flag */
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i <= NB_SEGMENTS; i++) {
         if (i != STM_SEGMENT->segment_num)
             assert(((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
                    ->stm_flags & GCFLAG_WRITE_BARRIER);
@@ -193,43 +197,51 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 
 /************************************************************/
 
-#if NB_SEGMENTS != 2
-# error "The logic in the functions below only works with two segments"
-#endif
 
 static bool detect_write_read_conflicts(void)
 {
-    long remote_num = 1 - STM_SEGMENT->segment_num;
-    char *remote_base = get_segment_base(remote_num);
-    uint8_t remote_version = get_segment(remote_num)->transaction_read_version;
+    /* Detect conflicts of the form: we want to commit a write to an object,
+       but the same object was also read in a different thread.
+    */
+    long i;
+    for (i = 1; i <= NB_SEGMENTS; i++) {
 
-    if (get_priv_segment(remote_num)->transaction_state == TS_NONE)
-        return false;    /* no need to check */
+        if (i == STM_SEGMENT->segment_num)
+            continue;
 
-    if (is_aborting_now(remote_num))
-        return false;    /* no need to check: is pending immediate abort */
+        if (get_priv_segment(i)->transaction_state == TS_NONE)
+            continue;    /* no need to check */
 
-    LIST_FOREACH_R(
-        STM_PSEGMENT->modified_old_objects,
-        object_t * /*item*/,
-        ({
-            if (was_read_remote(remote_base, item, remote_version)) {
-                /* A write-read conflict! */
-                write_read_contention_management(remote_num);
+        if (is_aborting_now(i))
+            continue;    /* no need to check: is pending immediate abort */
 
-                /* If we reach this point, we didn't abort, but maybe we
-                   had to wait for the other thread to commit.  If we
-                   did, then we have to restart committing from our call
-                   to synchronize_all_threads(). */
-                return true;
-            }
-        }));
+        char *remote_base = get_segment_base(i);
+        uint8_t remote_version = get_segment(i)->transaction_read_version;
+
+        LIST_FOREACH_R(
+            STM_PSEGMENT->modified_old_objects,
+            object_t * /*item*/,
+            ({
+                if (was_read_remote(remote_base, item, remote_version)) {
+                    /* A write-read conflict! */
+                    write_read_contention_management(i);
+
+                    /* If we reach this point, we didn't abort, but maybe we
+                       had to wait for the other thread to commit.  If we
+                       did, then we have to restart committing from our call
+                       to synchronize_all_threads(). */
+                    return true;
+                }
+            }));
+    }
 
     return false;
 }
 
 static void synchronize_overflow_object_now(object_t *obj)
 {
+    abort();//XXX
+#if 0
     assert(!_is_young(obj));
     assert((obj->stm_flags & GCFLAG_SMALL_UNIFORM) == 0);
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
@@ -264,6 +276,7 @@ static void synchronize_overflow_object_now(object_t *obj)
             long i;
             char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
             for (i = 0; i < NB_SEGMENTS; i++) {
+                abort();//XXX
                 if (i != STM_SEGMENT->segment_num) {
                     char *dst = REAL_ADDRESS(get_segment_base(i), start);
                     memcpy(dst, src, copy_size);
@@ -273,6 +286,68 @@ static void synchronize_overflow_object_now(object_t *obj)
 
         start = (start + 4096) & ~4095;
     } while (first_page++ < last_page);
+#endif
+}
+
+static void synchronize_object_now(object_t *obj)
+{
+    /* Assume that the version of 'obj' in the shared pages is up-to-date.
+       Assume also that the version in our own private page is up-to-date.
+       This function updates the private page of other threads.
+    */
+    assert(!_is_young(obj));
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+
+    uintptr_t start = (uintptr_t)obj;
+    uintptr_t first_page = start / 4096UL;
+    long i;
+
+    if (obj->stm_flags & GCFLAG_SMALL_UNIFORM) {
+        abort();//XXX WRITE THE FAST CASE
+    }
+    else {
+        char *realobj = REAL_ADDRESS(stm_object_pages, obj);
+        ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
+        assert(obj_size >= 16);
+        uintptr_t end = start + obj_size;
+        uintptr_t last_page = (end - 1) / 4096UL;
+
+        for (; first_page <= last_page; first_page++) {
+
+            for (i = 1; i < NB_SEGMENTS; i++) {
+
+                if (i == STM_SEGMENT->segment_num)
+                    continue;
+
+                if (!is_private_page(i, first_page))
+                    continue;
+
+                /* The page is a PRIVATE_PAGE.  We need to diffuse this
+                   fragment of object from the shared page to this private
+                   page. */
+
+                uintptr_t copy_size;
+                if (first_page == last_page) {
+                    /* this is the final fragment */
+                    copy_size = end - start;
+                }
+                else {
+                    /* this is a non-final fragment, going up to the
+                       page's end */
+                    copy_size = 4096 - (start & 4095);
+                }
+
+                /* double-check that the result fits in one page */
+                assert(copy_size > 0);
+                assert(copy_size + (start & 4095) <= 4096);
+
+                char *src = REAL_ADDRESS(stm_object_pages, start);
+                char *dst = REAL_ADDRESS(get_segment_base(i), start);
+                memcpy(dst, src, copy_size);
+            }
+            start = (start + 4096) & ~4095;
+        }
+    }
 }
 
 static void push_overflow_objects_from_privatized_pages(void)
@@ -286,22 +361,12 @@ static void push_overflow_objects_from_privatized_pages(void)
 
 static void push_modified_to_other_segments(void)
 {
-    long remote_num = 1 - STM_SEGMENT->segment_num;
     char *local_base = STM_SEGMENT->segment_base;
-    char *remote_base = get_segment_base(remote_num);
-    bool remote_active =
-        (get_priv_segment(remote_num)->transaction_state != TS_NONE &&
-         get_segment(remote_num)->nursery_end != NSE_SIGABORT);
 
     LIST_FOREACH_R(
         STM_PSEGMENT->modified_old_objects,
         object_t * /*item*/,
         ({
-            if (remote_active) {
-                assert(!was_read_remote(remote_base, item,
-                    get_segment(remote_num)->transaction_read_version));
-            }
-
             /* clear the write-lock (note that this runs with all other
                threads paused, so no need to be careful about ordering) */
             uintptr_t lock_idx = (((uintptr_t)item) >> 4) - WRITELOCK_START;
@@ -313,11 +378,14 @@ static void push_modified_to_other_segments(void)
                minor_collection() */
             assert((item->stm_flags & GCFLAG_WRITE_BARRIER) != 0);
 
-            /* copy the modified object to the other segment */
+            /* copy the modified object to the shared copy */
             char *src = REAL_ADDRESS(local_base, item);
-            char *dst = REAL_ADDRESS(remote_base, item);
+            char *dst = REAL_ADDRESS(stm_object_pages, item);
             ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
             memcpy(dst, src, size);
+
+            /* copy the object to the other private pages as needed */
+            synchronize_object_now(item);
         }));
 
     list_clear(STM_PSEGMENT->modified_old_objects);

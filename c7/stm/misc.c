@@ -43,7 +43,7 @@ bool _stm_was_written(object_t *obj)
 #ifdef STM_TESTS
 uint8_t _stm_get_page_flag(uintptr_t index)
 {
-    return flag_page_private[index];
+    abort();//XXX
 }
 
 long _stm_count_modified_old_objects(void)

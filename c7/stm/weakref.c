@@ -29,6 +29,8 @@ object_t *stm_setup_prebuilt_weakref(object_t *obj)
 
 static void _set_weakref_in_all_segments(object_t *weakref, object_t *value)
 {
+    abort();//XXX
+#if 0
     ssize_t size = 16;
 
     stm_char *point_to_loc = (stm_char*)WEAKREF_PTR(weakref, size);
@@ -44,6 +46,7 @@ static void _set_weakref_in_all_segments(object_t *weakref, object_t *value)
     else {
         *WEAKREF_PTR(weakref, size) = value;
     }
+#endif
 }
 
 /***** Minor collection *****/
