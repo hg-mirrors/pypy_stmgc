@@ -25,6 +25,7 @@ static void setup_pages(void)
 static void teardown_pages(void)
 {
     memset(&pages_ctl, 0, sizeof(pages_ctl));
+    memset(pages_privatized, 0, sizeof(pages_privatized));
 }
 
 static void mutex_pages_lock(void)
@@ -111,41 +112,30 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
 
 static void page_privatize(uintptr_t pagenum)
 {
-    wlog_t *item;
-    TREE_FIND(*STM_PSEGMENT->private_page_mapping, pagenum, item,
-              goto not_found);
+    if (is_private_page(STM_SEGMENT->segment_num, pagenum)) {
+        /* the page is already privatized */
+        return;
+    }
 
-    /* the page is already privatized */
-    return;
-
- not_found:;
-    /* lock, to prevent concurrent threads from looking up my own
-       'private_page_mapping' in parallel */
+    /* lock, to prevent concurrent threads from looking up this thread's
+       'pages_privatized' bits in parallel */
     mutex_pages_lock();
 
-    /* look up the next free page */
-    uintptr_t free_page_num = STM_PSEGMENT->private_free_page_num;
-
-    /* "mount" it in the segment
-       (XXX later we should again attempt to group together many calls to
-       d_remap_file_pages() in succession) */
-    char *new_page = STM_SEGMENT->segment_base + pagenum * 4096UL;
-    d_remap_file_pages(new_page, 4096,
-                       NB_PAGES * STM_SEGMENT->segment_num + free_page_num);
+    /* "unmaps" the page to make the address space location correspond
+       again to its underlying file offset (XXX later we should again
+       attempt to group together many calls to d_remap_file_pages() in
+       succession) */
+    uintptr_t pagenum_in_file = NB_PAGES * STM_SEGMENT->segment_num + pagenum;
+    char *new_page = stm_object_pages + pagenum_in_file * 4096UL;
+    d_remap_file_pages(new_page, 4096, pagenum_in_file);
     increment_total_allocated(4096);
-
-    /* update private_free_page_num */
-    uintptr_t future_page = *(uintptr_t *)new_page;
-    if (future_page == 0) {
-        future_page = free_page_num + 1;
-    }
-    STM_PSEGMENT->private_free_page_num = future_page;
 
     /* copy the content from the shared (segment 0) source */
     pagecopy(new_page, stm_object_pages + pagenum * 4096UL);
 
-    /* update private_page_mapping */
-    tree_insert(STM_PSEGMENT->private_page_mapping, pagenum, free_page_num);
+    /* add this thread's 'pages_privatized' bit */
+    uint64_t bitmask = 1UL << (STM_SEGMENT->segment_num - 1);
+    pages_privatized[pagenum - PAGE_FLAG_START].by_segment |= bitmask;
 
     mutex_pages_unlock();
 }

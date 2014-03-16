@@ -58,8 +58,6 @@ void stm_setup(void)
         pr->write_lock_num = i;
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
-        pr->private_page_mapping = tree_create();
-        pr->private_free_page_num = END_NURSERY_PAGE;
         pr->objects_pointing_to_nursery = NULL;
         pr->large_overflow_objects = NULL;
         pr->modified_old_objects = list_create();
