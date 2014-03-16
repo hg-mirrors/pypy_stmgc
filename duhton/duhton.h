@@ -13,8 +13,6 @@
 #endif
 
 
-#define DEFAULT_NUM_THREADS 2
-
 extern __thread stm_thread_local_t stm_thread_local;
 
 struct DuObject_s {
