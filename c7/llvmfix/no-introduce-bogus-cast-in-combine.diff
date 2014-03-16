@@ -1,6 +1,6 @@
 Index: lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp
 ===================================================================
---- lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp	(revision 203791)
+--- lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp	(revision 201645)
 +++ lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp	(working copy)
 @@ -299,6 +299,17 @@
  

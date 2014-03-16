@@ -1,8 +1,8 @@
 Index: lib/CodeGen/AsmPrinter/AsmPrinter.cpp
 ===================================================================
---- lib/CodeGen/AsmPrinter/AsmPrinter.cpp       (revision 203791)
-+++ lib/CodeGen/AsmPrinter/AsmPrinter.cpp       (working copy)
-@@ -1529,6 +1529,8 @@
+--- lib/CodeGen/AsmPrinter/AsmPrinter.cpp	(revision 201645)
++++ lib/CodeGen/AsmPrinter/AsmPrinter.cpp	(working copy)
+@@ -1617,6 +1617,8 @@
                                     Ctx);
    }
  
