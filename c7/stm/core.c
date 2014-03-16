@@ -112,8 +112,8 @@ void _stm_write_slowpath(object_t *obj)
     /* check that so far all copies of the object have the flag
        (a bit messy because it's possible that we read a page in
        the middle of privatization by another thread) */
-#ifndef NDEBUG
     long i;
+#ifndef NDEBUG
     long busy_loop = 1000000000;
     for (i = 0; i <= NB_SEGMENTS; i++) {
         while (!(((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
@@ -263,7 +263,10 @@ static void synchronize_object_now(object_t *obj, bool assume_local_private)
     /* Copy around the version of 'obj' that lives in our own segment.
        It is first copied into the shared pages, and then into other
        segments' own private pages.
+
+       This must be called with the mutex_pages_lock!
     */
+    assert(_has_mutex_pages());
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
@@ -417,10 +420,12 @@ void stm_commit_transaction(void)
         major_collection_now_at_safe_point();
 
     /* synchronize overflow objects living in privatized pages */
+    mutex_pages_lock();
     push_overflow_objects_from_privatized_pages();
 
     /* synchronize modified old objects to other threads */
     push_modified_to_other_segments();
+    mutex_pages_unlock();
 
     /* update 'overflow_number' if needed */
     if (STM_PSEGMENT->overflow_number_has_been_used) {

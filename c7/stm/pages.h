@@ -27,6 +27,7 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
 
 static void mutex_pages_lock(void);
 static void mutex_pages_unlock(void);
+static bool _has_mutex_pages(void) __attribute__((unused));
 static uint64_t increment_total_allocated(ssize_t add_or_remove);
 static bool is_major_collection_requested(void);
 static void force_major_collection_request(void);

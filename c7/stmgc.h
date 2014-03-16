@@ -107,6 +107,8 @@ long _stm_count_objects_pointing_to_nursery(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
 uint64_t _stm_total_allocated(void);
+void _stm_mutex_pages_lock(void);
+void _stm_mutex_pages_unlock(void);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01

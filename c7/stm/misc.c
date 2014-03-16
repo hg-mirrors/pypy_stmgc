@@ -81,4 +81,14 @@ uint64_t _stm_total_allocated(void)
     mutex_pages_unlock();
     return result;
 }
+
+void _stm_mutex_pages_lock(void)
+{
+    mutex_pages_lock();
+}
+
+void _stm_mutex_pages_unlock(void)
+{
+    mutex_pages_unlock();
+}
 #endif

@@ -39,7 +39,6 @@ static void mutex_pages_unlock(void)
     __sync_lock_release(&pages_ctl.mutex_pages);
 }
 
-__attribute__((unused))
 static bool _has_mutex_pages(void)
 {
     return pages_ctl.mutex_pages != 0;
@@ -47,6 +46,7 @@ static bool _has_mutex_pages(void)
 
 static uint64_t increment_total_allocated(ssize_t add_or_remove)
 {
+    assert(_has_mutex_pages());
     pages_ctl.total_allocated += add_or_remove;
 
     if (pages_ctl.total_allocated >= pages_ctl.total_allocated_bound)
@@ -119,6 +119,10 @@ static void page_privatize(uintptr_t pagenum)
     return;
 
  not_found:;
+    /* lock, to prevent concurrent threads from looking up my own
+       'private_page_mapping' in parallel */
+    mutex_pages_lock();
+
     /* look up the next free page */
     uintptr_t free_page_num = STM_PSEGMENT->private_free_page_num;
 
@@ -142,6 +146,8 @@ static void page_privatize(uintptr_t pagenum)
 
     /* update private_page_mapping */
     tree_insert(STM_PSEGMENT->private_page_mapping, pagenum, free_page_num);
+
+    mutex_pages_unlock();
 }
 
 #if 0
