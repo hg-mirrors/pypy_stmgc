@@ -385,7 +385,7 @@ void setup_globals()
     for (i = 0; i < PREBUILT_ROOTS; i++) {
         void* new_templ = malloc(sizeof(struct node_s));
         memcpy(new_templ, &prebuilt_template, sizeof(struct node_s));
-        prebuilt_roots[i] = stm_setup_prebuilt((objptr_t)new_templ);
+        prebuilt_roots[i] = stm_setup_prebuilt((objptr_t)(long)new_templ);
 
         if (i % 2 == 0) {
             int hash = i + 5;
