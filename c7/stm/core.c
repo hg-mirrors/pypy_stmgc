@@ -13,6 +13,7 @@ void _stm_write_slowpath(object_t *obj)
 {
     assert(_seems_to_be_running_transaction());
     assert(!_is_young(obj));
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
     /* is this an object from the same transaction, outside the nursery? */
     if ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) ==
@@ -104,15 +105,24 @@ void _stm_write_slowpath(object_t *obj)
         LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
     }
 
+    /* check that we really have a private page */
+    assert(_stm_get_private_page(((uintptr_t)obj) / 4096));
+
+    /* check that so far all copies of the object have the flag */
+    long i;
+    for (i = 0; i <= NB_SEGMENTS; i++) {
+        assert(((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
+               ->stm_flags & GCFLAG_WRITE_BARRIER);
+    }
+
     /* add the write-barrier-already-called flag ONLY if we succeeded in
        getting the write-lock */
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
 
     /* for sanity, check that all other segment copies of this object
-       still have the flag */
-    long i;
-    for (i = 1; i <= NB_SEGMENTS; i++) {
+       still have the flag (including the shared copy) */
+    for (i = 0; i <= NB_SEGMENTS; i++) {
         if (i != STM_SEGMENT->segment_num)
             assert(((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
                    ->stm_flags & GCFLAG_WRITE_BARRIER);
@@ -281,30 +291,36 @@ static void synchronize_object_now(object_t *obj, bool assume_local_private)
             assert(IMPLY(assume_local_private,
                          is_private_page(myself, first_page)));
 
+            char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
+            char *dst = REAL_ADDRESS(stm_object_pages, start);
             if (assume_local_private || is_private_page(myself, first_page)) {
-                char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
-                char *dst = REAL_ADDRESS(stm_object_pages, start);
                 if (copy_size == 4096)
                     pagecopy(dst, src);
                 else
                     memcpy(dst, src, copy_size);
             }
+            else {
+                assert(memcmp(dst, src, copy_size) == 0);  /* same page */
+            }
 
-            for (i = 1; i < NB_SEGMENTS; i++) {
+            for (i = 1; i <= NB_SEGMENTS; i++) {
                 if (i == myself)
                     continue;
-                if (!is_private_page(i, first_page))
-                    continue;
 
-                /* The page is a private page.  We need to diffuse this
-                   fragment of object from the shared page to this private
-                   page. */
-                char *src = REAL_ADDRESS(stm_object_pages, start);
-                char *dst = REAL_ADDRESS(get_segment_base(i), start);
-                if (copy_size == 4096)
-                    pagecopy(dst, src);
-                else
-                    memcpy(dst, src, copy_size);
+                src = REAL_ADDRESS(stm_object_pages, start);
+                dst = REAL_ADDRESS(get_segment_base(i), start);
+                if (is_private_page(i, first_page)) {
+                    /* The page is a private page.  We need to diffuse this
+                       fragment of object from the shared page to this private
+                       page. */
+                    if (copy_size == 4096)
+                        pagecopy(dst, src);
+                    else
+                        memcpy(dst, src, copy_size);
+                }
+                else {
+                    assert(memcmp(dst, src, copy_size) == 0);  /* same page */
+                }
             }
 
             start = (start + 4096) & ~4095;
@@ -338,7 +354,8 @@ static void push_modified_to_other_segments(void)
                minor_collection() */
             assert((item->stm_flags & GCFLAG_WRITE_BARRIER) != 0);
 
-            /* copy the object to the other private pages as needed */
+            /* copy the object to the shared page, and to the other
+               private pages as needed */
             synchronize_object_now(item, true);
         }));
 
