@@ -272,7 +272,7 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
     assert(_has_mutex_pages());
     assert(!_is_young(obj));
 
-    char *segment_base = get_segment(source_segment_num)->segment_base;
+    char *segment_base = get_segment_base(source_segment_num);
     uintptr_t start = (uintptr_t)obj;
     uintptr_t first_page = start / 4096UL;
     struct object_s *realobj = (struct object_s *)

@@ -149,7 +149,7 @@ static void page_reshare(uintptr_t pagenum)
     for (j = 0; j < NB_SEGMENTS; j++) {
         if (ps.by_segment & (1 << j)) {
             /* Page 'pagenum' is private in segment 'j + 1'. Reshare */
-            char *segment_base = stm_object_pages + NB_PAGES * 4096UL * (j+1);
+            char *segment_base = get_segment_base(j + 1);
 
             madvise(segment_base + pagenum * 4096UL, 4096, MADV_DONTNEED);
             d_remap_file_pages(segment_base + pagenum * 4096UL,
