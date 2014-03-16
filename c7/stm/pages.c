@@ -122,7 +122,9 @@ static void page_privatize(uintptr_t pagenum)
     /* look up the next free page */
     uintptr_t free_page_num = STM_PSEGMENT->private_free_page_num;
 
-    /* "mount" it in the segment */
+    /* "mount" it in the segment
+       (XXX later we should again attempt to group together many calls to
+       d_remap_file_pages() in succession) */
     char *new_page = STM_SEGMENT->segment_base + pagenum * 4096UL;
     d_remap_file_pages(new_page, 4096,
                        NB_PAGES * STM_SEGMENT->segment_num + free_page_num);
