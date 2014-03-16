@@ -279,7 +279,7 @@ class TestMajorCollection(BaseTest):
 
         stm_write(lp0) # privatize page with weakref in it too
 
-        assert stm_get_page_flag(stm_get_obj_pages(lp1)[0]) == PRIVATE_PAGE
+        assert stm_get_private_page(stm_get_obj_pages(lp1)[0]) != 0
         assert stm_get_weakref(lp1) == lp0
 
         self.commit_transaction()
