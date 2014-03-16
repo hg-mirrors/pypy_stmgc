@@ -224,4 +224,5 @@ static inline void _duck(void) {
     asm("/* workaround for llvm bug */");
 }
 
-static void synchronize_object_now(object_t *obj, bool assume_local_private);
+static void copy_object_to_shared(object_t *obj, int source_segment_num);
+static void synchronize_object_now(object_t *obj);
