@@ -35,8 +35,9 @@ struct page_shared_s {
 
 static struct page_shared_s pages_privatized[PAGE_FLAG_END - PAGE_FLAG_START];
 
-static void page_privatize(uintptr_t pagenum);
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
+static void page_privatize(uintptr_t pagenum);
+static void page_reshare(long segment_num, uintptr_t pagenum);
 
 static void mutex_pages_lock(void);
 static void mutex_pages_unlock(void);

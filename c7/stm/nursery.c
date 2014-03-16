@@ -200,7 +200,7 @@ static void collect_oldrefs_to_nursery(void)
             */
             if (STM_PSEGMENT->minor_collect_will_commit_now) {
                 mutex_pages_lock();
-                synchronize_object_now(obj, false);
+                synchronize_object_now(obj);
                 mutex_pages_unlock();
             }
             else

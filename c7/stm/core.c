@@ -263,7 +263,62 @@ static bool detect_write_read_conflicts(void)
     return false;
 }
 
-static void synchronize_object_now(object_t *obj, bool assume_local_private)
+static void copy_object_to_shared(object_t *obj, int source_segment_num)
+{
+    /* Only used by major GC.  XXX There is a lot of code duplication
+       with synchronize_object_now() but I don't completely see how to
+       improve...
+    */
+    assert(_has_mutex_pages());
+    assert(!_is_young(obj));
+
+    uintptr_t start = (uintptr_t)obj;
+    uintptr_t first_page = start / 4096UL;
+    struct object_s *realobj = (struct object_s *)
+        REAL_ADDRESS(get_segment(source_segment_num)->segment_base, obj);
+
+    if (realobj->stm_flags & GCFLAG_SMALL_UNIFORM) {
+        abort();//XXX WRITE THE FAST CASE
+    }
+    else {
+        ssize_t obj_size = stmcb_size_rounded_up(realobj);
+        assert(obj_size >= 16);
+        uintptr_t end = start + obj_size;
+        uintptr_t last_page = (end - 1) / 4096UL;
+
+        for (; first_page <= last_page; first_page++) {
+
+            /* Copy the object into the shared page, if needed */
+            if (is_private_page(source_segment_num, first_page)) {
+
+                uintptr_t copy_size;
+                if (first_page == last_page) {
+                    /* this is the final fragment */
+                    copy_size = end - start;
+                }
+                else {
+                    /* this is a non-final fragment, going up to the
+                       page's end */
+                    copy_size = 4096 - (start & 4095);
+                }
+                /* double-check that the result fits in one page */
+                assert(copy_size > 0);
+                assert(copy_size + (start & 4095) <= 4096);
+
+                char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
+                char *dst = REAL_ADDRESS(stm_object_pages, start);
+                if (copy_size == 4096)
+                    pagecopy(dst, src);
+                else
+                    memcpy(dst, src, copy_size);
+            }
+
+            start = (start + 4096) & ~4095;
+        }
+    }
+}
+
+static void synchronize_object_now(object_t *obj)
 {
     /* Copy around the version of 'obj' that lives in our own segment.
        It is first copied into the shared pages, and then into other
@@ -306,12 +361,9 @@ static void synchronize_object_now(object_t *obj, bool assume_local_private)
             assert(copy_size + (start & 4095) <= 4096);
 
             /* First copy the object into the shared page, if needed */
-            assert(IMPLY(assume_local_private,
-                         is_private_page(myself, first_page)));
-
             char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
             char *dst = REAL_ADDRESS(stm_object_pages, start);
-            if (assume_local_private || is_private_page(myself, first_page)) {
+            if (is_private_page(myself, first_page)) {
                 if (copy_size == 4096)
                     pagecopy(dst, src);
                 else
@@ -352,7 +404,7 @@ static void push_overflow_objects_from_privatized_pages(void)
         return;
 
     LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
-                   synchronize_object_now(item, false));
+                   synchronize_object_now(item));
 }
 
 static void push_modified_to_other_segments(void)
@@ -374,7 +426,7 @@ static void push_modified_to_other_segments(void)
 
             /* copy the object to the shared page, and to the other
                private pages as needed */
-            synchronize_object_now(item, true);
+            synchronize_object_now(item);
         }));
 
     list_clear(STM_PSEGMENT->modified_old_objects);

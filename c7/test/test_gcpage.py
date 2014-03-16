@@ -202,7 +202,6 @@ class TestGCPage(BaseTest):
         #
         self.start_transaction()
         stm_major_collect()
-        py.test.skip("XXX implement me")
         assert lib._stm_total_allocated() == 5000 + LMO    # shared again
 
     def test_reshare_if_no_longer_modified_1(self):

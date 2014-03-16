@@ -140,6 +140,33 @@ static void page_privatize(uintptr_t pagenum)
     mutex_pages_unlock();
 }
 
+static void page_reshare(long segment_num, uintptr_t pagenum)
+{
+    char *segment_base = get_segment(segment_num)->segment_base;
+
+#if 0   /* disabled: the private page that we are removing is
+           typically missing the inter-object information from
+           largemalloc.c */
+    long i, errors=0;
+    uint64_t *p = (uint64_t *)(stm_object_pages + pagenum * 4096UL);
+    uint64_t *q = (uint64_t *)(segment_base     + pagenum * 4096UL);
+    for (i = 0; i < 4096 / 8; i++) {
+        if (p[i] != q[i]) {
+            fprintf(stderr, "%p: 0x%lx\t\t%p: 0x%lx\n",
+                    &p[i], p[i], &q[i], q[i]);
+            errors++;
+        }
+    }
+    assert(!errors);
+#endif
+
+    madvise(segment_base + pagenum * 4096UL, 4096, MADV_DONTNEED);
+    d_remap_file_pages(segment_base + pagenum * 4096UL,
+                       4096, pagenum);
+    increment_total_allocated(-4096);
+}
+
+
 #if 0
 static bool is_fully_in_shared_pages(object_t *obj)
 {
