@@ -555,8 +555,11 @@ static void abort_with_mutex(void)
     /* invoke the callbacks */
     invoke_and_clear_callbacks_on_abort();
 
-    if (STM_SEGMENT->nursery_end == NSE_SIGABORT)
-        STM_SEGMENT->nursery_end = NURSERY_END;   /* done aborting */
+    if (STM_SEGMENT->nursery_end == NSE_SIGABORT) {
+        /* done aborting */
+        STM_SEGMENT->nursery_end = pause_signalled ? NSE_SIGPAUSE
+                                                   : NURSERY_END;
+    }
 
     _finish_transaction();
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
