@@ -294,6 +294,8 @@ class GlobalState(object):
             if confl_set:
                 contention_management(trs, other_trs,
                                       objs_in_conflict=confl_set)
+                if trs.check_must_abort():
+                    break
 
         if trs.check_must_abort():
             self.ex.do('# write-read conflict: %s' %
