@@ -109,14 +109,23 @@ void _stm_write_slowpath(object_t *obj)
     assert(tree_contains(STM_PSEGMENT->private_page_mapping,
                          ((uintptr_t)obj) / 4096));
 
-    /* check that so far all copies of the object have the flag */
+    /* check that so far all copies of the object have the flag
+       (a bit messy because it's possible that we read a page in
+       the middle of privatization by another thread) */
+#ifndef NDEBUG
     long i;
+    long busy_loop = 1000000000;
     for (i = 0; i <= NB_SEGMENTS; i++) {
-        assert(((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
-               ->stm_flags & GCFLAG_WRITE_BARRIER);
+        while (!(((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
+                 ->stm_flags & GCFLAG_WRITE_BARRIER)) {
+            spin_loop();
+            if (!--busy_loop)
+                stm_fatalerror("missing GCFLAG_WRITE_BARRIER");
+        }
     }
+#endif
 
-    /* add the write-barrier-already-called flag ONLY if we succeeded in
+    /* remove GCFLAG_WRITE_BARRIER, but only if we succeeded in
        getting the write-lock */
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
