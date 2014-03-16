@@ -525,8 +525,7 @@ static void major_collection_now_at_safe_point(void)
     LIST_FREE(mark_objects_to_trace);
 
     /* weakrefs: */
-    if (0)//XXX
-        stm_visit_old_weakrefs();
+    stm_visit_old_weakrefs();
 
     /* cleanup */
     clean_up_segment_lists();
