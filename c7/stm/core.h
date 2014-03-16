@@ -75,13 +75,6 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
 
-    /* Dict whose keys are shared page numbers, and whose values are
-       the corresponding private page number. */
-    struct tree_s *private_page_mapping;
-
-    /* Head of a free list of private pages. */
-    uintptr_t private_free_page_num;
-
     /* List of old objects (older than the current transaction) that the
        current transaction attempts to modify.  This is used to track
        the STM status: they are old objects that where written to and

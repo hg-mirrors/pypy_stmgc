@@ -43,9 +43,8 @@ bool _stm_was_written(object_t *obj)
 #ifdef STM_TESTS
 uintptr_t _stm_get_private_page(uintptr_t pagenum)
 {
-    wlog_t *item;
-    TREE_FIND(*STM_PSEGMENT->private_page_mapping, pagenum, item, return 0);
-    return item->val;
+    /* xxx returns 0 or 1 now */
+    return is_private_page(STM_SEGMENT->segment_num, pagenum);
 }
 
 long _stm_count_modified_old_objects(void)

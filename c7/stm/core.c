@@ -8,6 +8,28 @@ static void teardown_core(void)
     memset(write_locks, 0, sizeof(write_locks));
 }
 
+static void check_flag_write_barrier(object_t *obj)
+{
+    /* check that all copies of the object, apart from mine, have the
+       GCFLAG_WRITE_BARRIER.  (a bit messy because it's possible that we
+       read a page in the middle of privatization by another thread)
+    */
+#ifndef NDEBUG
+    long i;
+    struct object_s *o1;
+    for (i = 0; i <= NB_SEGMENTS; i++) {
+        if (i == STM_SEGMENT->segment_num)
+            continue;
+        o1 = (struct object_s *)REAL_ADDRESS(get_segment_base(i), obj);
+        if (!(o1->stm_flags & GCFLAG_WRITE_BARRIER)) {
+            mutex_pages_lock();  /* try again... */
+            if (!(o1->stm_flags & GCFLAG_WRITE_BARRIER))
+                stm_fatalerror("missing GCFLAG_WRITE_BARRIER");
+            mutex_pages_unlock();
+        }
+    }
+#endif
+}
 
 void _stm_write_slowpath(object_t *obj)
 {
@@ -106,37 +128,20 @@ void _stm_write_slowpath(object_t *obj)
     }
 
     /* check that we really have a private page */
-    assert(tree_contains(STM_PSEGMENT->private_page_mapping,
-                         ((uintptr_t)obj) / 4096));
+    assert(is_private_page(STM_SEGMENT->segment_num,
+                           ((uintptr_t)obj) / 4096));
 
-    /* check that so far all copies of the object have the flag
-       (a bit messy because it's possible that we read a page in
-       the middle of privatization by another thread) */
-    long i;
-#ifndef NDEBUG
-    long busy_loop = 1000000000;
-    for (i = 0; i <= NB_SEGMENTS; i++) {
-        while (!(((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
-                 ->stm_flags & GCFLAG_WRITE_BARRIER)) {
-            spin_loop();
-            if (!--busy_loop)
-                stm_fatalerror("missing GCFLAG_WRITE_BARRIER");
-        }
-    }
-#endif
+    /* check that so far all copies of the object have the flag */
+    check_flag_write_barrier(obj);
 
     /* remove GCFLAG_WRITE_BARRIER, but only if we succeeded in
        getting the write-lock */
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
 
-    /* for sanity, check that all other segment copies of this object
-       still have the flag (including the shared copy) */
-    for (i = 0; i <= NB_SEGMENTS; i++) {
-        if (i != STM_SEGMENT->segment_num)
-            assert(((struct object_s *)REAL_ADDRESS(get_segment_base(i), obj))
-                   ->stm_flags & GCFLAG_WRITE_BARRIER);
-    }
+    /* for sanity, check again that all other segment copies of this
+       object still have the flag (so privatization worked) */
+    check_flag_write_barrier(obj);
 }
 
 static void reset_transaction_read_version(void)
