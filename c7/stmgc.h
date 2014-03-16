@@ -87,7 +87,7 @@ char *_stm_real_address(object_t *o);
 #include <stdbool.h>
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
-uint8_t _stm_get_page_flag(uintptr_t index);
+uintptr_t _stm_get_private_page(uintptr_t pagenum);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 char *_stm_get_segment_base(long index);
 void _stm_test_switch(stm_thread_local_t *tl);
