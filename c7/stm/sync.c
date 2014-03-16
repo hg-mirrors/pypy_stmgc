@@ -293,7 +293,12 @@ static void remove_requests_for_safe_point(void)
 
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
-        assert(get_segment(i)->nursery_end != NURSERY_END);
+        /* note: the only possible way to concurrently change the value
+           of 'nursery_end' is with an abort done while we wait for
+           C_AT_SAFE_POINT.  It's fine because the next transaction
+           should not start. */
+        assert(get_segment(i)->nursery_end != NURSERY_END ||
+               get_priv_segment(i)->transaction_state == TS_NONE);
         if (get_segment(i)->nursery_end == NSE_SIGPAUSE)
             get_segment(i)->nursery_end = NURSERY_END;
     }
