@@ -106,7 +106,8 @@ void _stm_write_slowpath(object_t *obj)
     }
 
     /* check that we really have a private page */
-    assert(_stm_get_private_page(((uintptr_t)obj) / 4096));
+    assert(tree_contains(STM_PSEGMENT->private_page_mapping,
+                         ((uintptr_t)obj) / 4096));
 
     /* check that so far all copies of the object have the flag */
     long i;
