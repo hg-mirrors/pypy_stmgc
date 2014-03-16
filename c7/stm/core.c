@@ -272,10 +272,11 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
     assert(_has_mutex_pages());
     assert(!_is_young(obj));
 
+    char *segment_base = get_segment(source_segment_num)->segment_base;
     uintptr_t start = (uintptr_t)obj;
     uintptr_t first_page = start / 4096UL;
     struct object_s *realobj = (struct object_s *)
-        REAL_ADDRESS(get_segment(source_segment_num)->segment_base, obj);
+        REAL_ADDRESS(segment_base, obj);
 
     if (realobj->stm_flags & GCFLAG_SMALL_UNIFORM) {
         abort();//XXX WRITE THE FAST CASE
@@ -305,7 +306,7 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
                 assert(copy_size > 0);
                 assert(copy_size + (start & 4095) <= 4096);
 
-                char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
+                char *src = REAL_ADDRESS(segment_base, start);
                 char *dst = REAL_ADDRESS(stm_object_pages, start);
                 if (copy_size == 4096)
                     pagecopy(dst, src);
