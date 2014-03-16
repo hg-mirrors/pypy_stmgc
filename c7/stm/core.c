@@ -518,19 +518,17 @@ void stm_abort_transaction(void)
 static void
 reset_modified_from_other_segments(int segment_num)
 {
-    /* pull the right versions from other threads in order
+    /* pull the right versions from segment 0 in order
        to reset our pages as part of an abort.
 
        Note that this function is also sometimes called from
        contention.c to clean up the state of a different thread,
        when we would really like it to be aborted now and it is
        suspended at a safe-point.
-
     */
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
-    long remote_num = !segment_num;
     char *local_base = get_segment_base(segment_num);
-    char *remote_base = get_segment_base(remote_num);
+    char *remote_base = get_segment_base(0);
 
     LIST_FOREACH_R(
         pseg->modified_old_objects,
