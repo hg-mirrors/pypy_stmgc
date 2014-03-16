@@ -60,7 +60,7 @@ static void teardown_sync(void)
             stm_fatalerror("cond destroy: %m\n");
     }
 
-    memset(&sync_ctl, 0, sizeof(sync_ctl.in_use));
+    memset(&sync_ctl, 0, sizeof(sync_ctl));
 }
 
 #ifndef NDEBUG
