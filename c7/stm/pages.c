@@ -140,30 +140,24 @@ static void page_privatize(uintptr_t pagenum)
     mutex_pages_unlock();
 }
 
-static void page_reshare(long segment_num, uintptr_t pagenum)
+static void page_reshare(uintptr_t pagenum)
 {
-    char *segment_base = get_segment(segment_num)->segment_base;
+    struct page_shared_s ps = pages_privatized[pagenum - PAGE_FLAG_START];
+    pages_privatized[pagenum - PAGE_FLAG_START].by_segment = 0;
 
-#if 0   /* disabled: the private page that we are removing is
-           typically missing the inter-object information from
-           largemalloc.c */
-    long i, errors=0;
-    uint64_t *p = (uint64_t *)(stm_object_pages + pagenum * 4096UL);
-    uint64_t *q = (uint64_t *)(segment_base     + pagenum * 4096UL);
-    for (i = 0; i < 4096 / 8; i++) {
-        if (p[i] != q[i]) {
-            fprintf(stderr, "%p: 0x%lx\t\t%p: 0x%lx\n",
-                    &p[i], p[i], &q[i], q[i]);
-            errors++;
+    long j, total = 0;
+    for (j = 0; j < NB_SEGMENTS; j++) {
+        if (ps.by_segment & (1 << j)) {
+            /* Page 'pagenum' is private in segment 'j + 1'. Reshare */
+            char *segment_base = stm_object_pages + NB_PAGES * 4096UL * (j+1);
+
+            madvise(segment_base + pagenum * 4096UL, 4096, MADV_DONTNEED);
+            d_remap_file_pages(segment_base + pagenum * 4096UL,
+                               4096, pagenum);
+            total -= 4096;
         }
     }
-    assert(!errors);
-#endif
-
-    madvise(segment_base + pagenum * 4096UL, 4096, MADV_DONTNEED);
-    d_remap_file_pages(segment_base + pagenum * 4096UL,
-                       4096, pagenum);
-    increment_total_allocated(-4096);
+    increment_total_allocated(total);
 }
 
 

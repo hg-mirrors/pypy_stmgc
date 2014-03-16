@@ -253,29 +253,31 @@ static void major_reshare_pages(void)
 
     long i;
     mutex_pages_lock();
+
     for (i = 1; i <= NB_SEGMENTS; i++) {
+        /* The 'modified_old_objects' list gives the list of objects
+           whose pages need to remain private.  We temporarily remove
+           these bits from 'pages_privatized', so that these pages will
+           be skipped by the loop below (and by copy_object_to_shared()).
+        */
+        major_hide_private_bits_for_modified_objects(i);
 
         /* For each segment, push the current overflow objects from
-           private pages to the corresponding shared pages, if necessary.
+           private pages to the corresponding shared pages, if
+           necessary.  The pages that we will re-share must contain this
+           data; otherwise, it would exist only in the private pages,
+           and get lost in the loop below.
         */
         struct list_s *lst = get_priv_segment(i)->large_overflow_objects;
         if (lst != NULL) {
             LIST_FOREACH_R(lst, object_t *, copy_object_to_shared(item, i));
         }
-
-        /* The 'modified_old_objects' list gives the list of objects
-           whose pages need to remain private.  We temporarily remove
-           these bits from 'pages_privatized', so that these pages will
-           be skipped by the loop below.
-        */
-        major_hide_private_bits_for_modified_objects(i);
     }
 
     /* Now loop over all pages that are still in 'pages_privatized',
        and re-share them.
      */
     uintptr_t pagenum, endpagenum;
-    struct page_shared_s ps;
     pagenum = END_NURSERY_PAGE;   /* starts after the nursery */
     endpagenum = (uninitialized_page_start - stm_object_pages) / 4096UL;
 
@@ -291,18 +293,7 @@ static void major_reshare_pages(void)
                 break;   /* no pages in the 2nd section, so done too */
         }
 
-        ps = pages_privatized[pagenum - PAGE_FLAG_START];
-        if (ps.by_segment != 0) {
-            pages_privatized[pagenum - PAGE_FLAG_START].by_segment = 0;
-
-            long j;
-            for (j = 0; j < NB_SEGMENTS; j++) {
-                if (ps.by_segment & (1 << j)) {
-                    /* Page 'pagenum' is private in segment 'j + 1'. Reshare */
-                    page_reshare(j + 1, pagenum);
-                }
-            }
-        }
+        page_check_and_reshare(pagenum);
         pagenum++;
     }
 
