@@ -118,7 +118,7 @@ static void stm_move_young_weakrefs()
 static void stm_visit_old_weakrefs(void)
 {
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i <= NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
         struct list_s *lst;
 

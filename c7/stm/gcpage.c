@@ -533,6 +533,8 @@ static void major_collection_now_at_safe_point(void)
     dprintf((" .----- major collection -----------------------\n"));
     assert(_has_mutex());
 
+    if (0) {  // XXX TEMP
+
     /* first, force a minor collection in each of the other segments */
     major_do_minor_collections();
 
@@ -566,6 +568,7 @@ static void major_collection_now_at_safe_point(void)
 
     dprintf((" | used after collection:  %ld\n",
              (long)pages_ctl.total_allocated));
+    }
     dprintf((" `----------------------------------------------\n"));
 
     reset_major_collection_requested();

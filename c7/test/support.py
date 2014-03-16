@@ -46,7 +46,7 @@ char *_stm_real_address(object_t *obj);
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 void _stm_test_switch(stm_thread_local_t *tl);
-uint8_t _stm_get_page_flag(uintptr_t index);
+uintptr_t _stm_get_private_page(uintptr_t pagenum);
 int _stm_get_flags(object_t *obj);
 
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
@@ -98,8 +98,6 @@ void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 
 
 GC_N_SMALL_REQUESTS = 36      # from gcpage.c
-SHARED_PAGE         = 1       # from pages.h
-PRIVATE_PAGE        = 3       # from pages.h
 LARGE_MALLOC_OVERHEAD = 16    # from largemalloc.h
 
 lib = ffi.verify('''
@@ -361,8 +359,8 @@ def stm_minor_collect():
 def stm_major_collect():
     lib.stm_collect(1)
 
-def stm_get_page_flag(pagenum):
-    return lib._stm_get_page_flag(pagenum)
+def stm_get_private_page(pagenum):
+    return lib._stm_get_private_page(pagenum)
 
 def stm_get_obj_size(o):
     return lib.stmcb_size_rounded_up(stm_get_real_address(o))
