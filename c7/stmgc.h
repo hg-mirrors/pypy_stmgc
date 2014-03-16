@@ -127,6 +127,12 @@ uint64_t _stm_total_allocated(void);
 
 /* ==================== PUBLIC API ==================== */
 
+/* Number of segments (i.e. how many threads can be executed in
+   parallel, in maximum).
+*/
+#define STM_NB_SEGMENTS    4
+
+
 /* Structure of objects
    --------------------
 

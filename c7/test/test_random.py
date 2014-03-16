@@ -533,12 +533,13 @@ def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
 
 
 class TestRandom(BaseTest):
+    NB_THREADS = NB_SEGMENTS
 
     def test_fixed_16_bytes_objects(self, seed=1010):
         rnd = random.Random(seed)
 
         N_OBJECTS = 3
-        N_THREADS = 2
+        N_THREADS = self.NB_THREADS
         ex = Exec(self)
         ex.do("################################################################\n"*10)
         ex.do('# initialization')
