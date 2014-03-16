@@ -7,7 +7,7 @@ int main(int argc, char **argv)
     char *filename = NULL;
     int interactive = 1;
 	int i;
-	int num_threads = DEFAULT_NUM_THREADS;
+	int num_threads = STM_NB_SEGMENTS;
 
 	for (i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--help") == 0) {
