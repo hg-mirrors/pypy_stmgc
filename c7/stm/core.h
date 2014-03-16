@@ -20,7 +20,7 @@
 #define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
 #define NB_NURSERY_PAGES    (STM_GC_NURSERY/4)
 
-#define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_SEGMENTS)
+#define TOTAL_MEMORY          (NB_PAGES * 4096UL * (1 + NB_SEGMENTS))
 #define READMARKER_END        ((NB_PAGES * 4096UL) >> 4)
 #define FIRST_OBJECT_PAGE     ((READMARKER_END + 4095) / 4096UL)
 #define FIRST_NURSERY_PAGE    FIRST_OBJECT_PAGE
@@ -74,6 +74,13 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
+
+    /* Dict whose keys are shared page numbers, and whose values are
+       the corresponding private page number. */
+    struct tree_s *private_page_mapping;
+
+    /* Head of a free list of private pages. */
+    uintptr_t private_free_page_num;
 
     /* List of old objects (older than the current transaction) that the
        current transaction attempts to modify.  This is used to track
@@ -177,10 +184,6 @@ enum /* transaction_state */ {
 
 static char *stm_object_pages;
 static stm_thread_local_t *stm_all_thread_locals = NULL;
-
-#ifdef STM_TESTS
-static char *stm_other_pages;
-#endif
 
 static uint8_t write_locks[WRITELOCK_END - WRITELOCK_START];
 

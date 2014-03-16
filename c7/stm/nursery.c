@@ -26,7 +26,7 @@ static void setup_nursery(void)
     _stm_nursery_start = NURSERY_START;
 
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i <= NB_SEGMENTS; i++) {
         get_segment(i)->nursery_current = (stm_char *)NURSERY_START;
         get_segment(i)->nursery_end = NURSERY_END;
     }
@@ -378,7 +378,7 @@ void _stm_set_nursery_free_count(uint64_t free_count)
     _stm_nursery_start = NURSERY_END - free_count;
 
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i <= NB_SEGMENTS; i++) {
         if ((uintptr_t)get_segment(i)->nursery_current < _stm_nursery_start)
             get_segment(i)->nursery_current = (stm_char *)_stm_nursery_start;
     }
@@ -411,7 +411,7 @@ static void major_do_minor_collections(void)
     int original_num = STM_SEGMENT->segment_num;
     long i;
 
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i <= NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
         if (MINOR_NOTHING_TO_DO(pseg))  /*TS_NONE segments have NOTHING_TO_DO*/
             continue;
