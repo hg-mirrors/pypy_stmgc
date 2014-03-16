@@ -9,6 +9,7 @@ ffi.cdef("""
 typedef ... object_t;
 typedef ... stm_jmpbuf_t;
 #define SIZEOF_MYOBJ ...
+#define STM_NB_SEGMENTS ...
 #define _STM_FAST_ALLOC ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
 
@@ -46,7 +47,7 @@ char *_stm_real_address(object_t *obj);
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 void _stm_test_switch(stm_thread_local_t *tl);
-uint8_t _stm_get_page_flag(uintptr_t index);
+uintptr_t _stm_get_private_page(uintptr_t pagenum);
 int _stm_get_flags(object_t *obj);
 
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
@@ -98,8 +99,6 @@ void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 
 
 GC_N_SMALL_REQUESTS = 36      # from gcpage.c
-SHARED_PAGE         = 1       # from pages.h
-PRIVATE_PAGE        = 3       # from pages.h
 LARGE_MALLOC_OVERHEAD = 16    # from largemalloc.h
 
 lib = ffi.verify('''
@@ -262,6 +261,7 @@ WORD = 8
 HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
+NB_SEGMENTS = lib.STM_NB_SEGMENTS
 
 
 class Conflict(Exception):
@@ -361,8 +361,8 @@ def stm_minor_collect():
 def stm_major_collect():
     lib.stm_collect(1)
 
-def stm_get_page_flag(pagenum):
-    return lib._stm_get_page_flag(pagenum)
+def stm_get_private_page(pagenum):
+    return lib._stm_get_private_page(pagenum)
 
 def stm_get_obj_size(o):
     return lib.stmcb_size_rounded_up(stm_get_real_address(o))
@@ -402,10 +402,11 @@ def _allocate_thread_local():
 
 
 class BaseTest(object):
+    NB_THREADS = 2
 
     def setup_method(self, meth):
         lib.stm_setup()
-        self.tls = [_allocate_thread_local(), _allocate_thread_local()]
+        self.tls = [_allocate_thread_local() for i in range(self.NB_THREADS)]
         self.current_thread = 0
 
     def teardown_method(self, meth):

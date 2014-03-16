@@ -193,6 +193,7 @@ static inline bool mark_visited_test_and_clear(object_t *obj)
 /************************************************************/
 
 
+#if 0
 static inline void mark_single_flag_private(uintptr_t pagenum)
 {
     if (flag_page_private[pagenum] == PRIVATE_PAGE) {
@@ -314,6 +315,7 @@ static void major_reshare_pages(void)
         (uninitialized_page_stop - stm_object_pages) / 4096UL,
         NB_PAGES);
 }
+#endif
 
 /************************************************************/
 
@@ -322,11 +324,6 @@ static inline void mark_record_trace(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
     object_t *obj = *pobj;
-
-    if (obj == NULL || mark_visited_test_and_set(obj))
-        return;    /* already visited this object */
-
-    LIST_APPEND(mark_objects_to_trace, obj);
 
     /* Note: this obj might be visited already, but from a different
        segment.  We ignore this case and skip re-visiting the object
@@ -338,6 +335,10 @@ static inline void mark_record_trace(object_t **pobj)
        segments and only needs visiting once.  (It may actually be in a
        shared page, or maybe not.)
     */
+    if (obj == NULL || mark_visited_test_and_set(obj))
+        return;    /* already visited this object */
+
+    LIST_APPEND(mark_objects_to_trace, obj);
 }
 
 static void mark_trace(object_t *obj, char *segment_base)
@@ -345,13 +346,6 @@ static void mark_trace(object_t *obj, char *segment_base)
     assert(list_is_empty(mark_objects_to_trace));
 
     while (1) {
-
-        /* first, if we're not seeing segment 0, we must change the
-           flags in flag_page_private[] from PRIVATE_PAGE to
-           SEGMENT1_PAGE, which will mean "can't re-share" */
-        if (segment_base != stm_object_pages && RESHARE_PAGES)
-            mark_flag_page_private(obj, segment_base);
-
         /* trace into the object (the version from 'segment_base') */
         struct object_s *realobj =
             (struct object_s *)REAL_ADDRESS(segment_base, obj);
@@ -373,45 +367,33 @@ static inline void mark_visit_object(object_t *obj, char *segment_base)
 
 static void mark_visit_from_roots(void)
 {
-
     if (testing_prebuilt_objs != NULL) {
         LIST_FOREACH_R(testing_prebuilt_objs, object_t * /*item*/,
-                       mark_visit_object(item, get_segment_base(0)));
+                       mark_visit_object(item, stm_object_pages));
     }
 
-    /* Do the following twice, so that we trace first the objects from
-       segment 0, and then all others.  XXX This is a hack to make it
-       more likely that we'll be able to re-share pages. */
+    stm_thread_local_t *tl = stm_all_thread_locals;
+    do {
+        /* If 'tl' is currently running, its 'associated_segment_num'
+           field is the segment number that contains the correct
+           version of its overflowed objects.  If not, then the
+           field is still some correct segment number, and it doesn't
+           matter which one we pick. */
+        char *segment_base = get_segment_base(tl->associated_segment_num);
 
-    int must_be_zero;
-    for (must_be_zero = 1; must_be_zero >= 0; must_be_zero--) {
+        struct stm_shadowentry_s *current = tl->shadowstack;
+        struct stm_shadowentry_s *base = tl->shadowstack_base;
+        while (current-- != base) {
+            assert(current->ss != (object_t *)-1);
+            mark_visit_object(current->ss, segment_base);
+        }
+        mark_visit_object(tl->thread_local_obj, segment_base);
 
-        stm_thread_local_t *tl = stm_all_thread_locals;
-        do {
-            /* If 'tl' is currently running, its 'associated_segment_num'
-               field is the segment number that contains the correct
-               version of its overflowed objects.  If not, then the
-               field is still some correct segment number, and it doesn't
-               matter which one we pick. */
-            char *segment_base = get_segment_base(tl->associated_segment_num);
-
-            if (must_be_zero == (segment_base == get_segment_base(0))) {
-
-                struct stm_shadowentry_s *current = tl->shadowstack;
-                struct stm_shadowentry_s *base = tl->shadowstack_base;
-                while (current-- != base) {
-                    assert(current->ss != (object_t *)-1);
-                    mark_visit_object(current->ss, segment_base);
-                }
-                mark_visit_object(tl->thread_local_obj, segment_base);
-            }
-
-            tl = tl->next;
-        } while (tl != stm_all_thread_locals);
-    }
+        tl = tl->next;
+    } while (tl != stm_all_thread_locals);
 
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i <= NB_SEGMENTS; i++) {
         if (get_priv_segment(i)->transaction_state != TS_NONE)
             mark_visit_object(
                 get_priv_segment(i)->threadlocal_at_start_of_transaction,
@@ -422,20 +404,21 @@ static void mark_visit_from_roots(void)
 static void mark_visit_from_modified_objects(void)
 {
     /* The modified objects are the ones that may exist in two different
-       versions: one in the segment that modified it, and another in
-       all other segments. */
+       versions: one in the segment that modified it, and another in all
+       other segments.  (It can also be more than two if we don't have
+       eager write locking.)
+    */
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        char *base1 = get_segment_base(i);   /* two different segments */
-        char *base2 = get_segment_base(!i);
+    for (i = 1; i <= NB_SEGMENTS; i++) {
+        char *base = get_segment_base(i);
 
         LIST_FOREACH_R(
             get_priv_segment(i)->modified_old_objects,
             object_t * /*item*/,
             ({
                 mark_visited_test_and_set(item);
-                mark_trace(item, base1);
-                mark_trace(item, base2);
+                mark_trace(item, stm_object_pages);  /* shared version */
+                mark_trace(item, base);              /* private version */
             }));
     }
 }
@@ -443,7 +426,7 @@ static void mark_visit_from_modified_objects(void)
 static void clean_up_segment_lists(void)
 {
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i <= NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
         struct list_s *lst;
 
@@ -509,7 +492,7 @@ static void major_set_write_locks(void)
 {
     /* restore the write locks on the modified objects */
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i <= NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
 
         LIST_FOREACH_R(
@@ -549,8 +532,10 @@ static void major_collection_now_at_safe_point(void)
 
     /* sweeping */
     mutex_pages_lock();
+#if 0
     if (RESHARE_PAGES)
         major_reshare_pages();
+#endif
     sweep_large_objects();
     //sweep_uniform_pages();
     mutex_pages_unlock();
