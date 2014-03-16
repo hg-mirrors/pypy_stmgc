@@ -54,7 +54,7 @@ class TransactionState(object):
     e.g. maintains read/write sets. The state will be
     discarded on abort or pushed to other threads"""
 
-    def __init__(self, start_time):
+    def __init__(self, start_time, thread_num=None):
         self.read_set = set()
         self.write_set = set()
         self.values = {}
@@ -63,6 +63,7 @@ class TransactionState(object):
         self.objs_in_conflict = set()
         self.inevitable = False
         self.created_in_this_transaction = set()
+        self.thread_num = thread_num
 
     def get_old_modified(self):
         # returns only the ones that are modified and not from
@@ -74,6 +75,8 @@ class TransactionState(object):
         if objs_in_conflict is not None:
             self.objs_in_conflict |= objs_in_conflict
         self._must_abort = True
+        color = "\033[%dm" % (31 + self.thread_num % 6)
+        print >> sys.stderr, color + "# must abort: %r\033[0m" % (objs_in_conflict,)
 
     def check_must_abort(self):
         return self._must_abort
@@ -180,10 +183,10 @@ class ThreadState(object):
                     r, int(ffi.cast("uintptr_t", ex.content[r])),
                     stm_get_obj_size(ex.content[r])))
 
-    def start_transaction(self):
+    def start_transaction(self, thread_num):
         assert self.transaction_state is None
         start_time = self.global_state.inc_and_get_global_time()
-        trs = TransactionState(start_time)
+        trs = TransactionState(start_time, thread_num)
         trs.update_from_committed(
             self.global_state.committed_transaction_state)
         self.transaction_state = trs
@@ -291,6 +294,8 @@ class GlobalState(object):
             if confl_set:
                 contention_management(trs, other_trs,
                                       objs_in_conflict=confl_set)
+                if trs.check_must_abort():
+                    break
 
         if trs.check_must_abort():
             self.ex.do('# write-read conflict: %s' %
@@ -305,7 +310,7 @@ class GlobalState(object):
 
 
 def op_start_transaction(ex, global_state, thread_state):
-    thread_state.start_transaction()
+    thread_state.start_transaction(ex.thread_num)
     #
     ex.do('self.start_transaction()')
     thread_state.reload_roots(ex)
@@ -533,12 +538,13 @@ def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
 
 
 class TestRandom(BaseTest):
+    NB_THREADS = NB_SEGMENTS
 
     def test_fixed_16_bytes_objects(self, seed=1010):
         rnd = random.Random(seed)
 
         N_OBJECTS = 3
-        N_THREADS = 2
+        N_THREADS = self.NB_THREADS
         ex = Exec(self)
         ex.do("################################################################\n"*10)
         ex.do('# initialization')

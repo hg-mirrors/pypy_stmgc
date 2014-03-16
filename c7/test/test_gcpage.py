@@ -24,8 +24,8 @@ class TestGCPage(BaseTest):
         new = self.pop_root()
 
         assert len(stm_get_obj_pages(new)) == 2
-        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
-                == [SHARED_PAGE]*2)
+        assert ([stm_get_private_page(p) for p in stm_get_obj_pages(new)]
+                == [0, 0])
 
         assert not is_in_nursery(new)
         stm_write(new)
@@ -33,11 +33,11 @@ class TestGCPage(BaseTest):
 
         # now proceed to write into the object in a new transaction
         self.start_transaction()
-        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
-                == [SHARED_PAGE]*2)
+        assert ([stm_get_private_page(p) for p in stm_get_obj_pages(new)]
+                == [0, 0])
         stm_write(new)
-        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
-                == [PRIVATE_PAGE]*2)
+        assert ([bool(stm_get_private_page(p)) for p in stm_get_obj_pages(new)]
+                == [True, True])
 
         # write to 2nd page of object!!
         wnew = stm_get_real_address(new)
@@ -52,8 +52,8 @@ class TestGCPage(BaseTest):
 
         self.switch(0)
         self.abort_transaction()
-        assert ([stm_get_page_flag(p) for p in stm_get_obj_pages(new)]
-                == [PRIVATE_PAGE]*2)
+        assert ([bool(stm_get_private_page(p)) for p in stm_get_obj_pages(new)]
+                == [True, True])
 
     def test_partial_alloced_pages(self):
         self.start_transaction()
@@ -62,14 +62,14 @@ class TestGCPage(BaseTest):
         stm_minor_collect()
         new = self.pop_root()
 
-        assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == SHARED_PAGE
+        assert stm_get_private_page(stm_get_obj_pages(new)[0]) == 0
         assert stm_get_flags(new) & GCFLAG_WRITE_BARRIER
 
         stm_write(new)
         assert not (stm_get_flags(new) & GCFLAG_WRITE_BARRIER)
 
         self.commit_transaction()
-        assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == SHARED_PAGE
+        assert stm_get_private_page(stm_get_obj_pages(new)[0]) == 0
         assert stm_get_flags(new) & GCFLAG_WRITE_BARRIER
 
         self.start_transaction()
@@ -78,7 +78,7 @@ class TestGCPage(BaseTest):
         stm_minor_collect()
         newer = self.pop_root()
         # 'new' is still in shared_page and committed
-        assert stm_get_page_flag(stm_get_obj_pages(new)[0]) == SHARED_PAGE
+        assert stm_get_private_page(stm_get_obj_pages(new)[0]) == 0
         assert stm_get_flags(new) & GCFLAG_WRITE_BARRIER
         # 'newer' is now part of the SHARED page with 'new', but
         # uncommitted, so no privatization has to take place:
@@ -86,10 +86,10 @@ class TestGCPage(BaseTest):
         assert stm_get_flags(newer) & GCFLAG_WRITE_BARRIER
         stm_write(newer) # does not privatize
         assert not (stm_get_flags(newer) & GCFLAG_WRITE_BARRIER)
-        assert stm_get_page_flag(stm_get_obj_pages(newer)[0]) == SHARED_PAGE
+        assert stm_get_private_page(stm_get_obj_pages(newer)[0]) == 0
         self.commit_transaction()
 
-        assert stm_get_page_flag(stm_get_obj_pages(newer)[0]) == SHARED_PAGE
+        assert stm_get_private_page(stm_get_obj_pages(newer)[0]) == 0
         assert stm_get_flags(newer) & GCFLAG_WRITE_BARRIER
 
     def test_major_collection(self):
@@ -202,7 +202,6 @@ class TestGCPage(BaseTest):
         #
         self.start_transaction()
         stm_major_collect()
-        py.test.skip("XXX implement me")
         assert lib._stm_total_allocated() == 5000 + LMO    # shared again
 
     def test_reshare_if_no_longer_modified_1(self):
