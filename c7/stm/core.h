@@ -231,4 +231,4 @@ static inline void _duck(void) {
     asm("/* workaround for llvm bug */");
 }
 
-static void synchronize_overflow_object_now(object_t *obj);
+static void synchronize_object_now(object_t *obj, bool assume_local_private);

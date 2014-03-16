@@ -199,7 +199,7 @@ static void collect_oldrefs_to_nursery(void)
                content); or add the object to 'large_overflow_objects'.
             */
             if (STM_PSEGMENT->minor_collect_will_commit_now)
-                synchronize_overflow_object_now(obj);
+                synchronize_object_now(obj, false);
             else
                 LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
         }
