@@ -83,7 +83,7 @@ void _stm_write_slowpath(object_t *obj)
            (outside the nursery), then it fits into one page.  This is
            the common case. Otherwise, we need to compute it based on
            its location and size. */
-        if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0) {
+        if (is_small_uniform(obj)) {
             page_privatize(first_page);
         }
         else {
@@ -272,16 +272,16 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
     assert(_has_mutex_pages());
     assert(!_is_young(obj));
 
-    char *segment_base = get_segment_base(source_segment_num);
     uintptr_t start = (uintptr_t)obj;
     uintptr_t first_page = start / 4096UL;
-    struct object_s *realobj = (struct object_s *)
-        REAL_ADDRESS(segment_base, obj);
 
-    if (realobj->stm_flags & GCFLAG_SMALL_UNIFORM) {
+    if (is_small_uniform(obj)) {
         abort();//XXX WRITE THE FAST CASE
     }
     else {
+        char *segment_base = get_segment_base(source_segment_num);
+        struct object_s *realobj = (struct object_s *)
+            REAL_ADDRESS(segment_base, obj);
         ssize_t obj_size = stmcb_size_rounded_up(realobj);
         assert(obj_size >= 16);
         uintptr_t end = start + obj_size;
@@ -334,7 +334,7 @@ static void synchronize_object_now(object_t *obj)
     uintptr_t start = (uintptr_t)obj;
     uintptr_t first_page = start / 4096UL;
 
-    if (obj->stm_flags & GCFLAG_SMALL_UNIFORM) {
+    if (is_small_uniform(obj)) {
         abort();//XXX WRITE THE FAST CASE
     }
     else {
@@ -488,6 +488,9 @@ void stm_commit_transaction(void)
     /* update 'overflow_number' if needed */
     if (STM_PSEGMENT->overflow_number_has_been_used) {
         highest_overflow_number += GCFLAG_OVERFLOW_NUMBER_bit0;
+        /* Note that the overflow number cannot be entirely 1 bits;
+           this prevents stm_flags from ever containing the value -1,
+           which might be confused with GCWORD_MOVED. */
         assert(highest_overflow_number !=        /* XXX else, overflow! */
                (uint32_t)-GCFLAG_OVERFLOW_NUMBER_bit0);
         STM_PSEGMENT->overflow_number = highest_overflow_number;
