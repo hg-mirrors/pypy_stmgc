@@ -36,6 +36,10 @@ static union {
     char reserved[192];
 } sync_ctl __attribute__((aligned(64)));
 
+#ifndef NDEBUG
+static bool _safe_points_requested = false;
+#endif
+
 
 static void setup_sync(void)
 {
@@ -64,6 +68,10 @@ static void teardown_sync(void)
 static void teardown_sync_1(void)
 {
     memset(&sync_ctl, 0, sizeof(sync_ctl));
+#ifndef NDEBUG
+    _safe_points_requested = false;
+#endif
+    pause_signalled = false;
 }
 
 #ifndef NDEBUG
@@ -254,10 +262,6 @@ void _stm_stop_safe_point(void)
 
 /************************************************************/
 
-
-#ifndef NDEBUG
-static bool _safe_points_requested = false;
-#endif
 
 static void signal_everybody_to_pause_running(void)
 {
