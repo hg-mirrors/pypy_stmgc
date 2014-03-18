@@ -25,6 +25,10 @@ static void setup_pages(void)
 static void teardown_pages(void)
 {
     memset(&pages_ctl, 0, sizeof(pages_ctl));
+}
+
+static void teardown_pages_1(void)
+{
     memset(pages_privatized, 0, sizeof(pages_privatized));
 }
 
