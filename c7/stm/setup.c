@@ -139,7 +139,7 @@ void stm_teardown(void)
     teardown_pages();
 }
 
-void _init_shadow_stack(stm_thread_local_t *tl)
+static void _init_shadow_stack(stm_thread_local_t *tl)
 {
     struct stm_shadowentry_s *s = (struct stm_shadowentry_s *)
         malloc(SHADOW_STACK_SIZE * sizeof(struct stm_shadowentry_s));
@@ -148,13 +148,18 @@ void _init_shadow_stack(stm_thread_local_t *tl)
     tl->shadowstack_base = s;
 }
 
-void _done_shadow_stack(stm_thread_local_t *tl)
+static void _done_shadow_stack(stm_thread_local_t *tl)
 {
     free(tl->shadowstack_base);
     tl->shadowstack = NULL;
     tl->shadowstack_base = NULL;
 }
 
+static pthread_t *_get_cpth(stm_thread_local_t *tl)
+{
+    assert(sizeof(pthread_t) <= sizeof(tl->creating_pthread));
+    return (pthread_t *)(tl->creating_pthread);
+}
 
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
@@ -178,6 +183,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
        numbers automatically. */
     num = (num % NB_SEGMENTS) + 1;
     tl->associated_segment_num = num;
+    *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num));
     s_mutex_unlock();
