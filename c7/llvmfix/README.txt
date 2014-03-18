@@ -19,6 +19,6 @@ addrspacecast-in-constant.diff
     This is a workaround for (what we believe to be) clang producing
     incorrectly the addrspacecast operation for this kind of code:
 
-    static __attribute__((address_space(256))) long a = 42;
-    struct s1 { void *a; };
-    struct s1 fofo = { (void *)(long)&a };
+    static int a = 42;
+    struct s1 { void __attribute__((address_space(256))) *a; };
+    struct s1 fofo = { (void __attribute__((address_space(256))) *)(long)&a };
