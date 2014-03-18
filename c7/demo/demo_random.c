@@ -4,20 +4,24 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include "stmgc.h"
 
 #define NUMTHREADS 3
-#define STEPS_PER_THREAD 500
-#define THREAD_STARTS 1000 // how many restarts of threads
+#define STEPS_PER_THREAD 300
+#define THREAD_STARTS 300 // how many restarts of threads
 #define PREBUILT_ROOTS 3
 #define MAXROOTS 1000
+#define FORKS 3
 
 // SUPPORT
 struct node_s;
 typedef TLPREFIX struct node_s node_t;
 typedef node_t* nodeptr_t;
 typedef object_t* objptr_t;
+int num_forked_children = 0;
 
 struct node_s {
     struct object_s hdr;
@@ -337,6 +341,22 @@ void *demo_random(void *arg)
             push_roots();
             stm_commit_transaction();
 
+            if (arg) {
+                printf("==========   FORK  =========\n");
+                arg = NULL;
+                pid_t child = fork();
+                printf("=== in process %d thread %lx, fork() returned %d\n",
+                       (int)getpid(), (long)pthread_self(), (int)child);
+                if (child == -1) {
+                    fprintf(stderr, "fork() error: %m\n");
+                    abort();
+                }
+                if (child != 0)
+                    num_forked_children++;
+                else
+                    num_forked_children = 0;
+            }
+
             td.num_roots_at_transaction_start = td.num_roots;
 
             if (get_rand(100) < 98) {
@@ -427,8 +447,24 @@ int main(void)
         assert(status == 0);
         printf("thread finished\n");
         if (thread_starts) {
+            long forkbase = NUMTHREADS * THREAD_STARTS / (FORKS + 1);
+            long _fork = (thread_starts % forkbase) == 0;
             thread_starts--;
-            newthread(demo_random, NULL);
+            newthread(demo_random, (void *)_fork);
+        }
+    }
+
+    for (i = 0; i < num_forked_children; i++) {
+        pid_t child = wait(&status);
+        if (child == -1)
+            perror("wait");
+        printf("From %d: child %d terminated with exit status %d\n",
+               (int)getpid(), (int)child, status);
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+            ;
+        else {
+            printf("*** error from the child ***\n");
+            return 1;
         }
     }
 
