@@ -59,7 +59,10 @@ static void teardown_sync(void)
         if (pthread_cond_destroy(&sync_ctl.cond[i]) != 0)
             stm_fatalerror("cond destroy: %m\n");
     }
+}
 
+static void teardown_sync_1(void)
+{
     memset(&sync_ctl, 0, sizeof(sync_ctl));
 }
 

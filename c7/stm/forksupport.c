@@ -7,7 +7,11 @@
    copy of all shared pages as soon as fork() is called. */
 
 
-static char *fork_big_copy;
+static char *fork_big_copy = NULL;
+
+static char *setup_mmap(char *reason);            /* forward, in setup.c */
+static void do_or_redo_setup_after_fork(void);    /* forward, in setup.c */
+static void do_or_redo_teardown_after_fork(void); /* forward, in setup.c */
 
 
 static void forksupport_prepare(void)
@@ -58,7 +62,7 @@ static void forksupport_parent(void)
 
     assert(fork_big_copy != NULL);
     munmap(fork_big_copy, TOTAL_MEMORY);
-    stm_object_pages = NULL;
+    fork_big_copy = NULL;
 
     mutex_pages_unlock();
     s_mutex_unlock();
@@ -69,15 +73,23 @@ static void forksupport_child(void)
     if (stm_object_pages == NULL)
         return;
 
-    mremap(fork_big_copy, TOTAL_MEMORY, TOTAL_MEMORY,
-           MREMAP_MAYMOVE | MREMAP_FIXED,
-           stm_object_pages);
-
-    ...; reset carefully a much bigger part of the state here :-(((
-    memset(pages_privatized, 0, sizeof(pages_privatized));
+    /* xxx the stm_thread_local_t belonging to other threads just leak.
+       Note that stm_all_thread_locals is preserved across a
+       stm_teardown/stm_setup sequence. */
 
     mutex_pages_unlock();
     s_mutex_unlock();
+
+    do_or_redo_teardown_after_fork();
+
+    assert(fork_big_copy != NULL);
+    assert(stm_object_pages != NULL);
+    mremap(fork_big_copy, TOTAL_MEMORY, TOTAL_MEMORY,
+           MREMAP_MAYMOVE | MREMAP_FIXED,
+           stm_object_pages);
+    fork_big_copy = NULL;
+
+    do_or_redo_setup_after_fork();
 }
 
 
@@ -88,7 +100,8 @@ static void setup_forksupport(void)
     if (!fork_support_ready) {
         int res = pthread_atfork(forksupport_prepare, forksupport_parent,
                                  forksupport_child);
-        assert(res == 0);
+        if (res != 0)
+            stm_fatalerror("pthread_atfork() failed: %m");
         fork_support_ready = true;
     }
 }
