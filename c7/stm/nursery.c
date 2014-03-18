@@ -97,7 +97,7 @@ static void minor_trace_if_young(object_t **pobj)
                 obj->stm_flags &= ~GCFLAG_HAS_SHADOW;
                 realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
                 size = stmcb_size_rounded_up((struct object_s *)realobj);
-                goto copy_large_object;
+                goto handle_large_object;
             }
         }
         /* We need to make a copy of this object.  It goes either in
@@ -107,24 +107,26 @@ static void minor_trace_if_young(object_t **pobj)
         realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         size = stmcb_size_rounded_up((struct object_s *)realobj);
 
-        if (1 /*size >= GC_N_SMALL_REQUESTS*8*/) {
+        if (size >= GC_N_SMALL_REQUESTS) {
 
             /* case 1: object is not small enough.
                Ask gcpage.c for an allocation via largemalloc. */
             char *allocated = allocate_outside_nursery_large(size);
             nobj = (object_t *)(allocated - stm_object_pages);
 
-            /* Copy the object */
-         copy_large_object:;
-            char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
-            memcpy(realnobj, realobj, size);
-
+         handle_large_object:
             nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
         }
         else {
             /* case "small enough" */
-            abort();  //...
+            char *allocated = allocate_outside_nursery_small(size);
+            nobj = (object_t *)(allocated - stm_object_pages);
+            nobj_sync_now = (uintptr_t)nobj;
         }
+
+        /* Copy the object */
+        char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
+        memcpy(realnobj, realobj, size);
 
         /* Done copying the object. */
         //dprintf(("\t\t\t\t\t%p -> %p\n", obj, nobj));
@@ -153,6 +155,7 @@ static void minor_trace_if_young(object_t **pobj)
 
     /* Must trace the object later */
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
+    assert(nobj_sync_now == ((uintptr_t)nobj | is_small_uniform(nobj)));
 }
 
 static void collect_roots_in_nursery(void)

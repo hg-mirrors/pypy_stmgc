@@ -84,6 +84,7 @@ void _stm_write_slowpath(object_t *obj)
            the common case. Otherwise, we need to compute it based on
            its location and size. */
         if (is_small_uniform(obj)) {
+            abort();
             page_privatize(first_page);
         }
         else {

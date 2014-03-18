@@ -25,7 +25,7 @@ static void grab_more_free_pages_for_small_allocations(void)
             goto out_of_memory;
 
         uninitialized_page_stop -= decrease_by;
-        first_small_uniform_loc = (uintptr_t)uninitialized_page_stop;
+        first_small_uniform_loc = uninitialized_page_stop - stm_object_pages;
 
         char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL;
         if (!_stm_largemalloc_resize_arena(uninitialized_page_stop - base))
@@ -51,8 +51,6 @@ static void grab_more_free_pages_for_small_allocations(void)
 
 static char *_allocate_small_slowpath(uint64_t size)
 {
-    /* First try to grab the next page from the global 'small_page_list'
-     */
     long n = size / 8;
     struct small_page_list_s *smallpage;
     struct small_free_loc_s *TLPREFIX *fl =
@@ -60,6 +58,8 @@ static char *_allocate_small_slowpath(uint64_t size)
     assert(*fl == NULL);
 
  retry:
+    /* First try to grab the next page from the global 'small_page_list'
+     */
     smallpage = small_page_lists[n];
     if (smallpage != NULL) {
         if (UNLIKELY(!__sync_bool_compare_and_swap(&small_page_lists[n],
@@ -72,8 +72,8 @@ static char *_allocate_small_slowpath(uint64_t size)
         return (char *)smallpage;
     }
 
-    /* There is no more page waiting.  Maybe we can pick one from
-       free_uniform_pages.
+    /* There is no more page waiting for the correct size of objects.
+       Maybe we can pick one from free_uniform_pages.
      */
     smallpage = free_uniform_pages;
     if (smallpage != NULL) {
@@ -104,7 +104,8 @@ static char *_allocate_small_slowpath(uint64_t size)
         return (char *)smallpage;
     }
 
-    /* Not a single free page left.  Grab some more free pges and retry. */
+    /* Not a single free page left.  Grab some more free pages and retry.
+     */
     grab_more_free_pages_for_small_allocations();
     goto retry;
 }
