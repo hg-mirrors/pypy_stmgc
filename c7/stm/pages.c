@@ -107,6 +107,8 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
        segment 0. */
     uintptr_t i;
     assert(_has_mutex_pages());
+    if (count == 0)
+        return;
     for (i = 1; i <= NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
         d_remap_file_pages(segment_base + pagenum * 4096UL,

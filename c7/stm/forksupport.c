@@ -28,10 +28,9 @@ static void forksupport_prepare(void)
        a __thread variable, so never changes threads.
     */
     s_mutex_lock();
-
-    synchronize_all_threads();
-
     mutex_pages_lock();
+
+    dprintf(("forksupport_prepare: synchronized all threads\n"));
 
     fork_this_tl = NULL;
     stm_thread_local_t *tl = stm_all_thread_locals;
@@ -50,11 +49,29 @@ static void forksupport_prepare(void)
     if (fork_this_tl == NULL)
         stm_fatalerror("fork(): found no stm_thread_local_t from this thread");
 
+    /* Make a new mmap at some other address, but of the same size as
+       the standard mmap at stm_object_pages
+    */
     char *big_copy = setup_mmap("stmgc's fork support");
 
+    /* Copy each of the segment infos into the new mmap
+     */
+    long i;
+    for (i = 1; i <= NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *src = get_priv_segment(i);
+        char *dst = big_copy + (((char *)src) - stm_object_pages);
+        *(struct stm_priv_segment_info_s *)dst = *src;
+    }
+
+    /* Copy all the data from the two ranges of objects (large, small)
+       into the new mmap --- but only the shared objects
+    */
     uintptr_t pagenum, endpagenum;
     pagenum = END_NURSERY_PAGE;   /* starts after the nursery */
     endpagenum = (uninitialized_page_start - stm_object_pages) / 4096UL;
+    if (endpagenum < NB_PAGES)
+        endpagenum++;   /* the next page too, because it might contain
+                           data from largemalloc */
 
     while (1) {
         if (UNLIKELY(pagenum == endpagenum)) {
@@ -63,9 +80,9 @@ static void forksupport_prepare(void)
             if (endpagenum == NB_PAGES)
                 break;   /* done */
             pagenum = (uninitialized_page_stop - stm_object_pages) / 4096UL;
+            pagenum--;   /* the prev page too, because it does contain
+                            data from largemalloc */
             endpagenum = NB_PAGES;
-            if (pagenum == endpagenum)
-                break;   /* no pages in the 2nd section, so done too */
         }
 
         pagecopy(big_copy + pagenum * 4096UL,
@@ -82,9 +99,14 @@ static void forksupport_parent(void)
     if (stm_object_pages == NULL)
         return;
 
+    /* In the parent, after fork(), we can simply forget about the big copy
+       that we made for the child.
+    */
     assert(fork_big_copy != NULL);
     munmap(fork_big_copy, TOTAL_MEMORY);
     fork_big_copy = NULL;
+
+    dprintf(("forksupport_parent: continuing to run\n"));
 
     mutex_pages_unlock();
     s_mutex_unlock();
@@ -95,32 +117,62 @@ static void forksupport_child(void)
     if (stm_object_pages == NULL)
         return;
 
-    /* xxx the stm_thread_local_t belonging to other threads just leak.
-       Note that stm_all_thread_locals is preserved across a
-       stm_teardown/stm_setup sequence. */
-
+    /* In the child, first unregister all other stm_thread_local_t,
+       mostly as a way to free the memory used by the shadowstacks
+     */
     mutex_pages_unlock();
     s_mutex_unlock();
 
-    stm_thread_local_t *tl = stm_all_thread_locals;
-    do {
-        stm_thread_local_t *nexttl = tl->next;
-        if (tl != fork_this_tl) {
-            stm_unregister_thread_local(tl);
-        }
-        tl = nexttl;
-    } while (tl != stm_all_thread_locals);
+    assert(fork_this_tl != NULL);
+    while (stm_all_thread_locals->next != stm_all_thread_locals) {
+        if (stm_all_thread_locals == fork_this_tl)
+            stm_unregister_thread_local(stm_all_thread_locals->next);
+        else
+            stm_unregister_thread_local(stm_all_thread_locals);
+    }
+    assert(stm_all_thread_locals == fork_this_tl);
 
-    do_or_redo_teardown_after_fork();
+    /* Restore a few things in the child: the new pthread_self(), and
+       the %gs register (although I suppose it should be preserved by
+       fork())
+    */
+    *_get_cpth(fork_this_tl) = pthread_self();
+    set_gs_register(get_segment_base(fork_this_tl->associated_segment_num));
+    fork_this_tl = NULL;
 
+    /* Move the copy of the mmap over the old one, overwriting it
+       and thus freeing the old mapping in this process
+    */
     assert(fork_big_copy != NULL);
     assert(stm_object_pages != NULL);
-    mremap(fork_big_copy, TOTAL_MEMORY, TOTAL_MEMORY,
-           MREMAP_MAYMOVE | MREMAP_FIXED,
-           stm_object_pages);
+    void *res = mremap(fork_big_copy, TOTAL_MEMORY, TOTAL_MEMORY,
+                       MREMAP_MAYMOVE | MREMAP_FIXED,
+                       stm_object_pages);
+    if (res != stm_object_pages)
+        stm_fatalerror("after fork: mremap failed: %m");
     fork_big_copy = NULL;
 
+    /* Call a subset of stm_teardown() / stm_setup() to free and
+       recreate the necessary data in all segments, and to clean up some
+       of the global data like the big arrays that don't make sense any
+       more.  We keep other things like the smallmalloc and largemalloc
+       internal state.
+    */
+    do_or_redo_teardown_after_fork();
     do_or_redo_setup_after_fork();
+
+    /* Make all pages shared again.
+     */
+    mutex_pages_lock();
+    uintptr_t start = END_NURSERY_PAGE;
+    uintptr_t stop  = (uninitialized_page_start - stm_object_pages) / 4096UL;
+    pages_initialize_shared(start, stop - start);
+    start = (uninitialized_page_stop - stm_object_pages) / 4096UL;
+    stop = NB_PAGES;
+    pages_initialize_shared(start, stop - start);
+    mutex_pages_unlock();
+
+    dprintf(("forksupport_child: running one thread now\n"));
 }
 
 

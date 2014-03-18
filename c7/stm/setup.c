@@ -11,41 +11,36 @@ static char *setup_mmap(char *reason)
     if (result == MAP_FAILED)
         stm_fatalerror("%s failed: %m\n", reason);
 
-    /* The segment 0 is not used to run transactions, but contains the
-       shared copy of the pages.  We mprotect all pages before so that
-       accesses fail, up to and including the pages corresponding to the
-       nurseries of the other segments. */
-    mprotect(result, END_NURSERY_PAGE * 4096UL, PROT_NONE);
-
-    long i;
-    for (i = 1; i <= NB_SEGMENTS; i++) {
-        char *segment_base = result + i * (NB_PAGES * 4096UL);
-
-        /* In each segment, the first page is where TLPREFIX'ed
-           NULL accesses land.  We mprotect it so that accesses fail. */
-        mprotect(segment_base, 4096, PROT_NONE);
-
-        /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
-        if (FIRST_READMARKER_PAGE > 2)
-            mprotect(segment_base + 8192,
-                     (FIRST_READMARKER_PAGE - 2) * 4096UL,
-                     PROT_NONE);
-    }
-
     return result;
 }
 
 static void do_or_redo_setup_after_fork(void)
 {
+    /* The segment 0 is not used to run transactions, but contains the
+       shared copy of the pages.  We mprotect all pages before so that
+       accesses fail, up to and including the pages corresponding to the
+       nurseries of the other segments. */
+    mprotect(stm_object_pages, END_NURSERY_PAGE * 4096UL, PROT_NONE);
+
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
+
+        /* In each segment, the first page is where TLPREFIX'ed
+           NULL accesses land.  We mprotect it so that accesses fail. */
+        mprotect(segment_base, 4096, PROT_NONE);
 
         /* Fill the TLS page (page 1) with 0xDC, for debugging */
         memset(REAL_ADDRESS(segment_base, 4096), 0xDC, 4096);
         /* Make a "hole" at STM_PSEGMENT (which includes STM_SEGMENT) */
         memset(REAL_ADDRESS(segment_base, STM_PSEGMENT), 0,
                sizeof(*STM_PSEGMENT));
+
+        /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
+        if (FIRST_READMARKER_PAGE > 2)
+            mprotect(segment_base + 8192,
+                     (FIRST_READMARKER_PAGE - 2) * 4096UL,
+                     PROT_NONE);
 
         /* Initialize STM_PSEGMENT */
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
@@ -108,8 +103,8 @@ static void do_or_redo_teardown_after_fork(void)
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
-        assert(pr->objects_pointing_to_nursery == NULL);
-        assert(pr->large_overflow_objects == NULL);
+        LIST_FREE(pr->objects_pointing_to_nursery);
+        LIST_FREE(pr->large_overflow_objects);
         list_free(pr->modified_old_objects);
         list_free(pr->young_weakrefs);
         list_free(pr->old_weakrefs);

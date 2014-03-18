@@ -8,8 +8,8 @@ static int threadcolor_printf(const char *format, ...)
     char buffer[2048];
     va_list ap;
     int result;
-    int size = (int)sprintf(buffer, "\033[%dm[%lx] ", dprintfcolor(),
-                            (long)pthread_self());
+    int size = (int)sprintf(buffer, "\033[%dm[%d,%lx] ", dprintfcolor(),
+                            (int)getpid(), (long)pthread_self());
     assert(size >= 0);
 
     va_start(ap, format);
