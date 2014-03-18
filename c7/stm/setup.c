@@ -24,7 +24,7 @@ void stm_setup(void)
                             PROT_READ | PROT_WRITE,
                             MAP_PAGES_FLAGS, -1, 0);
     if (stm_object_pages == MAP_FAILED)
-        stm_fatalerror("initial stm_object_pages mmap() failed: %m\n");
+        stm_fatalerror("initial stm_object_pages mmap() failed: %m");
 
     /* The segment 0 is not used to run transactions, but to contain the
        shared copy of the pages.  We mprotect all pages before so that

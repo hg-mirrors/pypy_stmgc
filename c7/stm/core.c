@@ -157,7 +157,7 @@ static void reset_transaction_read_version(void)
              MAP_FIXED | MAP_PAGES_FLAGS, -1, 0) != readmarkers) {
         /* fall-back */
 #if STM_TESTS
-        stm_fatalerror("reset_transaction_read_version: %m\n");
+        stm_fatalerror("reset_transaction_read_version: %m");
 #endif
         memset(readmarkers, 0, NB_READMARKER_PAGES * 4096UL);
     }

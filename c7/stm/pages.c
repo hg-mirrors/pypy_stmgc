@@ -93,7 +93,7 @@ static void d_remap_file_pages(char *addr, size_t size, ssize_t pgoff)
 
     int res = remap_file_pages(addr, size, 0, pgoff, 0);
     if (UNLIKELY(res < 0))
-        stm_fatalerror("remap_file_pages: %m\n");
+        stm_fatalerror("remap_file_pages: %m");
 }
 
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
