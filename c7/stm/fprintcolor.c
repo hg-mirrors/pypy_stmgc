@@ -41,6 +41,7 @@ static void stm_fatalerror(const char *format, ...)
 
     va_start(ap, format);
     vfprintf(stderr, format, ap);
+    fprintf(stderr, "\n");
     va_end(ap);
 
     abort();
