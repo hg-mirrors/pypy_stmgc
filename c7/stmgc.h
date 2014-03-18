@@ -69,6 +69,7 @@ typedef struct stm_thread_local_s {
     /* the next fields are handled internally by the library */
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
+    long creating_pthread[4];
 } stm_thread_local_t;
 
 /* this should use llvm's coldcc calling convention,

@@ -8,10 +8,12 @@
 
 
 static char *fork_big_copy = NULL;
+static stm_thread_local_t *fork_this_tl;
 
 static char *setup_mmap(char *reason);            /* forward, in setup.c */
 static void do_or_redo_setup_after_fork(void);    /* forward, in setup.c */
 static void do_or_redo_teardown_after_fork(void); /* forward, in setup.c */
+static pthread_t *_get_cpth(stm_thread_local_t *);/* forward, in setup.c */
 
 
 static void forksupport_prepare(void)
@@ -19,14 +21,34 @@ static void forksupport_prepare(void)
     if (stm_object_pages == NULL)
         return;
 
-    /* This silently assumes that fork() is not called from transactions.
-       It's hard to check though...
-     */
+    /* This assumes that fork() is not called from transactions.
+       So far we attempt to check this by walking all stm_thread_local_t,
+       marking the one from the current thread, and verifying that it's not
+       running a transaction.  This assumes that the stm_thread_local_t is just
+       a __thread variable, so never changes threads.
+    */
     s_mutex_lock();
 
     synchronize_all_threads();
 
     mutex_pages_lock();
+
+    fork_this_tl = NULL;
+    stm_thread_local_t *tl = stm_all_thread_locals;
+    do {
+        if (pthread_equal(*_get_cpth(tl), pthread_self())) {
+            if (_stm_in_transaction(tl))
+                stm_fatalerror("fork(): cannot be used inside a transaction");
+            if (fork_this_tl != NULL)
+                stm_fatalerror("fork(): found several stm_thread_local_t"
+                               " from the same thread");
+            fork_this_tl = tl;
+        }
+        tl = tl->next;
+    } while (tl != stm_all_thread_locals);
+
+    if (fork_this_tl == NULL)
+        stm_fatalerror("fork(): found no stm_thread_local_t from this thread");
 
     char *big_copy = setup_mmap("stmgc's fork support");
 
@@ -79,6 +101,15 @@ static void forksupport_child(void)
 
     mutex_pages_unlock();
     s_mutex_unlock();
+
+    stm_thread_local_t *tl = stm_all_thread_locals;
+    do {
+        stm_thread_local_t *nexttl = tl->next;
+        if (tl != fork_this_tl) {
+            stm_unregister_thread_local(tl);
+        }
+        tl = nexttl;
+    } while (tl != stm_all_thread_locals);
 
     do_or_redo_teardown_after_fork();
 
