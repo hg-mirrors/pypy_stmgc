@@ -142,8 +142,8 @@ static void forksupport_prepare(void)
     fork_was_in_transaction = was_in_transaction;
 
     assert(_has_mutex());
-    printf("forksupport_prepare: from %p %p\n", fork_this_tl,
-           fork_this_tl->creating_pthread[0]);
+    dprintf(("forksupport_prepare: from %p %p\n", fork_this_tl,
+             fork_this_tl->creating_pthread[0]));
 }
 
 static void forksupport_parent(void)
@@ -151,8 +151,8 @@ static void forksupport_parent(void)
     if (stm_object_pages == NULL)
         return;
 
-    printf("forksupport_parent: continuing to run %p %p\n", fork_this_tl,
-           fork_this_tl->creating_pthread[0]);
+    dprintf(("forksupport_parent: continuing to run %p %p\n", fork_this_tl,
+             fork_this_tl->creating_pthread[0]));
     assert(_has_mutex());
     assert(_is_tl_registered(fork_this_tl));
 
