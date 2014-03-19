@@ -15,6 +15,17 @@ static char *setup_mmap(char *reason);            /* forward, in setup.c */
 static pthread_t *_get_cpth(stm_thread_local_t *);/* forward, in setup.c */
 
 
+static bool page_is_null(char *p)
+{
+    long *q = (long *)p;
+    long i;
+    for (i = 0; i < 4096 / sizeof(long); i++)
+        if (q[i] != 0)
+            return false;
+    return true;
+}
+
+
 static void forksupport_prepare(void)
 {
     if (stm_object_pages == NULL)
@@ -64,13 +75,25 @@ static void forksupport_prepare(void)
     */
     char *big_copy = setup_mmap("stmgc's fork support");
 
-    /* Copy each of the segment infos into the new mmap
+    /* Copy each of the segment infos into the new mmap, nurseries,
+       and associated read markers
      */
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
-        struct stm_priv_segment_info_s *src = get_priv_segment(i);
-        char *dst = big_copy + (((char *)src) - stm_object_pages);
-        *(struct stm_priv_segment_info_s *)dst = *src;
+        char *src, *dst;
+        struct stm_priv_segment_info_s *psrc = get_priv_segment(i);
+        dst = big_copy + (((char *)psrc) - stm_object_pages);
+        *(struct stm_priv_segment_info_s *)dst = *psrc;
+
+        src = get_segment_base(i) + FIRST_READMARKER_PAGE * 4096UL;
+        dst = big_copy + (src - stm_object_pages);
+        long j;
+        for (j = 0; j < END_NURSERY_PAGE - FIRST_READMARKER_PAGE; j++) {
+            if (!page_is_null(src))
+                pagecopy(dst, src);
+            src += 4096;
+            dst += 4096;
+        }
     }
 
     /* Copy all the data from the two ranges of objects (large, small)
