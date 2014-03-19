@@ -4,7 +4,7 @@
 
 
 /* XXX this is currently not doing copy-on-write, but simply forces a
-   copy of all shared pages as soon as fork() is called. */
+   copy of all pages as soon as fork() is called. */
 
 
 static char *fork_big_copy = NULL;
@@ -12,8 +12,6 @@ static stm_thread_local_t *fork_this_tl;
 static bool fork_was_in_transaction;
 
 static char *setup_mmap(char *reason);            /* forward, in setup.c */
-static void do_or_redo_setup_after_fork(void);    /* forward, in setup.c */
-static void do_or_redo_teardown_after_fork(void); /* forward, in setup.c */
 static pthread_t *_get_cpth(stm_thread_local_t *);/* forward, in setup.c */
 
 
@@ -31,37 +29,34 @@ static void forksupport_prepare(void)
 
     dprintf(("forksupport_prepare\n"));
 
-    fork_this_tl = NULL;
+    stm_thread_local_t *this_tl = NULL;
     stm_thread_local_t *tl = stm_all_thread_locals;
     do {
         if (pthread_equal(*_get_cpth(tl), pthread_self())) {
-            if (fork_this_tl != NULL)
+            if (this_tl != NULL)
                 stm_fatalerror("fork(): found several stm_thread_local_t"
                                " from the same thread");
-            fork_this_tl = tl;
+            this_tl = tl;
         }
         tl = tl->next;
     } while (tl != stm_all_thread_locals);
 
-    if (fork_this_tl == NULL)
+    if (this_tl == NULL)
         stm_fatalerror("fork(): found no stm_thread_local_t from this thread");
     s_mutex_unlock();
 
-    /* Run a commit without releasing the mutex at the end; if necessary,
-       actually start a dummy inevitable transaction for this
-    */
-    fork_was_in_transaction = _stm_in_transaction(fork_this_tl);
-    if (!fork_was_in_transaction)
-        stm_start_inevitable_transaction(fork_this_tl);
-    _stm_commit_transaction(/*keep_the_lock_at_the_end =*/ 1);
+    bool was_in_transaction = _stm_in_transaction(this_tl);
+    if (was_in_transaction) {
+        stm_become_inevitable("fork");
+        /* Note that the line above can still fail and abort, which should
+           be fine */
+    }
+    else {
+        stm_start_inevitable_transaction(this_tl);
+    }
 
-    printf("fork_was_in_transaction: %d\n"
-           "fork_this_tl->associated_segment_num: %d\n",
-           (int)fork_was_in_transaction,
-           (int)fork_this_tl->associated_segment_num);
-
-    /* Note that the commit can still fail and abort, which should be fine */
-
+    s_mutex_lock();
+    synchronize_all_threads();
     mutex_pages_lock();
 
     /* Make a new mmap at some other address, but of the same size as
@@ -79,7 +74,7 @@ static void forksupport_prepare(void)
     }
 
     /* Copy all the data from the two ranges of objects (large, small)
-       into the new mmap --- but only the shared objects
+       into the new mmap
     */
     uintptr_t pagenum, endpagenum;
     pagenum = END_NURSERY_PAGE;   /* starts after the nursery */
@@ -100,15 +95,32 @@ static void forksupport_prepare(void)
             endpagenum = NB_PAGES;
         }
 
-        pagecopy(big_copy + pagenum * 4096UL,
-                 stm_object_pages + pagenum * 4096UL);
+        char *src = stm_object_pages + pagenum * 4096UL;
+        char *dst = big_copy + pagenum * 4096UL;
+        pagecopy(dst, src);
+
+        struct page_shared_s ps = pages_privatized[pagenum - PAGE_FLAG_START];
+        if (ps.by_segment != 0) {
+            long j;
+            for (j = 0; j < NB_SEGMENTS; j++) {
+                src += NB_PAGES * 4096UL;
+                dst += NB_PAGES * 4096UL;
+                if (ps.by_segment & (1 << j)) {
+                    pagecopy(dst, src);
+                }
+            }
+        }
         pagenum++;
     }
 
     assert(fork_big_copy == NULL);
     fork_big_copy = big_copy;
+    fork_this_tl = this_tl;
+    fork_was_in_transaction = was_in_transaction;
 
     assert(_has_mutex());
+    printf("forksupport_prepare: from %p %p\n", fork_this_tl,
+           fork_this_tl->creating_pthread[0]);
 }
 
 static void forksupport_parent(void)
@@ -116,8 +128,10 @@ static void forksupport_parent(void)
     if (stm_object_pages == NULL)
         return;
 
-    assert(_is_tl_registered(fork_this_tl));
+    printf("forksupport_parent: continuing to run %p %p\n", fork_this_tl,
+           fork_this_tl->creating_pthread[0]);
     assert(_has_mutex());
+    assert(_is_tl_registered(fork_this_tl));
 
     /* In the parent, after fork(), we can simply forget about the big copy
        that we made for the child.
@@ -125,22 +139,33 @@ static void forksupport_parent(void)
     assert(fork_big_copy != NULL);
     munmap(fork_big_copy, TOTAL_MEMORY);
     fork_big_copy = NULL;
-
-    dprintf(("forksupport_parent: continuing to run\n"));
+    bool was_in_transaction = fork_was_in_transaction;
 
     mutex_pages_unlock();
+    s_mutex_unlock();
 
-    printf("AFTER: fork_was_in_transaction: %d\n"
-           "fork_this_tl->associated_segment_num: %d\n",
-           (int)fork_was_in_transaction,
-           (int)fork_this_tl->associated_segment_num);
-
-    if (fork_was_in_transaction) {
-        _stm_start_transaction(fork_this_tl, NULL,
-                               /*already_got_the_lock =*/ 1);
+    if (!was_in_transaction) {
+        stm_commit_transaction();
     }
-    else {
-        s_mutex_unlock();
+
+    dprintf(("forksupport_parent: continuing to run\n"));
+}
+
+static void fork_abort_thread(long i)
+{
+    struct stm_priv_segment_info_s *pr = get_priv_segment(i);
+    dprintf(("forksupport_child: abort in seg%ld\n", i));
+    assert(pr->pub.running_thread->associated_segment_num == i);
+    assert(pr->transaction_state == TS_REGULAR);
+    set_gs_register(get_segment_base(i));
+
+    stm_jmpbuf_t jmpbuf;
+    if (__builtin_setjmp(jmpbuf) == 0) {
+        pr->pub.jmpbuf_ptr = &jmpbuf;
+#ifndef NDEBUG
+        pr->running_pthread = pthread_self();
+#endif
+        stm_abort_transaction();
     }
 }
 
@@ -148,7 +173,6 @@ static void forksupport_child(void)
 {
     if (stm_object_pages == NULL)
         return;
-    abort();
 
     /* this new process contains no other thread, so we can
        just release these locks early */
@@ -170,7 +194,6 @@ static void forksupport_child(void)
     /* Unregister all other stm_thread_local_t, mostly as a way to free
        the memory used by the shadowstacks
      */
-    assert(fork_this_tl != NULL);
     while (stm_all_thread_locals->next != stm_all_thread_locals) {
         if (stm_all_thread_locals == fork_this_tl)
             stm_unregister_thread_local(stm_all_thread_locals->next);
@@ -179,37 +202,58 @@ static void forksupport_child(void)
     }
     assert(stm_all_thread_locals == fork_this_tl);
 
-    /* Restore a few things: the new pthread_self(), and the %gs
-       register (although I suppose it should be preserved by fork())
-    */
-    *_get_cpth(fork_this_tl) = pthread_self();
-    set_gs_register(get_segment_base(fork_this_tl->associated_segment_num));
-
-    /* Call a subset of stm_teardown() / stm_setup() to free and
-       recreate the necessary data in all segments, and to clean up some
-       of the global data like the big arrays that don't make sense any
-       more.  We keep other things like the smallmalloc and largemalloc
-       internal state.
-    */
-    do_or_redo_teardown_after_fork();
-    do_or_redo_setup_after_fork();
-
     /* Make all pages shared again.
      */
-    mutex_pages_lock();
-    uintptr_t start = END_NURSERY_PAGE;
-    uintptr_t stop  = (uninitialized_page_start - stm_object_pages) / 4096UL;
-    pages_initialize_shared(start, stop - start);
-    start = (uninitialized_page_stop - stm_object_pages) / 4096UL;
-    stop = NB_PAGES;
-    pages_initialize_shared(start, stop - start);
-    mutex_pages_unlock();
+    uintptr_t pagenum, endpagenum;
+    pagenum = END_NURSERY_PAGE;   /* starts after the nursery */
+    endpagenum = (uninitialized_page_start - stm_object_pages) / 4096UL;
 
-    /* Now restart the transaction if needed
+    while (1) {
+        if (UNLIKELY(pagenum == endpagenum)) {
+            /* we reach this point usually twice, because there are
+               more pages after 'uninitialized_page_stop' */
+            if (endpagenum == NB_PAGES)
+                break;   /* done */
+            pagenum = (uninitialized_page_stop - stm_object_pages) / 4096UL;
+            endpagenum = NB_PAGES;
+            if (endpagenum == NB_PAGES)
+                break;   /* done */
+        }
+
+        struct page_shared_s ps = pages_privatized[pagenum - PAGE_FLAG_START];
+        long j;
+        for (j = 0; j < NB_SEGMENTS; j++) {
+            if (!(ps.by_segment & (1 << j))) {
+                _page_do_reshare(j + 1, pagenum);
+            }
+        }
+        pagenum++;
+    }
+
+    /* Force the interruption of other running segments
      */
-    if (fork_was_in_transaction)
-        stm_start_inevitable_transaction(fork_this_tl);
+    long i;
+    for (i = 1; i <= NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pr = get_priv_segment(i);
+        if (pr->pub.running_thread != NULL &&
+            pr->pub.running_thread != fork_this_tl) {
+            fork_abort_thread(i);
+        }
+    }
 
+    /* Restore a few things: the new pthread_self(), and the %gs
+       register */
+    int segnum = fork_this_tl->associated_segment_num;
+    assert(1 <= segnum && segnum <= NB_SEGMENTS);
+    *_get_cpth(fork_this_tl) = pthread_self();
+    set_gs_register(get_segment_base(segnum));
+    assert(STM_SEGMENT->segment_num == segnum);
+
+    if (!fork_was_in_transaction) {
+        stm_commit_transaction();
+    }
+
+    /* Done */
     dprintf(("forksupport_child: running one thread now\n"));
 }
 

@@ -146,6 +146,13 @@ static void page_privatize(uintptr_t pagenum)
     mutex_pages_unlock();
 }
 
+static void _page_do_reshare(long segnum, uintptr_t pagenum)
+{
+    char *segment_base = get_segment_base(segnum);
+    d_remap_file_pages(segment_base + pagenum * 4096UL,
+                       4096, pagenum);
+}
+
 static void page_reshare(uintptr_t pagenum)
 {
     struct page_shared_s ps = pages_privatized[pagenum - PAGE_FLAG_START];
