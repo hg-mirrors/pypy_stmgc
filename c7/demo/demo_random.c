@@ -14,7 +14,7 @@
 #define THREAD_STARTS 300 // how many restarts of threads
 #define PREBUILT_ROOTS 3
 #define MAXROOTS 1000
-#define FORKS 3
+#define FORKS 1
 
 // SUPPORT
 struct node_s;
@@ -339,9 +339,22 @@ void *demo_random(void *arg)
 
         if (p == (objptr_t)-1) {
             push_roots();
-            stm_commit_transaction();
 
-            if (arg) {
+            if (arg == NULL) {   /* common case */
+                stm_commit_transaction();
+                td.num_roots_at_transaction_start = td.num_roots;
+                if (get_rand(100) < 98) {
+                    STM_START_TRANSACTION(&stm_thread_local, here);
+                } else {
+                    stm_start_inevitable_transaction(&stm_thread_local);
+                }
+                td.num_roots = td.num_roots_at_transaction_start;
+                p = NULL;
+                pop_roots();
+                reload_roots();
+            }
+            else {
+                /* run a fork() inside the transaction */
                 printf("==========   FORK  =========\n");
                 arg = NULL;
                 pid_t child = fork();
@@ -355,19 +368,10 @@ void *demo_random(void *arg)
                     num_forked_children++;
                 else
                     num_forked_children = 0;
-            }
 
-            td.num_roots_at_transaction_start = td.num_roots;
-
-            if (get_rand(100) < 98) {
-                STM_START_TRANSACTION(&stm_thread_local, here);
-            } else {
-                stm_start_inevitable_transaction(&stm_thread_local);
+                pop_roots();
+                p = NULL;
             }
-            td.num_roots = td.num_roots_at_transaction_start;
-            p = NULL;
-            pop_roots();
-            reload_roots();
         }
     }
     stm_commit_transaction();
