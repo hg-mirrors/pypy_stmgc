@@ -78,7 +78,8 @@ void _stm_write_slowpath(object_t *);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
-void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *);
+void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *, int);
+void _stm_commit_transaction(int);
 void _stm_collectable_safe_point(void);
 
 /* for tests, but also used in duhton: */
@@ -257,17 +258,19 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
    stm_jmpbuf_t). */
 #define STM_START_TRANSACTION(tl, jmpbuf)  ({                   \
     while (__builtin_setjmp(jmpbuf) == 1) { /*redo setjmp*/ }   \
-    _stm_start_transaction(tl, &jmpbuf);                        \
+    _stm_start_transaction(tl, &jmpbuf, 0);                     \
 })
 
 /* Start an inevitable transaction, if it's going to return from the
    current function immediately. */
 static inline void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
-    _stm_start_transaction(tl, NULL);
+    _stm_start_transaction(tl, NULL, 0);
 }
 
 /* Commit a transaction. */
-void stm_commit_transaction(void);
+static inline void stm_commit_transaction(void) {
+    _stm_commit_transaction(0);
+}
 
 /* Abort the currently running transaction. */
 void stm_abort_transaction(void) __attribute__((noreturn));

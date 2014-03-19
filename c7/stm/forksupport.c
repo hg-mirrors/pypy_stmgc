@@ -9,6 +9,7 @@
 
 static char *fork_big_copy = NULL;
 static stm_thread_local_t *fork_this_tl;
+static bool fork_was_in_transaction;
 
 static char *setup_mmap(char *reason);            /* forward, in setup.c */
 static void do_or_redo_setup_after_fork(void);    /* forward, in setup.c */
@@ -21,23 +22,19 @@ static void forksupport_prepare(void)
     if (stm_object_pages == NULL)
         return;
 
-    /* This assumes that fork() is not called from transactions.
-       So far we attempt to check this by walking all stm_thread_local_t,
+    /* So far we attempt to check this by walking all stm_thread_local_t,
        marking the one from the current thread, and verifying that it's not
        running a transaction.  This assumes that the stm_thread_local_t is just
        a __thread variable, so never changes threads.
     */
     s_mutex_lock();
-    mutex_pages_lock();
 
-    dprintf(("forksupport_prepare: synchronized all threads\n"));
+    dprintf(("forksupport_prepare\n"));
 
     fork_this_tl = NULL;
     stm_thread_local_t *tl = stm_all_thread_locals;
     do {
         if (pthread_equal(*_get_cpth(tl), pthread_self())) {
-            if (_stm_in_transaction(tl))
-                stm_fatalerror("fork(): cannot be used inside a transaction");
             if (fork_this_tl != NULL)
                 stm_fatalerror("fork(): found several stm_thread_local_t"
                                " from the same thread");
@@ -48,6 +45,24 @@ static void forksupport_prepare(void)
 
     if (fork_this_tl == NULL)
         stm_fatalerror("fork(): found no stm_thread_local_t from this thread");
+    s_mutex_unlock();
+
+    /* Run a commit without releasing the mutex at the end; if necessary,
+       actually start a dummy inevitable transaction for this
+    */
+    fork_was_in_transaction = _stm_in_transaction(fork_this_tl);
+    if (!fork_was_in_transaction)
+        stm_start_inevitable_transaction(fork_this_tl);
+    _stm_commit_transaction(/*keep_the_lock_at_the_end =*/ 1);
+
+    printf("fork_was_in_transaction: %d\n"
+           "fork_this_tl->associated_segment_num: %d\n",
+           (int)fork_was_in_transaction,
+           (int)fork_this_tl->associated_segment_num);
+
+    /* Note that the commit can still fail and abort, which should be fine */
+
+    mutex_pages_lock();
 
     /* Make a new mmap at some other address, but of the same size as
        the standard mmap at stm_object_pages
@@ -92,12 +107,17 @@ static void forksupport_prepare(void)
 
     assert(fork_big_copy == NULL);
     fork_big_copy = big_copy;
+
+    assert(_has_mutex());
 }
 
 static void forksupport_parent(void)
 {
     if (stm_object_pages == NULL)
         return;
+
+    assert(_is_tl_registered(fork_this_tl));
+    assert(_has_mutex());
 
     /* In the parent, after fork(), we can simply forget about the big copy
        that we made for the child.
@@ -109,36 +129,31 @@ static void forksupport_parent(void)
     dprintf(("forksupport_parent: continuing to run\n"));
 
     mutex_pages_unlock();
-    s_mutex_unlock();
+
+    printf("AFTER: fork_was_in_transaction: %d\n"
+           "fork_this_tl->associated_segment_num: %d\n",
+           (int)fork_was_in_transaction,
+           (int)fork_this_tl->associated_segment_num);
+
+    if (fork_was_in_transaction) {
+        _stm_start_transaction(fork_this_tl, NULL,
+                               /*already_got_the_lock =*/ 1);
+    }
+    else {
+        s_mutex_unlock();
+    }
 }
 
 static void forksupport_child(void)
 {
     if (stm_object_pages == NULL)
         return;
+    abort();
 
-    /* In the child, first unregister all other stm_thread_local_t,
-       mostly as a way to free the memory used by the shadowstacks
-     */
+    /* this new process contains no other thread, so we can
+       just release these locks early */
     mutex_pages_unlock();
     s_mutex_unlock();
-
-    assert(fork_this_tl != NULL);
-    while (stm_all_thread_locals->next != stm_all_thread_locals) {
-        if (stm_all_thread_locals == fork_this_tl)
-            stm_unregister_thread_local(stm_all_thread_locals->next);
-        else
-            stm_unregister_thread_local(stm_all_thread_locals);
-    }
-    assert(stm_all_thread_locals == fork_this_tl);
-
-    /* Restore a few things in the child: the new pthread_self(), and
-       the %gs register (although I suppose it should be preserved by
-       fork())
-    */
-    *_get_cpth(fork_this_tl) = pthread_self();
-    set_gs_register(get_segment_base(fork_this_tl->associated_segment_num));
-    fork_this_tl = NULL;
 
     /* Move the copy of the mmap over the old one, overwriting it
        and thus freeing the old mapping in this process
@@ -151,6 +166,24 @@ static void forksupport_child(void)
     if (res != stm_object_pages)
         stm_fatalerror("after fork: mremap failed: %m");
     fork_big_copy = NULL;
+
+    /* Unregister all other stm_thread_local_t, mostly as a way to free
+       the memory used by the shadowstacks
+     */
+    assert(fork_this_tl != NULL);
+    while (stm_all_thread_locals->next != stm_all_thread_locals) {
+        if (stm_all_thread_locals == fork_this_tl)
+            stm_unregister_thread_local(stm_all_thread_locals->next);
+        else
+            stm_unregister_thread_local(stm_all_thread_locals);
+    }
+    assert(stm_all_thread_locals == fork_this_tl);
+
+    /* Restore a few things: the new pthread_self(), and the %gs
+       register (although I suppose it should be preserved by fork())
+    */
+    *_get_cpth(fork_this_tl) = pthread_self();
+    set_gs_register(get_segment_base(fork_this_tl->associated_segment_num));
 
     /* Call a subset of stm_teardown() / stm_setup() to free and
        recreate the necessary data in all segments, and to clean up some
@@ -171,6 +204,11 @@ static void forksupport_child(void)
     stop = NB_PAGES;
     pages_initialize_shared(start, stop - start);
     mutex_pages_unlock();
+
+    /* Now restart the transaction if needed
+     */
+    if (fork_was_in_transaction)
+        stm_start_inevitable_transaction(fork_this_tl);
 
     dprintf(("forksupport_child: running one thread now\n"));
 }

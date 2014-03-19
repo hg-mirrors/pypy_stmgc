@@ -164,11 +164,13 @@ static void reset_transaction_read_version(void)
     STM_SEGMENT->transaction_read_version = 1;
 }
 
-void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
+void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf,
+                            int already_got_the_lock)
 {
-    assert(!_stm_in_transaction(tl));
-
-    s_mutex_lock();
+    if (!already_got_the_lock) {
+        assert(!_stm_in_transaction(tl));
+        s_mutex_lock();
+    }
 
   retry:
     if (jmpbuf == NULL) {
@@ -447,7 +449,7 @@ static void _finish_transaction(void)
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 }
 
-void stm_commit_transaction(void)
+void _stm_commit_transaction(int keep_the_lock_at_the_end)
 {
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
@@ -506,7 +508,8 @@ void stm_commit_transaction(void)
     _finish_transaction();
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
-    s_mutex_unlock();
+    if (!keep_the_lock_at_the_end)
+        s_mutex_unlock();
 }
 
 void stm_abort_transaction(void)
