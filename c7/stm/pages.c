@@ -103,6 +103,8 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
        segment 0. */
     uintptr_t i;
     assert(_has_mutex_pages());
+    if (count == 0)
+        return;
     for (i = 1; i <= NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
         d_remap_file_pages(segment_base + pagenum * 4096UL,
@@ -138,6 +140,13 @@ static void page_privatize(uintptr_t pagenum)
     pages_privatized[pagenum - PAGE_FLAG_START].by_segment |= bitmask;
 
     mutex_pages_unlock();
+}
+
+static void _page_do_reshare(long segnum, uintptr_t pagenum)
+{
+    char *segment_base = get_segment_base(segnum);
+    d_remap_file_pages(segment_base + pagenum * 4096UL,
+                       4096, pagenum);
 }
 
 static void page_reshare(uintptr_t pagenum)
