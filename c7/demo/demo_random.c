@@ -10,11 +10,11 @@
 #include "stmgc.h"
 
 #define NUMTHREADS 3
-#define STEPS_PER_THREAD 300
-#define THREAD_STARTS 300 // how many restarts of threads
+#define STEPS_PER_THREAD 500
+#define THREAD_STARTS 1000 // how many restarts of threads
 #define PREBUILT_ROOTS 3
 #define MAXROOTS 1000
-#define FORKS 1
+#define FORKS 3
 
 // SUPPORT
 struct node_s;

@@ -14,8 +14,25 @@ static char *setup_mmap(char *reason)
     return result;
 }
 
-static void do_or_redo_setup_after_fork(void)
+void stm_setup(void)
 {
+    /* Check that some values are acceptable */
+    assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
+    assert(4096 <= ((uintptr_t)STM_SEGMENT));
+    assert((uintptr_t)STM_SEGMENT == (uintptr_t)STM_PSEGMENT);
+    assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= 8192);
+    assert(2 <= FIRST_READMARKER_PAGE);
+    assert(FIRST_READMARKER_PAGE * 4096UL <= READMARKER_START);
+    assert(READMARKER_START < READMARKER_END);
+    assert(READMARKER_END <= 4096UL * FIRST_OBJECT_PAGE);
+    assert(FIRST_OBJECT_PAGE < NB_PAGES);
+    assert((NB_PAGES * 4096UL) >> 8 <= (FIRST_OBJECT_PAGE * 4096UL) >> 4);
+    assert((END_NURSERY_PAGE * 4096UL) >> 8 <=
+           (FIRST_READMARKER_PAGE * 4096UL));
+    assert(_STM_FAST_ALLOC <= NB_NURSERY_PAGES * 4096);
+
+    stm_object_pages = setup_mmap("initial stm_object_pages mmap()");
+
     /* The segment 0 is not used to run transactions, but contains the
        shared copy of the pages.  We mprotect all pages before so that
        accesses fail, up to and including the pages corresponding to the
@@ -68,54 +85,12 @@ static void do_or_redo_setup_after_fork(void)
        so a null read marker means "not read" whatever the
        current transaction_read_version is.
     */
-    setup_nursery();
-}
-
-void stm_setup(void)
-{
-    /* Check that some values are acceptable */
-    assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
-    assert(4096 <= ((uintptr_t)STM_SEGMENT));
-    assert((uintptr_t)STM_SEGMENT == (uintptr_t)STM_PSEGMENT);
-    assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= 8192);
-    assert(2 <= FIRST_READMARKER_PAGE);
-    assert(FIRST_READMARKER_PAGE * 4096UL <= READMARKER_START);
-    assert(READMARKER_START < READMARKER_END);
-    assert(READMARKER_END <= 4096UL * FIRST_OBJECT_PAGE);
-    assert(FIRST_OBJECT_PAGE < NB_PAGES);
-    assert((NB_PAGES * 4096UL) >> 8 <= (FIRST_OBJECT_PAGE * 4096UL) >> 4);
-    assert((END_NURSERY_PAGE * 4096UL) >> 8 <=
-           (FIRST_READMARKER_PAGE * 4096UL));
-    assert(_STM_FAST_ALLOC <= NB_NURSERY_PAGES * 4096);
-
-    stm_object_pages = setup_mmap("initial stm_object_pages mmap()");
-
-    do_or_redo_setup_after_fork();
 
     setup_sync();
+    setup_nursery();
     setup_gcpage();
     setup_pages();
     setup_forksupport();
-}
-
-static void do_or_redo_teardown_after_fork(void)
-{
-    long i;
-    for (i = 1; i <= NB_SEGMENTS; i++) {
-        struct stm_priv_segment_info_s *pr = get_priv_segment(i);
-        LIST_FREE(pr->objects_pointing_to_nursery);
-        LIST_FREE(pr->large_overflow_objects);
-        list_free(pr->modified_old_objects);
-        list_free(pr->young_weakrefs);
-        list_free(pr->old_weakrefs);
-        tree_free(pr->young_outside_nursery);
-        tree_free(pr->nursery_objects_shadows);
-        tree_free(pr->callbacks_on_abort);
-    }
-
-    teardown_core();
-    teardown_sync_1();
-    teardown_pages_1();
 }
 
 void stm_teardown(void)
@@ -124,11 +99,23 @@ void stm_teardown(void)
        need to call it. */
     assert(!_has_mutex());
 
-    do_or_redo_teardown_after_fork();
+    long i;
+    for (i = 1; i <= NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pr = get_priv_segment(i);
+        assert(pr->objects_pointing_to_nursery == NULL);
+        assert(pr->large_overflow_objects == NULL);
+        list_free(pr->modified_old_objects);
+        list_free(pr->young_weakrefs);
+        list_free(pr->old_weakrefs);
+        tree_free(pr->young_outside_nursery);
+        tree_free(pr->nursery_objects_shadows);
+        tree_free(pr->callbacks_on_abort);
+    }
 
     munmap(stm_object_pages, TOTAL_MEMORY);
     stm_object_pages = NULL;
 
+    teardown_core();
     teardown_sync();
     teardown_gcpage();
     teardown_pages();
