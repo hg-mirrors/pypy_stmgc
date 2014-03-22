@@ -54,6 +54,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(void);
+bool _check_become_globally_unique_transaction(void);
 int stm_is_inevitable(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
@@ -159,6 +160,10 @@ bool _check_abort_transaction(void) {
 
 bool _check_become_inevitable() {
     CHECKED(stm_become_inevitable("TEST"));
+}
+
+bool _check_become_globally_unique_transaction() {
+    CHECKED(stm_become_globally_unique_transaction("TESTGUT"));
 }
 
 #undef CHECKED
@@ -357,6 +362,10 @@ def stm_become_inevitable():
     if lib._check_become_inevitable():
         raise Conflict()
 
+def stm_become_globally_unique_transaction():
+    if lib._check_become_globally_unique_transaction():
+        raise Conflict()
+
 def stm_minor_collect():
     lib.stm_collect(0)
 
@@ -412,6 +421,10 @@ class BaseTest(object):
         self.current_thread = 0
 
     def teardown_method(self, meth):
+        tl = self.tls[self.current_thread]
+        if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
+            self.commit_transaction()      # must succeed!
+        #
         for n, tl in enumerate(self.tls):
             if lib._stm_in_transaction(tl):
                 if self.current_thread != n:
@@ -420,6 +433,7 @@ class BaseTest(object):
                     self.commit_transaction()   # must succeed!
                 else:
                     self.abort_transaction()
+        #
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
         lib.stm_teardown()
