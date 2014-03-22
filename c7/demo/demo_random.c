@@ -288,6 +288,11 @@ objptr_t do_step(objptr_t p)
         stm_become_inevitable("please");
         pop_roots();
         return NULL;
+    } else if (get_rand(360) == 1) {
+        fprintf(stdout, "GUT");
+        push_roots();
+        stm_become_globally_unique_transaction("really");
+        pop_roots();
     }
     return p;
 }
