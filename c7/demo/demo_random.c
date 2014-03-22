@@ -288,11 +288,12 @@ objptr_t do_step(objptr_t p)
         stm_become_inevitable("please");
         pop_roots();
         return NULL;
-    } else if (get_rand(360) == 1) {
-        fprintf(stdout, "GUT");
+    } else if (get_rand(240) == 1) {
         push_roots();
         stm_become_globally_unique_transaction("really");
+        fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
         pop_roots();
+        return NULL;
     }
     return p;
 }
@@ -324,8 +325,9 @@ void *demo_random(void *arg)
 
     setup_thread();
 
-    objptr_t p = NULL;
+    objptr_t p;
     stm_jmpbuf_t here;
+    volatile int call_fork = (arg != NULL);
 
     STM_START_TRANSACTION(&stm_thread_local, here);
     assert(td.num_roots >= td.num_roots_at_transaction_start);
@@ -345,7 +347,7 @@ void *demo_random(void *arg)
         if (p == (objptr_t)-1) {
             push_roots();
 
-            if (arg == NULL) {   /* common case */
+            if (call_fork == 0) {   /* common case */
                 stm_commit_transaction();
                 td.num_roots_at_transaction_start = td.num_roots;
                 if (get_rand(100) < 98) {
@@ -361,7 +363,7 @@ void *demo_random(void *arg)
             else {
                 /* run a fork() inside the transaction */
                 printf("==========   FORK  =========\n");
-                arg = NULL;
+                call_fork = 0;
                 pid_t child = fork();
                 printf("=== in process %d thread %lx, fork() returned %d\n",
                        (int)getpid(), (long)pthread_self(), (int)child);
