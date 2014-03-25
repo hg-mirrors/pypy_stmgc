@@ -190,6 +190,8 @@ static void fork_abort_thread(long i)
 #ifndef NDEBUG
         pr->running_pthread = pthread_self();
 #endif
+        pr->pub.running_thread->shadowstack = (
+            pr->shadowstack_at_start_of_transaction);
         stm_abort_transaction();
     }
 }
