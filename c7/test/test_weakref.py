@@ -338,3 +338,22 @@ class TestMajorCollection(BaseTest):
         self.switch(1)
         lp1 = self.pop_root()
         assert stm_get_weakref(lp1) == lp0
+
+    def test_weakref_bug2(self):
+        self.start_transaction()
+        lp0 = stm_allocate(16)
+        self.push_root(lp0)
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        lp0 = self.pop_root()
+        self.push_root(lp0)
+        stm_write(lp0)    # privatize page
+        lp1 = stm_allocate_weakref(lp0)    # young object
+        self.push_root(lp1)
+        stm_minor_collect()
+        lp1 = self.pop_root()       # overflow object
+        self.push_root(lp1)
+        #
+        self.switch(1)
+        stm_major_collect()
