@@ -383,7 +383,7 @@ class TestBasic(BaseTest):
         stm_write(lp1)
         stm_set_char(lp1, 'b')
         assert lib.stm_is_inevitable() == 0
-        stm_become_inevitable()
+        self.become_inevitable()
         assert lib.stm_is_inevitable() == 1
         self.commit_transaction()
         #

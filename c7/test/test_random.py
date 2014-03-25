@@ -346,7 +346,7 @@ def op_become_inevitable(ex, global_state, thread_state):
 
     thread_state.push_roots(ex)
     ex.do(raising_call(trs.check_must_abort(),
-                       "stm_become_inevitable"))
+                       "self.become_inevitable"))
     if trs.check_must_abort():
         thread_state.abort_transaction()
     else:

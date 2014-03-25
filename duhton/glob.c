@@ -126,7 +126,7 @@ DuObject *du_print(DuObject *cons, DuObject *locals)
     }
 
     _du_save1(lst);
-    stm_become_inevitable("print");
+    stm_become_inevitable(&stm_thread_local, "print");
     _du_restore1(lst);
 
     int i;
