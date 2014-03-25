@@ -60,7 +60,7 @@ static void forksupport_prepare(void)
 
     bool was_in_transaction = _stm_in_transaction(this_tl);
     if (was_in_transaction) {
-        stm_become_inevitable("fork");
+        stm_become_inevitable(this_tl, "fork");
         /* Note that the line above can still fail and abort, which should
            be fine */
     }

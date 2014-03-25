@@ -86,7 +86,7 @@ class TestExtra(BaseTest):
         #
         self.switch(1)
         self.start_transaction()
-        lib._check_become_globally_unique_transaction()
+        self.become_globally_unique_transaction()
         assert lib.stm_is_inevitable()
         #
         py.test.raises(Conflict, self.switch, 0)

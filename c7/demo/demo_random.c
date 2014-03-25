@@ -285,12 +285,12 @@ objptr_t do_step(objptr_t p)
         return (objptr_t)-1; // break current
     } else if (get_rand(20) == 1) {
         push_roots();
-        stm_become_inevitable("please");
+        stm_become_inevitable(&stm_thread_local, "please");
         pop_roots();
         return NULL;
     } else if (get_rand(240) == 1) {
         push_roots();
-        stm_become_globally_unique_transaction("really");
+        stm_become_globally_unique_transaction(&stm_thread_local, "really");
         fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
         pop_roots();
         return NULL;

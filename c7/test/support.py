@@ -53,8 +53,8 @@ int _stm_get_flags(object_t *obj);
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
-bool _check_become_inevitable(void);
-bool _check_become_globally_unique_transaction(void);
+bool _check_become_inevitable(stm_thread_local_t *tl);
+bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 int stm_is_inevitable(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
@@ -158,12 +158,12 @@ bool _check_abort_transaction(void) {
     CHECKED(stm_abort_transaction());
 }
 
-bool _check_become_inevitable() {
-    CHECKED(stm_become_inevitable("TEST"));
+bool _check_become_inevitable(stm_thread_local_t *tl) {
+    CHECKED(stm_become_inevitable(tl, "TEST"));
 }
 
-bool _check_become_globally_unique_transaction() {
-    CHECKED(stm_become_globally_unique_transaction("TESTGUT"));
+bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
+    CHECKED(stm_become_globally_unique_transaction(tl, "TESTGUT"));
 }
 
 #undef CHECKED
@@ -358,14 +358,6 @@ def stm_stop_safe_point():
     if lib._check_stop_safe_point():
         raise Conflict()
 
-def stm_become_inevitable():
-    if lib._check_become_inevitable():
-        raise Conflict()
-
-def stm_become_globally_unique_transaction():
-    if lib._check_become_globally_unique_transaction():
-        raise Conflict()
-
 def stm_minor_collect():
     lib.stm_collect(0)
 
@@ -515,3 +507,13 @@ class BaseTest(object):
     def set_thread_local_obj(self, newobj):
         tl = self.tls[self.current_thread]
         tl.thread_local_obj = newobj
+
+    def become_inevitable(self):
+        tl = self.tls[self.current_thread]
+        if lib._check_become_inevitable(tl):
+            raise Conflict()
+
+    def become_globally_unique_transaction(self):
+        tl = self.tls[self.current_thread]
+        if lib._check_become_globally_unique_transaction(tl):
+            raise Conflict()

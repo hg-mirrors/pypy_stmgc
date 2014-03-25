@@ -676,9 +676,10 @@ void _stm_become_inevitable(const char *msg)
     s_mutex_unlock();
 }
 
-void stm_become_globally_unique_transaction(const char *msg)
+void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
+                                            const char *msg)
 {
-    stm_become_inevitable(msg);   /* may still abort */
+    stm_become_inevitable(tl, msg);   /* may still abort */
 
     s_mutex_lock();
     synchronize_all_threads(STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE);

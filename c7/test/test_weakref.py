@@ -176,7 +176,7 @@ class TestIsolation(BaseTest):
         # back in thread 0, we pop toref from the shadowstack
         # in an inevitable transaction
         self.start_transaction()
-        stm_become_inevitable()
+        self.become_inevitable()
         self.pop_root() # forget toref
         stm_major_collect()
 
