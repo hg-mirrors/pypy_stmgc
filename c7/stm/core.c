@@ -580,6 +580,16 @@ static void abort_data_structures_from_segment_num(int segment_num)
     */
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
 
+    switch (pseg->transaction_state) {
+    case TS_REGULAR:
+        break;
+    case TS_INEVITABLE:
+        stm_fatalerror("abort: transaction_state == TS_INEVITABLE");
+    default:
+        stm_fatalerror("abort: bad transaction_state == %d",
+                       (int)pseg->transaction_state);
+    }
+
     /* throw away the content of the nursery */
     long bytes_in_nursery = throw_away_nursery(pseg);
 
@@ -605,15 +615,6 @@ static void abort_with_mutex(void)
     assert(_has_mutex());
     dprintf(("~~~ ABORT\n"));
 
-    switch (STM_PSEGMENT->transaction_state) {
-    case TS_REGULAR:
-        break;
-    case TS_INEVITABLE:
-        stm_fatalerror("abort: transaction_state == TS_INEVITABLE");
-    default:
-        stm_fatalerror("abort: bad transaction_state == %d",
-                       (int)STM_PSEGMENT->transaction_state);
-    }
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
     abort_data_structures_from_segment_num(STM_SEGMENT->segment_num);
