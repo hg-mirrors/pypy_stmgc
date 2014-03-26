@@ -13,7 +13,6 @@
 
 #define STM_NB_SEGMENTS    4
 
-
 typedef struct { /* empty */ } stm_jmpbuf_t;
 
 typedef struct object_s {
@@ -88,15 +87,10 @@ void stm_setup(void);
 void stm_teardown(void);
 void stm_collect(long level);
 
-inline static void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
-    if (pthread_mutex_lock(&_stm_gil) != 0) abort();
-    _stm_tloc = tl;
-}
-inline static void stm_commit_transaction(void) {
-    stm_collect(0);
-    _stm_tloc = NULL;
-    if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
-}
+
+void stm_start_inevitable_transaction(stm_thread_local_t *tl);
+void stm_commit_transaction(void);
+
 inline static void stm_become_inevitable(
     stm_thread_local_t *tl, const char *msg) { }
 inline static void _stm_become_inevitable(const char *msg) { }
