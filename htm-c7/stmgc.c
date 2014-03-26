@@ -24,20 +24,26 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
         return;
     }
 
-    int status;
+    volatile int status;
  transaction_retry:
-    if ((status = xbegin()) == XBEGIN_OK) {
+
+    status = xbegin();
+    if (status == XBEGIN_OK) {
         if (mutex_locked(&_stm_gil))
             xabort(0);
         /* transaction OK */
     }
     else {
-        if (mutex_locked(&_stm_gil))
-            acquire_gil(tl);
-        else if (status & (XBEGIN_MAYBE_RETRY | XBEGIN_NORMAL_CONFLICT))
+        if (status & (XBEGIN_MAYBE_RETRY | XBEGIN_NORMAL_CONFLICT | XBEGIN_XABORT)) {
             goto transaction_retry;
-        else
+        } else if (mutex_locked(&_stm_gil)) {
             acquire_gil(tl);
+        }
+        else {
+            acquire_gil(tl);
+        }
+
+        fprintf(stderr, "failed HTM: %s\n", xbegin_status(status));
     }
 
     _stm_tloc = tl;
@@ -49,8 +55,10 @@ void stm_commit_transaction(void) {
     if (mutex_locked(&_stm_gil)) {
         assert(!xtest());
         if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
+        //fprintf(stderr, "G");
     } else {
         xend();
+        fprintf(stderr, "==== Committed HTM ====\n");
     }
 }
 

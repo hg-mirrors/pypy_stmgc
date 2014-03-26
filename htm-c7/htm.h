@@ -18,7 +18,7 @@
 #define XBEGIN_XABORT_ARG(x) (((x) >> 24) & 0xFF)
 
 static __thread char buf[128];
-char* xbegin_status(int status)
+static char* xbegin_status(int status)
 {
     if (status == XBEGIN_OK)
         snprintf(buf, 128, "OK");
@@ -36,6 +36,9 @@ char* xbegin_status(int status)
         snprintf(buf, 128, "DEBUG");
     else if (status & XBEGIN_NESTED_ABORT)
         snprintf(buf, 128, "NESTED_ABORT");
+    else
+        snprintf(buf, 128, "WAT.");
+
     return buf;
 }
 
@@ -52,8 +55,6 @@ static __attribute__((__always_inline__)) inline void xend()
 }
 
 #define xabort(argument) do { asm volatile(".byte 0xC6, 0xF8, %P0" :: "i" (argument) : "memory"); } while (0);
-
-
 
 static __attribute__((__always_inline__)) inline int xtest()
 {
