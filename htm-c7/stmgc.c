@@ -16,12 +16,14 @@ struct stm_segment_info_s _stm_segment;
 static __thread int gil_transactions = 0;
 static __thread int htm_transactions = 0;
 
+__thread struct htm_transaction_info_s _htm_info;
 
 #define smp_spinloop()  asm volatile ("pause":::"memory")
 
 static void acquire_gil(stm_thread_local_t *tl) {
     if (pthread_mutex_lock(&_stm_gil) == 0) {
         _stm_tloc = tl;
+        _htm_info.use_gil = 1;
         return;
     }
     abort();
@@ -52,6 +54,11 @@ static int is_persistent(int status) {
 
 void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
     /* set_transaction_length(pc) */
+
+    /* fprintf(stderr, "previous tr: retry: %d gil: %d\n", */
+    /*         _htm_info.retry_counter, _htm_info.use_gil); */
+    _htm_info.retry_counter = 0;
+    _htm_info.use_gil = 0;
 
     if (mutex_locked(&_stm_gil)) {
         if (spin_and_acquire_gil(tl))
@@ -91,6 +98,7 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
             acquire_gil(tl);
         } else {
             /* transient abort */
+            _htm_info.retry_counter++;
             transient_retry_counter--;
             if (transient_retry_counter > 0) {
                 smp_spinloop();
@@ -130,8 +138,24 @@ void stm_unregister_thread_local(stm_thread_local_t *tl) {
     free(tl->shadowstack_base);
 }
 
+/************************************************************/
+/* some simple thread-local malloc: */
+#define MAX_MALLOC (1000 * 1024 * 1024)
 
+static __thread char* _malloc_area_base = NULL;
+static __thread char* _malloc_area_current = NULL;
+void* tl_malloc(size_t size) {
+    if (_malloc_area_base == NULL) {
+        _malloc_area_base = malloc(MAX_MALLOC);
+        _malloc_area_current = _malloc_area_base;
+    }
 
+    void* res = _malloc_area_current;
+    _malloc_area_current += size;
+    if (_malloc_area_current - _malloc_area_base > MAX_MALLOC)
+        abort();
+    return res;
+}
 
 /************************************************************/
 
@@ -264,7 +288,7 @@ void _stm_write_slowpath(object_t *obj)
 
 object_t *_stm_allocate_old(ssize_t size)
 {
-    char *p = malloc(size);
+    char *p = tl_malloc(size);
     assert(p);
     memset(p, 0, size);
     ((object_t *)p)->gil_flags = _STM_GCFLAG_WRITE_BARRIER;
@@ -273,7 +297,7 @@ object_t *_stm_allocate_old(ssize_t size)
 
 object_t *_stm_allocate_external(ssize_t size)
 {
-    char *p = malloc(size);
+    char *p = tl_malloc(size);
     assert(p);
     memset(p, 0, size);
     _stm_write_slowpath((object_t *)p);
@@ -327,7 +351,7 @@ static void minor_trace_if_young(object_t **pobj)
          */
         size_t size = stmcb_size_rounded_up(obj);
 
-        nobj = malloc(size);
+        nobj = tl_malloc(size);
         assert(nobj);
 
         /* Copy the object  */
