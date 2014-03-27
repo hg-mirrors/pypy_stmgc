@@ -176,6 +176,8 @@ static void pages_setup_readmarkers_for_nursery(void)
        page"; missing one, we remap all the pages over to the same one.
        We still keep one page *per segment* to avoid cross-CPU cache
        conflicts.
+
+       (XXX no performance difference measured so far)
     */
     long i, j;
     for (i = 1; i <= NB_SEGMENTS; i++) {
