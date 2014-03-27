@@ -36,6 +36,7 @@ static void setup_protection_settings(void)
                      (FIRST_READMARKER_PAGE - 2) * 4096UL,
                      PROT_NONE);
     }
+    pages_setup_readmarkers_for_nursery();
 }
 
 void stm_setup(void)
