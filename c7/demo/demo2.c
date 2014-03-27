@@ -4,11 +4,20 @@
 #include <pthread.h>
 #include <semaphore.h>
 
-#include "stmgc.h"
+#ifdef USE_HTM
+#  include "../../htm-c7/stmgc.h"
+#else
+#  include "stmgc.h"
+#endif
 
-#define NTHREADS    3
-#define LIST_LENGTH 2000
-#define BUNCH       100
+#define LIST_LENGTH 4000
+#define NTHREADS    2
+
+#ifdef USE_HTM
+#  define BUNCH       200
+#else
+#  define BUNCH       200
+#endif
 
 typedef TLPREFIX struct node_s node_t;
 typedef node_t* nodeptr_t;
@@ -233,6 +242,7 @@ int main(void)
 
 
     setup_list();
+
 
     for (i = 1; i <= NTHREADS; i++) {
         newthread(demo2, (void*)(uintptr_t)i);
