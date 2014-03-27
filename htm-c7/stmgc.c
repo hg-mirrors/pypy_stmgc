@@ -138,8 +138,24 @@ void stm_unregister_thread_local(stm_thread_local_t *tl) {
     free(tl->shadowstack_base);
 }
 
+/************************************************************/
+/* some simple thread-local malloc: */
+#define MAX_MALLOC (1000 * 1024 * 1024)
 
+static __thread char* _malloc_area_base = NULL;
+static __thread char* _malloc_area_current = NULL;
+void* tl_malloc(size_t size) {
+    if (_malloc_area_base == NULL) {
+        _malloc_area_base = malloc(MAX_MALLOC);
+        _malloc_area_current = _malloc_area_base;
+    }
 
+    void* res = _malloc_area_current;
+    _malloc_area_current += size;
+    if (_malloc_area_current - _malloc_area_base > MAX_MALLOC)
+        abort();
+    return res;
+}
 
 /************************************************************/
 
@@ -272,7 +288,7 @@ void _stm_write_slowpath(object_t *obj)
 
 object_t *_stm_allocate_old(ssize_t size)
 {
-    char *p = malloc(size);
+    char *p = tl_malloc(size);
     assert(p);
     memset(p, 0, size);
     ((object_t *)p)->gil_flags = _STM_GCFLAG_WRITE_BARRIER;
@@ -281,7 +297,7 @@ object_t *_stm_allocate_old(ssize_t size)
 
 object_t *_stm_allocate_external(ssize_t size)
 {
-    char *p = malloc(size);
+    char *p = tl_malloc(size);
     assert(p);
     memset(p, 0, size);
     _stm_write_slowpath((object_t *)p);
@@ -335,7 +351,7 @@ static void minor_trace_if_young(object_t **pobj)
          */
         size_t size = stmcb_size_rounded_up(obj);
 
-        nobj = malloc(size);
+        nobj = tl_malloc(size);
         assert(nobj);
 
         /* Copy the object  */
