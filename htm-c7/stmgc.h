@@ -36,16 +36,17 @@ typedef struct stm_thread_local_s {
     size_t mem_bytes_to_clear_on_abort;  /* compat only -- always NULL */
 }  stm_thread_local_t;
 
-extern stm_thread_local_t *_stm_tloc;
-extern char *_stm_nursery_current, *_stm_nursery_end;
+extern __thread stm_thread_local_t *_stm_tloc;
+extern __thread char *_stm_nursery_current, *_stm_nursery_end;
 
 
 struct stm_segment_info_s {
     stm_jmpbuf_t *jmpbuf_ptr;  /* compat only -- always NULL */
-    char *nursery_current;     /* compat only -- always NULL */
+    char *nursery_current;     /* updated... */
 };
-extern struct stm_segment_info_s _stm_segment;
-#define STM_SEGMENT (&_stm_segment)
+//extern struct stm_segment_info_s _stm_segment;
+extern __thread struct stm_segment_info_s *_stm_segment;
+#define STM_SEGMENT (_stm_segment)
 
 #ifdef NDEBUG
 #define OPT_ASSERT(cond) do { if (!(cond)) __builtin_unreachable(); } while (0)
@@ -75,6 +76,7 @@ inline static object_t *stm_allocate(ssize_t size_rounded_up) {
     char *p = _stm_nursery_current;
     char *end = p + size_rounded_up;
     _stm_nursery_current = end;
+    STM_SEGMENT->nursery_current = end;
     if (UNLIKELY(end > _stm_nursery_end))
         return _stm_allocate_slowpath(size_rounded_up);
 
