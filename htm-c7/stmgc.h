@@ -13,6 +13,14 @@
 
 #define STM_NB_SEGMENTS    4
 
+#define HTM_INFO_AVAILABLE 1
+struct htm_transaction_info_s {
+    int retry_counter;          /* only counting transient aborts of HTM */
+    int use_gil;                /* in GIL mode? 0=HTM */
+};
+extern __thread struct htm_transaction_info_s _htm_info;
+
+
 typedef struct { /* empty */ } stm_jmpbuf_t;
 
 typedef struct object_s {
@@ -28,6 +36,7 @@ typedef struct stm_thread_local_s {
 
 extern stm_thread_local_t *_stm_tloc;
 extern char *_stm_nursery_current, *_stm_nursery_end;
+
 
 struct stm_segment_info_s {
     stm_jmpbuf_t *jmpbuf_ptr;  /* compat only -- always NULL */

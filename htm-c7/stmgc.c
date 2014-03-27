@@ -16,12 +16,14 @@ struct stm_segment_info_s _stm_segment;
 static __thread int gil_transactions = 0;
 static __thread int htm_transactions = 0;
 
+__thread struct htm_transaction_info_s _htm_info;
 
 #define smp_spinloop()  asm volatile ("pause":::"memory")
 
 static void acquire_gil(stm_thread_local_t *tl) {
     if (pthread_mutex_lock(&_stm_gil) == 0) {
         _stm_tloc = tl;
+        _htm_info.use_gil = 1;
         return;
     }
     abort();
@@ -52,6 +54,11 @@ static int is_persistent(int status) {
 
 void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
     /* set_transaction_length(pc) */
+
+    /* fprintf(stderr, "previous tr: retry: %d gil: %d\n", */
+    /*         _htm_info.retry_counter, _htm_info.use_gil); */
+    _htm_info.retry_counter = 0;
+    _htm_info.use_gil = 0;
 
     if (mutex_locked(&_stm_gil)) {
         if (spin_and_acquire_gil(tl))
@@ -91,6 +98,7 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
             acquire_gil(tl);
         } else {
             /* transient abort */
+            _htm_info.retry_counter++;
             transient_retry_counter--;
             if (transient_retry_counter > 0) {
                 smp_spinloop();
