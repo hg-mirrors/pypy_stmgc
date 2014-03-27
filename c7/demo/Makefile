@@ -30,3 +30,9 @@ build-%: %.c ${H_FILES} ${C_FILES}
 release-%: %.c ${H_FILES} ${C_FILES}
 	clang -I.. -pthread  -g -DNDEBUG -O2 $< -o release-$* \
         -Wall -Werror ../stmgc.c
+
+
+release-htm-%: %.c ../../htm-c7/stmgc.? ../../htm-c7/htm.h
+	clang -I.. -pthread -g -DNDEBUG -O2 $< -o release-htm-$* ../../htm-c7/stmgc.c -Wall -DUSE_HTM
+
+

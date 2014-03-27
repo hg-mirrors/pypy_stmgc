@@ -267,10 +267,11 @@ static void throw_away_nursery(void)
         _stm_nursery_base = malloc(NURSERY_SIZE);
         assert(_stm_nursery_base);
         _stm_nursery_end = _stm_nursery_base + NURSERY_SIZE;
+        _stm_nursery_current = _stm_nursery_base;
     }
 
+    memset(_stm_nursery_base, 0, _stm_nursery_current-_stm_nursery_base);
     _stm_nursery_current = _stm_nursery_base;
-    memset(_stm_nursery_base, 0, NURSERY_SIZE);
 }
 
 #define WEAKREF_PTR(wr, sz)  ((object_t * TLPREFIX *)(((char *)(wr)) + (sz) - sizeof(void*)))
@@ -332,6 +333,7 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 {
     /* run minor collection */
     //fprintf(stderr, "minor collect\n");
+    _stm_nursery_current -= size_rounded_up;
     stm_collect(0);
 
     char *p = _stm_nursery_current;

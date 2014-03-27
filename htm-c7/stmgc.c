@@ -7,8 +7,13 @@ pthread_mutex_t _stm_gil = PTHREAD_MUTEX_INITIALIZER;
 stm_thread_local_t *_stm_tloc;
 struct stm_segment_info_s _stm_segment;
 
+#define TRANSIENT_RETRY_MAX 5
+#define GIL_RETRY_MAX 5
+
+#define ABORT_GIL_LOCKED 1
 
 
+#define smp_spinloop()  asm volatile ("pause":::"memory")
 
 static void acquire_gil(stm_thread_local_t *tl) {
     if (pthread_mutex_lock(&_stm_gil) == 0) {
@@ -18,32 +23,76 @@ static void acquire_gil(stm_thread_local_t *tl) {
     abort();
 }
 
+static int spin_and_acquire_gil(stm_thread_local_t *tl) {
+    int n = 100;
+    while ((n --> 0) && mutex_locked(&_stm_gil)) {
+        smp_spinloop();
+    }
+
+    if (!mutex_locked(&_stm_gil))
+        return 0;
+
+    acquire_gil(tl);
+    return 1;
+}
+
+static int is_persistent(int status) {
+    if ((status & XBEGIN_XABORT) && XBEGIN_XABORT_ARG(status) == ABORT_GIL_LOCKED)
+        return 0;
+    else if (status & (XBEGIN_MAYBE_RETRY | XBEGIN_NORMAL_CONFLICT))
+        return 0;
+    else if (status == XBEGIN_UNKNOWN)
+        return 0;
+    return 1;
+}
+
 void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
+    /* set_transaction_length(pc) */
+
     if (mutex_locked(&_stm_gil)) {
-        acquire_gil(tl);
-        return;
+        if (spin_and_acquire_gil(tl))
+            return;
     }
 
     volatile int status;
- transaction_retry:
+    volatile int transient_retry_counter = TRANSIENT_RETRY_MAX;
+    volatile int gil_retry_counter = GIL_RETRY_MAX;
+    volatile int first_retry = 1;
 
+ transaction_retry:
     status = xbegin();
     if (status == XBEGIN_OK) {
         if (mutex_locked(&_stm_gil))
-            xabort(0);
+            xabort(ABORT_GIL_LOCKED);
         /* transaction OK */
     }
     else {
-        if (status & (XBEGIN_MAYBE_RETRY | XBEGIN_NORMAL_CONFLICT | XBEGIN_XABORT)) {
-            goto transaction_retry;
-        } else if (mutex_locked(&_stm_gil)) {
-            acquire_gil(tl);
+        if (first_retry) {
+            first_retry = 0;
+            /* adjust_transaction_length(pc) */
         }
-        else {
+
+        if (mutex_locked(&_stm_gil)) {
+            gil_retry_counter--;
+            if (gil_retry_counter > 0) {
+                if (spin_and_acquire_gil(tl))
+                    return;
+                else
+                    goto transaction_retry;
+            }
+            acquire_gil(tl);
+        } else if (is_persistent(status)) {
+            acquire_gil(tl);
+        } else {
+            /* transient abort */
+            transient_retry_counter--;
+            if (transient_retry_counter > 0)
+                goto transaction_retry;
             acquire_gil(tl);
         }
 
-        fprintf(stderr, "failed HTM: %s\n", xbegin_status(status));
+        /* fprintf(stderr, "failed HTM: %s, t_retry: %d, gil_retry: %d\n", */
+        /*         xbegin_status(status), transient_retry_counter, gil_retry_counter); */
     }
 
     _stm_tloc = tl;
@@ -55,10 +104,10 @@ void stm_commit_transaction(void) {
     if (mutex_locked(&_stm_gil)) {
         assert(!xtest());
         if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
-        //fprintf(stderr, "G");
+        fprintf(stderr, "G");
     } else {
         xend();
-        fprintf(stderr, "==== Committed HTM ====\n");
+        fprintf(stderr, "H");
     }
 }
 
@@ -327,10 +376,11 @@ static void throw_away_nursery(void)
         _stm_nursery_base = malloc(NURSERY_SIZE);
         assert(_stm_nursery_base);
         _stm_nursery_end = _stm_nursery_base + NURSERY_SIZE;
+        _stm_nursery_current = _stm_nursery_base;
     }
 
+    memset(_stm_nursery_base, 0, _stm_nursery_current-_stm_nursery_base);
     _stm_nursery_current = _stm_nursery_base;
-    memset(_stm_nursery_base, 0, NURSERY_SIZE);
 }
 
 #define WEAKREF_PTR(wr, sz)  ((object_t * TLPREFIX *)(((char *)(wr)) + (sz) - sizeof(void*)))
@@ -392,6 +442,7 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 {
     /* run minor collection */
     //fprintf(stderr, "minor collect\n");
+    _stm_nursery_current -= size_rounded_up;
     stm_collect(0);
 
     char *p = _stm_nursery_current;
