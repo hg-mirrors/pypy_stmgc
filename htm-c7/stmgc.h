@@ -77,9 +77,7 @@ inline static void stm_register_thread_local(stm_thread_local_t *tl) {
     tl->shadowstack = tl->shadowstack_base;
     tl->last_abort__bytes_in_nursery = 0;
 }
-inline static void stm_unregister_thread_local(stm_thread_local_t *tl) {
-    free(tl->shadowstack_base);
-}
+void stm_unregister_thread_local(stm_thread_local_t *tl);
 
 extern pthread_mutex_t _stm_gil;
 
