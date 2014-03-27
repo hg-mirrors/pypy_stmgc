@@ -8,8 +8,8 @@ __thread stm_thread_local_t *_stm_tloc;
 //struct stm_segment_info_s _stm_segment;
 __thread struct stm_segment_info_s* _stm_segment;
 
-#define TRANSIENT_RETRY_MAX 5
-#define GIL_RETRY_MAX 5
+#define TRANSIENT_RETRY_MAX 10
+#define GIL_RETRY_MAX 10
 
 #define ABORT_GIL_LOCKED 1
 
@@ -17,7 +17,7 @@ __thread struct stm_segment_info_s* _stm_segment;
 static __thread int gil_transactions = 0;
 static __thread int htm_transactions = 0;
 
-__thread struct htm_transaction_info_s _htm_info;
+__thread struct htm_transaction_info_s _htm_info __attribute__((aligned(64)));
 
 #define smp_spinloop()  asm volatile ("pause":::"memory")
 
@@ -32,12 +32,11 @@ static void acquire_gil(stm_thread_local_t *tl) {
 
 static int spin_and_acquire_gil(stm_thread_local_t *tl) {
     int n = 5;
-    while ((n --> 0) && mutex_locked(&_stm_gil)) {
+    while (n-- > 0) {
+        if (!mutex_locked(&_stm_gil))
+            return 0;
         smp_spinloop();
     }
-
-    if (!mutex_locked(&_stm_gil))
-        return 0;
 
     acquire_gil(tl);
     return 1;
@@ -274,10 +273,10 @@ void stm_teardown(void)
 void stm_register_thread_local(stm_thread_local_t *tl) {
     objects_pointing_to_nursery = list_create();
     young_weakrefs = list_create();
-    _stm_segment = malloc(sizeof(struct stm_segment_info_s));
+    _stm_segment = tl_malloc(sizeof(struct stm_segment_info_s));
 
     tl->thread_local_obj = NULL;
-    tl->shadowstack_base = (object_t **)malloc(768*1024);
+    tl->shadowstack_base = (object_t **)tl_malloc(768*1024);
     assert(tl->shadowstack_base);
     tl->shadowstack = tl->shadowstack_base;
     tl->last_abort__bytes_in_nursery = 0;
@@ -288,11 +287,11 @@ void stm_unregister_thread_local(stm_thread_local_t *tl) {
             "in %p\ngil_transactions: %d\nhtm_transactions: %d\nratio: %f\n",
             tl, gil_transactions, htm_transactions,
             (float)gil_transactions / (float)htm_transactions);
-    free(tl->shadowstack_base);
+    //free(tl->shadowstack_base);
 
     list_free(objects_pointing_to_nursery);
     list_free(young_weakrefs);
-    free(_stm_segment);
+    //free(_stm_segment);
 }
 
 

@@ -18,7 +18,7 @@ struct htm_transaction_info_s {
     int retry_counter;          /* only counting transient aborts of HTM */
     int use_gil;                /* in GIL mode? 0=HTM */
 };
-extern __thread struct htm_transaction_info_s _htm_info;
+extern __thread struct htm_transaction_info_s _htm_info __attribute__((aligned(64)));
 
 
 typedef void* stm_jmpbuf_t[5];  /* for use with __builtin_setjmp() */
@@ -43,6 +43,7 @@ extern __thread char *_stm_nursery_current, *_stm_nursery_end;
 struct stm_segment_info_s {
     stm_jmpbuf_t *jmpbuf_ptr;  /* compat only -- always NULL */
     char *nursery_current;     /* updated... */
+    int segment_num;  /* compat only -- always NULL */
 };
 //extern struct stm_segment_info_s _stm_segment;
 extern __thread struct stm_segment_info_s *_stm_segment;
