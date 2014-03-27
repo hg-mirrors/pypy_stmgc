@@ -21,7 +21,7 @@ struct htm_transaction_info_s {
 extern __thread struct htm_transaction_info_s _htm_info;
 
 
-typedef struct { /* empty */ } stm_jmpbuf_t;
+typedef void* stm_jmpbuf_t[5];  /* for use with __builtin_setjmp() */
 
 typedef struct object_s {
     uint32_t gil_flags;
@@ -32,6 +32,8 @@ typedef struct stm_thread_local_s {
     object_t **shadowstack_base;
     object_t *thread_local_obj;
     long last_abort__bytes_in_nursery;
+    char *mem_clear_on_abort;  /* compat only -- always NULL */
+    size_t mem_bytes_to_clear_on_abort;  /* compat only -- always NULL */
 }  stm_thread_local_t;
 
 extern stm_thread_local_t *_stm_tloc;
@@ -91,6 +93,9 @@ void stm_collect(long level);
 
 void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
+
+inline static void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *buf)
+{ stm_start_inevitable_transaction(tl); }
 
 inline static void stm_become_inevitable(
     stm_thread_local_t *tl, const char *msg) { }
