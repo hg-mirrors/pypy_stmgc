@@ -130,13 +130,6 @@ void stm_commit_transaction(void) {
 }
 
 
-void stm_unregister_thread_local(stm_thread_local_t *tl) {
-    fprintf(stderr,
-            "in %p\ngil_transactions: %d\nhtm_transactions: %d\nratio: %f\n",
-            tl, gil_transactions, htm_transactions,
-            (float)gil_transactions / (float)htm_transactions);
-    free(tl->shadowstack_base);
-}
 
 /************************************************************/
 /* some simple thread-local malloc: */
@@ -266,19 +259,39 @@ static struct list_s *_list_grow(struct list_s *lst, uintptr_t nalloc)
 
 #define GCFLAG_WRITE_BARRIER  _STM_GCFLAG_WRITE_BARRIER
 
-static struct list_s *objects_pointing_to_nursery;
-static struct list_s *young_weakrefs;
+static __thread struct list_s *objects_pointing_to_nursery;
+static __thread struct list_s *young_weakrefs;
 
 void stm_setup(void)
 {
-    objects_pointing_to_nursery = list_create();
-    young_weakrefs = list_create();
 }
 
 void stm_teardown(void)
 {
-    list_free(objects_pointing_to_nursery);
 }
+
+void stm_register_thread_local(stm_thread_local_t *tl) {
+    objects_pointing_to_nursery = list_create();
+    young_weakrefs = list_create();
+
+    tl->thread_local_obj = NULL;
+    tl->shadowstack_base = (object_t **)malloc(768*1024);
+    assert(tl->shadowstack_base);
+    tl->shadowstack = tl->shadowstack_base;
+    tl->last_abort__bytes_in_nursery = 0;
+}
+
+void stm_unregister_thread_local(stm_thread_local_t *tl) {
+    fprintf(stderr,
+            "in %p\ngil_transactions: %d\nhtm_transactions: %d\nratio: %f\n",
+            tl, gil_transactions, htm_transactions,
+            (float)gil_transactions / (float)htm_transactions);
+    free(tl->shadowstack_base);
+
+    list_free(objects_pointing_to_nursery);
+    list_free(young_weakrefs);
+}
+
 
 void _stm_write_slowpath(object_t *obj)
 {

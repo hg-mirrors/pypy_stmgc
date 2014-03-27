@@ -18,6 +18,7 @@
 #define XBEGIN_XABORT_ARG(x) (((x) >> 24) & 0xFF)
 
 static __thread char buf[128];
+__attribute__((unused))
 static char* xbegin_status(int status)
 {
     if (status == XBEGIN_OK)
