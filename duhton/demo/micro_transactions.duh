@@ -1,11 +1,13 @@
 
 
 
-(setq c (container 0))
+;;(setq c (container 0))
 
 
 (defun increment ()
   ;;(set c (+ (get c) 1))
+  (setq c 0)
+  (setq c (+  c 1))
   )
 
 

@@ -30,7 +30,7 @@ static void acquire_gil(stm_thread_local_t *tl) {
 }
 
 static int spin_and_acquire_gil(stm_thread_local_t *tl) {
-    int n = 100;
+    int n = 5;
     while ((n --> 0) && mutex_locked(&_stm_gil)) {
         smp_spinloop();
     }
@@ -65,10 +65,10 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
             return;
     }
 
-    volatile int status;
-    volatile int transient_retry_counter = TRANSIENT_RETRY_MAX;
-    volatile int gil_retry_counter = GIL_RETRY_MAX;
-    volatile int first_retry = 1;
+    int status;
+    int transient_retry_counter = TRANSIENT_RETRY_MAX;
+    int gil_retry_counter = GIL_RETRY_MAX;
+    int first_retry = 1;
 
  transaction_retry:
     status = xbegin();
