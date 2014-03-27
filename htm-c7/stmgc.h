@@ -79,13 +79,7 @@ inline static object_t *stm_allocate(ssize_t size_rounded_up) {
     return (object_t *)p;
 }
 
-inline static void stm_register_thread_local(stm_thread_local_t *tl) {
-    tl->thread_local_obj = NULL;
-    tl->shadowstack_base = (object_t **)malloc(768*1024);
-    assert(tl->shadowstack_base);
-    tl->shadowstack = tl->shadowstack_base;
-    tl->last_abort__bytes_in_nursery = 0;
-}
+void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
 
 extern pthread_mutex_t _stm_gil;
