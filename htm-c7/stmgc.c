@@ -4,8 +4,9 @@
 #include "htm.h"
 
 pthread_mutex_t _stm_gil = PTHREAD_MUTEX_INITIALIZER;
-stm_thread_local_t *_stm_tloc;
-struct stm_segment_info_s _stm_segment;
+__thread stm_thread_local_t *_stm_tloc;
+//struct stm_segment_info_s _stm_segment;
+__thread struct stm_segment_info_s* _stm_segment;
 
 #define TRANSIENT_RETRY_MAX 5
 #define GIL_RETRY_MAX 5
@@ -273,6 +274,7 @@ void stm_teardown(void)
 void stm_register_thread_local(stm_thread_local_t *tl) {
     objects_pointing_to_nursery = list_create();
     young_weakrefs = list_create();
+    _stm_segment = malloc(sizeof(struct stm_segment_info_s));
 
     tl->thread_local_obj = NULL;
     tl->shadowstack_base = (object_t **)malloc(768*1024);
@@ -290,6 +292,7 @@ void stm_unregister_thread_local(stm_thread_local_t *tl) {
 
     list_free(objects_pointing_to_nursery);
     list_free(young_weakrefs);
+    free(_stm_segment);
 }
 
 
@@ -323,9 +326,9 @@ object_t *_stm_allocate_external(ssize_t size)
 #define NB_NURSERY_PAGES    1024          // 4MB
 #define NURSERY_SIZE        (NB_NURSERY_PAGES * 4096UL)
 
-char *_stm_nursery_base    = NULL;
-char *_stm_nursery_current = NULL;
-char *_stm_nursery_end     = NULL;
+__thread char *_stm_nursery_base    = NULL;
+__thread char *_stm_nursery_current = NULL;
+__thread char *_stm_nursery_end     = NULL;
 #define _stm_nursery_start ((uintptr_t)_stm_nursery_base)
 
 static bool _is_in_nursery(object_t *obj)
@@ -427,7 +430,7 @@ static void collect_oldrefs_to_nursery(void)
 static void throw_away_nursery(void)
 {
     if (_stm_nursery_base == NULL) {
-        _stm_nursery_base = malloc(NURSERY_SIZE);
+        _stm_nursery_base = tl_malloc(NURSERY_SIZE);
         assert(_stm_nursery_base);
         _stm_nursery_end = _stm_nursery_base + NURSERY_SIZE;
         _stm_nursery_current = _stm_nursery_base;
@@ -435,6 +438,7 @@ static void throw_away_nursery(void)
 
     memset(_stm_nursery_base, 0, _stm_nursery_current-_stm_nursery_base);
     _stm_nursery_current = _stm_nursery_base;
+    STM_SEGMENT->nursery_current = _stm_nursery_current;
 }
 
 #define WEAKREF_PTR(wr, sz)  ((object_t * TLPREFIX *)(((char *)(wr)) + (sz) - sizeof(void*)))
@@ -503,6 +507,7 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
     char *end = p + size_rounded_up;
     assert(end <= _stm_nursery_end);
     _stm_nursery_current = end;
+    STM_SEGMENT->nursery_current = end;
     return (object_t *)p;
 }
 
