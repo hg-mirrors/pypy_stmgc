@@ -13,6 +13,10 @@ struct stm_segment_info_s _stm_segment;
 #define ABORT_GIL_LOCKED 1
 
 
+static __thread int gil_transactions = 0;
+static __thread int htm_transactions = 0;
+
+
 #define smp_spinloop()  asm volatile ("pause":::"memory")
 
 static void acquire_gil(stm_thread_local_t *tl) {
@@ -75,10 +79,12 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
         if (mutex_locked(&_stm_gil)) {
             gil_retry_counter--;
             if (gil_retry_counter > 0) {
-                if (spin_and_acquire_gil(tl))
+                if (spin_and_acquire_gil(tl)) {
                     return;
-                else
+                } else {
+                    smp_spinloop();
                     goto transaction_retry;
+                }
             }
             acquire_gil(tl);
         } else if (is_persistent(status)) {
@@ -86,8 +92,10 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
         } else {
             /* transient abort */
             transient_retry_counter--;
-            if (transient_retry_counter > 0)
+            if (transient_retry_counter > 0) {
+                smp_spinloop();
                 goto transaction_retry;
+            }
             acquire_gil(tl);
         }
 
@@ -104,14 +112,23 @@ void stm_commit_transaction(void) {
     if (mutex_locked(&_stm_gil)) {
         assert(!xtest());
         if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
-        fprintf(stderr, "G");
+        gil_transactions++;
+        //fprintf(stderr, "G");
     } else {
         xend();
-        fprintf(stderr, "H");
+        htm_transactions++;
+        //fprintf(stderr, "H");
     }
 }
 
 
+void stm_unregister_thread_local(stm_thread_local_t *tl) {
+    fprintf(stderr,
+            "in %p\ngil_transactions: %d\nhtm_transactions: %d\nratio: %f\n",
+            tl, gil_transactions, htm_transactions,
+            (float)gil_transactions / (float)htm_transactions);
+    free(tl->shadowstack_base);
+}
 
 
 

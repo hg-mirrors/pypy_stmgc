@@ -1,0 +1,18 @@
+
+
+
+(setq c (container 0))
+
+
+(defun increment ()
+  ;;(set c (+ (get c) 1))
+  )
+
+
+(setq n 0)
+(while (< n 10000000)
+  (transaction increment)
+  (setq n (+ n 1))
+  )
+
+(run-transactions)
