@@ -5,16 +5,23 @@
 
 
 (defun increment ()
-  ;;(set c (+ (get c) 1))
-  (setq c 0)
-  (setq c (+  c 1))
   )
 
 
+(defun big_transactions ()
+  (setq n 0)
+  (while (< n 20000)
+    (transaction increment)
+    (setq n (+ n 1))
+    )
+  )
+
 (setq n 0)
-(while (< n 10000000)
-  (transaction increment)
+(while (< n 800)
+  (transaction big_transactions)
   (setq n (+ n 1))
   )
 
+(setq timer (time))
 (run-transactions)
+(print (quote TIME_IN_PARALLEL:) (- (time) timer))
