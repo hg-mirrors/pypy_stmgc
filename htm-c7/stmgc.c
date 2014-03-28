@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "htm.h"
+#include <unistd.h>
 
 pthread_mutex_t _stm_gil = PTHREAD_MUTEX_INITIALIZER;
 __thread stm_thread_local_t *_stm_tloc;
@@ -117,15 +118,17 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
 void stm_commit_transaction(void) {
     stm_collect(0);
     _stm_tloc = NULL;
-    if (mutex_locked(&_stm_gil)) {
-        assert(!xtest());
+    if (_htm_info.use_gil) {
+        OPT_ASSERT(!xtest());
         if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
         gil_transactions++;
-        //fprintf(stderr, "G");
+        if (gil_transactions % 512 == 0)
+            fprintf(stderr, "G");
     } else {
         xend();
         htm_transactions++;
-        //fprintf(stderr, "H");
+        if (htm_transactions % 512 == 0)
+            fprintf(stderr, "H");
     }
 }
 
@@ -201,7 +204,7 @@ static inline uintptr_t list_count(struct list_s *lst)
 
 static inline uintptr_t list_pop_item(struct list_s *lst)
 {
-    assert(lst->count > 0);
+    OPT_ASSERT(lst->count > 0);
     return lst->items[--lst->count];
 }
 
@@ -277,7 +280,7 @@ void stm_register_thread_local(stm_thread_local_t *tl) {
 
     tl->thread_local_obj = NULL;
     tl->shadowstack_base = (object_t **)tl_malloc(768*1024);
-    assert(tl->shadowstack_base);
+    OPT_ASSERT(tl->shadowstack_base);
     tl->shadowstack = tl->shadowstack_base;
     tl->last_abort__bytes_in_nursery = 0;
 }
@@ -304,7 +307,7 @@ void _stm_write_slowpath(object_t *obj)
 object_t *_stm_allocate_old(ssize_t size)
 {
     char *p = tl_malloc(size);
-    assert(p);
+    OPT_ASSERT(p);
     memset(p, 0, size);
     ((object_t *)p)->gil_flags = _STM_GCFLAG_WRITE_BARRIER;
     return (object_t *)p;
@@ -313,7 +316,7 @@ object_t *_stm_allocate_old(ssize_t size)
 object_t *_stm_allocate_external(ssize_t size)
 {
     char *p = tl_malloc(size);
-    assert(p);
+    OPT_ASSERT(p);
     memset(p, 0, size);
     _stm_write_slowpath((object_t *)p);
     return (object_t *)p;
@@ -367,7 +370,7 @@ static void minor_trace_if_young(object_t **pobj)
         size_t size = stmcb_size_rounded_up(obj);
 
         nobj = tl_malloc(size);
-        assert(nobj);
+        OPT_ASSERT(nobj);
 
         /* Copy the object  */
         memcpy(nobj, obj, size);
@@ -400,10 +403,10 @@ static void collect_roots_in_nursery(void)
 
 static inline void _collect_now(object_t *obj)
 {
-    assert(!_is_in_nursery(obj));
+    OPT_ASSERT(!_is_in_nursery(obj));
 
     /* We must not have GCFLAG_WRITE_BARRIER so far.  Add it now. */
-    assert(!(obj->gil_flags & GCFLAG_WRITE_BARRIER));
+    OPT_ASSERT(!(obj->gil_flags & GCFLAG_WRITE_BARRIER));
     obj->gil_flags |= GCFLAG_WRITE_BARRIER;
 
     /* Trace the 'obj' to replace pointers to nursery with pointers
@@ -430,7 +433,7 @@ static void throw_away_nursery(void)
 {
     if (_stm_nursery_base == NULL) {
         _stm_nursery_base = tl_malloc(NURSERY_SIZE);
-        assert(_stm_nursery_base);
+        OPT_ASSERT(_stm_nursery_base);
         _stm_nursery_end = _stm_nursery_base + NURSERY_SIZE;
         _stm_nursery_current = _stm_nursery_base;
     }
@@ -448,7 +451,7 @@ static void move_young_weakrefs(void)
         young_weakrefs,
         object_t * /*item*/,
         ({
-            assert(_is_in_nursery(item));
+            OPT_ASSERT(_is_in_nursery(item));
             object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)item;
 
             /* the following checks are done like in nursery.c: */
@@ -459,11 +462,11 @@ static void move_young_weakrefs(void)
 
             item = pforwarded_array[1]; /* moved location */
 
-            assert(!_is_in_nursery(item));
+            OPT_ASSERT(!_is_in_nursery(item));
 
             ssize_t size = 16;
             object_t *pointing_to = *WEAKREF_PTR(item, size);
-            assert(pointing_to != NULL);
+            OPT_ASSERT(pointing_to != NULL);
 
             if (_is_in_nursery(pointing_to)) {
                 object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)pointing_to;
@@ -504,7 +507,7 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 
     char *p = _stm_nursery_current;
     char *end = p + size_rounded_up;
-    assert(end <= _stm_nursery_end);
+    OPT_ASSERT(end <= _stm_nursery_end);
     _stm_nursery_current = end;
     STM_SEGMENT->nursery_current = end;
     return (object_t *)p;
@@ -512,7 +515,7 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 
 object_t *stm_allocate_weakref(ssize_t size_rounded_up)
 {
-    assert(size_rounded_up == 16);
+    OPT_ASSERT(size_rounded_up == 16);
     object_t *obj = stm_allocate(size_rounded_up);
     LIST_APPEND(young_weakrefs, obj);
     return obj;
