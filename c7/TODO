@@ -1,7 +1,4 @@
 
-known-working revision: 75893b92af4e
-
-
 - use small uniform gcpages
 
 - write barrier for big arrays
@@ -12,3 +9,5 @@ known-working revision: 75893b92af4e
   minor collections
 
 - fork() is done by copying the whole mmap non-lazily; improve.
+
+- contention.c: when pausing: should also tell other_pseg "please commit soon"
