@@ -67,6 +67,7 @@ static __attribute__((__always_inline__)) inline int xtest()
 
 static __attribute__((__always_inline__)) inline int mutex_locked(pthread_mutex_t* mut)
 {
+    /* HACK: pthread internals! */
     return !!mut->__data.__lock;
 }
 

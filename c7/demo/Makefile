@@ -33,6 +33,6 @@ release-%: %.c ${H_FILES} ${C_FILES}
 
 
 release-htm-%: %.c ../../htm-c7/stmgc.? ../../htm-c7/htm.h
-	clang -I.. -pthread -g -DNDEBUG -O2 $< -o release-htm-$* ../../htm-c7/stmgc.c -Wall -DUSE_HTM
+	clang -I.. -pthread -g  -O2 $< -o release-htm-$* ../../htm-c7/stmgc.c -Wall -DUSE_HTM
 
 

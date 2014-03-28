@@ -9,7 +9,7 @@ __thread stm_thread_local_t *_stm_tloc;
 //struct stm_segment_info_s _stm_segment;
 __thread struct stm_segment_info_s* _stm_segment;
 
-#define TRANSIENT_RETRY_MAX 10
+#define TRANSIENT_RETRY_MAX 100
 #define GIL_RETRY_MAX 10
 
 #define ABORT_GIL_LOCKED 1
@@ -17,6 +17,10 @@ __thread struct stm_segment_info_s* _stm_segment;
 
 static __thread int gil_transactions = 0;
 static __thread int htm_transactions = 0;
+static __thread int gil_retry_acquire = 0;
+static __thread int gil_spin_retry_acquire = 0;
+static __thread int transient_retry_acquire = 0;
+static __thread int persistent_acquire = 0;
 
 __thread struct htm_transaction_info_s _htm_info __attribute__((aligned(64)));
 
@@ -32,13 +36,14 @@ static void acquire_gil(stm_thread_local_t *tl) {
 }
 
 static int spin_and_acquire_gil(stm_thread_local_t *tl) {
-    int n = 5;
+    int n = 500;
     while (n-- > 0) {
         if (!mutex_locked(&_stm_gil))
             return 0;
         smp_spinloop();
     }
 
+    gil_spin_retry_acquire++;
     acquire_gil(tl);
     return 1;
 }
@@ -61,10 +66,10 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
     _htm_info.retry_counter = 0;
     _htm_info.use_gil = 0;
 
-    if (mutex_locked(&_stm_gil)) {
-        if (spin_and_acquire_gil(tl))
-            return;
-    }
+    /* if (mutex_locked(&_stm_gil)) { */
+    /*     if (spin_and_acquire_gil(tl)) */
+    /*         return; */
+    /* } */
 
     int status;
     int transient_retry_counter = TRANSIENT_RETRY_MAX;
@@ -84,7 +89,7 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
             /* adjust_transaction_length(pc) */
         }
 
-        if (mutex_locked(&_stm_gil)) {
+        if ((status & XBEGIN_XABORT) && XBEGIN_XABORT_ARG(status) == ABORT_GIL_LOCKED) {
             gil_retry_counter--;
             if (gil_retry_counter > 0) {
                 if (spin_and_acquire_gil(tl)) {
@@ -94,8 +99,10 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
                     goto transaction_retry;
                 }
             }
+            gil_retry_acquire++;
             acquire_gil(tl);
         } else if (is_persistent(status)) {
+            persistent_acquire++;
             acquire_gil(tl);
         } else {
             /* transient abort */
@@ -105,6 +112,7 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
                 smp_spinloop();
                 goto transaction_retry;
             }
+            transient_retry_acquire++;
             acquire_gil(tl);
         }
 
@@ -287,9 +295,14 @@ void stm_register_thread_local(stm_thread_local_t *tl) {
 
 void stm_unregister_thread_local(stm_thread_local_t *tl) {
     fprintf(stderr,
-            "in %p\ngil_transactions: %d\nhtm_transactions: %d\nratio: %f\n",
+            "== in %p ==\ngil_transactions:\t%d\nhtm_transactions:\t%d\nratio:\t\t\t=%f\n"
+            "gil_spin_retry_acquire:\t%d\n"
+            "gil_retry_acquire:\t%d\npersistent_acquire:\t%d\n"
+            "transient_retry_acquire:%d\n",
             tl, gil_transactions, htm_transactions,
-            (float)gil_transactions / (float)htm_transactions);
+            (float)gil_transactions / (float)htm_transactions,
+            gil_spin_retry_acquire,
+            gil_retry_acquire, persistent_acquire, transient_retry_acquire);
     //free(tl->shadowstack_base);
 
     list_free(objects_pointing_to_nursery);

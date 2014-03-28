@@ -10,7 +10,7 @@
 #  include "stmgc.h"
 #endif
 
-#define ITERS 10000000
+#define ITERS 1000000
 #define NTHREADS    2
 
 
@@ -52,12 +52,15 @@ void *demo2(void *arg)
     stm_register_thread_local(&stm_thread_local);
     tl_counter = 0;
 
+    object_t *tmp;
     int i = 0;
     while (i < ITERS) {
         stm_start_inevitable_transaction(&stm_thread_local);
         tl_counter++;
-        if (i % 5 == 0)
-            gl_counter++;
+        if (i % 500 < 250)
+            STM_PUSH_ROOT(stm_thread_local, stm_allocate(16));//gl_counter++;
+        else
+            STM_POP_ROOT(stm_thread_local, tmp);
         stm_commit_transaction();
         i++;
     }
