@@ -1,0 +1,83 @@
+
+Reports
+=======
+
+- self-abort:
+    WRITE_WRITE_CONTENTION, INEVITABLE_CONTENTION:
+       traceback in both threads, time lost by this thread
+    WRITE_READ_CONTENTION:
+       traceback pointing back to the write, time lost by this thread
+
+- aborted by a different thread:
+    WRITE_WRITE_CONTENTION:
+       traceback in both threads, time lost by this thread
+    WRITE_READ_CONTENTION:
+       remote traceback pointing back to the write, time lost by this thread
+       (no local traceback available to know where we've read the object from)
+    INEVITABLE_CONTENTION:
+       n/a
+
+- self-pausing:
+    same as self-abort, but reporting the time lost by pausing
+
+- waiting for a free segment:
+    - if we're waiting because of inevitability, report with a
+      traceback and the time lost
+    - if we're just waiting because of no free segment, don't report it,
+      or maybe with only the total time lost and no traceback
+
+- more internal reasons for cond_wait(), like synchronizing the threads,
+  should all be resolved quickly and are unlikely worth a report
+
+
+Internal Measurements
+=====================
+
+- use clock_gettime(CLOCK_MONOTONIC), it seems to be the fastest way
+  (less than 5 times slower than a RDTSC instruction, which is itself
+  not safe in the presence of threads migrating among CPUs)
+
+- record a fixed number of entries, as a fixed-size heapq list, with
+  higher recorded times sorted first; the entry with the lowest amount
+  of time is dropped.
+
+- if there are several aborts from the same transaction start, then
+  regroup them by traceback, and report only once with the number
+  of consecutive occurrences and the total time; do that before inserting
+  in the heapq list, as otherwise if we have a lot of quick aborts they
+  would all be lost as not contributing significant time individually
+
+
+API of stmgc.h
+==============
+
+- timelogs are always thread-local.  We have APIs to create, clear and
+  destroy them; recorded entries go to all active timelogs of this thread.
+
+- the traceback reports are based on the user of the library pushing and
+  popping stack entries to the current stack in every thread.
+
+- we have APIs to enumerate a timelog's current entries, and enumerate
+  each traceback's recorded frames.
+
+
+Tracebacks
+==========
+
+Tracebacks are implemented as read-only objects in a linked list, each
+one for one frame.  Each such object has a reference count, so that we can
+internally record the current stack by taking a reference to the current
+top-of-stack, and keep it entirely alive by increasing just this object's
+reference count.  Some simple freelist should make this efficient for
+the common case of objects freed shortly after being allocated.
+
+We record one traceback pointer for every old object written during this
+transaction.  It could be avoided only if we are running with no timelog
+at all (not just none in this thread), but it's probably not worth the
+optimization.
+
+This is all thread-local, with the exception of when we record another
+thread's traceback.  To implement this, we clone the complete traceback
+into the other thread's local allocator.  It should be fine because it
+is only needed when we have already determined that this entry has an
+important enough recorded time to be worth storing.
