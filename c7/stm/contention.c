@@ -149,6 +149,8 @@ static void contention_management(uint8_t other_segment_num,
         */
         contmgr.other_pseg->signal_when_done = true;
 
+        /* XXX should also tell other_pseg "please commit soon" */
+
         dprintf(("pausing...\n"));
         cond_signal(C_AT_SAFE_POINT);
         STM_PSEGMENT->safe_point = SP_WAIT_FOR_C_TRANSACTION_DONE;
