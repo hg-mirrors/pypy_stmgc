@@ -31,3 +31,4 @@
 #include "stm/extra.c"
 #include "stm/fprintcolor.c"
 #include "stm/weakref.c"
+#include "stm/timelog.c"

@@ -70,6 +70,7 @@ typedef struct stm_thread_local_s {
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
+    struct stm_timelog_s *last_tlog;
 } stm_thread_local_t;
 
 /* this should use llvm's coldcc calling convention,
@@ -334,6 +335,35 @@ void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
    commits. */
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
                                             const char *msg);
+
+
+/* ---------- timelogs ---------- */
+
+enum {
+    STLOG_REASON_UNKNOWN,
+    STLOG_REASON_ABORT_SELF,
+    STLOG_REASON_ABORT_OTHER,
+    STLOG_REASON_PAUSE,
+};
+enum {
+    STLOG_CONTENTION_NONE,
+    STLOG_CONTENTION_WRITE_WRITE,
+    STLOG_CONTENTION_WRITE_READ,
+    STLOG_CONTENTION_INEVITABLE,
+};
+
+typedef struct stm_timelog_s {
+    uint8_t reason;
+    uint8_t contention;
+    int user;
+    double time_lost;
+    //stm_traceback_t *traceback_self;
+    //stm_traceback_t *traceback_other;
+} stm_timelog_t;
+
+/* XXX maybe inline these functions if they turn out to be trivial */
+stm_timelog_t *stm_fetch_and_remove_timelog(stm_thread_local_t *);
+void stm_free_timelog(stm_timelog_t *);
 
 
 /* ==================== END ==================== */

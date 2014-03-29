@@ -98,6 +98,26 @@ void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
 
 int stm_can_move(object_t *);
 void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
+
+#define STLOG_REASON_UNKNOWN ...
+#define STLOG_REASON_ABORT_SELF ...
+#define STLOG_REASON_ABORT_OTHER ...
+#define STLOG_REASON_PAUSE ...
+#define STLOG_CONTENTION_NONE ...
+#define STLOG_CONTENTION_WRITE_WRITE ...
+#define STLOG_CONTENTION_WRITE_READ ...
+#define STLOG_CONTENTION_INEVITABLE ...
+
+typedef struct {
+    uint8_t reason;
+    uint8_t contention;
+    int user;
+    double time_lost;
+    ...;
+} stm_timelog_t;
+
+stm_timelog_t *stm_fetch_and_remove_timelog(stm_thread_local_t *);
+void stm_free_timelog(stm_timelog_t *);
 """)
 
 
@@ -517,3 +537,7 @@ class BaseTest(object):
         tl = self.tls[self.current_thread]
         if lib._check_become_globally_unique_transaction(tl):
             raise Conflict()
+
+    def fetch_and_remove_timelog(self):
+        tl = self.tls[self.current_thread]
+        return lib.stm_fetch_and_remove_timelog(tl)
