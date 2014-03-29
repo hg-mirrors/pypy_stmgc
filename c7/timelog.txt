@@ -41,11 +41,12 @@ Internal Measurements
   higher recorded times sorted first; the entry with the lowest amount
   of time is dropped.
 
-- if there are several aborts from the same transaction start, then
-  regroup them by traceback, and report only once with the number
-  of consecutive occurrences and the total time; do that before inserting
-  in the heapq list, as otherwise if we have a lot of quick aborts they
-  would all be lost as not contributing significant time individually
+- if there are several aborts from what is logically the same starting
+  place and which ends with the same traceback, we'd like to regroup them
+  and report them only once with the number of consecutive occurrences
+  and the total time; doing that before inserting the entries in the heapq
+  list is needed, as otherwise if we have a lot of quick aborts they
+  would all be lost as not contributing significant time individually.
 
 
 API of stmgc.h
@@ -59,6 +60,10 @@ API of stmgc.h
 
 - we have APIs to enumerate a timelog's current entries, and enumerate
   each traceback's recorded frames.
+
+- we can get directly the traceback of the transaction that aborted just
+  now.  If the user determines it should be merged with an older
+  traceback, he calls a merge function.
 
 
 Tracebacks
