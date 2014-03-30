@@ -186,13 +186,7 @@ static sem_t done;
 
 void unregister_thread_local(void)
 {
-    int i;
-    stm_flush_timing(&stm_thread_local);
-    for (i = 0; i < _STM_TIME_N; i++) {
-        fprintf(stderr, "timer %2d: %.6f\n", i,
-                (double)stm_thread_local.timing[i]);
-    }
-
+    stm_flush_timing(&stm_thread_local, 1);
     stm_unregister_thread_local(&stm_thread_local);
 }
 

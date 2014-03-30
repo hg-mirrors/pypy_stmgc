@@ -38,7 +38,37 @@ static void timing_end_transaction(enum stm_time_e attribute_to)
     tl->timing[STM_TIME_RUN_CURRENT] = 0.0f;
 }
 
-void stm_flush_timing(stm_thread_local_t *tl)
+static const char *timer_names[] = {
+    "outside transaction",
+    "run current",
+    "run committed",
+    "run aborted write write",
+    "run aborted write read",
+    "run aborted inevitable",
+    "run aborted other",
+    "wait free segment",
+    "wait write read",
+    "wait inevitable",
+    "wait other",
+    "bookkeeping",
+    "minor gc",
+    "major gc",
+    "sync pause",
+};
+
+void stm_flush_timing(stm_thread_local_t *tl, int verbose)
 {
     TIMING_CHANGE(tl, tl->_timing_cur_state);
+
+    assert((sizeof(timer_names) / sizeof(timer_names[0])) == _STM_TIME_N);
+    if (verbose > 0) {
+        int i;
+        s_mutex_lock();
+        fprintf(stderr, "thread %p:\n", tl);
+        for (i = 0; i < _STM_TIME_N; i++) {
+            fprintf(stderr, "    %-24s %.3f s\n",
+                    timer_names[i], (double)tl->timing[i]);
+        }
+        s_mutex_unlock();
+    }
 }
