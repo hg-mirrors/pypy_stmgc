@@ -24,6 +24,7 @@ typedef struct {
     size_t mem_bytes_to_clear_on_abort;
     long last_abort__bytes_in_nursery;
     int associated_segment_num;
+    uint32_t events[];
     float timing[];
     ...;
 } stm_thread_local_t;
