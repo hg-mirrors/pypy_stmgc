@@ -31,7 +31,6 @@ static union {
         pthread_cond_t cond[_C_TOTAL];
         /* some additional pieces of global state follow */
         uint8_t in_use1[NB_SEGMENTS];   /* 1 if running a pthread */
-        uint64_t global_time;
     };
     char reserved[192];
 } sync_ctl __attribute__((aligned(64)));
@@ -120,13 +119,14 @@ static inline void cond_broadcast(enum cond_type_e ctype)
 /************************************************************/
 
 
-static void wait_for_end_of_inevitable_transaction(bool can_abort)
+static void wait_for_end_of_inevitable_transaction(
+                        stm_thread_local_t *tl_or_null_if_can_abort)
 {
     long i;
  restart:
     for (i = 1; i <= NB_SEGMENTS; i++) {
         if (get_priv_segment(i)->transaction_state == TS_INEVITABLE) {
-            if (can_abort) {
+            if (tl_or_null_if_can_abort == NULL) {
                 /* handle this case like a contention: it will either
                    abort us (not the other thread, which is inevitable),
                    or wait for a while.  If we go past this call, then we
@@ -137,7 +137,11 @@ static void wait_for_end_of_inevitable_transaction(bool can_abort)
             else {
                 /* wait for stm_commit_transaction() to finish this
                    inevitable transaction */
+                change_timing_state_tl(tl_or_null_if_can_abort,
+                                       STM_TIME_WAIT_INEVITABLE);
                 cond_wait(C_INEVITABLE);
+                /* don't bother changing the timing state again: the caller
+                   will very soon go to STM_TIME_RUN_CURRENT */
             }
             goto restart;
         }
@@ -188,7 +192,6 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
     assert(STM_SEGMENT->segment_num == num);
     assert(STM_SEGMENT->running_thread == NULL);
     STM_SEGMENT->running_thread = tl;
-    STM_PSEGMENT->start_time = ++sync_ctl.global_time;
     return true;
 }
 
