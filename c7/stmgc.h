@@ -360,7 +360,7 @@ void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
 
 
 /* Temporary? */
-void stm_flush_timing(stm_thread_local_t *);
+void stm_flush_timing(stm_thread_local_t *tl, int verbose);
 
 
 /* ==================== END ==================== */

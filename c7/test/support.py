@@ -116,7 +116,7 @@ void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 #define STM_TIME_MAJOR_GC ...
 #define STM_TIME_SYNC_PAUSE ...
 
-void stm_flush_timing(stm_thread_local_t *);
+void stm_flush_timing(stm_thread_local_t *, int);
 """)
 
 

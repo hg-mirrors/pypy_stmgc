@@ -6,7 +6,7 @@ class TestTiming(BaseTest):
 
     def gettimer(self, n):
         tl = self.tls[self.current_thread]
-        lib.stm_flush_timing(tl)
+        lib.stm_flush_timing(tl, 1)
         return tl.timing[n]
 
     def expect_timer(self, n, expected_value):
