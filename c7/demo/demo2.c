@@ -184,6 +184,18 @@ void setup_list(void)
 static sem_t done;
 
 
+void unregister_thread_local(void)
+{
+    int i;
+    stm_flush_timing(&stm_thread_local);
+    for (i = 0; i < _STM_TIME_N; i++) {
+        fprintf(stderr, "timer %2d: %.6f\n", i,
+                (double)stm_thread_local.timing[i]);
+    }
+
+    stm_unregister_thread_local(&stm_thread_local);
+}
+
 void *demo2(void *arg)
 {
     int status;
@@ -198,7 +210,7 @@ void *demo2(void *arg)
     STM_POP_ROOT(stm_thread_local, global_chained_list);
     assert(stm_thread_local.shadowstack == stm_thread_local.shadowstack_base);
 
-    stm_unregister_thread_local(&stm_thread_local);
+    unregister_thread_local();
     status = sem_post(&done); assert(status == 0);
     return NULL;
 }
@@ -255,7 +267,7 @@ int main(void)
     final_check();
 
 
-    stm_unregister_thread_local(&stm_thread_local);
+    unregister_thread_local();
     stm_teardown();
 
     return 0;

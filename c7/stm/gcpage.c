@@ -134,7 +134,7 @@ static void major_collection_if_requested(void)
 
     if (is_major_collection_requested()) {   /* if still true */
 
-        enum stm_time_e oldstate = change_timing_state(STM_TIME_MAJOR_GC);
+        int oldstate = change_timing_state(STM_TIME_MAJOR_GC);
 
         synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
 

@@ -40,5 +40,5 @@ static void timing_end_transaction(enum stm_time_e attribute_to)
 
 void stm_flush_timing(stm_thread_local_t *tl)
 {
-    change_timing_state_tl(tl, tl->_timing_cur_state);
+    TIMING_CHANGE(tl, tl->_timing_cur_state);
 }

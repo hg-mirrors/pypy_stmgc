@@ -459,6 +459,9 @@ void stm_commit_transaction(void)
 
     minor_collection(/*commit=*/ true);
 
+    /* the call to minor_collection() above leaves us with
+       STM_TIME_BOOKKEEPING */
+
     s_mutex_lock();
 
  restart:
