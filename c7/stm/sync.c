@@ -182,6 +182,7 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
     }
     /* No segment available.  Wait until release_thread_segment()
        signals that one segment has been freed. */
+    change_timing_state_tl(tl, STM_TIME_WAIT_FREE_SEGMENT);
     cond_wait(C_SEGMENT_FREE);
 
     /* Return false to the caller, which will call us again */
@@ -309,6 +310,10 @@ static void remove_requests_for_safe_point(void)
 
 static void enter_safe_point_if_requested(void)
 {
+    if (STM_SEGMENT->nursery_end == NURSERY_END)
+        return;    /* fast path: no safe point requested */
+
+    int previous_state = -1;
     assert(_seems_to_be_running_transaction());
     assert(_has_mutex());
     while (1) {
@@ -325,10 +330,17 @@ static void enter_safe_point_if_requested(void)
 #ifdef STM_TESTS
         abort_with_mutex();
 #endif
+        if (previous_state == -1) {
+            previous_state = change_timing_state(STM_TIME_SYNC_PAUSE);
+        }
         cond_signal(C_AT_SAFE_POINT);
         STM_PSEGMENT->safe_point = SP_WAIT_FOR_C_REQUEST_REMOVED;
         cond_wait(C_REQUEST_REMOVED);
         STM_PSEGMENT->safe_point = SP_RUNNING;
+    }
+
+    if (previous_state != -1) {
+        change_timing_state(previous_state);
     }
 }
 
