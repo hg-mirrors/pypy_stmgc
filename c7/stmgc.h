@@ -63,9 +63,9 @@ enum stm_time_e {
     STM_TIME_RUN_ABORTED_INEVITABLE,
     STM_TIME_RUN_ABORTED_OTHER,
     STM_TIME_WAIT_FREE_SEGMENT,
-    STM_TIME_WAIT_WRITE_WRITE,
     STM_TIME_WAIT_WRITE_READ,
     STM_TIME_WAIT_INEVITABLE,
+    STM_TIME_WAIT_OTHER,
     STM_TIME_BOOKKEEPING,
     STM_TIME_MINOR_GC,
     STM_TIME_MAJOR_GC,
@@ -136,7 +136,7 @@ void _stm_mutex_pages_unlock(void);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
-#define _STM_NSE_SIGNAL_MAX               1
+#define _STM_NSE_SIGNAL_MAX     _STM_TIME_N
 #define _STM_FAST_ALLOC           (66*1024)
 
 

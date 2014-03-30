@@ -435,7 +435,7 @@ static void push_modified_to_other_segments(void)
     list_clear(STM_PSEGMENT->modified_old_objects);
 }
 
-static void _finish_transaction(enum stm_time_e attribute_to)
+static void _finish_transaction(int attribute_to)
 {
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
@@ -636,13 +636,16 @@ static void abort_with_mutex(void)
     /* invoke the callbacks */
     invoke_and_clear_callbacks_on_abort();
 
-    if (STM_SEGMENT->nursery_end == NSE_SIGABORT) {
+    int attribute_to = STM_TIME_RUN_ABORTED_OTHER;
+
+    if (is_abort(STM_SEGMENT->nursery_end)) {
         /* done aborting */
+        attribute_to = STM_SEGMENT->nursery_end;
         STM_SEGMENT->nursery_end = pause_signalled ? NSE_SIGPAUSE
                                                    : NURSERY_END;
     }
 
-    _finish_transaction(STM_TIME_RUN_ABORTED_OTHER);
+    _finish_transaction(attribute_to);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     /* Broadcast C_ABORTED to wake up contention.c */
