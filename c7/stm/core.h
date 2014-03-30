@@ -121,7 +121,7 @@ struct stm_priv_segment_info_s {
 
     /* Start time: to know approximately for how long a transaction has
        been running, in contention management */
-    uint64_t start_time;
+    double start_time;
 
     /* This is the number stored in the overflowed objects (a multiple of
        GCFLAG_OVERFLOW_NUMBER_bit0).  It is incremented when the
