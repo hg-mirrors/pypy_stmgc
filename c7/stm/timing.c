@@ -55,6 +55,7 @@ static const char *timer_names[] = {
     "minor gc",
     "major gc",
     "sync pause",
+    "spin loop",
 };
 
 void stm_flush_timing(stm_thread_local_t *tl, int verbose)
