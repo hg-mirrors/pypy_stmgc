@@ -153,27 +153,59 @@ static inline char *allocate_outside_nursery_small(uint64_t size)
     return (char *)result;
 }
 
+void sweep_small_page_full(char *page, long szword)
+{
+    abort();
+}
+
+void sweep_small_page_partial(struct small_free_loc_s *free_loc, long szword)
+{
+    abort();
+}
+
 void _stm_smallmalloc_sweep(void)
 {
-    long i;
-    for (i = 2; i < GC_N_SMALL_REQUESTS; i++) {
-        struct small_page_list_s *page = small_page_lists[i];
+    long i, szword;
+    for (szword = 2; szword < GC_N_SMALL_REQUESTS; szword++) {
+        struct small_page_list_s *page = small_page_lists[szword];
+        struct small_page_list_s *nextpage;
+        small_page_lists[szword] = NULL;
+
+        /* process the pages that the various segments are busy filling */
+        for (i = 1; i <= NB_SEGMENTS; i++) {
+            struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+            struct small_free_loc_s **fl =
+                    &pseg->small_malloc_data.loc_free[szword];
+            if (*fl != NULL) {
+                /* the entry in full_pages_object_size[] should already be
+                   szword.  We reset it to 0. */
+                fpsz_t *fpsz = get_fp_sz((char *)*fl);
+                assert(fpsz->sz == szword);
+                fpsz->sz = 0;
+                sweep_small_page_partial(*fl, szword);
+                *fl = NULL;
+            }
+        }
+
+        /* process all the other partially-filled pages */
         while (page != NULL) {
             /* for every page in small_page_lists: assert that the
                corresponding full_pages_object_size[] entry is 0 */
             assert(get_fp_sz((char *)page)->sz == 0);
-            abort();  // walk
-            page = page->nextpage;
+            nextpage = page->nextpage;
+            sweep_small_page_partial(&page->header, szword);
+            page = nextpage;
         }
     }
 
-    fpsz_t *fpsz_start = get_fp_sz(uninitialized_page_stop);
+    char *pageptr = uninitialized_page_stop;
+    fpsz_t *fpsz_start = get_fp_sz(pageptr);
     fpsz_t *fpsz_end = &full_pages_object_size[PAGE_SMSIZE_END -
                                                PAGE_SMSIZE_START];
     fpsz_t *fpsz;
-    for (fpsz = fpsz_start; fpsz < fpsz_end; fpsz++) {
+    for (fpsz = fpsz_start; fpsz < fpsz_end; fpsz++, pageptr += 4096) {
         if (fpsz->sz != 0) {
-            abort();  // walk
+            sweep_small_page_full(pageptr, fpsz->sz);
         }
     }
 }
