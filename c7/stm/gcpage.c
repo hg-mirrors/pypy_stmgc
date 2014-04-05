@@ -64,7 +64,12 @@ static char *allocate_outside_nursery_large(uint64_t size)
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
     /* only for tests xxx but stm_setup_prebuilt() uses this now too */
-    char *p = allocate_outside_nursery_large(size_rounded_up);
+    char *p;
+    if (size_rounded_up > GC_LAST_SMALL_SIZE)
+        p = allocate_outside_nursery_large(size_rounded_up);
+    else
+        p = allocate_outside_nursery_small(size_rounded_up);
+
     memset(p, 0, size_rounded_up);
 
     object_t *o = (object_t *)(p - stm_object_pages);

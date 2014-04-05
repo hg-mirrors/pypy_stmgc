@@ -81,6 +81,7 @@ void _stm_large_dump(void);
 void *memset(void *s, int c, size_t n);
 bool (*_stm_largemalloc_keep)(char *data);
 void _stm_largemalloc_sweep(void);
+void _stm_smallmalloc_sweep(void);
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
@@ -290,6 +291,8 @@ HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
+GC_N_SMALL_REQUESTS = 36
+GC_LAST_SMALL_SIZE = 8 * (GC_N_SMALL_REQUESTS - 1)
 
 
 class Conflict(Exception):
