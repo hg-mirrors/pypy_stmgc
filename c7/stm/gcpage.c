@@ -19,8 +19,6 @@ static void setup_gcpage(void)
 
 static void teardown_gcpage(void)
 {
-    memset(small_alloc, 0, sizeof(small_alloc));
-    free_uniform_pages = NULL;
     LIST_FREE(testing_prebuilt_objs);
     if (tree_prebuilt_objs != NULL) {
         tree_free(tree_prebuilt_objs);
@@ -29,51 +27,10 @@ static void teardown_gcpage(void)
 }
 
 
-#define GCPAGE_NUM_PAGES   20
-
 static void setup_N_pages(char *pages_addr, uint64_t num)
 {
     pages_initialize_shared((pages_addr - stm_object_pages) / 4096UL, num);
 }
-
-static void grab_more_free_pages_for_small_allocations(void)
-{
-    /* grab N (= GCPAGE_NUM_PAGES) pages out of the top addresses */
-    uintptr_t decrease_by = GCPAGE_NUM_PAGES * 4096;
-    if (uninitialized_page_stop - uninitialized_page_start <= decrease_by)
-        goto out_of_memory;
-
-    uninitialized_page_stop -= decrease_by;
-
-    if (!_stm_largemalloc_resize_arena(uninitialized_page_stop -
-                                       uninitialized_page_start))
-        goto out_of_memory;
-
-    setup_N_pages(uninitialized_page_start, GCPAGE_NUM_PAGES);
-
-    char *p = uninitialized_page_start;
-    long i;
-    for (i = 0; i < 16; i++) {
-        *(char **)p = free_uniform_pages;
-        free_uniform_pages = p;
-    }
-    return;
-
- out_of_memory:
-    stm_fatalerror("out of memory!");   /* XXX */
-}
-
-static char *_allocate_small_slowpath(uint64_t size)
-{
-    /* not thread-safe!  Use only when holding the mutex */
-    assert(_has_mutex());
-
-    if (free_uniform_pages == NULL)
-        grab_more_free_pages_for_small_allocations();
-
-    abort();//...
-}
-
 
 static char *allocate_outside_nursery_large(uint64_t size)
 {
@@ -199,14 +156,14 @@ static inline bool mark_visited_test_and_clear(object_t *obj)
 static uintptr_t object_last_page(object_t *obj)
 {
     uintptr_t lastbyte;
-    struct object_s *realobj =
-        (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
 
-    if (realobj->stm_flags & GCFLAG_SMALL_UNIFORM) {
+    if (is_small_uniform(obj)) {
         lastbyte = (uintptr_t)obj;
     }
     else {
         /* get the size of the object */
+        struct object_s *realobj =
+            (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
         size_t obj_size = stmcb_size_rounded_up(realobj);
 
         /* that's the last byte within the object */
