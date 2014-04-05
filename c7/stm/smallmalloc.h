@@ -12,18 +12,16 @@
 
 
 struct small_free_loc_s {
-    struct small_free_loc_s *next;
-};
-
-struct small_page_list_s {
     /* A chained list of locations within the same page which are
        free. */
-    struct small_free_loc_s header;
+    struct small_free_loc_s *next;
 
     /* A chained list of all small pages containing objects of a given
        small size, and that have at least one free object.  It points
-       *inside* the next page, to another struct small_page_list_s. */
-    struct small_page_list_s *nextpage;
+       *inside* the next page, to another struct small_free_loc_s.  This
+       field is only meaningful on the first small_free_loc_s of a given
+       page! */
+    struct small_free_loc_s *nextpage;
 
     /* This structure is only two words, so it always fits inside one
        free slot inside the page. */
@@ -36,7 +34,7 @@ struct small_page_list_s {
    is a chained list of fully-free pages (which can be reused for a
    different size than the one they originally contained).
 */
-static struct small_page_list_s *small_page_lists[GC_N_SMALL_REQUESTS];
+static struct small_free_loc_s *small_page_lists[GC_N_SMALL_REQUESTS];
 
 #define free_uniform_pages   (small_page_lists[0])
 

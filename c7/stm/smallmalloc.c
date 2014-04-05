@@ -19,18 +19,27 @@ static fpsz_t full_pages_object_size[PAGE_SMSIZE_END - PAGE_SMSIZE_START];
    technically full yet, it will be very soon in this case).
 */
 
-static fpsz_t *get_fp_sz(char *smallpage)
+static fpsz_t *get_fpsz(char *smallpage)
 {
     uintptr_t pagenum = (((char *)smallpage) - stm_object_pages) / 4096;
+    assert(PAGE_SMSIZE_START <= pagenum && pagenum < PAGE_SMSIZE_END);
     return &full_pages_object_size[pagenum - PAGE_SMSIZE_START];
 }
 
+
+#ifdef STM_TESTS
+bool (*_stm_smallmalloc_keep)(char *data);   /* a hook for tests */
+#endif
 
 static void teardown_smallmalloc(void)
 {
     memset(small_page_lists, 0, sizeof(small_page_lists));
     assert(free_uniform_pages == NULL);   /* done by the previous line */
     first_small_uniform_loc = (uintptr_t) -1;
+#ifdef STM_TESTS
+    _stm_smallmalloc_keep = NULL;
+#endif
+    memset(full_pages_object_size, 0, sizeof(full_pages_object_size));
 }
 
 static void grab_more_free_pages_for_small_allocations(void)
@@ -59,8 +68,8 @@ static void grab_more_free_pages_for_small_allocations(void)
         char *p = uninitialized_page_stop;
         long i;
         for (i = 0; i < GCPAGE_NUM_PAGES; i++) {
-            ((struct small_page_list_s *)p)->nextpage = free_uniform_pages;
-            free_uniform_pages = (struct small_page_list_s *)p;
+            ((struct small_free_loc_s *)p)->nextpage = free_uniform_pages;
+            free_uniform_pages = (struct small_free_loc_s *)p;
             p += 4096;
         }
     }
@@ -75,7 +84,7 @@ static void grab_more_free_pages_for_small_allocations(void)
 static char *_allocate_small_slowpath(uint64_t size)
 {
     long n = size / 8;
-    struct small_page_list_s *smallpage;
+    struct small_free_loc_s *smallpage;
     struct small_free_loc_s *TLPREFIX *fl =
         &STM_PSEGMENT->small_malloc_data.loc_free[n];
     assert(*fl == NULL);
@@ -91,8 +100,8 @@ static char *_allocate_small_slowpath(uint64_t size)
             goto retry;
 
         /* Succeeded: we have a page in 'smallpage' */
-        *fl = smallpage->header.next;
-        get_fp_sz((char *)smallpage)->sz = n;
+        *fl = smallpage->next;
+        get_fpsz((char *)smallpage)->sz = n;
         return (char *)smallpage;
     }
 
@@ -110,22 +119,24 @@ static char *_allocate_small_slowpath(uint64_t size)
            initialized so far, apart from the 'nextpage' field read
            above.  Initialize it.
         */
+        struct small_free_loc_s *p, **previous;
         assert(!(((uintptr_t)smallpage) & 4095));
-        struct small_free_loc_s *p, *following = NULL;
+        previous = (struct small_free_loc_s **)
+            REAL_ADDRESS(STM_SEGMENT->segment_base, fl);
 
         /* Initialize all slots from the second one to the last one to
            contain a chained list */
         uintptr_t i = size;
         while (i <= 4096 - size) {
             p = (struct small_free_loc_s *)(((char *)smallpage) + i);
-            p->next = following;
-            following = p;
+            *previous = p;
+            previous = &p->next;
             i += size;
         }
+        *previous = NULL;
 
         /* The first slot is immediately returned */
-        *fl = following;
-        get_fp_sz((char *)smallpage)->sz = n;
+        get_fpsz((char *)smallpage)->sz = n;
         return (char *)smallpage;
     }
 
@@ -153,22 +164,97 @@ static inline char *allocate_outside_nursery_small(uint64_t size)
     return (char *)result;
 }
 
+object_t *_stm_allocate_old_small(ssize_t size_rounded_up)
+{
+    char *p = allocate_outside_nursery_small(size_rounded_up);
+    return (object_t *)(p - stm_object_pages);
+}
+
+/************************************************************/
+
+static inline bool _smallmalloc_sweep_keep(char *p)
+{
+#ifdef STM_TESTS
+    if (_stm_smallmalloc_keep != NULL)
+        return _stm_smallmalloc_keep(p);
+#endif
+    abort();
+    //return smallmalloc_keep_object_at(p);
+}
+
+void check_order_inside_small_page(struct small_free_loc_s *page)
+{
+#ifndef NDEBUG
+    /* the free locations are supposed to be in increasing order */
+    while (page->next != NULL) {
+        assert(page->next > page);
+        page = page->next;
+    }
+#endif
+}
+
 void sweep_small_page_full(char *page, long szword)
 {
     abort();
 }
 
-void sweep_small_page_partial(struct small_free_loc_s *free_loc, long szword)
+void sweep_small_page_partial(struct small_free_loc_s *page, long szword)
 {
-    abort();
+    check_order_inside_small_page(page);
+
+    /* for every non-free location, ask if we must free it */
+    char *baseptr = (char *)(((uintptr_t)page) & ~4095);
+    uintptr_t i, size = szword * 8;
+    bool any_object_remaining = false;
+    struct small_free_loc_s *fl = page;
+    struct small_free_loc_s *flprev = NULL;
+
+    /* XXX could optimize for the case where all objects die: we don't
+       need to painfully rebuild the free list in the whole page, just
+       to have it ignored in the end because we put the page into
+       'free_uniform_pages' */
+
+    for (i = 0; i <= 4096 - size; i += size) {
+        char *p = baseptr + i;
+        if (p == (char *)fl) {
+            /* location is already free */
+            flprev = fl;
+            fl = fl->next;
+        }
+        else if (_smallmalloc_sweep_keep(p)) {
+            /* the location should be freed now */
+            if (flprev == NULL) {
+                flprev = (struct small_free_loc_s *)p;
+                flprev->next = fl;
+                page = flprev;
+            }
+            else {
+                assert(flprev->next == fl);
+                flprev->next = (struct small_free_loc_s *)p;
+                flprev->next->next = fl;
+            }
+        }
+        else {
+            any_object_remaining = true;
+        }
+    }
+    if (any_object_remaining) {
+        check_order_inside_small_page(page);
+        page->nextpage = small_page_lists[szword];
+        small_page_lists[szword] = page;
+    }
+    else {
+        ((struct small_free_loc_s *)baseptr)->nextpage = free_uniform_pages;
+        free_uniform_pages = (struct small_free_loc_s *)baseptr;
+    }
 }
 
 void _stm_smallmalloc_sweep(void)
 {
     long i, szword;
     for (szword = 2; szword < GC_N_SMALL_REQUESTS; szword++) {
-        struct small_page_list_s *page = small_page_lists[szword];
-        struct small_page_list_s *nextpage;
+        struct small_free_loc_s *page = small_page_lists[szword];
+        struct small_free_loc_s *nextpage;
         small_page_lists[szword] = NULL;
 
         /* process the pages that the various segments are busy filling */
@@ -179,7 +265,7 @@ void _stm_smallmalloc_sweep(void)
             if (*fl != NULL) {
                 /* the entry in full_pages_object_size[] should already be
                    szword.  We reset it to 0. */
-                fpsz_t *fpsz = get_fp_sz((char *)*fl);
+                fpsz_t *fpsz = get_fpsz((char *)*fl);
                 assert(fpsz->sz == szword);
                 fpsz->sz = 0;
                 sweep_small_page_partial(*fl, szword);
@@ -191,15 +277,17 @@ void _stm_smallmalloc_sweep(void)
         while (page != NULL) {
             /* for every page in small_page_lists: assert that the
                corresponding full_pages_object_size[] entry is 0 */
-            assert(get_fp_sz((char *)page)->sz == 0);
+            assert(get_fpsz((char *)page)->sz == 0);
             nextpage = page->nextpage;
-            sweep_small_page_partial(&page->header, szword);
+            sweep_small_page_partial(page, szword);
             page = nextpage;
         }
     }
 
+    /* process the really full pages, which are the ones which still
+       have a non-zero full_pages_object_size[] entry */
     char *pageptr = uninitialized_page_stop;
-    fpsz_t *fpsz_start = get_fp_sz(pageptr);
+    fpsz_t *fpsz_start = get_fpsz(pageptr);
     fpsz_t *fpsz_end = &full_pages_object_size[PAGE_SMSIZE_END -
                                                PAGE_SMSIZE_START];
     fpsz_t *fpsz;
