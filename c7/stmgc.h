@@ -138,6 +138,7 @@ object_t *_stm_enum_objects_pointing_to_nursery(long index);
 uint64_t _stm_total_allocated(void);
 void _stm_mutex_pages_lock(void);
 void _stm_mutex_pages_unlock(void);
+char *stm_object_pages;
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
