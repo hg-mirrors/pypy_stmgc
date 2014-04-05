@@ -175,7 +175,10 @@ enum /* transaction_state */ {
     TS_INEVITABLE,
 };
 
-static char *stm_object_pages;
+#ifndef STM_TESTS
+static
+#endif
+       char *stm_object_pages;
 static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 static uint8_t write_locks[WRITELOCK_END - WRITELOCK_START];

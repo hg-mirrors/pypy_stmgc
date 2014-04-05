@@ -29,6 +29,8 @@ typedef struct {
     ...;
 } stm_thread_local_t;
 
+char *stm_object_pages;
+
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);

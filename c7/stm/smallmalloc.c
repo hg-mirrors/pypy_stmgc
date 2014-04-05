@@ -221,7 +221,7 @@ void sweep_small_page_partial(struct small_free_loc_s *page, long szword)
             flprev = fl;
             fl = fl->next;
         }
-        else if (_smallmalloc_sweep_keep(p)) {
+        else if (!_smallmalloc_sweep_keep(p)) {
             /* the location should be freed now */
             if (flprev == NULL) {
                 flprev = (struct small_free_loc_s *)p;
@@ -231,7 +231,8 @@ void sweep_small_page_partial(struct small_free_loc_s *page, long szword)
             else {
                 assert(flprev->next == fl);
                 flprev->next = (struct small_free_loc_s *)p;
-                flprev->next->next = fl;
+                flprev = (struct small_free_loc_s *)p;
+                flprev->next = fl;
             }
         }
         else {
