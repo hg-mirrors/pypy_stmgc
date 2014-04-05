@@ -193,20 +193,21 @@ void check_order_inside_small_page(struct small_free_loc_s *page)
 #endif
 }
 
-void sweep_small_page_full(char *page, long szword)
+static char *getbaseptr(struct small_free_loc_s *fl)
 {
-    abort();
+    return (char *)(((uintptr_t)fl) & ~4095);
 }
 
-void sweep_small_page_partial(struct small_free_loc_s *page, long szword)
+void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
+                      long szword)
 {
-    check_order_inside_small_page(page);
+    if (page_free != NULL)
+        check_order_inside_small_page(page_free);
 
     /* for every non-free location, ask if we must free it */
-    char *baseptr = (char *)(((uintptr_t)page) & ~4095);
     uintptr_t i, size = szword * 8;
-    bool any_object_remaining = false;
-    struct small_free_loc_s *fl = page;
+    bool any_object_remaining = false, any_object_dying = false;
+    struct small_free_loc_s *fl = page_free;
     struct small_free_loc_s *flprev = NULL;
 
     /* XXX could optimize for the case where all objects die: we don't
@@ -220,13 +221,14 @@ void sweep_small_page_partial(struct small_free_loc_s *page, long szword)
             /* location is already free */
             flprev = fl;
             fl = fl->next;
+            any_object_dying = true;
         }
         else if (!_smallmalloc_sweep_keep(p)) {
             /* the location should be freed now */
             if (flprev == NULL) {
                 flprev = (struct small_free_loc_s *)p;
                 flprev->next = fl;
-                page = flprev;
+                page_free = flprev;
             }
             else {
                 assert(flprev->next == fl);
@@ -234,19 +236,23 @@ void sweep_small_page_partial(struct small_free_loc_s *page, long szword)
                 flprev = (struct small_free_loc_s *)p;
                 flprev->next = fl;
             }
+            any_object_dying = true;
         }
         else {
             any_object_remaining = true;
         }
     }
-    if (any_object_remaining) {
-        check_order_inside_small_page(page);
-        page->nextpage = small_page_lists[szword];
-        small_page_lists[szword] = page;
-    }
-    else {
+    if (!any_object_remaining) {
         ((struct small_free_loc_s *)baseptr)->nextpage = free_uniform_pages;
         free_uniform_pages = (struct small_free_loc_s *)baseptr;
+    }
+    else if (!any_object_dying) {
+        get_fpsz(baseptr)->sz = szword;
+    }
+    else {
+        check_order_inside_small_page(page_free);
+        page_free->nextpage = small_page_lists[szword];
+        small_page_lists[szword] = page_free;
     }
 }
 
@@ -269,7 +275,7 @@ void _stm_smallmalloc_sweep(void)
                 fpsz_t *fpsz = get_fpsz((char *)*fl);
                 assert(fpsz->sz == szword);
                 fpsz->sz = 0;
-                sweep_small_page_partial(*fl, szword);
+                sweep_small_page(getbaseptr(*fl), *fl, szword);
                 *fl = NULL;
             }
         }
@@ -280,7 +286,7 @@ void _stm_smallmalloc_sweep(void)
                corresponding full_pages_object_size[] entry is 0 */
             assert(get_fpsz((char *)page)->sz == 0);
             nextpage = page->nextpage;
-            sweep_small_page_partial(page, szword);
+            sweep_small_page(getbaseptr(page), page, szword);
             page = nextpage;
         }
     }
@@ -293,8 +299,10 @@ void _stm_smallmalloc_sweep(void)
                                                PAGE_SMSIZE_START];
     fpsz_t *fpsz;
     for (fpsz = fpsz_start; fpsz < fpsz_end; fpsz++, pageptr += 4096) {
-        if (fpsz->sz != 0) {
-            sweep_small_page_full(pageptr, fpsz->sz);
+        uint8_t sz = fpsz->sz;
+        if (sz != 0) {
+            fpsz->sz = 0;
+            sweep_small_page(pageptr, NULL, sz);
         }
     }
 }

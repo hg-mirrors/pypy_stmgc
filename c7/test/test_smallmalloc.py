@@ -46,7 +46,7 @@ class TestSmallMalloc(BaseTest):
 
     def test_sweep_freeing_random_subset(self):
         for i in range(50):
-            page0 = [stm_allocate_old_small(16) for i in range(0, 4096-16, 16)]
+            page0 = [stm_allocate_old_small(16) for i in range(0, 4096, 16)]
             assert len(set(map(pageof, page0))) == 1
             tid = lib._get_type_id(page0[0])
             while len(page0) > 0:
@@ -66,3 +66,11 @@ class TestSmallMalloc(BaseTest):
                     p = stm_allocate_old_small(16)
                     assert pageof(p) == pageof(page0[0])
                     page0.append(p)
+
+    def test_sweep_full_page_remains_full(self):
+        page0 = [stm_allocate_old_small(16) for i in range(0, 4096, 16)]
+        tid = lib._get_type_id(page0[0])
+        self.keep_me = set(page0)
+        lib._stm_smallmalloc_sweep()
+        for p in page0:
+            assert lib._get_type_id(p) == tid
