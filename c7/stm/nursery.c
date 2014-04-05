@@ -64,7 +64,6 @@ static void minor_trace_if_young(object_t **pobj)
     /* takes a normal pointer to a thread-local pointer to an object */
     object_t *obj = *pobj;
     object_t *nobj;
-    uintptr_t nobj_sync_now;
 
     if (obj == NULL)
         return;
@@ -93,31 +92,28 @@ static void minor_trace_if_young(object_t **pobj)
                 obj->stm_flags &= ~GCFLAG_HAS_SHADOW;
                 realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
                 size = stmcb_size_rounded_up((struct object_s *)realobj);
-                goto handle_large_object;
             }
         }
-        /* We need to make a copy of this object.  It goes either in
-           a largemalloc.c-managed area, or if it's small enough, in
-           one of the small uniform pages from gcpage.c.
-        */
-        realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-        size = stmcb_size_rounded_up((struct object_s *)realobj);
-
-        if (size > GC_LAST_SMALL_SIZE) {
-
-            /* case 1: object is not small enough.
-               Ask gcpage.c for an allocation via largemalloc. */
-            char *allocated = allocate_outside_nursery_large(size);
-            nobj = (object_t *)(allocated - stm_object_pages);
-
-         handle_large_object:
-            nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
-        }
         else {
-            /* case "small enough" */
-            char *allocated = allocate_outside_nursery_small(size);
-            nobj = (object_t *)(allocated - stm_object_pages);
-            nobj_sync_now = (uintptr_t)nobj;
+            /* We need to make a copy of this object.  It goes either in
+               a largemalloc.c-managed area, or if it's small enough, in
+               one of the small uniform pages from gcpage.c.
+            */
+            realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+            size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+            if (size > GC_LAST_SMALL_SIZE) {
+
+                /* case 1: object is not small enough.
+                   Ask gcpage.c for an allocation via largemalloc. */
+                char *allocated = allocate_outside_nursery_large(size);
+                nobj = (object_t *)(allocated - stm_object_pages);
+            }
+            else {
+                /* case "small enough" */
+                char *allocated = allocate_outside_nursery_small(size);
+                nobj = (object_t *)(allocated - stm_object_pages);
+            }
         }
 
         /* Copy the object */
@@ -140,7 +136,6 @@ static void minor_trace_if_young(object_t **pobj)
         /* a young object outside the nursery */
         nobj = obj;
         tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)nobj);
-        nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
     }
 
     /* Set the overflow_number if nedeed */
@@ -150,8 +145,8 @@ static void minor_trace_if_young(object_t **pobj)
     }
 
     /* Must trace the object later */
+    uintptr_t nobj_sync_now = (uintptr_t)nobj | !is_small_uniform(nobj);
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
-    assert(nobj_sync_now == ((uintptr_t)nobj | is_small_uniform(nobj)));
 }
 
 static void collect_roots_in_nursery(void)
