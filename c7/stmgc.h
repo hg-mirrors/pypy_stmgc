@@ -125,6 +125,7 @@ void _stm_large_free(char *data);
 void _stm_large_dump(void);
 bool (*_stm_largemalloc_keep)(char *data);
 void _stm_largemalloc_sweep(void);
+object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
 bool (*_stm_smallmalloc_keep)(char *data);
 void _stm_smallmalloc_sweep(void);
 void _stm_start_safe_point(void);
