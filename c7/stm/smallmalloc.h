@@ -8,6 +8,7 @@
 */
 
 #define GC_N_SMALL_REQUESTS    36
+#define GC_LAST_SMALL_SIZE     (8 * (GC_N_SMALL_REQUESTS - 1))
 
 
 struct small_free_loc_s {
@@ -19,8 +20,9 @@ struct small_page_list_s {
        free. */
     struct small_free_loc_s header;
 
-    /* A chained list of all small pages containing objects of
-       a given small size, and that have at least one free object. */
+    /* A chained list of all small pages containing objects of a given
+       small size, and that have at least one free object.  It points
+       *inside* the next page, to another struct small_page_list_s. */
     struct small_page_list_s *nextpage;
 
     /* This structure is only two words, so it always fits inside one
@@ -57,7 +59,8 @@ struct small_malloc_data_s {
 static inline char *allocate_outside_nursery_small(uint64_t size)
      __attribute__((always_inline));
 
-static char *_allocate_small_slowpath(uint64_t size);
+void _stm_smallmalloc_sweep(void);
+
 static void teardown_smallmalloc(void);
 
 static inline bool is_small_uniform(object_t *obj) {

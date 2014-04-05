@@ -3,10 +3,33 @@
 #endif
 
 
+#define PAGE_SMSIZE_START   END_NURSERY_PAGE
+#define PAGE_SMSIZE_END     NB_PAGES
+
+typedef struct {
+    uint8_t sz;
+} fpsz_t;
+
+static fpsz_t full_pages_object_size[PAGE_SMSIZE_END - PAGE_SMSIZE_START];
+/* ^^^ This array contains the size (in number of words) of the objects
+   in the given page, provided it's a "full page of small objects".  It
+   is 0 if it's not such a page, if it's fully free, or if it's in
+   small_page_lists.  It is not 0 as soon as the page enters the
+   segment's 'small_malloc_data.loc_free' (even if the page is not
+   technically full yet, it will be very soon in this case).
+*/
+
+static fpsz_t *get_fp_sz(char *smallpage)
+{
+    uintptr_t pagenum = (((char *)smallpage) - stm_object_pages) / 4096;
+    return &full_pages_object_size[pagenum - PAGE_SMSIZE_START];
+}
+
+
 static void teardown_smallmalloc(void)
 {
     memset(small_page_lists, 0, sizeof(small_page_lists));
-    assert(free_uniform_pages == NULL);
+    assert(free_uniform_pages == NULL);   /* done by the previous line */
     first_small_uniform_loc = (uintptr_t) -1;
 }
 
@@ -69,6 +92,7 @@ static char *_allocate_small_slowpath(uint64_t size)
 
         /* Succeeded: we have a page in 'smallpage' */
         *fl = smallpage->header.next;
+        get_fp_sz((char *)smallpage)->sz = n;
         return (char *)smallpage;
     }
 
@@ -101,6 +125,7 @@ static char *_allocate_small_slowpath(uint64_t size)
 
         /* The first slot is immediately returned */
         *fl = following;
+        get_fp_sz((char *)smallpage)->sz = n;
         return (char *)smallpage;
     }
 
@@ -114,7 +139,7 @@ __attribute__((always_inline))
 static inline char *allocate_outside_nursery_small(uint64_t size)
 {
     OPT_ASSERT((size & 7) == 0);
-    OPT_ASSERT(16 <= size && size < 8 * GC_N_SMALL_REQUESTS);
+    OPT_ASSERT(16 <= size && size <= GC_LAST_SMALL_SIZE);
 
     struct small_free_loc_s *TLPREFIX *fl =
         &STM_PSEGMENT->small_malloc_data.loc_free[size / 8];
@@ -126,4 +151,29 @@ static inline char *allocate_outside_nursery_small(uint64_t size)
 
     *fl = result->next;
     return (char *)result;
+}
+
+void _stm_smallmalloc_sweep(void)
+{
+    long i;
+    for (i = 2; i < GC_N_SMALL_REQUESTS; i++) {
+        struct small_page_list_s *page = small_page_lists[i];
+        while (page != NULL) {
+            /* for every page in small_page_lists: assert that the
+               corresponding full_pages_object_size[] entry is 0 */
+            assert(get_fp_sz((char *)page)->sz == 0);
+            abort();  // walk
+            page = page->nextpage;
+        }
+    }
+
+    fpsz_t *fpsz_start = get_fp_sz(uninitialized_page_stop);
+    fpsz_t *fpsz_end = &full_pages_object_size[PAGE_SMSIZE_END -
+                                               PAGE_SMSIZE_START];
+    fpsz_t *fpsz;
+    for (fpsz = fpsz_start; fpsz < fpsz_end; fpsz++) {
+        if (fpsz->sz != 0) {
+            abort();  // walk
+        }
+    }
 }
