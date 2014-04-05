@@ -6,10 +6,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+
 #ifdef USE_GIL
 #  include "../gil-c7/stmgc.h"
 #else
+#ifdef USE_HTM
+#  include "../htm-c7/stmgc.h"
+#else
 #  include "../c7/stmgc.h"
+#endif
 #endif
 
 

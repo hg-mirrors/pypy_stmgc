@@ -1,11 +1,165 @@
 #include "stmgc.h"
 #include <string.h>
 #include <stdio.h>
+#include "htm.h"
+#include <unistd.h>
 
 pthread_mutex_t _stm_gil = PTHREAD_MUTEX_INITIALIZER;
-stm_thread_local_t *_stm_tloc;
-struct stm_segment_info_s _stm_segment;
+__thread stm_thread_local_t *_stm_tloc;
+//struct stm_segment_info_s _stm_segment;
+__thread struct stm_segment_info_s* _stm_segment;
 
+#define TRANSIENT_RETRY_MAX 100
+#define GIL_RETRY_MAX 10
+
+#define ABORT_GIL_LOCKED 1
+
+
+static __thread int gil_transactions = 0;
+static __thread int htm_transactions = 0;
+static __thread int gil_retry_acquire = 0;
+static __thread int gil_spin_retry_acquire = 0;
+static __thread int transient_retry_acquire = 0;
+static __thread int persistent_acquire = 0;
+
+__thread struct htm_transaction_info_s _htm_info __attribute__((aligned(64)));
+
+#define smp_spinloop()  asm volatile ("pause":::"memory")
+
+static void acquire_gil(stm_thread_local_t *tl) {
+    if (pthread_mutex_lock(&_stm_gil) == 0) {
+        _stm_tloc = tl;
+        _htm_info.use_gil = 1;
+        return;
+    }
+    abort();
+}
+
+static int spin_and_acquire_gil(stm_thread_local_t *tl) {
+    int n = 500;
+    while (n-- > 0) {
+        if (!mutex_locked(&_stm_gil))
+            return 0;
+        smp_spinloop();
+    }
+
+    gil_spin_retry_acquire++;
+    acquire_gil(tl);
+    return 1;
+}
+
+static int is_persistent(int status) {
+    if ((status & XBEGIN_XABORT) && XBEGIN_XABORT_ARG(status) == ABORT_GIL_LOCKED)
+        return 0;
+    else if (status & (XBEGIN_MAYBE_RETRY | XBEGIN_NORMAL_CONFLICT))
+        return 0;
+    else if (status == XBEGIN_UNKNOWN)
+        return 0;
+    return 1;
+}
+
+void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
+    /* set_transaction_length(pc) */
+
+    /* fprintf(stderr, "previous tr: retry: %d gil: %d\n", */
+    /*         _htm_info.retry_counter, _htm_info.use_gil); */
+    _htm_info.retry_counter = 0;
+    _htm_info.use_gil = 0;
+
+    /* if (mutex_locked(&_stm_gil)) { */
+    /*     if (spin_and_acquire_gil(tl)) */
+    /*         return; */
+    /* } */
+
+    int status;
+    int transient_retry_counter = TRANSIENT_RETRY_MAX;
+    int gil_retry_counter = GIL_RETRY_MAX;
+    int first_retry = 1;
+
+ transaction_retry:
+    status = xbegin();
+    if (status == XBEGIN_OK) {
+        if (mutex_locked(&_stm_gil))
+            xabort(ABORT_GIL_LOCKED);
+        /* transaction OK */
+    }
+    else {
+        if (first_retry) {
+            first_retry = 0;
+            /* adjust_transaction_length(pc) */
+        }
+
+        if ((status & XBEGIN_XABORT) && XBEGIN_XABORT_ARG(status) == ABORT_GIL_LOCKED) {
+            gil_retry_counter--;
+            if (gil_retry_counter > 0) {
+                if (spin_and_acquire_gil(tl)) {
+                    return;
+                } else {
+                    smp_spinloop();
+                    goto transaction_retry;
+                }
+            }
+            gil_retry_acquire++;
+            acquire_gil(tl);
+        } else if (is_persistent(status)) {
+            persistent_acquire++;
+            acquire_gil(tl);
+        } else {
+            /* transient abort */
+            _htm_info.retry_counter++;
+            transient_retry_counter--;
+            if (transient_retry_counter > 0) {
+                smp_spinloop();
+                goto transaction_retry;
+            }
+            transient_retry_acquire++;
+            acquire_gil(tl);
+        }
+
+        /* fprintf(stderr, "failed HTM: %s, t_retry: %d, gil_retry: %d\n", */
+        /*         xbegin_status(status), transient_retry_counter, gil_retry_counter); */
+    }
+
+    _stm_tloc = tl;
+}
+
+void stm_commit_transaction(void) {
+    stm_collect(0);
+    _stm_tloc = NULL;
+    if (_htm_info.use_gil) {
+        OPT_ASSERT(!xtest());
+        if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
+        gil_transactions++;
+        if (gil_transactions % 512 == 0)
+            fprintf(stderr, "G");
+    } else {
+        xend();
+        htm_transactions++;
+        if (htm_transactions % 512 == 0)
+            fprintf(stderr, "H");
+    }
+}
+
+
+
+/************************************************************/
+/* some simple thread-local malloc: */
+#define MAX_MALLOC (1000 * 1024 * 1024)
+
+static __thread char* _malloc_area_base = NULL;
+static __thread char* _malloc_area_current = NULL;
+void* tl_malloc(size_t size) {
+    if (_malloc_area_base == NULL) {
+        _malloc_area_base = malloc(MAX_MALLOC);
+        _malloc_area_current = _malloc_area_base;
+    }
+
+    void* res = _malloc_area_current;
+    _malloc_area_current += size;
+    if (_malloc_area_current - _malloc_area_base > MAX_MALLOC)
+        abort();
+    return res;
+}
 
 /************************************************************/
 
@@ -58,7 +212,7 @@ static inline uintptr_t list_count(struct list_s *lst)
 
 static inline uintptr_t list_pop_item(struct list_s *lst)
 {
-    assert(lst->count > 0);
+    OPT_ASSERT(lst->count > 0);
     return lst->items[--lst->count];
 }
 
@@ -116,19 +270,46 @@ static struct list_s *_list_grow(struct list_s *lst, uintptr_t nalloc)
 
 #define GCFLAG_WRITE_BARRIER  _STM_GCFLAG_WRITE_BARRIER
 
-static struct list_s *objects_pointing_to_nursery;
-static struct list_s *young_weakrefs;
+static __thread struct list_s *objects_pointing_to_nursery;
+static __thread struct list_s *young_weakrefs;
 
 void stm_setup(void)
 {
-    objects_pointing_to_nursery = list_create();
-    young_weakrefs = list_create();
 }
 
 void stm_teardown(void)
 {
-    list_free(objects_pointing_to_nursery);
 }
+
+void stm_register_thread_local(stm_thread_local_t *tl) {
+    objects_pointing_to_nursery = list_create();
+    young_weakrefs = list_create();
+    _stm_segment = tl_malloc(sizeof(struct stm_segment_info_s));
+
+    tl->thread_local_obj = NULL;
+    tl->shadowstack_base = (object_t **)tl_malloc(768*1024);
+    OPT_ASSERT(tl->shadowstack_base);
+    tl->shadowstack = tl->shadowstack_base;
+    tl->last_abort__bytes_in_nursery = 0;
+}
+
+void stm_unregister_thread_local(stm_thread_local_t *tl) {
+    fprintf(stderr,
+            "== in %p ==\ngil_transactions:\t%d\nhtm_transactions:\t%d\nratio:\t\t\t=%f\n"
+            "gil_spin_retry_acquire:\t%d\n"
+            "gil_retry_acquire:\t%d\npersistent_acquire:\t%d\n"
+            "transient_retry_acquire:%d\n",
+            tl, gil_transactions, htm_transactions,
+            (float)gil_transactions / (float)htm_transactions,
+            gil_spin_retry_acquire,
+            gil_retry_acquire, persistent_acquire, transient_retry_acquire);
+    //free(tl->shadowstack_base);
+
+    list_free(objects_pointing_to_nursery);
+    list_free(young_weakrefs);
+    //free(_stm_segment);
+}
+
 
 void _stm_write_slowpath(object_t *obj)
 {
@@ -138,8 +319,8 @@ void _stm_write_slowpath(object_t *obj)
 
 object_t *_stm_allocate_old(ssize_t size)
 {
-    char *p = malloc(size);
-    assert(p);
+    char *p = tl_malloc(size);
+    OPT_ASSERT(p);
     memset(p, 0, size);
     ((object_t *)p)->gil_flags = _STM_GCFLAG_WRITE_BARRIER;
     return (object_t *)p;
@@ -147,8 +328,8 @@ object_t *_stm_allocate_old(ssize_t size)
 
 object_t *_stm_allocate_external(ssize_t size)
 {
-    char *p = malloc(size);
-    assert(p);
+    char *p = tl_malloc(size);
+    OPT_ASSERT(p);
     memset(p, 0, size);
     _stm_write_slowpath((object_t *)p);
     return (object_t *)p;
@@ -160,9 +341,9 @@ object_t *_stm_allocate_external(ssize_t size)
 #define NB_NURSERY_PAGES    1024          // 4MB
 #define NURSERY_SIZE        (NB_NURSERY_PAGES * 4096UL)
 
-char *_stm_nursery_base    = NULL;
-char *_stm_nursery_current = NULL;
-char *_stm_nursery_end     = NULL;
+__thread char *_stm_nursery_base    = NULL;
+__thread char *_stm_nursery_current = NULL;
+__thread char *_stm_nursery_end     = NULL;
 #define _stm_nursery_start ((uintptr_t)_stm_nursery_base)
 
 static bool _is_in_nursery(object_t *obj)
@@ -201,8 +382,8 @@ static void minor_trace_if_young(object_t **pobj)
          */
         size_t size = stmcb_size_rounded_up(obj);
 
-        nobj = malloc(size);
-        assert(nobj);
+        nobj = tl_malloc(size);
+        OPT_ASSERT(nobj);
 
         /* Copy the object  */
         memcpy(nobj, obj, size);
@@ -235,10 +416,10 @@ static void collect_roots_in_nursery(void)
 
 static inline void _collect_now(object_t *obj)
 {
-    assert(!_is_in_nursery(obj));
+    OPT_ASSERT(!_is_in_nursery(obj));
 
     /* We must not have GCFLAG_WRITE_BARRIER so far.  Add it now. */
-    assert(!(obj->gil_flags & GCFLAG_WRITE_BARRIER));
+    OPT_ASSERT(!(obj->gil_flags & GCFLAG_WRITE_BARRIER));
     obj->gil_flags |= GCFLAG_WRITE_BARRIER;
 
     /* Trace the 'obj' to replace pointers to nursery with pointers
@@ -264,14 +445,15 @@ static void collect_oldrefs_to_nursery(void)
 static void throw_away_nursery(void)
 {
     if (_stm_nursery_base == NULL) {
-        _stm_nursery_base = malloc(NURSERY_SIZE);
-        assert(_stm_nursery_base);
+        _stm_nursery_base = tl_malloc(NURSERY_SIZE);
+        OPT_ASSERT(_stm_nursery_base);
         _stm_nursery_end = _stm_nursery_base + NURSERY_SIZE;
         _stm_nursery_current = _stm_nursery_base;
     }
 
     memset(_stm_nursery_base, 0, _stm_nursery_current-_stm_nursery_base);
     _stm_nursery_current = _stm_nursery_base;
+    STM_SEGMENT->nursery_current = _stm_nursery_current;
 }
 
 #define WEAKREF_PTR(wr, sz)  ((object_t * TLPREFIX *)(((char *)(wr)) + (sz) - sizeof(void*)))
@@ -282,7 +464,7 @@ static void move_young_weakrefs(void)
         young_weakrefs,
         object_t * /*item*/,
         ({
-            assert(_is_in_nursery(item));
+            OPT_ASSERT(_is_in_nursery(item));
             object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)item;
 
             /* the following checks are done like in nursery.c: */
@@ -293,11 +475,11 @@ static void move_young_weakrefs(void)
 
             item = pforwarded_array[1]; /* moved location */
 
-            assert(!_is_in_nursery(item));
+            OPT_ASSERT(!_is_in_nursery(item));
 
             ssize_t size = 16;
             object_t *pointing_to = *WEAKREF_PTR(item, size);
-            assert(pointing_to != NULL);
+            OPT_ASSERT(pointing_to != NULL);
 
             if (_is_in_nursery(pointing_to)) {
                 object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)pointing_to;
@@ -338,14 +520,15 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 
     char *p = _stm_nursery_current;
     char *end = p + size_rounded_up;
-    assert(end <= _stm_nursery_end);
+    OPT_ASSERT(end <= _stm_nursery_end);
     _stm_nursery_current = end;
+    STM_SEGMENT->nursery_current = end;
     return (object_t *)p;
 }
 
 object_t *stm_allocate_weakref(ssize_t size_rounded_up)
 {
-    assert(size_rounded_up == 16);
+    OPT_ASSERT(size_rounded_up == 16);
     object_t *obj = stm_allocate(size_rounded_up);
     LIST_APPEND(young_weakrefs, obj);
     return obj;

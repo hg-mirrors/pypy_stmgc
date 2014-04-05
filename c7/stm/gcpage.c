@@ -42,7 +42,7 @@ static char *allocate_outside_nursery_large(uint64_t size)
     /* Allocate the object with largemalloc.c from the lower addresses. */
     char *addr = _stm_large_malloc(size);
     if (addr == NULL)
-        stm_fatalerror("not enough memory!\n");
+        stm_fatalerror("not enough memory!");
 
     if (addr + size > uninitialized_page_start) {
         uintptr_t npages;
@@ -50,7 +50,7 @@ static char *allocate_outside_nursery_large(uint64_t size)
         npages += GCPAGE_NUM_PAGES;
         if (uninitialized_page_stop - uninitialized_page_start <
                 npages * 4096UL) {
-            stm_fatalerror("out of memory!\n");   /* XXX */
+            stm_fatalerror("out of memory!");   /* XXX */
         }
         setup_N_pages(uninitialized_page_start, npages);
         uninitialized_page_start += npages * 4096UL;
@@ -91,11 +91,15 @@ static void major_collection_if_requested(void)
 
     if (is_major_collection_requested()) {   /* if still true */
 
-        synchronize_all_threads();
+        int oldstate = change_timing_state(STM_TIME_MAJOR_GC);
+
+        synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
 
         if (is_major_collection_requested()) {   /* if *still* true */
             major_collection_now_at_safe_point();
         }
+
+        change_timing_state(oldstate);
     }
 
     s_mutex_unlock();
@@ -246,8 +250,7 @@ static void major_reshare_pages(void)
                 break;   /* done */
             pagenum = (uninitialized_page_stop - stm_object_pages) / 4096UL;
             endpagenum = NB_PAGES;
-            if (pagenum == endpagenum)
-                break;   /* no pages in the 2nd section, so done too */
+            continue;
         }
 
         page_check_and_reshare(pagenum);

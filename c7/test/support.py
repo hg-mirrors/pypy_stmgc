@@ -24,6 +24,8 @@ typedef struct {
     size_t mem_bytes_to_clear_on_abort;
     long last_abort__bytes_in_nursery;
     int associated_segment_num;
+    uint32_t events[];
+    float timing[];
     ...;
 } stm_thread_local_t;
 
@@ -53,7 +55,8 @@ int _stm_get_flags(object_t *obj);
 void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
-bool _check_become_inevitable(void);
+bool _check_become_inevitable(stm_thread_local_t *tl);
+bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 int stm_is_inevitable(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
@@ -97,6 +100,24 @@ void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
 
 int stm_can_move(object_t *);
 void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
+
+#define STM_TIME_OUTSIDE_TRANSACTION ...
+#define STM_TIME_RUN_CURRENT ...
+#define STM_TIME_RUN_COMMITTED ...
+#define STM_TIME_RUN_ABORTED_WRITE_WRITE ...
+#define STM_TIME_RUN_ABORTED_WRITE_READ ...
+#define STM_TIME_RUN_ABORTED_INEVITABLE ...
+#define STM_TIME_RUN_ABORTED_OTHER ...
+#define STM_TIME_WAIT_FREE_SEGMENT ...
+#define STM_TIME_WAIT_WRITE_READ ...
+#define STM_TIME_WAIT_INEVITABLE ...
+#define STM_TIME_WAIT_OTHER ...
+#define STM_TIME_BOOKKEEPING ...
+#define STM_TIME_MINOR_GC ...
+#define STM_TIME_MAJOR_GC ...
+#define STM_TIME_SYNC_PAUSE ...
+
+void stm_flush_timing(stm_thread_local_t *, int);
 """)
 
 
@@ -157,8 +178,12 @@ bool _check_abort_transaction(void) {
     CHECKED(stm_abort_transaction());
 }
 
-bool _check_become_inevitable() {
-    CHECKED(stm_become_inevitable("TEST"));
+bool _check_become_inevitable(stm_thread_local_t *tl) {
+    CHECKED(stm_become_inevitable(tl, "TEST"));
+}
+
+bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
+    CHECKED(stm_become_globally_unique_transaction(tl, "TESTGUT"));
 }
 
 #undef CHECKED
@@ -256,6 +281,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
      extra_compile_args=['-g', '-O0', '-Werror', '-ferror-limit=1'],
+     extra_link_args=['-g', '-lrt'],
      force_generic_engine=True)
 
 
@@ -353,10 +379,6 @@ def stm_stop_safe_point():
     if lib._check_stop_safe_point():
         raise Conflict()
 
-def stm_become_inevitable():
-    if lib._check_become_inevitable():
-        raise Conflict()
-
 def stm_minor_collect():
     lib.stm_collect(0)
 
@@ -412,6 +434,10 @@ class BaseTest(object):
         self.current_thread = 0
 
     def teardown_method(self, meth):
+        tl = self.tls[self.current_thread]
+        if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
+            self.commit_transaction()      # must succeed!
+        #
         for n, tl in enumerate(self.tls):
             if lib._stm_in_transaction(tl):
                 if self.current_thread != n:
@@ -420,6 +446,7 @@ class BaseTest(object):
                     self.commit_transaction()   # must succeed!
                 else:
                     self.abort_transaction()
+        #
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
         lib.stm_teardown()
@@ -501,3 +528,13 @@ class BaseTest(object):
     def set_thread_local_obj(self, newobj):
         tl = self.tls[self.current_thread]
         tl.thread_local_obj = newobj
+
+    def become_inevitable(self):
+        tl = self.tls[self.current_thread]
+        if lib._check_become_inevitable(tl):
+            raise Conflict()
+
+    def become_globally_unique_transaction(self):
+        tl = self.tls[self.current_thread]
+        if lib._check_become_globally_unique_transaction(tl):
+            raise Conflict()

@@ -1,0 +1,27 @@
+
+
+
+;;(setq c (container 0))
+
+
+(defun increment ()
+  )
+
+
+(defun big_transactions ()
+  (setq n 0)
+  (while (< n 20000)
+    (transaction increment)
+    (setq n (+ n 1))
+    )
+  )
+
+(setq n 0)
+(while (< n 800)
+  (transaction big_transactions)
+  (setq n (+ n 1))
+  )
+
+(setq timer (time))
+(run-transactions)
+(print (quote TIME_IN_PARALLEL:) (- (time) timer))

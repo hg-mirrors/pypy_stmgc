@@ -28,7 +28,13 @@ static void set_gs_register(char *value);
 static bool acquire_thread_segment(stm_thread_local_t *tl);
 static void release_thread_segment(stm_thread_local_t *tl);
 
-static void wait_for_end_of_inevitable_transaction(bool can_abort);
-static void synchronize_all_threads(void);
+static void wait_for_end_of_inevitable_transaction(stm_thread_local_t *);
 
-static bool pause_signalled;
+enum sync_type_e {
+    STOP_OTHERS_UNTIL_MUTEX_UNLOCK,
+    STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE,
+};
+static void synchronize_all_threads(enum sync_type_e sync_type);
+static void committed_globally_unique_transaction(void);
+
+static bool pause_signalled, globally_unique_transaction;

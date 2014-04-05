@@ -57,7 +57,7 @@ Memory organization
 We have a small, fixed number of big pieces of memory called "segments".
 Each segment has enough (virtual) address space for all the objects that
 the program needs.  This is actually allocated from a single big mmap()
-so that pages can be exchanged between segments with remap_file_pages().
+so that pages can be shared between segments with remap_file_pages().
 We call N the number of segments.  Actual threads are not limited in
 number; they grab one segment in order to run GC-manipulating code, and
 release it afterwards.  This is similar to what occurs with the GIL,
@@ -81,20 +81,26 @@ as others.  We get a fresh new physical page, and duplicate its content
 --- much like the OS does after a fork() for pages modified by one or
 the other process.
 
-In more details: the first page of addresses in each thread-local region
-(4096 bytes) is made non-accessible, to detect errors of accessing the
-NULL pointer.  The second page is reserved for thread-local data.  The
-rest is divided into 1/16 for thread-local read markers, followed by
-15/16 for the real objects.  We initially use remap_file_pages() on this
-15/16 range.  The read markers are described below.
+In more details: we actually get N + 1 consecutive segments, and segment
+number 0 is reserved to contain the globally committed state of the
+objects.  The segments actually used by threads are numbered from 1 to
+N.  The first page of addresses in each segment is made non-accessible,
+to detect errors of accessing the NULL pointer.  The second page is
+reserved for thread-local data.  The rest is divided into 1/16 for
+thread-local read markers, followed by 15/16 for the real objects.  The
+read markers are described below.  We use remap_file_pages() on this
+15/16 range: every page in this range can be either remapped to the same
+page from segment 0 ("shared", the initial state), or remapped back to
+itself ("private").
 
-Each transaction records the objects that it changed.  These are
-necessarily within unshared pages.  When we want to commit a
-transaction, we ask for a safe-point (suspending the other threads in a
-known state), and then we copy again the modified objects into the other
-version(s) of that data.  The point is that, from another thread's point
-of view, the memory didn't appear to change unexpectedly, but only when
-waiting in a safe-point.
+Each transaction records the objects that it changed, and makes sure
+that the corresponding pages are "private" in this segment.  When we
+want to commit a transaction, we ask for a safe-point (suspending the
+other threads in a known state), and then we copy the modified objects
+into the share pages, as well as into the other segments if they are
+also backed by private pages.  The point is that, from another thread's
+point of view, the memory didn't appear to change unexpectedly, but only
+when waiting in a safe-point.
 
 Moreover, we detect read-write conflicts when trying to commit.  To do
 this, each transaction needs to track in their own (private) read
@@ -105,11 +111,13 @@ we either abort the committing thread, or mark the other thread as
 requiring an abort (which it will do when trying to leave the
 safe-point).
 
-On the other hand, write-write conflicts are detected eagerly, which is
-necessary to avoid that all segments contain a modified version of the
-object and no segment is left with the original version.  It is done
-with a compare-and-swap into an array of write locks (only the first
-time a given old object is modified by a given transaction).
+On the other hand, write-write conflicts are detected eagerly.  It is
+done with a compare-and-swap into an array of write locks (only the
+first time a given old object is modified by a given transaction).  This
+used to be necessary in some previous version, but is kept for now
+because it would require more measurements to know if it's a good or bad
+idea; the alternative is to simply let conflicting writes proceed and
+detect the situation at commit time only.
 
 
 Object creation and GC
@@ -127,7 +135,7 @@ We use a GC that is similar to the one in PyPy:
   objects that are also outside the nursery.
 
 - pages need to be unshared when they contain old objects that are then
-  modified.
+  modified (and only in this case).
 
 - we need a write barrier to detect the changes done to any non-nursery
   object (the first time only).  This is just a flag check.  Then the
@@ -139,13 +147,15 @@ We use a GC that is similar to the one in PyPy:
   to be synchronized, but ideally the threads should then proceed
   to do a parallel GC (i.e. mark in all threads in parallel, and
   then sweep in al threads in parallel, with one arbitrary thread
-  taking on the additional coordination role needed).
+  taking on the additional coordination role needed).  But we'll think
+  about it when it becomes a problem.
 
 - the major collections should be triggered by the amount of really-used
-  memory, which means: counting the unshared pages as N pages.  Major
-  collection should then re-share the pages as much as possible.  This is
-  the essential part that guarantees that old, no-longer-modified
-  bunches of objects are eventually present in only one copy in memory,
-  in shared pages --- while at the same time bounding the number of
-  calls to remap_file_pages() for each page at N-1 per major collection
-  cycle.
+  memory, which means: counting each actual copy of a private page
+  independently, but shared pages as one.  Major collection will then
+  re-share the pages as much as possible.  This is the essential part
+  that guarantees that old, no-longer-modified bunches of objects are
+  eventually present in only one copy in memory, in shared pages ---
+  while at the same time bounding the number of calls to
+  remap_file_pages() at two for each private page (one to privatize, one
+  to re-share) for a complete major collection cycle.

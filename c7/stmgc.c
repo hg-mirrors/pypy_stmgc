@@ -14,6 +14,7 @@
 #include "stm/extra.h"
 #include "stm/fprintcolor.h"
 #include "stm/weakref.h"
+#include "stm/timing.h"
 
 #include "stm/misc.c"
 #include "stm/list.c"
@@ -25,6 +26,7 @@
 #include "stm/smallmalloc.c"
 #include "stm/nursery.c"
 #include "stm/sync.c"
+#include "stm/forksupport.c"
 #include "stm/setup.c"
 #include "stm/hash_id.c"
 #include "stm/core.c"
@@ -32,3 +34,4 @@
 #include "stm/extra.c"
 #include "stm/fprintcolor.c"
 #include "stm/weakref.c"
+#include "stm/timing.c"

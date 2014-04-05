@@ -69,6 +69,14 @@ static void cm_abort_the_younger(struct contmgr_s *cm)
 __attribute__((unused))
 static void cm_always_wait_for_other_thread(struct contmgr_s *cm)
 {
+    /* we tried this contention management, but it seems to have
+       very bad cases: if thread 1 always reads an object in every
+       transaction, and thread 2 wants to write this object just
+       once, then thread 2 will pause when it tries to commit;
+       it will wait until thread 1 committed; but by the time
+       thread 2 resumes again, thread 1 has already started the
+       next transaction and read the object again.
+    */
     cm_abort_the_younger(cm);
     cm->try_sleep = true;
 }
@@ -110,22 +118,36 @@ static void contention_management(uint8_t other_segment_num,
 #ifdef STM_TESTS
     cm_abort_the_younger(&contmgr);
 #else
-    cm_always_wait_for_other_thread(&contmgr);
+    cm_pause_if_younger(&contmgr);
 #endif
 
     /* Fix the choices that are found incorrect due to TS_INEVITABLE
-       or NSE_SIGABORT */
-    if (contmgr.other_pseg->pub.nursery_end == NSE_SIGABORT) {
+       or is_abort() */
+    if (is_abort(contmgr.other_pseg->pub.nursery_end)) {
         contmgr.abort_other = true;
         contmgr.try_sleep = false;
     }
     else if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         assert(contmgr.other_pseg->transaction_state != TS_INEVITABLE);
         contmgr.abort_other = true;
+        contmgr.try_sleep = false;
     }
     else if (contmgr.other_pseg->transaction_state == TS_INEVITABLE) {
         contmgr.abort_other = false;
     }
+
+
+    int wait_category =
+        kind == WRITE_READ_CONTENTION ? STM_TIME_WAIT_WRITE_READ :
+        kind == INEVITABLE_CONTENTION ? STM_TIME_WAIT_INEVITABLE :
+        STM_TIME_WAIT_OTHER;
+
+    int abort_category =
+        kind == WRITE_WRITE_CONTENTION ? STM_TIME_RUN_ABORTED_WRITE_WRITE :
+        kind == WRITE_READ_CONTENTION ? STM_TIME_RUN_ABORTED_WRITE_READ :
+        kind == INEVITABLE_CONTENTION ? STM_TIME_RUN_ABORTED_INEVITABLE :
+        STM_TIME_RUN_ABORTED_OTHER;
+
 
     if (contmgr.try_sleep && kind != WRITE_WRITE_CONTENTION &&
         contmgr.other_pseg->safe_point != SP_WAIT_FOR_C_TRANSACTION_DONE) {
@@ -140,6 +162,10 @@ static void contention_management(uint8_t other_segment_num,
         */
         contmgr.other_pseg->signal_when_done = true;
 
+        change_timing_state(wait_category);
+
+        /* XXX should also tell other_pseg "please commit soon" */
+
         dprintf(("pausing...\n"));
         cond_signal(C_AT_SAFE_POINT);
         STM_PSEGMENT->safe_point = SP_WAIT_FOR_C_TRANSACTION_DONE;
@@ -149,15 +175,20 @@ static void contention_management(uint8_t other_segment_num,
 
         if (must_abort())
             abort_with_mutex();
+
+        change_timing_state(STM_TIME_RUN_CURRENT);
     }
+
     else if (!contmgr.abort_other) {
         dprintf(("abort in contention\n"));
+        STM_SEGMENT->nursery_end = abort_category;
         abort_with_mutex();
     }
+
     else {
         /* We have to signal the other thread to abort, and wait until
            it does. */
-        contmgr.other_pseg->pub.nursery_end = NSE_SIGABORT;
+        contmgr.other_pseg->pub.nursery_end = abort_category;
 
         int sp = contmgr.other_pseg->safe_point;
         switch (sp) {

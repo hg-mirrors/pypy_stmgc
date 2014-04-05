@@ -80,3 +80,13 @@ class TestExtra(BaseTest):
         self.start_transaction()
         self.abort_transaction()
         assert seen == []
+
+    def test_stm_become_globally_unique_transaction(self):
+        self.start_transaction()
+        #
+        self.switch(1)
+        self.start_transaction()
+        self.become_globally_unique_transaction()
+        assert lib.stm_is_inevitable()
+        #
+        py.test.raises(Conflict, self.switch, 0)

@@ -3,6 +3,42 @@
 #endif
 
 
+static char *setup_mmap(char *reason)
+{
+    char *result = mmap(NULL, TOTAL_MEMORY,
+                        PROT_READ | PROT_WRITE,
+                        MAP_PAGES_FLAGS, -1, 0);
+    if (result == MAP_FAILED)
+        stm_fatalerror("%s failed: %m\n", reason);
+
+    return result;
+}
+
+static void setup_protection_settings(void)
+{
+    /* The segment 0 is not used to run transactions, but contains the
+       shared copy of the pages.  We mprotect all pages before so that
+       accesses fail, up to and including the pages corresponding to the
+       nurseries of the other segments. */
+    mprotect(stm_object_pages, END_NURSERY_PAGE * 4096UL, PROT_NONE);
+
+    long i;
+    for (i = 1; i <= NB_SEGMENTS; i++) {
+        char *segment_base = get_segment_base(i);
+
+        /* In each segment, the first page is where TLPREFIX'ed
+           NULL accesses land.  We mprotect it so that accesses fail. */
+        mprotect(segment_base, 4096, PROT_NONE);
+
+        /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
+        if (FIRST_READMARKER_PAGE > 2)
+            mprotect(segment_base + 8192,
+                     (FIRST_READMARKER_PAGE - 2) * 4096UL,
+                     PROT_NONE);
+    }
+    pages_setup_readmarkers_for_nursery();
+}
+
 void stm_setup(void)
 {
     /* Check that some values are acceptable */
@@ -20,37 +56,18 @@ void stm_setup(void)
            (FIRST_READMARKER_PAGE * 4096UL));
     assert(_STM_FAST_ALLOC <= NB_NURSERY_PAGES * 4096);
 
-    stm_object_pages = mmap(NULL, TOTAL_MEMORY,
-                            PROT_READ | PROT_WRITE,
-                            MAP_PAGES_FLAGS, -1, 0);
-    if (stm_object_pages == MAP_FAILED)
-        stm_fatalerror("initial stm_object_pages mmap() failed: %m\n");
-
-    /* The segment 0 is not used to run transactions, but to contain the
-       shared copy of the pages.  We mprotect all pages before so that
-       accesses fail, up to and including the pages corresponding to the
-       nurseries of the other segments. */
-    mprotect(stm_object_pages, END_NURSERY_PAGE * 4096UL, PROT_NONE);
+    stm_object_pages = setup_mmap("initial stm_object_pages mmap()");
+    setup_protection_settings();
 
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
-
-        /* In each segment, the first page is where TLPREFIX'ed
-           NULL accesses land.  We mprotect it so that accesses fail. */
-        mprotect(segment_base, 4096, PROT_NONE);
 
         /* Fill the TLS page (page 1) with 0xDC, for debugging */
         memset(REAL_ADDRESS(segment_base, 4096), 0xDC, 4096);
         /* Make a "hole" at STM_PSEGMENT (which includes STM_SEGMENT) */
         memset(REAL_ADDRESS(segment_base, STM_PSEGMENT), 0,
                sizeof(*STM_PSEGMENT));
-
-        /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
-        if (FIRST_READMARKER_PAGE > 2)
-            mprotect(segment_base + 8192,
-                     (FIRST_READMARKER_PAGE - 2) * 4096UL,
-                     PROT_NONE);
 
         /* Initialize STM_PSEGMENT */
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
@@ -83,6 +100,7 @@ void stm_setup(void)
     setup_nursery();
     setup_gcpage();
     setup_pages();
+    setup_forksupport();
 }
 
 void stm_teardown(void)
@@ -110,12 +128,11 @@ void stm_teardown(void)
     teardown_core();
     teardown_sync();
     teardown_gcpage();
-    teardown_nursery();
     teardown_smallmalloc();
     teardown_pages();
 }
 
-void _init_shadow_stack(stm_thread_local_t *tl)
+static void _init_shadow_stack(stm_thread_local_t *tl)
 {
     struct stm_shadowentry_s *s = (struct stm_shadowentry_s *)
         malloc(SHADOW_STACK_SIZE * sizeof(struct stm_shadowentry_s));
@@ -124,13 +141,18 @@ void _init_shadow_stack(stm_thread_local_t *tl)
     tl->shadowstack_base = s;
 }
 
-void _done_shadow_stack(stm_thread_local_t *tl)
+static void _done_shadow_stack(stm_thread_local_t *tl)
 {
     free(tl->shadowstack_base);
     tl->shadowstack = NULL;
     tl->shadowstack_base = NULL;
 }
 
+static pthread_t *_get_cpth(stm_thread_local_t *tl)
+{
+    assert(sizeof(pthread_t) <= sizeof(tl->creating_pthread));
+    return (pthread_t *)(tl->creating_pthread);
+}
 
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
@@ -148,12 +170,15 @@ void stm_register_thread_local(stm_thread_local_t *tl)
         num = tl->prev->associated_segment_num;
     }
     tl->thread_local_obj = NULL;
+    tl->_timing_cur_state = STM_TIME_OUTSIDE_TRANSACTION;
+    tl->_timing_cur_start = get_stm_time();
 
     /* assign numbers consecutively, but that's for tests; we could also
        assign the same number to all of them and they would get their own
        numbers automatically. */
     num = (num % NB_SEGMENTS) + 1;
     tl->associated_segment_num = num;
+    *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num));
     s_mutex_unlock();
@@ -162,6 +187,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
 void stm_unregister_thread_local(stm_thread_local_t *tl)
 {
     s_mutex_lock();
+    assert(tl->prev != NULL);
     assert(tl->next != NULL);
     _done_shadow_stack(tl);
     if (tl == stm_all_thread_locals) {

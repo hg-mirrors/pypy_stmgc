@@ -158,7 +158,7 @@ static void reset_transaction_read_version(void)
              MAP_FIXED | MAP_PAGES_FLAGS, -1, 0) != readmarkers) {
         /* fall-back */
 #if STM_TESTS
-        stm_fatalerror("reset_transaction_read_version: %m\n");
+        stm_fatalerror("reset_transaction_read_version: %m");
 #endif
         memset(readmarkers, 0, NB_READMARKER_PAGES * 4096UL);
     }
@@ -173,7 +173,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 
   retry:
     if (jmpbuf == NULL) {
-        wait_for_end_of_inevitable_transaction(false);
+        wait_for_end_of_inevitable_transaction(tl);
     }
 
     if (!acquire_thread_segment(tl))
@@ -182,6 +182,8 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
 
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
+    change_timing_state(STM_TIME_RUN_CURRENT);
+    STM_PSEGMENT->start_time = tl->_timing_cur_start;
     STM_PSEGMENT->safe_point = SP_RUNNING;
     STM_PSEGMENT->transaction_state = (jmpbuf != NULL ? TS_REGULAR
                                                       : TS_INEVITABLE);
@@ -192,9 +194,9 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
     STM_PSEGMENT->threadlocal_at_start_of_transaction = tl->thread_local_obj;
 
+    enter_safe_point_if_requested();
     dprintf(("start_transaction\n"));
 
-    enter_safe_point_if_requested();
     s_mutex_unlock();
 
     /* Now running the SP_RUNNING start.  We can set our
@@ -434,7 +436,7 @@ static void push_modified_to_other_segments(void)
     list_clear(STM_PSEGMENT->modified_old_objects);
 }
 
-static void _finish_transaction(void)
+static void _finish_transaction(int attribute_to)
 {
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
@@ -442,6 +444,8 @@ static void _finish_transaction(void)
     /* reset these lists to NULL for the next transaction */
     LIST_FREE(STM_PSEGMENT->objects_pointing_to_nursery);
     LIST_FREE(STM_PSEGMENT->large_overflow_objects);
+
+    timing_end_transaction(attribute_to);
 
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     release_thread_segment(tl);
@@ -456,13 +460,16 @@ void stm_commit_transaction(void)
 
     minor_collection(/*commit=*/ true);
 
+    /* the call to minor_collection() above leaves us with
+       STM_TIME_BOOKKEEPING */
+
     s_mutex_lock();
 
  restart:
     /* force all other threads to be paused.  They will unpause
        automatically when we are done here, i.e. at mutex_unlock().
        Important: we should not call cond_wait() in the meantime. */
-    synchronize_all_threads();
+    synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
 
     /* detect conflicts */
     if (detect_write_read_conflicts())
@@ -504,10 +511,12 @@ void stm_commit_transaction(void)
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         /* wake up one thread in wait_for_end_of_inevitable_transaction() */
         cond_signal(C_INEVITABLE);
+        if (globally_unique_transaction)
+            committed_globally_unique_transaction();
     }
 
     /* done */
-    _finish_transaction();
+    _finish_transaction(STM_TIME_RUN_COMMITTED);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
@@ -582,6 +591,16 @@ static void abort_data_structures_from_segment_num(int segment_num)
     */
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
 
+    switch (pseg->transaction_state) {
+    case TS_REGULAR:
+        break;
+    case TS_INEVITABLE:
+        stm_fatalerror("abort: transaction_state == TS_INEVITABLE");
+    default:
+        stm_fatalerror("abort: bad transaction_state == %d",
+                       (int)pseg->transaction_state);
+    }
+
     /* throw away the content of the nursery */
     long bytes_in_nursery = throw_away_nursery(pseg);
 
@@ -591,6 +610,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
     /* reset the tl->shadowstack and thread_local_obj to their original
        value before the transaction start */
     stm_thread_local_t *tl = pseg->pub.running_thread;
+    assert(tl->shadowstack >= pseg->shadowstack_at_start_of_transaction);
     tl->shadowstack = pseg->shadowstack_at_start_of_transaction;
     tl->thread_local_obj = pseg->threadlocal_at_start_of_transaction;
     tl->last_abort__bytes_in_nursery = bytes_in_nursery;
@@ -606,15 +626,6 @@ static void abort_with_mutex(void)
     assert(_has_mutex());
     dprintf(("~~~ ABORT\n"));
 
-    switch (STM_PSEGMENT->transaction_state) {
-    case TS_REGULAR:
-        break;
-    case TS_INEVITABLE:
-        stm_fatalerror("abort: transaction_state == TS_INEVITABLE");
-    default:
-        stm_fatalerror("abort: bad transaction_state == %d",
-                       (int)STM_PSEGMENT->transaction_state);
-    }
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
     abort_data_structures_from_segment_num(STM_SEGMENT->segment_num);
@@ -629,13 +640,16 @@ static void abort_with_mutex(void)
     /* invoke the callbacks */
     invoke_and_clear_callbacks_on_abort();
 
-    if (STM_SEGMENT->nursery_end == NSE_SIGABORT) {
+    int attribute_to = STM_TIME_RUN_ABORTED_OTHER;
+
+    if (is_abort(STM_SEGMENT->nursery_end)) {
         /* done aborting */
+        attribute_to = STM_SEGMENT->nursery_end;
         STM_SEGMENT->nursery_end = pause_signalled ? NSE_SIGPAUSE
                                                    : NURSERY_END;
     }
 
-    _finish_transaction();
+    _finish_transaction(attribute_to);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     /* Broadcast C_ABORTED to wake up contention.c */
@@ -668,11 +682,25 @@ void _stm_become_inevitable(const char *msg)
     if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
         dprintf(("become_inevitable: %s\n", msg));
 
-        wait_for_end_of_inevitable_transaction(true);
+        wait_for_end_of_inevitable_transaction(NULL);
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
         STM_SEGMENT->jmpbuf_ptr = NULL;
         clear_callbacks_on_abort();
     }
+    else {
+        assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE);
+        assert(STM_SEGMENT->jmpbuf_ptr == NULL);
+    }
 
+    s_mutex_unlock();
+}
+
+void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
+                                            const char *msg)
+{
+    stm_become_inevitable(tl, msg);   /* may still abort */
+
+    s_mutex_lock();
+    synchronize_all_threads(STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE);
     s_mutex_unlock();
 }

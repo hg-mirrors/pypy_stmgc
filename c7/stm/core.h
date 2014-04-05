@@ -28,6 +28,8 @@
 
 #define READMARKER_START      ((FIRST_OBJECT_PAGE * 4096UL) >> 4)
 #define FIRST_READMARKER_PAGE (READMARKER_START / 4096UL)
+#define OLD_RM_START          ((END_NURSERY_PAGE * 4096UL) >> 4)
+#define FIRST_OLD_RM_PAGE     (OLD_RM_START / 4096UL)
 #define NB_READMARKER_PAGES   (FIRST_OBJECT_PAGE - FIRST_READMARKER_PAGE)
 
 #define WRITELOCK_START       ((END_NURSERY_PAGE * 4096UL) >> 4)
@@ -114,7 +116,7 @@ struct stm_priv_segment_info_s {
 
     /* Start time: to know approximately for how long a transaction has
        been running, in contention management */
-    uint64_t start_time;
+    double start_time;
 
     /* This is the number stored in the overflowed objects (a multiple of
        GCFLAG_OVERFLOW_NUMBER_bit0).  It is incremented when the

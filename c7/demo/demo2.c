@@ -4,11 +4,20 @@
 #include <pthread.h>
 #include <semaphore.h>
 
-#include "stmgc.h"
+#ifdef USE_HTM
+#  include "../../htm-c7/stmgc.h"
+#else
+#  include "stmgc.h"
+#endif
 
-#define NTHREADS    3
-#define LIST_LENGTH 2000
-#define BUNCH       100
+#define LIST_LENGTH 4000
+#define NTHREADS    2
+
+#ifdef USE_HTM
+#  define BUNCH       200
+#else
+#  define BUNCH       200
+#endif
 
 typedef TLPREFIX struct node_s node_t;
 typedef node_t* nodeptr_t;
@@ -175,6 +184,12 @@ void setup_list(void)
 static sem_t done;
 
 
+void unregister_thread_local(void)
+{
+    stm_flush_timing(&stm_thread_local, 1);
+    stm_unregister_thread_local(&stm_thread_local);
+}
+
 void *demo2(void *arg)
 {
     int status;
@@ -189,7 +204,7 @@ void *demo2(void *arg)
     STM_POP_ROOT(stm_thread_local, global_chained_list);
     assert(stm_thread_local.shadowstack == stm_thread_local.shadowstack_base);
 
-    stm_unregister_thread_local(&stm_thread_local);
+    unregister_thread_local();
     status = sem_post(&done); assert(status == 0);
     return NULL;
 }
@@ -234,6 +249,7 @@ int main(void)
 
     setup_list();
 
+
     for (i = 1; i <= NTHREADS; i++) {
         newthread(demo2, (void*)(uintptr_t)i);
     }
@@ -245,7 +261,7 @@ int main(void)
     final_check();
 
 
-    stm_unregister_thread_local(&stm_thread_local);
+    unregister_thread_local();
     stm_teardown();
 
     return 0;

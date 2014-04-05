@@ -30,9 +30,14 @@ static void teardown_pages(void)
 
 static void mutex_pages_lock(void)
 {
+    if (__sync_lock_test_and_set(&pages_ctl.mutex_pages, 1) == 0)
+        return;
+
+    int previous = change_timing_state(STM_TIME_SPIN_LOOP);
     while (__sync_lock_test_and_set(&pages_ctl.mutex_pages, 1) != 0) {
         spin_loop();
     }
+    change_timing_state(previous);
 }
 
 static void mutex_pages_unlock(void)
@@ -93,7 +98,7 @@ static void d_remap_file_pages(char *addr, size_t size, ssize_t pgoff)
 
     int res = remap_file_pages(addr, size, 0, pgoff, 0);
     if (UNLIKELY(res < 0))
-        stm_fatalerror("remap_file_pages: %m\n");
+        stm_fatalerror("remap_file_pages: %m");
 }
 
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
@@ -103,6 +108,8 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
        segment 0. */
     uintptr_t i;
     assert(_has_mutex_pages());
+    if (count == 0)
+        return;
     for (i = 1; i <= NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
         d_remap_file_pages(segment_base + pagenum * 4096UL,
@@ -140,6 +147,13 @@ static void page_privatize(uintptr_t pagenum)
     mutex_pages_unlock();
 }
 
+static void _page_do_reshare(long segnum, uintptr_t pagenum)
+{
+    char *segment_base = get_segment_base(segnum);
+    d_remap_file_pages(segment_base + pagenum * 4096UL,
+                       4096, pagenum);
+}
+
 static void page_reshare(uintptr_t pagenum)
 {
     struct page_shared_s ps = pages_privatized[pagenum - PAGE_FLAG_START];
@@ -160,25 +174,24 @@ static void page_reshare(uintptr_t pagenum)
     increment_total_allocated(total);
 }
 
-
-#if 0
-static bool is_fully_in_shared_pages(object_t *obj)
+static void pages_setup_readmarkers_for_nursery(void)
 {
-    uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
+    /* The nursery page's read markers are never read, but must still
+       be writeable.  We'd like to map the pages to a general "trash
+       page"; missing one, we remap all the pages over to the same one.
+       We still keep one page *per segment* to avoid cross-CPU cache
+       conflicts.
 
-    if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0)
-        return (flag_page_private[first_page] == SHARED_PAGE);
+       (XXX no performance difference measured so far)
+    */
+    long i, j;
+    for (i = 1; i <= NB_SEGMENTS; i++) {
+        char *segment_base = get_segment_base(i);
 
-    ssize_t obj_size = stmcb_size_rounded_up(
-        (struct object_s *)REAL_ADDRESS(stm_object_pages, obj));
-
-    uintptr_t last_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
-
-    do {
-        if (flag_page_private[first_page++] != SHARED_PAGE)
-            return false;
-    } while (first_page <= last_page);
-
-    return true;
+        for (j = FIRST_READMARKER_PAGE + 1; j < FIRST_OLD_RM_PAGE; j++) {
+            remap_file_pages(segment_base + 4096 * j, 4096, 0,
+                             i * NB_PAGES + FIRST_READMARKER_PAGE, 0);
+            /* errors here ignored */
+        }
+    }
 }
-#endif

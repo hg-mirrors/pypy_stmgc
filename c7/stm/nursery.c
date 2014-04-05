@@ -32,10 +32,6 @@ static void setup_nursery(void)
     }
 }
 
-static void teardown_nursery(void)
-{
-}
-
 static inline bool _is_in_nursery(object_t *obj)
 {
     assert((uintptr_t)obj >= NURSERY_START);
@@ -229,7 +225,12 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 
     realnursery = REAL_ADDRESS(pseg->pub.segment_base, _stm_nursery_start);
     nursery_used = pseg->pub.nursery_current - (stm_char *)_stm_nursery_start;
+    OPT_ASSERT((nursery_used & 7) == 0);
     memset(realnursery, 0, nursery_used);
+
+    /* assert that the rest of the nursery still contains only zeroes */
+    assert_memset_zero(realnursery + nursery_used,
+                       (NURSERY_END - _stm_nursery_start) - nursery_used);
 
     pseg->pub.nursery_current = (stm_char *)_stm_nursery_start;
 
@@ -320,7 +321,11 @@ static void minor_collection(bool commit)
 
     stm_safe_point();
 
+    change_timing_state(STM_TIME_MINOR_GC);
+
     _do_minor_collection(commit);
+
+    change_timing_state(commit ? STM_TIME_BOOKKEEPING : STM_TIME_RUN_CURRENT);
 }
 
 void stm_collect(long level)
@@ -381,6 +386,7 @@ object_t *_stm_allocate_external(ssize_t size_rounded_up)
 void _stm_set_nursery_free_count(uint64_t free_count)
 {
     assert(free_count <= NURSERY_SIZE);
+    assert((free_count & 7) == 0);
     _stm_nursery_start = NURSERY_END - free_count;
 
     long i;

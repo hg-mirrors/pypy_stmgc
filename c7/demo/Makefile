@@ -17,16 +17,20 @@ clean:
 H_FILES = ../stmgc.h ../stm/*.h
 C_FILES = ../stmgc.c ../stm/*.c
 
+COMMON = -I.. -pthread -lrt -g -Wall -Werror
+
 
 # note that 'build' is partially optimized but still contains all asserts
 debug-%: %.c ${H_FILES} ${C_FILES}
-	clang -I.. -pthread -DSTM_DEBUGPRINT -DSTM_GC_NURSERY=128 -g -O0 \
-        $< -o debug-$* -Wall -Werror ../stmgc.c
+	clang $(COMMON) -DSTM_DEBUGPRINT -DSTM_GC_NURSERY=128 -O0 \
+        $< -o debug-$* ../stmgc.c
 
 build-%: %.c ${H_FILES} ${C_FILES}
-	clang -I.. -pthread -DSTM_GC_NURSERY=128 -g -O1 \
-        $< -o build-$* -Wall -Werror ../stmgc.c
+	clang $(COMMON) -DSTM_GC_NURSERY=128 -O1 $< -o build-$* ../stmgc.c
 
 release-%: %.c ${H_FILES} ${C_FILES}
-	clang -I.. -pthread  -g -DNDEBUG -O2 $< -o release-$* \
-        -Wall -Werror ../stmgc.c
+	clang $(COMMON) -DNDEBUG -O2 $< -o release-$* ../stmgc.c
+
+
+release-htm-%: %.c ../../htm-c7/stmgc.? ../../htm-c7/htm.h
+	clang $(COMMON) -O2 $< -o release-htm-$* ../../htm-c7/stmgc.c -DUSE_HTM

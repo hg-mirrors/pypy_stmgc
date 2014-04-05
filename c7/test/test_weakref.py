@@ -176,7 +176,7 @@ class TestIsolation(BaseTest):
         # back in thread 0, we pop toref from the shadowstack
         # in an inevitable transaction
         self.start_transaction()
-        stm_become_inevitable()
+        self.become_inevitable()
         self.pop_root() # forget toref
         stm_major_collect()
 
@@ -314,3 +314,49 @@ class TestMajorCollection(BaseTest):
         assert stm_get_char(lp2, 10) == 'C'
         assert stm_get_weakref(lp1) == ffi.NULL
         assert stm_get_weakref(lp3) == lp2
+
+    def test_weakref_bug1(self):
+        self.start_transaction()
+        lp0 = stm_allocate(16)
+        self.push_root(lp0)
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        lp0 = self.pop_root()
+        self.push_root(lp0)
+        stm_write(lp0)    # privatize page
+        #
+        self.switch(1)
+        self.start_transaction()
+        lp1 = stm_allocate_weakref(lp0)
+        assert stm_get_weakref(lp1) == lp0
+        self.push_root(lp1)
+        #
+        self.switch(0)
+        stm_major_collect()
+        #
+        self.switch(1)
+        lp1 = self.pop_root()
+        assert stm_get_weakref(lp1) == lp0
+
+    def test_weakref_bug2(self):
+        def make_wr():
+            self.start_transaction()
+            lp0 = stm_allocate(16)
+            self.push_root(lp0)
+            self.commit_transaction()
+            #
+            self.start_transaction()
+            lp0 = self.pop_root()
+            self.push_root(lp0)
+            stm_write(lp0)    # privatize page
+            lp1 = stm_allocate_weakref(lp0)    # young object
+            self.push_root(lp1)
+            stm_minor_collect()
+            lp1 = self.pop_root()       # overflow object
+            self.push_root(lp1)
+        #
+        make_wr()
+        self.switch(1)
+        make_wr()
+        stm_major_collect()

@@ -1,15 +1,13 @@
 
-known-working revision: 5e4ec1af0e0c
-
-
 - use small uniform gcpages
 
 - write barrier for big arrays
 
-- weakrefs
 - finalizers
 
 - the highest_overflow_number can overflow after 2**30 non-collect-time
   minor collections
 
-- re-enable the buggy RESHARE_PAGES=1, probably with a better impl
+- fork() is done by copying the whole mmap non-lazily; improve.
+
+- contention.c: when pausing: should also tell other_pseg "please commit soon"

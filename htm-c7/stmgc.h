@@ -13,8 +13,15 @@
 
 #define STM_NB_SEGMENTS    4
 
+#define HTM_INFO_AVAILABLE 1
+struct htm_transaction_info_s {
+    int retry_counter;          /* only counting transient aborts of HTM */
+    int use_gil;                /* in GIL mode? 0=HTM */
+};
+extern __thread struct htm_transaction_info_s _htm_info __attribute__((aligned(64)));
 
-typedef struct { /* empty */ } stm_jmpbuf_t;
+
+typedef void* stm_jmpbuf_t[5];  /* for use with __builtin_setjmp() */
 
 typedef struct object_s {
     uint32_t gil_flags;
@@ -25,17 +32,22 @@ typedef struct stm_thread_local_s {
     object_t **shadowstack_base;
     object_t *thread_local_obj;
     long last_abort__bytes_in_nursery;
+    char *mem_clear_on_abort;  /* compat only -- always NULL */
+    size_t mem_bytes_to_clear_on_abort;  /* compat only -- always NULL */
 }  stm_thread_local_t;
 
-extern stm_thread_local_t *_stm_tloc;
-extern char *_stm_nursery_current, *_stm_nursery_end;
+extern __thread stm_thread_local_t *_stm_tloc;
+extern __thread char *_stm_nursery_current, *_stm_nursery_end;
+
 
 struct stm_segment_info_s {
     stm_jmpbuf_t *jmpbuf_ptr;  /* compat only -- always NULL */
-    char *nursery_current;     /* compat only -- always NULL */
+    char *nursery_current;     /* updated... */
+    int segment_num;  /* compat only -- always NULL */
 };
-extern struct stm_segment_info_s _stm_segment;
-#define STM_SEGMENT (&_stm_segment)
+//extern struct stm_segment_info_s _stm_segment;
+extern __thread struct stm_segment_info_s *_stm_segment;
+#define STM_SEGMENT (_stm_segment)
 
 #ifdef NDEBUG
 #define OPT_ASSERT(cond) do { if (!(cond)) __builtin_unreachable(); } while (0)
@@ -65,22 +77,15 @@ inline static object_t *stm_allocate(ssize_t size_rounded_up) {
     char *p = _stm_nursery_current;
     char *end = p + size_rounded_up;
     _stm_nursery_current = end;
+    STM_SEGMENT->nursery_current = end;
     if (UNLIKELY(end > _stm_nursery_end))
         return _stm_allocate_slowpath(size_rounded_up);
 
     return (object_t *)p;
 }
 
-inline static void stm_register_thread_local(stm_thread_local_t *tl) {
-    tl->thread_local_obj = NULL;
-    tl->shadowstack_base = (object_t **)malloc(768*1024);
-    assert(tl->shadowstack_base);
-    tl->shadowstack = tl->shadowstack_base;
-    tl->last_abort__bytes_in_nursery = 0;
-}
-inline static void stm_unregister_thread_local(stm_thread_local_t *tl) {
-    free(tl->shadowstack_base);
-}
+void stm_register_thread_local(stm_thread_local_t *tl);
+void stm_unregister_thread_local(stm_thread_local_t *tl);
 
 extern pthread_mutex_t _stm_gil;
 
@@ -88,15 +93,13 @@ void stm_setup(void);
 void stm_teardown(void);
 void stm_collect(long level);
 
-inline static void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
-    if (pthread_mutex_lock(&_stm_gil) != 0) abort();
-    _stm_tloc = tl;
-}
-inline static void stm_commit_transaction(void) {
-    stm_collect(0);
-    _stm_tloc = NULL;
-    if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
-}
+
+void stm_start_inevitable_transaction(stm_thread_local_t *tl);
+void stm_commit_transaction(void);
+
+inline static void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *buf)
+{ stm_start_inevitable_transaction(tl); }
+
 inline static void stm_become_inevitable(
     stm_thread_local_t *tl, const char *msg) { }
 inline static void _stm_become_inevitable(const char *msg) { }
