@@ -274,6 +274,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
+                    ('STM_LARGEMALLOC_TEST', '1'),
                     ('STM_NO_COND_WAIT', '1'),
                     ('STM_DEBUGPRINT', '1'),
                     ('GC_N_SMALL_REQUESTS', str(GC_N_SMALL_REQUESTS)), #check

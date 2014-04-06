@@ -17,7 +17,7 @@ clean:
 H_FILES = ../stmgc.h ../stm/*.h
 C_FILES = ../stmgc.c ../stm/*.c
 
-COMMON = -I.. -pthread -lrt -g -Wall -Werror
+COMMON = -I.. -pthread -lrt -g -Wall -Werror -DSTM_LARGEMALLOC_TEST
 
 
 # note that 'build' is partially optimized but still contains all asserts
