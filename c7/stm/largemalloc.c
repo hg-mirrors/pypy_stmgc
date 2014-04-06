@@ -134,6 +134,8 @@ static int compare_chunks(const void *vchunk1, const void *vchunk2)
         return +1;
 }
 
+#define MAX_STACK_COUNT  64
+
 static void really_sort_bin(size_t index)
 {
     dlist_t *unsorted = largebins[index].prev;
@@ -148,12 +150,20 @@ static void really_sort_bin(size_t index)
     scan->next = end;
 
     mchunk_t *chunk1;
-    mchunk_t *chunks[count];    /* dynamically-sized */
+    mchunk_t *chunk_array[MAX_STACK_COUNT];
+    mchunk_t **chunks = chunk_array;
+
     if (count == 1) {
         chunk1 = data2chunk(unsorted);   /* common case */
         count = 0;
     }
     else {
+        if (count > MAX_STACK_COUNT) {
+            chunks = malloc(count * sizeof(mchunk_t *));
+            if (chunks == NULL) {
+                stm_fatalerror("out of memory");   // XXX
+            }
+        }
         size_t i;
         for (i = 0; i < count; i++) {
             chunks[i] = data2chunk(unsorted);
@@ -200,6 +210,9 @@ static void really_sort_bin(size_t index)
         chunk1 = chunks[--count];
         search_size = chunk1->size;
     }
+
+    if (chunks != chunk_array)
+        free(chunks);
 }
 
 static void sort_bin(size_t index)
