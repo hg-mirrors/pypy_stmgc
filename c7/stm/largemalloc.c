@@ -104,8 +104,8 @@ static void insert_unsorted(mchunk_t *new)
 static int compare_chunks(const void *vchunk1, const void *vchunk2)
 {
     /* sort by size */
-    const mchunk_t *chunk1 = (const mchunk_t *)vchunk1;
-    const mchunk_t *chunk2 = (const mchunk_t *)vchunk2;
+    mchunk_t *chunk1 = *(mchunk_t *const *)vchunk1;
+    mchunk_t *chunk2 = *(mchunk_t *const *)vchunk2;
     if (chunk1->size < chunk2->size)
         return -1;
     if (chunk1->size == chunk2->size)
