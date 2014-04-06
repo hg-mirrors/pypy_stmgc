@@ -17,7 +17,10 @@ class TestLargeMalloc(BaseTest):
         lib._stm_mutex_pages_lock()   # for this file
 
     def test_simple(self):
+        #
+        lib._stm_large_dump()
         d1 = lib._stm_large_malloc(7000)
+        lib._stm_large_dump()
         d2 = lib._stm_large_malloc(8000)
         print d1
         print d2
@@ -70,7 +73,7 @@ class TestLargeMalloc(BaseTest):
         lib._stm_large_dump()
 
     def test_resize_arena_reduce_2(self):
-        lib._stm_large_malloc(self.size // 2 - 64)
+        lib._stm_large_malloc(self.size // 2 - 80)
         r = lib._stm_largemalloc_resize_arena(self.size // 2)
         assert r == 1
         lib._stm_large_dump()
@@ -120,7 +123,7 @@ class TestLargeMalloc(BaseTest):
                 p.append((d, sz, content1, content2))
         lib._stm_large_dump()
 
-    def test_random_largemalloc_sweep(self):
+    def test_random_largemalloc_sweep(self, constrained_size_range=False):
         @ffi.callback("bool(char *)")
         def keep(data):
             try:
@@ -138,7 +141,11 @@ class TestLargeMalloc(BaseTest):
 
         r = random.Random(1000)
         for j in range(500):
-            sizes = [random.choice(range(104, 500, 8)) for i in range(20)]
+            if constrained_size_range:
+                max = 120
+            else:
+                max = 500
+            sizes = [random.choice(range(104, max, 8)) for i in range(20)]
             all = [lib._stm_large_malloc(size) for size in sizes]
             print all
 
@@ -170,3 +177,6 @@ class TestLargeMalloc(BaseTest):
                     assert all[i][50] == chr(65 + i)
                 else:
                     assert all_orig[i][50] == '\xDE'
+
+    def test_random_largemalloc_sweep_constrained_size_range(self):
+        self.test_random_largemalloc_sweep(constrained_size_range=True)

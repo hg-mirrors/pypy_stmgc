@@ -62,3 +62,5 @@ static inline void page_check_and_reshare(uintptr_t pagenum)
     if (pages_privatized[pagenum - PAGE_FLAG_START].by_segment != 0)
         page_reshare(pagenum);
 }
+
+void _stm_mutex_pages_lock(void);
