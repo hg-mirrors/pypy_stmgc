@@ -360,3 +360,40 @@ class TestMajorCollection(BaseTest):
         self.switch(1)
         make_wr()
         stm_major_collect()
+
+
+class TestManyThreads(BaseTest):
+    NB_THREADS = NB_SEGMENTS
+
+    def test_weakref_bug3(self):
+        # make an object
+        self.start_transaction()
+        lp0 = stm_allocate(16)
+        self.push_root(lp0)
+        self.commit_transaction()
+        lp0 = self.pop_root()
+        self.push_root(lp0)
+        #
+        # privatize the page in all segments
+        for i in range(NB_SEGMENTS-1, -1, -1):
+            self.switch(i)
+            self.start_transaction()
+            stm_set_char(lp0, 'A')
+            self.commit_transaction()
+        #
+        self.start_transaction()
+        lp2 = stm_allocate(16)
+        self.push_root(lp2)
+        lp1 = stm_allocate_weakref(lp2)
+        self.push_root(lp1)
+        self.commit_transaction()
+        lp1 = self.pop_root()
+        lp2 = self.pop_root()
+        self.push_root(lp2)
+        self.push_root(lp1)
+        # the commit copies the weakref to all segments, but misses
+        # segment #0
+        #
+        self.start_transaction()
+        stm_major_collect()    # reshare all, keeping only segment #0
+        assert stm_get_weakref(lp1) == lp2
