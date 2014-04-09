@@ -34,7 +34,7 @@ static void _set_weakref_in_all_segments(object_t *weakref, object_t *value)
     stm_char *point_to_loc = (stm_char*)WEAKREF_PTR(weakref, size);
 
     long i;
-    for (i = 1; i <= NB_SEGMENTS; i++) {
+    for (i = 0; i <= NB_SEGMENTS; i++) {
         char *base = get_segment_base(i);
         object_t ** ref_loc = (object_t **)REAL_ADDRESS(base, point_to_loc);
         *ref_loc = value;
