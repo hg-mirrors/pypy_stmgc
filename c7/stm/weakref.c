@@ -57,11 +57,14 @@ static void stm_move_young_weakrefs(void)
                a young outside nursery object. */
             assert(_is_in_nursery(item));
             object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)item;
+            ssize_t size = 16;
 
-            /* the following checks are done like in nursery.c: */
-            if (!(item->stm_flags & GCFLAG_HAS_SHADOW)
-                || (pforwarded_array[0] != GCWORD_MOVED)) {
-                /* weakref dies */
+            /* check if the weakref object was moved out of the nursery */
+            if (pforwarded_array[0] != GCWORD_MOVED) {
+                /* no: weakref dies */
+#ifndef NDEBUG
+                *WEAKREF_PTR(item, size) = (object_t *)-99;
+#endif
                 continue;
             }
 
@@ -69,15 +72,13 @@ static void stm_move_young_weakrefs(void)
 
             assert(!_is_young(item));
 
-            ssize_t size = 16;
             object_t *pointing_to = *WEAKREF_PTR(item, size);
             assert(pointing_to != NULL);
 
             if (_is_in_nursery(pointing_to)) {
                 object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)pointing_to;
-                /* the following checks are done like in nursery.c: */
-                if (!(pointing_to->stm_flags & GCFLAG_HAS_SHADOW)
-                    || (pforwarded_array[0] != GCWORD_MOVED)) {
+                /* check if the target was moved out of the nursery */
+                if (pforwarded_array[0] != GCWORD_MOVED) {
                     /* pointing_to dies */
                     _set_weakref_in_all_segments(item, NULL);
                     continue;   /* no need to remember in old_weakrefs */
@@ -96,7 +97,9 @@ static void stm_move_young_weakrefs(void)
                     _set_weakref_in_all_segments(item, NULL);
                     continue;   /* no need to remember in old_weakrefs */
                 }
-                /* pointing_to was already old */
+                /* pointing_to is either a surviving young object outside
+                   the nursery, or it was already old; in both cases keeping
+                   the currently stored pointer is what we need */
             }
             LIST_APPEND(STM_PSEGMENT->old_weakrefs, item);
         }));
@@ -128,7 +131,7 @@ static void stm_visit_old_weakrefs(void)
             stm_char *wr = (stm_char *)WEAKREF_PTR(weakref, size);
             char *real_wr = REAL_ADDRESS(pseg->pub.segment_base, wr);
             object_t *pointing_to = *(object_t **)real_wr;
-            assert(pointing_to != NULL);
+            assert((uintptr_t)pointing_to >= NURSERY_END);
             if (!mark_visited_test(pointing_to)) {
                 //assert(flag_page_private[(uintptr_t)weakref / 4096UL] != PRIVATE_PAGE);
                 _set_weakref_in_all_segments(weakref, NULL);
