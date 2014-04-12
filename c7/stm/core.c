@@ -384,6 +384,23 @@ static void synchronize_object_now(object_t *obj)
                 EVENTUALLY(memcmp(dst, src, copy_size) == 0);  /* same page */
             }
 
+            /* Do a full memory barrier.  We must make sure that other
+               CPUs see the changes we did to the shared page ("S",
+               above) before we check the other segments below with
+               is_private_page().  Otherwise, we risk the following:
+               this CPU writes "S" but the writes are not visible yet;
+               then it checks is_private_page() and gets false, and does
+               nothing more; just afterwards another CPU sets its own
+               private_page bit and copies the page; but it risks doing
+               so before seeing the "S" writes.
+
+               XXX what is the cost of this?  If it's high, then we
+               should reorganize the code so that we buffer the second
+               parts and do them by bunch of N, after just one call to
+               __sync_synchronize()...
+            */
+            __sync_synchronize();
+
             for (i = 1; i <= NB_SEGMENTS; i++) {
                 if (i == myself)
                     continue;
