@@ -59,6 +59,8 @@ enum /* stm_flags */ {
     GCFLAG_OVERFLOW_NUMBER_bit0 = 0x4   /* must be last */
 };
 
+#define SYNC_QUEUE_SIZE    31
+
 
 /************************************************************/
 
@@ -155,6 +157,12 @@ struct stm_priv_segment_info_s {
 
     /* This is for smallmalloc.c */
     struct small_malloc_data_s small_malloc_data;
+
+    /* The sync queue is used to minimize the number of __sync_synchronize
+       calls needed. */
+    stm_char *sq_fragments[SYNC_QUEUE_SIZE];
+    int sq_fragsizes[SYNC_QUEUE_SIZE];
+    int sq_len;
 };
 
 enum /* safe_point */ {
@@ -226,4 +234,5 @@ static inline void _duck(void) {
 }
 
 static void copy_object_to_shared(object_t *obj, int source_segment_num);
-static void synchronize_object_now(object_t *obj);
+static void synchronize_object_enqueue(object_t *obj);
+static void synchronize_objects_flush(void);

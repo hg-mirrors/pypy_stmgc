@@ -56,7 +56,6 @@ static object_t *find_existing_shadow(object_t *obj);
 /************************************************************/
 
 #define GCWORD_MOVED  ((object_t *) -1)
-#define FLAG_SYNC_LARGE       0x01
 
 
 static void minor_trace_if_young(object_t **pobj)
@@ -145,8 +144,7 @@ static void minor_trace_if_young(object_t **pobj)
     }
 
     /* Must trace the object later */
-    uintptr_t nobj_sync_now = (uintptr_t)nobj | !is_small_uniform(nobj);
-    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj);
 }
 
 static void collect_roots_in_nursery(void)
@@ -179,29 +177,20 @@ static inline void _collect_now(object_t *obj)
 static void collect_oldrefs_to_nursery(void)
 {
     struct list_s *lst = STM_PSEGMENT->objects_pointing_to_nursery;
+    assert(STM_PSEGMENT->minor_collect_will_commit_now);
 
     while (!list_is_empty(lst)) {
-        uintptr_t obj_sync_now = list_pop_item(lst);
-        object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE);
+        object_t *obj = (object_t *)list_pop_item(lst);
 
         _collect_now(obj);
 
-        if (obj_sync_now & FLAG_SYNC_LARGE) {
-            /* this was a large object.  We must either synchronize the
-               object to other segments now (after we added the
-               WRITE_BARRIER flag and traced into it to fix its
-               content); or add the object to 'large_overflow_objects'.
-            */
-            if (STM_PSEGMENT->minor_collect_will_commit_now) {
-                synchronize_object_now(obj);
-            }
-            else
-                LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
-        }
+        synchronize_object_enqueue(obj);
 
         /* the list could have moved while appending */
         lst = STM_PSEGMENT->objects_pointing_to_nursery;
     }
+
+    synchronize_objects_flush();
 }
 
 static void collect_modified_old_objects(void)
@@ -283,6 +272,9 @@ static void _do_minor_collection(bool commit)
            into objects_pointing_to_nursery, but instead we use the
            following shortcut */
         collect_modified_old_objects();
+    }
+    else {
+        abort();  // handle specially the objects_pointing_to_nursery already there
     }
 
     collect_roots_in_nursery();
