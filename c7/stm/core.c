@@ -95,7 +95,7 @@ void _stm_write_slowpath(object_t *obj)
            (outside the nursery), then it fits into one page.  This is
            the common case. Otherwise, we need to compute it based on
            its location and size. */
-        if ((obj->stm_flags & GCFLAG_SMALL_UNIFORM) != 0) {
+        if (is_small_uniform(obj)) {
             page_privatize(first_page);
         }
         else {
@@ -285,16 +285,16 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
     */
     assert(!_is_young(obj));
 
-    char *segment_base = get_segment_base(source_segment_num);
     uintptr_t start = (uintptr_t)obj;
     uintptr_t first_page = start / 4096UL;
-    struct object_s *realobj = (struct object_s *)
-        REAL_ADDRESS(segment_base, obj);
 
-    if (realobj->stm_flags & GCFLAG_SMALL_UNIFORM) {
+    if (is_small_uniform(obj)) {
         abort();//XXX WRITE THE FAST CASE
     }
     else {
+        char *segment_base = get_segment_base(source_segment_num);
+        struct object_s *realobj = (struct object_s *)
+            REAL_ADDRESS(segment_base, obj);
         ssize_t obj_size = stmcb_size_rounded_up(realobj);
         assert(obj_size >= 16);
         uintptr_t end = start + obj_size;
@@ -343,17 +343,50 @@ static void synchronize_object_now(object_t *obj)
 
     uintptr_t start = (uintptr_t)obj;
     uintptr_t first_page = start / 4096UL;
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    long i, myself = STM_SEGMENT->segment_num;
 
-    if (obj->stm_flags & GCFLAG_SMALL_UNIFORM) {
-        abort();//XXX WRITE THE FAST CASE
+    if (is_small_uniform(obj)) {
+        /* First copy the object into the shared page, if needed */
+        char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
+        char *dst = REAL_ADDRESS(stm_object_pages, start);
+        ssize_t obj_size = 0;   /* computed lazily, only if needed */
+
+        if (is_private_page(myself, first_page)) {
+            obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
+            memcpy(dst, src, obj_size);
+        }
+        else {
+            assert(memcmp(dst, src,          /* already identical */
+                stmcb_size_rounded_up((struct object_s *)realobj)) == 0);
+        }
+
+        for (i = 1; i <= NB_SEGMENTS; i++) {
+            if (i == myself)
+                continue;
+
+            src = REAL_ADDRESS(stm_object_pages, start);
+            dst = REAL_ADDRESS(get_segment_base(i), start);
+            if (is_private_page(i, first_page)) {
+                /* The page is a private page.  We need to diffuse this
+                   object from the shared page to this private page. */
+                if (obj_size == 0) {
+                    obj_size =
+                        stmcb_size_rounded_up((struct object_s *)src);
+                }
+                memcpy(dst, src, obj_size);
+            }
+            else {
+                assert(memcmp(dst, src,      /* already identical */
+                    stmcb_size_rounded_up((struct object_s *)src)) == 0);
+            }
+        }
     }
     else {
-        char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
         assert(obj_size >= 16);
         uintptr_t end = start + obj_size;
         uintptr_t last_page = (end - 1) / 4096UL;
-        long i, myself = STM_SEGMENT->segment_num;
 
         for (; first_page <= last_page; first_page++) {
 
@@ -501,6 +534,9 @@ void stm_commit_transaction(void)
     /* update 'overflow_number' if needed */
     if (STM_PSEGMENT->overflow_number_has_been_used) {
         highest_overflow_number += GCFLAG_OVERFLOW_NUMBER_bit0;
+        /* Note that the overflow number cannot be entirely 1 bits;
+           this prevents stm_flags from ever containing the value -1,
+           which might be confused with GCWORD_MOVED. */
         assert(highest_overflow_number !=        /* XXX else, overflow! */
                (uint32_t)-GCFLAG_OVERFLOW_NUMBER_bit0);
         STM_PSEGMENT->overflow_number = highest_overflow_number;

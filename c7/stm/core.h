@@ -41,18 +41,13 @@ enum /* stm_flags */ {
     */
     GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
 
-    /* This flag is set by gcpage.c for all objects living in
-       uniformly-sized pages of small objects.
-    */
-    GCFLAG_SMALL_UNIFORM = 0x02,
-
     /* The following flag is set on nursery objects of which we asked
        the id or the identityhash.  It means that a space of the size of
        the object has already been allocated in the nonmovable part.
        The same flag is abused to mark prebuilt objects whose hash has
        been taken during translation and is statically recorded just
        after the object. */
-    GCFLAG_HAS_SHADOW = 0x04,
+    GCFLAG_HAS_SHADOW = 0x2,
 
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by
        the "overflow number".  This is a number that identifies the
@@ -61,7 +56,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x8   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x4   /* must be last */
 };
 
 
@@ -157,6 +152,9 @@ struct stm_priv_segment_info_s {
 #ifndef NDEBUG
     pthread_t running_pthread;
 #endif
+
+    /* This is for smallmalloc.c */
+    struct small_malloc_data_s small_malloc_data;
 };
 
 enum /* safe_point */ {
@@ -175,7 +173,10 @@ enum /* transaction_state */ {
     TS_INEVITABLE,
 };
 
-static char *stm_object_pages;
+#ifndef STM_TESTS
+static
+#endif
+       char *stm_object_pages;
 static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 static uint8_t write_locks[WRITELOCK_END - WRITELOCK_START];

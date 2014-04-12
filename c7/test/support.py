@@ -29,6 +29,8 @@ typedef struct {
     ...;
 } stm_thread_local_t;
 
+char *stm_object_pages;
+
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
@@ -81,6 +83,9 @@ void _stm_large_dump(void);
 void *memset(void *s, int c, size_t n);
 bool (*_stm_largemalloc_keep)(char *data);
 void _stm_largemalloc_sweep(void);
+object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
+bool (*_stm_smallmalloc_keep)(char *data);
+void _stm_smallmalloc_sweep(void);
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
@@ -289,6 +294,8 @@ HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
+GC_N_SMALL_REQUESTS = 36
+GC_LAST_SMALL_SIZE = 8 * (GC_N_SMALL_REQUESTS - 1)
 
 
 class Conflict(Exception):
@@ -309,6 +316,12 @@ def stm_allocate_old(size):
 def stm_allocate_old_refs(n):
     o = lib._stm_allocate_old(HDR + n * WORD)
     tid = 421420 + n
+    lib._set_type_id(o, tid)
+    return o
+
+def stm_allocate_old_small(size):
+    o = lib._stm_allocate_old_small(size)
+    tid = 42 + size
     lib._set_type_id(o, tid)
     return o
 
