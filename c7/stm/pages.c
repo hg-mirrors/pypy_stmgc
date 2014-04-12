@@ -115,10 +115,7 @@ static void page_privatize(uintptr_t pagenum)
     }
 
 #ifndef NDEBUG
-    while (__sync_fetch_and_or(&pages_privatizing.by_segment, bitmask)
-           & bitmask) {
-        spin_loop();
-    }
+    spinlock_acquire(lock_pages_privatizing[STM_SEGMENT->segment_num]);
 #endif
 
     /* add this thread's 'pages_privatized' bit */
@@ -137,7 +134,7 @@ static void page_privatize(uintptr_t pagenum)
     pagecopy(new_page, stm_object_pages + pagenum * 4096UL);
 
 #ifndef NDEBUG
-    __sync_fetch_and_sub(&pages_privatizing.by_segment, bitmask);
+    spinlock_release(lock_pages_privatizing[STM_SEGMENT->segment_num]);
 #endif
 }
 

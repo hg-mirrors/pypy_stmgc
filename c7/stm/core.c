@@ -14,12 +14,13 @@ static void teardown_core(void)
 #define EVENTUALLY(condition)                                   \
     {                                                           \
         if (!(condition)) {                                     \
-            while (!__sync_bool_compare_and_swap(               \
-                    &pages_privatizing.by_segment, 0, -1))      \
-                spin_loop();                                    \
+            int _i;                                             \
+            for (_i = 1; _i <= NB_SEGMENTS; _i++)               \
+                spinlock_acquire(lock_pages_privatizing[_i]);   \
             if (!(condition))                                   \
                 stm_fatalerror("fails: " #condition);           \
-            __sync_lock_release(&pages_privatizing.by_segment); \
+            for (_i = 1; _i <= NB_SEGMENTS; _i++)               \
+                spinlock_release(lock_pages_privatizing[_i]);   \
         }                                                       \
     }
 #endif

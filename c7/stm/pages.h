@@ -74,5 +74,5 @@ static inline void page_check_and_reshare(uintptr_t pagenum)
 }
 
 #ifndef NDEBUG
-static struct page_shared_s pages_privatizing = { 0 };
+static char lock_pages_privatizing[NB_SEGMENTS + 1] = { 0 };
 #endif

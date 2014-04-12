@@ -90,8 +90,7 @@ static char *allocate_outside_nursery_large(uint64_t size)
     }
 
     /* uncommon case: need to initialize some more pages */
-    while (__sync_lock_test_and_set(&lock_growth_large, 1) != 0)
-        spin_loop();
+    spinlock_acquire(lock_growth_large);
 
     if (addr + size > uninitialized_page_start) {
         uintptr_t npages;
@@ -105,7 +104,7 @@ static char *allocate_outside_nursery_large(uint64_t size)
         __sync_synchronize();
         uninitialized_page_start += npages * 4096UL;
     }
-    __sync_lock_release(&lock_growth_large);
+    spinlock_release(lock_growth_large);
     return addr;
 }
 

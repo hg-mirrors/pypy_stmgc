@@ -116,14 +116,12 @@ static struct {
 
 static void lm_lock(void)
 {
-    while (UNLIKELY(__sync_lock_test_and_set(&lm.lock, 1) != 0))
-        spin_loop();
+    spinlock_acquire(lm.lock);
 }
 
 static void lm_unlock(void)
 {
-    assert(lm.lock == 1);
-    __sync_lock_release(&lm.lock);
+    spinlock_release(lm.lock);
 }
 
 
