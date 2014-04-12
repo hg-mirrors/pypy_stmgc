@@ -70,7 +70,6 @@ enum stm_time_e {
     STM_TIME_MINOR_GC,
     STM_TIME_MAJOR_GC,
     STM_TIME_SYNC_PAUSE,
-    STM_TIME_SPIN_LOOP,
     _STM_TIME_N
 };
 
@@ -136,8 +135,6 @@ long _stm_count_objects_pointing_to_nursery(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
 uint64_t _stm_total_allocated(void);
-void _stm_mutex_pages_lock(void);
-void _stm_mutex_pages_unlock(void);
 char *stm_object_pages;
 #endif
 
@@ -261,6 +258,10 @@ object_t *stm_allocate_weakref(ssize_t size_rounded_up);
  */
 void stm_setup(void);
 void stm_teardown(void);
+
+/* The size of each shadow stack, in number of entries.
+   Must be big enough to accomodate all STM_PUSH_ROOTs! */
+#define STM_SHADOW_STACK_DEPTH   163840
 
 /* Push and pop roots from/to the shadow stack. Only allowed inside
    transaction. */

@@ -96,8 +96,6 @@ object_t *_stm_enum_objects_pointing_to_nursery(long index);
 
 void stm_collect(long level);
 uint64_t _stm_total_allocated(void);
-void _stm_mutex_pages_lock(void);
-void _stm_mutex_pages_unlock(void);
 
 long stm_identityhash(object_t *obj);
 long stm_id(object_t *obj);
@@ -279,6 +277,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
+                    ('STM_LARGEMALLOC_TEST', '1'),
                     ('STM_NO_COND_WAIT', '1'),
                     ('STM_DEBUGPRINT', '1'),
                     ('GC_N_SMALL_REQUESTS', str(GC_N_SMALL_REQUESTS)), #check
