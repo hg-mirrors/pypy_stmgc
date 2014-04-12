@@ -332,129 +332,107 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
     }
 }
 
-static void synchronize_object_now(object_t *obj)
+static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
+{
+    /* First copy the object into the shared page, if needed */
+    uintptr_t page = ((uintptr_t)obj) / 4096UL;
+
+    char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, frag);
+    char *dst = REAL_ADDRESS(stm_object_pages, frag);
+    if (is_private_page(STM_SEGMENT->segment_num, page))
+        memcpy(dst, src, frag_size);
+    else
+        EVENTUALLY(memcmp(dst, src, frag_size) == 0);  /* same page */
+
+    /* Then enqueue this object (or fragemnt of object) */
+    if (STM_PSEGMENT->sq_len == SYNC_QUEUE_SIZE)
+        synchronize_objects_flush();
+    STM_PSEGMENT->sq_fragments[STM_PSEGMENT->sq_len] = frag;
+    STM_PSEGMENT->sq_fragsizes[STM_PSEGMENT->sq_len] = frag_size;
+    ++STM_PSEGMENT->sq_len;
+}
+
+static void synchronize_object_enqueue(object_t *obj)
 {
     /* Copy around the version of 'obj' that lives in our own segment.
        It is first copied into the shared pages, and then into other
-       segments' own private pages.
+       segments' own private pages.  (The second part might be done
+       later; call synchronize_objects_flush() to flush this queue.)
     */
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)dst);
+    OPT_ASSERT(obj_size >= 16);
 
+    if (LIKELY(is_small_uniform(obj))) {
+        _synchronize_fragment((stm_char *)obj, obj_size);
+        return;
+    }
+
+    /* else, a more complicated case for large objects, to copy
+       around data only within the needed pages
+    */
     uintptr_t start = (uintptr_t)obj;
-    uintptr_t first_page = start / 4096UL;
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    uintptr_t end = start + obj_size;
+
+    do {
+        uintptr_t copy_up_to = (start + 4096) & ~4095;   /* end of page */
+        if (copy_up_to >= end) {
+            copy_up_to = end;        /* this is the last fragment */
+        }
+        uintptr_t copy_size = copy_up_to - start;
+
+        /* double-check that the result fits in one page */
+        assert(copy_size > 0);
+        assert(copy_size + (start & 4095) <= 4096);
+
+        _synchronize_fragment((stm_char *)start, copy_size);
+
+        start = copy_up_to;
+    
+    } while (start != end);
+}
+
+static void synchronize_objects_flush(void)
+{
+
+    /* Do a full memory barrier.  We must make sure that other
+       CPUs see the changes we did to the shared page ("S", in
+       synchronize_object_enqueue()) before we check the other segments
+       with is_private_page() (below).  Otherwise, we risk the
+       following: this CPU writes "S" but the writes are not visible yet;
+       then it checks is_private_page() and gets false, and does nothing
+       more; just afterwards another CPU sets its own private_page bit
+       and copies the page; but it risks doing so before seeing the "S"
+       writes.
+    */
+    long j = STM_PSEGMENT->sq_len;
+    if (j == 0)
+        return;
+    STM_PSEGMENT->sq_len = 0;
+
+    __sync_synchronize();
+
     long i, myself = STM_SEGMENT->segment_num;
+    do {
+        --j;
+        stm_char *frag = STM_PSEGMENT->sq_fragments[j];
+        uintptr_t page = ((uintptr_t)frag) / 4096UL;
+        if (!any_other_private_page(myself, page))
+            continue;
 
-    if (is_small_uniform(obj)) {
-        /* First copy the object into the shared page, if needed */
-        char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
-        char *dst = REAL_ADDRESS(stm_object_pages, start);
-        ssize_t obj_size = 0;   /* computed lazily, only if needed */
-
-        if (is_private_page(myself, first_page)) {
-            obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
-            memcpy(dst, src, obj_size);
-        }
-        else {
-            assert(memcmp(dst, src,          /* already identical */
-                stmcb_size_rounded_up((struct object_s *)realobj)) == 0);
-        }
+        ssize_t frag_size = STM_PSEGMENT->sq_fragsizes[j];
 
         for (i = 1; i <= NB_SEGMENTS; i++) {
             if (i == myself)
                 continue;
 
-            src = REAL_ADDRESS(stm_object_pages, start);
-            dst = REAL_ADDRESS(get_segment_base(i), start);
-            if (is_private_page(i, first_page)) {
-                /* The page is a private page.  We need to diffuse this
-                   object from the shared page to this private page. */
-                if (obj_size == 0) {
-                    obj_size =
-                        stmcb_size_rounded_up((struct object_s *)src);
-                }
-                memcpy(dst, src, obj_size);
-            }
-            else {
-                assert(memcmp(dst, src,      /* already identical */
-                    stmcb_size_rounded_up((struct object_s *)src)) == 0);
-            }
-        }
-    }
-    else {
-        ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
-        assert(obj_size >= 16);
-        uintptr_t end = start + obj_size;
-        uintptr_t last_page = (end - 1) / 4096UL;
-
-        for (; first_page <= last_page; first_page++) {
-
-            uintptr_t copy_size;
-            if (first_page == last_page) {
-                /* this is the final fragment */
-                copy_size = end - start;
-            }
-            else {
-                /* this is a non-final fragment, going up to the
-                   page's end */
-                copy_size = 4096 - (start & 4095);
-            }
-            /* double-check that the result fits in one page */
-            assert(copy_size > 0);
-            assert(copy_size + (start & 4095) <= 4096);
-
-            /* First copy the object into the shared page, if needed */
-            char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
-            char *dst = REAL_ADDRESS(stm_object_pages, start);
-            if (is_private_page(myself, first_page)) {
-                if (copy_size == 4096)
-                    pagecopy(dst, src);
-                else
-                    memcpy(dst, src, copy_size);
-            }
-            else {
-                EVENTUALLY(memcmp(dst, src, copy_size) == 0);  /* same page */
-            }
-
-            /* Do a full memory barrier.  We must make sure that other
-               CPUs see the changes we did to the shared page ("S",
-               above) before we check the other segments below with
-               is_private_page().  Otherwise, we risk the following:
-               this CPU writes "S" but the writes are not visible yet;
-               then it checks is_private_page() and gets false, and does
-               nothing more; just afterwards another CPU sets its own
-               private_page bit and copies the page; but it risks doing
-               so before seeing the "S" writes.
-
-               XXX what is the cost of this?  If it's high, then we
-               should reorganize the code so that we buffer the second
-               parts and do them by bunch of N, after just one call to
-               __sync_synchronize()...
-            */
-            __sync_synchronize();
-
-            for (i = 1; i <= NB_SEGMENTS; i++) {
-                if (i == myself)
-                    continue;
-
-                src = REAL_ADDRESS(stm_object_pages, start);
-                dst = REAL_ADDRESS(get_segment_base(i), start);
-                if (is_private_page(i, first_page)) {
-                    /* The page is a private page.  We need to diffuse this
-                       fragment of object from the shared page to this private
-                       page. */
-                    if (copy_size == 4096)
-                        pagecopy(dst, src);
-                    else
-                        memcpy(dst, src, copy_size);
-                }
-                else {
-                    EVENTUALLY(!memcmp(dst, src, copy_size));  /* same page */
-                }
-            }
-
-            start = (start + 4096) & ~4095;
+            char *src = REAL_ADDRESS(stm_object_pages, frag);
+            char *dst = REAL_ADDRESS(get_segment_base(i), frag);
+            if (is_private_page(i, page))
+                memcpy(dst, src, frag_size);
+            else
+                EVENTUALLY(memcmp(dst, src, frag_size) == 0);  /* same page */
         }
     }
 }
