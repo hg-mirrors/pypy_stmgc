@@ -11,3 +11,8 @@
 - fork() is done by copying the whole mmap non-lazily; improve.
 
 - contention.c: when pausing: should also tell other_pseg "please commit soon"
+
+- resharing: remap_file_pages on multiple pages at once; and madvise()
+  the unused pages away --- or maybe use consecutive addresses from the
+  lowest ones from segment N, instead of the page corresponding to the page
+  number in segment 0 (possibly a bit messy)
