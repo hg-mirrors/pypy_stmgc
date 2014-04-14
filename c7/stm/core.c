@@ -279,6 +279,7 @@ static bool detect_write_read_conflicts(void)
 
 static void copy_object_to_shared(object_t *obj, int source_segment_num)
 {
+    abort();
     /* Only used by major GC.  XXX There is a lot of code duplication
        with synchronize_object_now() but I don't completely see how to
        improve...
@@ -335,7 +336,7 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
 static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
 {
     /* First copy the object into the shared page, if needed */
-    uintptr_t page = ((uintptr_t)obj) / 4096UL;
+    uintptr_t page = ((uintptr_t)frag) / 4096UL;
 
     char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, frag);
     char *dst = REAL_ADDRESS(stm_object_pages, frag);
@@ -361,7 +362,8 @@ static void synchronize_object_enqueue(object_t *obj)
     */
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
-    ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)dst);
+    ssize_t obj_size = stmcb_size_rounded_up(
+        (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
     OPT_ASSERT(obj_size >= 16);
 
     if (LIKELY(is_small_uniform(obj))) {
@@ -389,7 +391,7 @@ static void synchronize_object_enqueue(object_t *obj)
         _synchronize_fragment((stm_char *)start, copy_size);
 
         start = copy_up_to;
-    
+
     } while (start != end);
 }
 
@@ -434,7 +436,7 @@ static void synchronize_objects_flush(void)
             else
                 EVENTUALLY(memcmp(dst, src, frag_size) == 0);  /* same page */
         }
-    }
+    } while (j > 0);
 }
 
 static void push_overflow_objects_from_privatized_pages(void)
@@ -443,7 +445,8 @@ static void push_overflow_objects_from_privatized_pages(void)
         return;
 
     LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
-                   synchronize_object_now(item));
+                   synchronize_object_enqueue(item));
+    synchronize_objects_flush();
 }
 
 static void push_modified_to_other_segments(void)
@@ -465,9 +468,10 @@ static void push_modified_to_other_segments(void)
 
             /* copy the object to the shared page, and to the other
                private pages as needed */
-            synchronize_object_now(item);
+            synchronize_object_enqueue(item);
         }));
 
+    synchronize_objects_flush();
     list_clear(STM_PSEGMENT->modified_old_objects);
 }
 
