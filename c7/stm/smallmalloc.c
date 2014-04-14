@@ -42,13 +42,15 @@ static void teardown_smallmalloc(void)
     memset(full_pages_object_size, 0, sizeof(full_pages_object_size));
 }
 
+static int gmfp_lock = 0;
+
 static void grab_more_free_pages_for_small_allocations(void)
 {
     /* Grab GCPAGE_NUM_PAGES pages out of the top addresses.  Use the
        lock of pages.c to prevent any remapping from occurring under our
        feet.
     */
-    mutex_pages_lock();
+    spinlock_acquire(gmfp_lock);
 
     if (free_uniform_pages == NULL) {
 
@@ -74,7 +76,7 @@ static void grab_more_free_pages_for_small_allocations(void)
         }
     }
 
-    mutex_pages_unlock();
+    spinlock_release(gmfp_lock);
     return;
 
  out_of_memory:
