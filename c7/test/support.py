@@ -12,6 +12,8 @@ typedef ... stm_jmpbuf_t;
 #define STM_NB_SEGMENTS ...
 #define _STM_FAST_ALLOC ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
+#define STM_STACK_MARKER_NEW ...
+#define STM_STACK_MARKER_OLD ...
 
 struct stm_shadowentry_s {
     object_t *ss;
@@ -504,7 +506,8 @@ class BaseTest(object):
     def pop_root(self):
         tl = self.tls[self.current_thread]
         curlength = tl.shadowstack - tl.shadowstack_base
-        if curlength == 0:
+        assert curlength >= 1
+        if curlength == 1:
             raise EmptyStack
         assert 0 < curlength <= SHADOWSTACK_LENGTH
         tl.shadowstack -= 1

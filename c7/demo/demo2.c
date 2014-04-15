@@ -194,6 +194,7 @@ void *demo2(void *arg)
 {
     int status;
     stm_register_thread_local(&stm_thread_local);
+    char *org = (char *)stm_thread_local.shadowstack;
 
     STM_PUSH_ROOT(stm_thread_local, global_chained_list);  /* remains forever in the shadow stack */
 
@@ -202,7 +203,7 @@ void *demo2(void *arg)
     }
 
     STM_POP_ROOT(stm_thread_local, global_chained_list);
-    assert(stm_thread_local.shadowstack == stm_thread_local.shadowstack_base);
+    assert(org == (char *)stm_thread_local.shadowstack);
 
     unregister_thread_local();
     status = sem_post(&done); assert(status == 0);
