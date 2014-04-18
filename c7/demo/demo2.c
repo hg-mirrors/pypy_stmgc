@@ -210,13 +210,11 @@ void *demo2(void *arg)
 
     while (check_sorted() == -1) {
 
-        STM_PUSH_ROOT(stm_thread_local, (uintptr_t)(2 * loops + 1));
-        STM_PUSH_ROOT(stm_thread_local, NULL);
+        STM_PUSH_MARKER(stm_thread_local, 2 * loops + 1, NULL);
 
         bubble_run();
 
-        STM_POP_ROOT_RET(stm_thread_local);
-        STM_POP_ROOT_RET(stm_thread_local);
+        STM_POP_MARKER(stm_thread_local);
         loops++;
     }
 
