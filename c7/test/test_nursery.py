@@ -1,7 +1,7 @@
 from support import *
 import py
 
-class TestBasic(BaseTest):
+class TestNursery(BaseTest):
 
     def test_nursery_full(self):
         lib._stm_set_nursery_free_count(2048)

@@ -35,8 +35,18 @@ static void timing_end_transaction(enum stm_time_e attribute_to)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     TIMING_CHANGE(tl, STM_TIME_OUTSIDE_TRANSACTION);
-    add_timing(tl, attribute_to, tl->timing[STM_TIME_RUN_CURRENT]);
+    double time_this_transaction = tl->timing[STM_TIME_RUN_CURRENT];
+    add_timing(tl, attribute_to, time_this_transaction);
     tl->timing[STM_TIME_RUN_CURRENT] = 0.0f;
+
+    if (attribute_to != STM_TIME_RUN_COMMITTED &&
+            time_this_transaction > tl->longest_marker_time) {
+        assert(tl->shadowstack ==
+               STM_PSEGMENT->shadowstack_at_start_of_transaction);
+        tl->shadowstack = STM_PSEGMENT->shadowstack_at_abort;
+        marker_fetch(tl, attribute_to, time_this_transaction);
+        tl->shadowstack = STM_PSEGMENT->shadowstack_at_start_of_transaction;
+    }
 }
 
 static const char *timer_names[] = {
