@@ -203,7 +203,7 @@ void *demo2(void *arg)
     }
 
     STM_POP_ROOT(stm_thread_local, global_chained_list);
-    assert(org == (char *)stm_thread_local.shadowstack);
+    OPT_ASSERT(org == (char *)stm_thread_local.shadowstack);
 
     unregister_thread_local();
     status = sem_post(&done); assert(status == 0);
