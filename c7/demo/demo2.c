@@ -44,6 +44,14 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     visit((object_t **)&n->next);
 }
 
+static void expand_marker(uintptr_t odd_number,
+                          object_t *following_object,
+                          char *outputbuf, size_t outputbufsize)
+{
+    assert(following_object == NULL);
+    snprintf(outputbuf, outputbufsize, "<%lu>", odd_number);
+}
+
 
 nodeptr_t global_chained_list;
 
@@ -198,8 +206,18 @@ void *demo2(void *arg)
 
     STM_PUSH_ROOT(stm_thread_local, global_chained_list);  /* remains forever in the shadow stack */
 
+    int loops = 0;
+
     while (check_sorted() == -1) {
+
+        STM_PUSH_ROOT(stm_thread_local, (uintptr_t)(2 * loops + 1));
+        STM_PUSH_ROOT(stm_thread_local, NULL);
+
         bubble_run();
+
+        STM_POP_ROOT_RET(stm_thread_local);
+        STM_POP_ROOT_RET(stm_thread_local);
+        loops++;
     }
 
     STM_POP_ROOT(stm_thread_local, global_chained_list);
@@ -246,6 +264,7 @@ int main(void)
 
     stm_setup();
     stm_register_thread_local(&stm_thread_local);
+    stmcb_expand_marker = expand_marker;
 
 
     setup_list();

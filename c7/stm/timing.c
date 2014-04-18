@@ -39,8 +39,7 @@ static void timing_end_transaction(enum stm_time_e attribute_to)
     add_timing(tl, attribute_to, time_this_transaction);
     tl->timing[STM_TIME_RUN_CURRENT] = 0.0f;
 
-    if (attribute_to != STM_TIME_RUN_COMMITTED &&
-            time_this_transaction * 0.99 > tl->longest_marker_time) {
+    if (attribute_to != STM_TIME_RUN_COMMITTED) {
         struct stm_priv_segment_info_s *pseg =
             get_priv_segment(STM_SEGMENT->segment_num);
         marker_copy(tl, pseg, attribute_to, time_this_transaction);
@@ -81,6 +80,10 @@ void stm_flush_timing(stm_thread_local_t *tl, int verbose)
             fprintf(stderr, "    %-24s %9u %8.3f s\n",
                     timer_names[i], tl->events[i], (double)tl->timing[i]);
         }
+        fprintf(stderr, "    %-24s %6s %11.6f s\n",
+                "longest recorded marker", "", tl->longest_marker_time);
+        fprintf(stderr, "    \"%.*s\"\n",
+                (int)_STM_MARKER_LEN, tl->longest_marker_self);
         s_mutex_unlock();
     }
 }

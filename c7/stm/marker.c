@@ -10,7 +10,8 @@ void (*stmcb_expand_marker)(uintptr_t odd_number,
 
 static void marker_fetch_expand(struct stm_priv_segment_info_s *pseg)
 {
-    pseg->marker_self[0] = 0;
+    if (pseg->marker_self[0] != 0)
+        return;   /* already collected an entry */
 
     if (stmcb_expand_marker != NULL) {
         stm_thread_local_t *tl = pseg->pub.running_thread;
@@ -22,6 +23,11 @@ static void marker_fetch_expand(struct stm_priv_segment_info_s *pseg)
                 /* the stack entry is an odd number */
                 stmcb_expand_marker(x, current[1].ss,
                                     pseg->marker_self, _STM_MARKER_LEN);
+
+                if (pseg->marker_self[0] == 0) {
+                    pseg->marker_self[0] = '?';
+                    pseg->marker_self[1] = 0;
+                }
                 break;
             }
         }
@@ -40,7 +46,10 @@ static void marker_copy(stm_thread_local_t *tl,
        earlier than now (some objects may be GCed), but we only know
        here the total time it gets attributed.
     */
-    tl->longest_marker_state = attribute_to;
-    tl->longest_marker_time = time;
-    memcpy(tl->longest_marker_self, pseg->marker_self, _STM_MARKER_LEN);
+    if (time * 0.99 > tl->longest_marker_time) {
+        tl->longest_marker_state = attribute_to;
+        tl->longest_marker_time = time;
+        memcpy(tl->longest_marker_self, pseg->marker_self, _STM_MARKER_LEN);
+    }
+    pseg->marker_self[0] = 0;
 }
