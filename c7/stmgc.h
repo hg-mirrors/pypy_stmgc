@@ -274,6 +274,19 @@ void stm_teardown(void);
 #define STM_STACK_MARKER_NEW   2
 #define STM_STACK_MARKER_OLD   6
 
+#define STM_PUSH_MARKER(tl, odd_num, p)   do {  \
+    uintptr_t _odd_num = (odd_num);             \
+    assert(_odd_num & 1);                       \
+    STM_PUSH_ROOT(tl, _odd_num);                \
+    STM_PUSH_ROOT(tl, p);                       \
+} while (0)
+
+#define STM_POP_MARKER(tl)   ({                 \
+    object_t *_popped = STM_POP_ROOT_RET(tl);   \
+    STM_POP_ROOT_RET(tl);                       \
+    _popped;                                    \
+})
+
 
 /* Every thread needs to have a corresponding stm_thread_local_t
    structure.  It may be a "__thread" global variable or something else.
