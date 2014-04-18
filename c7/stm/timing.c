@@ -40,12 +40,10 @@ static void timing_end_transaction(enum stm_time_e attribute_to)
     tl->timing[STM_TIME_RUN_CURRENT] = 0.0f;
 
     if (attribute_to != STM_TIME_RUN_COMMITTED &&
-            time_this_transaction > tl->longest_marker_time) {
-        assert(tl->shadowstack ==
-               STM_PSEGMENT->shadowstack_at_start_of_transaction);
-        tl->shadowstack = STM_PSEGMENT->shadowstack_at_abort;
-        marker_fetch(tl, attribute_to, time_this_transaction);
-        tl->shadowstack = STM_PSEGMENT->shadowstack_at_start_of_transaction;
+            time_this_transaction * 0.99 > tl->longest_marker_time) {
+        struct stm_priv_segment_info_s *pseg =
+            get_priv_segment(STM_SEGMENT->segment_num);
+        marker_copy(tl, pseg, attribute_to, time_this_transaction);
     }
 }
 

@@ -158,6 +158,9 @@ struct stm_priv_segment_info_s {
 #ifndef NDEBUG
     pthread_t running_pthread;
 #endif
+
+    /* Temporarily stores the marker information */
+    char marker_self[_STM_MARKER_LEN];
 };
 
 enum /* safe_point */ {

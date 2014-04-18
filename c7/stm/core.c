@@ -620,6 +620,9 @@ static void abort_data_structures_from_segment_num(int segment_num)
                        (int)pseg->transaction_state);
     }
 
+    /* look up and preserve the marker information as a string */
+    marker_fetch_expand(pseg);
+
     /* throw away the content of the nursery */
     long bytes_in_nursery = throw_away_nursery(pseg);
 
