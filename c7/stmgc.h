@@ -73,6 +73,8 @@ enum stm_time_e {
     _STM_TIME_N
 };
 
+#define _STM_MARKER_LEN  80
+
 typedef struct stm_thread_local_s {
     /* every thread should handle the shadow stack itself */
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
@@ -93,8 +95,8 @@ typedef struct stm_thread_local_s {
     /* the marker with the longest associated time so far */
     enum stm_time_e longest_marker_state;
     double longest_marker_time;
-    char longest_marker_self[80];
-    char longest_marker_other[80];
+    char longest_marker_self[_STM_MARKER_LEN];
+    char longest_marker_other[_STM_MARKER_LEN];
     /* the next fields are handled internally by the library */
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
