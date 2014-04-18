@@ -630,6 +630,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
        value before the transaction start */
     stm_thread_local_t *tl = pseg->pub.running_thread;
     assert(tl->shadowstack >= pseg->shadowstack_at_start_of_transaction);
+    pseg->shadowstack_at_abort = tl->shadowstack;
     tl->shadowstack = pseg->shadowstack_at_start_of_transaction;
     tl->thread_local_obj = pseg->threadlocal_at_start_of_transaction;
     tl->last_abort__bytes_in_nursery = bytes_in_nursery;

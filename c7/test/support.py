@@ -28,6 +28,10 @@ typedef struct {
     int associated_segment_num;
     uint32_t events[];
     float timing[];
+    int longest_marker_state;
+    double longest_marker_time;
+    char longest_marker_self[];
+    char longest_marker_other[];
     ...;
 } stm_thread_local_t;
 
@@ -118,6 +122,9 @@ void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 #define STM_TIME_SYNC_PAUSE ...
 
 void stm_flush_timing(stm_thread_local_t *, int);
+
+void (*stmcb_expand_marker)(uintptr_t odd_number, object_t *following_object,
+                            char *outputbuf, size_t outputbufsize);
 """)
 
 
@@ -435,6 +442,7 @@ class BaseTest(object):
         self.current_thread = 0
 
     def teardown_method(self, meth):
+        lib.stmcb_expand_marker = ffi.NULL
         tl = self.tls[self.current_thread]
         if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
             self.commit_transaction()      # must succeed!

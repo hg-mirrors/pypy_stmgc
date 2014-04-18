@@ -1,0 +1,82 @@
+from support import *
+import py, time
+
+class TestMarker(BaseTest):
+
+    def test_marker_odd_simple(self):
+        self.start_transaction()
+        self.push_root(ffi.cast("object_t *", 29))
+        stm_minor_collect()
+        stm_major_collect()
+        # assert did not crash
+        x = self.pop_root()
+        assert int(ffi.cast("uintptr_t", x)) == 29
+
+    def test_abort_marker_no_shadowstack(self):
+        tl = self.get_stm_thread_local()
+        assert tl.longest_marker_state == lib.STM_TIME_OUTSIDE_TRANSACTION
+        assert tl.longest_marker_time == 0.0
+        #
+        self.start_transaction()
+        start = time.time()
+        while abs(time.time() - start) <= 0.1:
+            pass
+        self.abort_transaction()
+        #
+        tl = self.get_stm_thread_local()
+        assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_OTHER
+        assert 0.099 <= tl.longest_marker_time <= 0.9
+        assert tl.longest_marker_self[0] == '\x00'
+        assert tl.longest_marker_other[0] == '\x00'
+
+    def test_abort_marker_shadowstack(self):
+        self.start_transaction()
+        p = stm_allocate(16)
+        self.push_root(ffi.cast("object_t *", 29))
+        self.push_root(p)
+        start = time.time()
+        while abs(time.time() - start) <= 0.1:
+            pass
+        self.abort_transaction()
+        #
+        tl = self.get_stm_thread_local()
+        assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_OTHER
+        assert 0.099 <= tl.longest_marker_time <= 0.9
+        assert tl.longest_marker_self[0] == '\x00'
+        assert tl.longest_marker_other[0] == '\x00'
+
+    def test_abort_marker_no_shadowstack_cb(self):
+        @ffi.callback("void(uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(number, ptr, outbuf, outbufsize):
+            seen.append(1)
+        lib.stmcb_expand_marker = expand_marker
+        seen = []
+        #
+        self.start_transaction()
+        self.abort_transaction()
+        #
+        tl = self.get_stm_thread_local()
+        assert tl.longest_marker_self[0] == '\x00'
+        assert not seen
+
+    def test_abort_marker_shadowstack_cb(self):
+        @ffi.callback("void(uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(number, ptr, outbuf, outbufsize):
+            s = '%d %r\x00' % (number, ptr)
+            assert len(s) <= outbufsize
+            outbuf[0:len(s)] = s
+        lib.stmcb_expand_marker = expand_marker
+        #
+        self.start_transaction()
+        p = stm_allocate(16)
+        self.push_root(ffi.cast("object_t *", 29))
+        self.push_root(p)
+        start = time.time()
+        while abs(time.time() - start) <= 0.1:
+            pass
+        self.abort_transaction()
+        #
+        tl = self.get_stm_thread_local()
+        assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_OTHER
+        assert 0.099 <= tl.longest_marker_time <= 0.9
+        assert ffi.string(tl.longest_marker_self) == '29 %r' % (p,)

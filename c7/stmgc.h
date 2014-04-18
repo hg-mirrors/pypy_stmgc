@@ -90,6 +90,11 @@ typedef struct stm_thread_local_s {
     float timing[_STM_TIME_N];
     double _timing_cur_start;
     enum stm_time_e _timing_cur_state;
+    /* the marker with the longest associated time so far */
+    enum stm_time_e longest_marker_state;
+    double longest_marker_time;
+    char longest_marker_self[80];
+    char longest_marker_other[80];
     /* the next fields are handled internally by the library */
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
@@ -264,8 +269,8 @@ void stm_teardown(void);
 #define STM_PUSH_ROOT(tl, p)   ((tl).shadowstack++->ss = (object_t *)(p))
 #define STM_POP_ROOT(tl, p)    ((p) = (typeof(p))((--(tl).shadowstack)->ss))
 #define STM_POP_ROOT_RET(tl)   ((--(tl).shadowstack)->ss)
-#define STM_STACK_MARKER_NEW   1
-#define STM_STACK_MARKER_OLD   2
+#define STM_STACK_MARKER_NEW   2
+#define STM_STACK_MARKER_OLD   6
 
 
 /* Every thread needs to have a corresponding stm_thread_local_t
@@ -366,6 +371,14 @@ void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
 
 /* Temporary? */
 void stm_flush_timing(stm_thread_local_t *tl, int verbose);
+
+
+/* The markers pushed in the shadowstack are an odd number followed by a
+   regular pointer.  When needed, this library invokes this callback to
+   turn this pair into a human-readable explanation. */
+extern void (*stmcb_expand_marker)(uintptr_t odd_number,
+                                   object_t *following_object,
+                                   char *outputbuf, size_t outputbufsize);
 
 
 /* ==================== END ==================== */

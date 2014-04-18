@@ -152,6 +152,7 @@ struct stm_priv_segment_info_s {
        'thread_local_obj' field. */
     struct stm_shadowentry_s *shadowstack_at_start_of_transaction;
     object_t *threadlocal_at_start_of_transaction;
+    struct stm_shadowentry_s *shadowstack_at_abort;
 
     /* For debugging */
 #ifndef NDEBUG
