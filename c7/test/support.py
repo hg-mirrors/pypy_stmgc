@@ -126,6 +126,8 @@ void stm_flush_timing(stm_thread_local_t *, int);
 void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,
                             object_t *following_object,
                             char *outputbuf, size_t outputbufsize);
+void (*stmcb_debug_print)(const char *cause, double time,
+                          const char *marker);
 
 void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
 void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
@@ -464,6 +466,7 @@ class BaseTest(object):
 
     def teardown_method(self, meth):
         lib.stmcb_expand_marker = ffi.NULL
+        lib.stmcb_debug_print = ffi.NULL
         tl = self.tls[self.current_thread]
         if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
             self.commit_transaction()      # must succeed!
