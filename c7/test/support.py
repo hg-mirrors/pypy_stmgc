@@ -129,6 +129,7 @@ void (*stmcb_expand_marker)(uintptr_t odd_number, object_t *following_object,
 void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
 void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
 void stm_pop_marker(stm_thread_local_t *);
+char *_stm_expand_marker(void);
 """)
 
 

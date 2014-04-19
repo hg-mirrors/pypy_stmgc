@@ -34,6 +34,15 @@ static void marker_fetch_expand(struct stm_priv_segment_info_s *pseg)
     }
 }
 
+char *_stm_expand_marker(void)
+{
+    struct stm_priv_segment_info_s *pseg =
+        get_priv_segment(STM_SEGMENT->segment_num);
+    pseg->marker_self[0] = 0;
+    marker_fetch_expand(pseg);
+    return pseg->marker_self;
+}
+
 static void marker_copy(stm_thread_local_t *tl,
                         struct stm_priv_segment_info_s *pseg,
                         enum stm_time_e attribute_to, double time)
