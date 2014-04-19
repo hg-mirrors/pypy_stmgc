@@ -123,7 +123,8 @@ void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 
 void stm_flush_timing(stm_thread_local_t *, int);
 
-void (*stmcb_expand_marker)(uintptr_t odd_number, object_t *following_object,
+void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,
+                            object_t *following_object,
                             char *outputbuf, size_t outputbufsize);
 
 void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);

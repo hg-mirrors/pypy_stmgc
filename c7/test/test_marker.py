@@ -46,8 +46,8 @@ class TestMarker(BaseTest):
         assert tl.longest_marker_other[0] == '\x00'
 
     def test_abort_marker_no_shadowstack_cb(self):
-        @ffi.callback("void(uintptr_t, object_t *, char *, size_t)")
-        def expand_marker(number, ptr, outbuf, outbufsize):
+        @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(base, number, ptr, outbuf, outbufsize):
             seen.append(1)
         lib.stmcb_expand_marker = expand_marker
         seen = []
@@ -60,8 +60,8 @@ class TestMarker(BaseTest):
         assert not seen
 
     def test_abort_marker_shadowstack_cb(self):
-        @ffi.callback("void(uintptr_t, object_t *, char *, size_t)")
-        def expand_marker(number, ptr, outbuf, outbufsize):
+        @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(base, number, ptr, outbuf, outbufsize):
             s = '%d %r\x00' % (number, ptr)
             assert len(s) <= outbufsize
             outbuf[0:len(s)] = s
@@ -116,8 +116,8 @@ class TestMarker(BaseTest):
         py.test.raises(EmptyStack, self.pop_root)
 
     def test_stm_expand_marker(self):
-        @ffi.callback("void(uintptr_t, object_t *, char *, size_t)")
-        def expand_marker(number, ptr, outbuf, outbufsize):
+        @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(base, number, ptr, outbuf, outbufsize):
             s = '%d %r\x00' % (number, ptr)
             assert len(s) <= outbufsize
             outbuf[0:len(s)] = s
