@@ -114,3 +114,19 @@ class TestMarker(BaseTest):
         lib.stm_push_marker(tl, 29, p)
         lib.stm_pop_marker(tl)
         py.test.raises(EmptyStack, self.pop_root)
+
+    def test_stm_expand_marker(self):
+        @ffi.callback("void(uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(number, ptr, outbuf, outbufsize):
+            s = '%d %r\x00' % (number, ptr)
+            assert len(s) <= outbufsize
+            outbuf[0:len(s)] = s
+        lib.stmcb_expand_marker = expand_marker
+        self.start_transaction()
+        p = stm_allocate(16)
+        self.push_root(ffi.cast("object_t *", 29))
+        self.push_root(p)
+        self.push_root(stm_allocate(32))
+        self.push_root(stm_allocate(16))
+        raw = lib._stm_expand_marker()
+        assert ffi.string(raw) == '29 %r' % (p,)
