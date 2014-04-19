@@ -287,6 +287,17 @@ void stm_teardown(void);
     _popped;                                    \
 })
 
+#define STM_UPDATE_MARKER_NUM(tl, odd_num)  do {                \
+    uintptr_t _odd_num = (odd_num);                             \
+    assert(_odd_num & 1);                                       \
+    struct stm_shadowentry_s *_ss = (tl).shadowstack - 2;       \
+    while (!(((uintptr_t)(_ss->ss)) & 1)) {                     \
+        _ss--;                                                  \
+        assert(_ss >= (tl).shadowstack_base);                   \
+    }                                                           \
+    _ss->ss = (object_t *)_odd_num;                             \
+} while (0)
+
 
 /* Every thread needs to have a corresponding stm_thread_local_t
    structure.  It may be a "__thread" global variable or something else.
