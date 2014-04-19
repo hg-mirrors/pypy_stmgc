@@ -130,3 +130,26 @@ class TestMarker(BaseTest):
         self.push_root(stm_allocate(16))
         raw = lib._stm_expand_marker()
         assert ffi.string(raw) == '29 %r' % (p,)
+
+    def test_stmcb_debug_print(self):
+        @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(base, number, ptr, outbuf, outbufsize):
+            s = '<<<%d>>>\x00' % (number,)
+            assert len(s) <= outbufsize
+            outbuf[0:len(s)] = s
+        @ffi.callback("void(char *, double, char *)")
+        def debug_print(cause, time, marker):
+            if 0.0 < time < 1.0:
+                time = "time_ok"
+            seen.append((ffi.string(cause), time, ffi.string(marker)))
+        seen = []
+        lib.stmcb_expand_marker = expand_marker
+        lib.stmcb_debug_print = debug_print
+        #
+        self.start_transaction()
+        p = stm_allocate(16)
+        self.push_root(ffi.cast("object_t *", 29))
+        self.push_root(p)
+        self.abort_transaction()
+        #
+        assert seen == [("run aborted other", "time_ok", "<<<29>>>")]
