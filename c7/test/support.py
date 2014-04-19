@@ -125,6 +125,10 @@ void stm_flush_timing(stm_thread_local_t *, int);
 
 void (*stmcb_expand_marker)(uintptr_t odd_number, object_t *following_object,
                             char *outputbuf, size_t outputbufsize);
+
+void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
+void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
+void stm_pop_marker(stm_thread_local_t *);
 """)
 
 
@@ -277,6 +281,21 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
         object_t **ref = ((object_t **)(myobj + 1)) + i;
         visit(ref);
     }
+}
+
+void stm_push_marker(stm_thread_local_t *tl, uintptr_t onum, object_t *ob)
+{
+    STM_PUSH_MARKER(*tl, onum, ob);
+}
+
+void stm_update_marker_num(stm_thread_local_t *tl, uintptr_t onum)
+{
+    STM_UPDATE_MARKER_NUM(*tl, onum);
+}
+
+void stm_pop_marker(stm_thread_local_t *tl)
+{
+    STM_POP_MARKER(*tl);
 }
 
 ''', sources=source_files,

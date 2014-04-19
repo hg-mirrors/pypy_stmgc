@@ -80,3 +80,37 @@ class TestMarker(BaseTest):
         assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_OTHER
         assert 0.099 <= tl.longest_marker_time <= 0.9
         assert ffi.string(tl.longest_marker_self) == '29 %r' % (p,)
+
+    def test_macros(self):
+        self.start_transaction()
+        p = stm_allocate(16)
+        tl = self.get_stm_thread_local()
+        lib.stm_push_marker(tl, 29, p)
+        p1 = self.pop_root()
+        assert p1 == p
+        p1 = self.pop_root()
+        assert p1 == ffi.cast("object_t *", 29)
+        py.test.raises(EmptyStack, self.pop_root)
+        #
+        lib.stm_push_marker(tl, 29, p)
+        lib.stm_update_marker_num(tl, 27)
+        p1 = self.pop_root()
+        assert p1 == p
+        p1 = self.pop_root()
+        assert p1 == ffi.cast("object_t *", 27)
+        py.test.raises(EmptyStack, self.pop_root)
+        #
+        lib.stm_push_marker(tl, 29, p)
+        self.push_root(p)
+        lib.stm_update_marker_num(tl, 27)
+        p1 = self.pop_root()
+        assert p1 == p
+        p1 = self.pop_root()
+        assert p1 == p
+        p1 = self.pop_root()
+        assert p1 == ffi.cast("object_t *", 27)
+        py.test.raises(EmptyStack, self.pop_root)
+        #
+        lib.stm_push_marker(tl, 29, p)
+        lib.stm_pop_marker(tl)
+        py.test.raises(EmptyStack, self.pop_root)
