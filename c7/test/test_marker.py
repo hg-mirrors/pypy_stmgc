@@ -153,3 +153,25 @@ class TestMarker(BaseTest):
         self.abort_transaction()
         #
         assert seen == [("run aborted other", "time_ok", "<<<29>>>")]
+
+    def test_multiple_markers(self):
+        @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(base, number, ptr, outbuf, outbufsize):
+            seen.append(number)
+            if ptr == ffi.NULL:
+                return
+            s = '%d %r\x00' % (number, ptr)
+            assert len(s) <= outbufsize
+            outbuf[0:len(s)] = s
+        seen = []
+        lib.stmcb_expand_marker = expand_marker
+        #
+        self.start_transaction()
+        p = stm_allocate(16)
+        self.push_root(ffi.cast("object_t *", 27))
+        self.push_root(p)
+        self.push_root(ffi.cast("object_t *", 29))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        raw = lib._stm_expand_marker()
+        assert ffi.string(raw) == '27 %r' % (p,)
+        assert seen == [29, 27]
