@@ -14,13 +14,10 @@ static void teardown_core(void)
 #define EVENTUALLY(condition)                                   \
     {                                                           \
         if (!(condition)) {                                     \
-            int _i;                                             \
-            for (_i = 1; _i <= NB_SEGMENTS; _i++)               \
-                spinlock_acquire(lock_pages_privatizing[_i]);   \
+            acquire_privatization_lock();                       \
             if (!(condition))                                   \
                 stm_fatalerror("fails: " #condition);           \
-            for (_i = 1; _i <= NB_SEGMENTS; _i++)               \
-                spinlock_release(lock_pages_privatizing[_i]);   \
+            release_privatization_lock();                       \
         }                                                       \
     }
 #endif
@@ -337,9 +334,12 @@ static void synchronize_object_now(object_t *obj)
     /* Copy around the version of 'obj' that lives in our own segment.
        It is first copied into the shared pages, and then into other
        segments' own private pages.
+
+       Must be called with the privatization lock acquired.
     */
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    assert(STM_PSEGMENT->privatization_lock == 1);
 
     uintptr_t start = (uintptr_t)obj;
     uintptr_t first_page = start / 4096UL;
@@ -381,25 +381,8 @@ static void synchronize_object_now(object_t *obj)
                     memcpy(dst, src, copy_size);
             }
             else {
-                EVENTUALLY(memcmp(dst, src, copy_size) == 0);  /* same page */
+                assert(memcmp(dst, src, copy_size) == 0);  /* same page */
             }
-
-            /* Do a full memory barrier.  We must make sure that other
-               CPUs see the changes we did to the shared page ("S",
-               above) before we check the other segments below with
-               is_private_page().  Otherwise, we risk the following:
-               this CPU writes "S" but the writes are not visible yet;
-               then it checks is_private_page() and gets false, and does
-               nothing more; just afterwards another CPU sets its own
-               private_page bit and copies the page; but it risks doing
-               so before seeing the "S" writes.
-
-               XXX what is the cost of this?  If it's high, then we
-               should reorganize the code so that we buffer the second
-               parts and do them by bunch of N, after just one call to
-               __sync_synchronize()...
-            */
-            __sync_synchronize();
 
             for (i = 1; i <= NB_SEGMENTS; i++) {
                 if (i == myself)
@@ -417,7 +400,7 @@ static void synchronize_object_now(object_t *obj)
                         memcpy(dst, src, copy_size);
                 }
                 else {
-                    EVENTUALLY(!memcmp(dst, src, copy_size));  /* same page */
+                    assert(!memcmp(dst, src, copy_size));  /* same page */
                 }
             }
 
@@ -431,12 +414,15 @@ static void push_overflow_objects_from_privatized_pages(void)
     if (STM_PSEGMENT->large_overflow_objects == NULL)
         return;
 
+    acquire_privatization_lock();
     LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
                    synchronize_object_now(item));
+    release_privatization_lock();
 }
 
 static void push_modified_to_other_segments(void)
 {
+    acquire_privatization_lock();
     LIST_FOREACH_R(
         STM_PSEGMENT->modified_old_objects,
         object_t * /*item*/,
@@ -456,6 +442,7 @@ static void push_modified_to_other_segments(void)
                private pages as needed */
             synchronize_object_now(item);
         }));
+    release_privatization_lock();
 
     list_clear(STM_PSEGMENT->modified_old_objects);
 }
