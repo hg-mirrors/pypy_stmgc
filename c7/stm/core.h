@@ -148,6 +148,12 @@ struct stm_priv_segment_info_s {
     /* For sleeping contention management */
     bool signal_when_done;
 
+    /* This lock is acquired when that segment calls synchronize_object_now.
+       On the rare event of a page_privatize(), the latter will acquire
+       all the locks in all segments.  Otherwise, for the common case,
+       it's cheap. */
+    uint8_t privatization_lock;
+
     /* In case of abort, we restore the 'shadowstack' field and the
        'thread_local_obj' field. */
     struct stm_shadowentry_s *shadowstack_at_start_of_transaction;
@@ -226,3 +232,17 @@ static inline void _duck(void) {
 
 static void copy_object_to_shared(object_t *obj, int source_segment_num);
 static void synchronize_object_now(object_t *obj);
+
+static inline void acquire_privatization_lock(void)
+{
+    uint8_t *lock = (uint8_t *)REAL_ADDRESS(STM_SEGMENT->segment_base,
+                                            &STM_PSEGMENT->privatization_lock);
+    spinlock_acquire(*lock);
+}
+
+static inline void release_privatization_lock(void)
+{
+    uint8_t *lock = (uint8_t *)REAL_ADDRESS(STM_SEGMENT->segment_base,
+                                            &STM_PSEGMENT->privatization_lock);
+    spinlock_release(*lock);
+}

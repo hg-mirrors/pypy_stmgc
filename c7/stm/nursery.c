@@ -217,7 +217,9 @@ static void collect_oldrefs_to_nursery(void)
                content); or add the object to 'large_overflow_objects'.
             */
             if (STM_PSEGMENT->minor_collect_will_commit_now) {
+                acquire_privatization_lock();
                 synchronize_object_now(obj);
+                release_privatization_lock();
             }
             else
                 LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
