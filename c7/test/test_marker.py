@@ -159,8 +159,6 @@ class TestMarker(BaseTest):
         @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
         def expand_marker(base, number, ptr, outbuf, outbufsize):
             seen.append(number)
-            if ptr == ffi.NULL:
-                return
             s = '%d %r\x00' % (number, ptr)
             assert len(s) <= outbufsize
             outbuf[0:len(s)] = s
@@ -174,8 +172,8 @@ class TestMarker(BaseTest):
         self.push_root(ffi.cast("object_t *", 29))
         self.push_root(ffi.cast("object_t *", ffi.NULL))
         raw = lib._stm_expand_marker()
-        assert ffi.string(raw) == '27 %r' % (p,)
-        assert seen == [29, 27]
+        assert ffi.string(raw).startswith('29 ')
+        assert seen == [29]
 
     def test_double_abort_markers_cb(self):
         @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
@@ -190,6 +188,10 @@ class TestMarker(BaseTest):
         self.push_root(ffi.cast("object_t *", 19))
         self.push_root(ffi.cast("object_t *", ffi.NULL))
         stm_set_char(p, 'A')
+        self.pop_root()
+        self.pop_root()
+        self.push_root(ffi.cast("object_t *", 17))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
         #
         self.switch(1)
         self.start_transaction()

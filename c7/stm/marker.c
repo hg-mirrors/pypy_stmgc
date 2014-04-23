@@ -11,38 +11,53 @@ void (*stmcb_debug_print)(const char *cause, double time,
                           const char *marker);
 
 
-static void marker_fetch_expand(struct stm_priv_segment_info_s *pseg)
+static void marker_fetch(stm_thread_local_t *tl, uintptr_t marker[2])
 {
-    if (pseg->marker_self[0] != 0)
-        return;   /* already collected an entry */
-
-    if (stmcb_expand_marker != NULL) {
-        stm_thread_local_t *tl = pseg->pub.running_thread;
-        struct stm_shadowentry_s *current = tl->shadowstack - 1;
-        struct stm_shadowentry_s *base = tl->shadowstack_base;
-        /* stop walking just before shadowstack_base, which contains
-           STM_STACK_MARKER_OLD which shouldn't be expanded */
-        while (--current > base) {
-            uintptr_t x = (uintptr_t)current->ss;
-            if (x & 1) {
-                /* the stack entry is an odd number */
-                stmcb_expand_marker(pseg->pub.segment_base, x, current[1].ss,
-                                    pseg->marker_self, _STM_MARKER_LEN);
-
-                if (pseg->marker_self[0] != 0)
-                    break;
-            }
+    struct stm_shadowentry_s *current = tl->shadowstack - 1;
+    struct stm_shadowentry_s *base = tl->shadowstack_base;
+    /* stop walking just before shadowstack_base, which contains
+       STM_STACK_MARKER_OLD which shouldn't be expanded */
+    while (--current > base) {
+        if (((uintptr_t)current->ss) & 1) {
+            /* found the odd marker */
+            marker[0] = (uintptr_t)current[0].ss;
+            marker[1] = (uintptr_t)current[1].ss;
+            return;
         }
     }
+    marker[0] = 0;
+    marker[1] = 0;
+}
+
+static void marker_expand(uintptr_t marker[2], char *segment_base,
+                          char *outmarker)
+{
+    if (marker[0] == 0)
+        return;   /* no marker entry found */
+    if (outmarker[0] != 0)
+        return;   /* already collected an entry */
+    if (stmcb_expand_marker != NULL) {
+        stmcb_expand_marker(segment_base, marker[0], (object_t *)marker[1],
+                            outmarker, _STM_MARKER_LEN);
+    }
+}
+
+static void marker_fetch_expand(struct stm_priv_segment_info_s *pseg)
+{
+    uintptr_t marker[2];
+    marker_fetch(pseg->pub.running_thread, marker);
+    marker_expand(marker, pseg->pub.segment_base, pseg->marker_self);
 }
 
 char *_stm_expand_marker(void)
 {
-    struct stm_priv_segment_info_s *pseg =
-        get_priv_segment(STM_SEGMENT->segment_num);
-    pseg->marker_self[0] = 0;
-    marker_fetch_expand(pseg);
-    return pseg->marker_self;
+    /* for tests only! */
+    static char _result[_STM_MARKER_LEN];
+    uintptr_t marker[2];
+    _result[0] = 0;
+    marker_fetch(STM_SEGMENT->running_thread, marker);
+    marker_expand(marker, STM_SEGMENT->segment_base, _result);
+    return _result;
 }
 
 static void marker_copy(stm_thread_local_t *tl,

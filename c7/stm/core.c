@@ -86,6 +86,13 @@ void _stm_write_slowpath(object_t *obj)
            Add it to the list 'modified_old_objects'. */
         LIST_APPEND(STM_PSEGMENT->modified_old_objects, obj);
 
+        /* Add the current marker, recording where we wrote to this object */
+        uintptr_t marker[2];
+        marker_fetch(STM_SEGMENT->running_thread, marker);
+        STM_PSEGMENT->modified_old_objects_markers =
+            list_append2(STM_PSEGMENT->modified_old_objects_markers,
+                         marker[0], marker[1]);
+
         /* We need to privatize the pages containing the object, if they
            are still SHARED_PAGE.  The common case is that there is only
            one page in total. */
@@ -223,12 +230,17 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
+    assert(list_is_empty(STM_PSEGMENT->modified_old_objects_markers));
     assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
     assert(tree_is_cleared(STM_PSEGMENT->nursery_objects_shadows));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_abort));
     assert(STM_PSEGMENT->objects_pointing_to_nursery == NULL);
     assert(STM_PSEGMENT->large_overflow_objects == NULL);
+#ifndef NDEBUG
+    /* this should not be used when objects_pointing_to_nursery == NULL */
+    STM_PSEGMENT->modified_old_objects_markers_num_old = 99999999999999999L;
+#endif
 
     check_nursery_at_transaction_start();
 }
@@ -458,6 +470,7 @@ static void push_modified_to_other_segments(void)
         }));
 
     list_clear(STM_PSEGMENT->modified_old_objects);
+    list_clear(STM_PSEGMENT->modified_old_objects_markers);
 }
 
 static void _finish_transaction(int attribute_to)
@@ -596,6 +609,7 @@ reset_modified_from_other_segments(int segment_num)
         }));
 
     list_clear(pseg->modified_old_objects);
+    list_clear(pseg->modified_old_objects_markers);
 }
 
 static void abort_data_structures_from_segment_num(int segment_num)
