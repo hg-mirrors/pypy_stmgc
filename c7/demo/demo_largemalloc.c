@@ -23,6 +23,8 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     abort();
 }
 
+void stmcb_commit_soon() {}
+
 /************************************************************/
 
 #define ARENA_SIZE  (1024*1024*1024)

@@ -272,6 +272,10 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     }
 }
 
+void stmcb_commit_soon()
+{
+}
+
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
                     ('STM_LARGEMALLOC_TEST', '1'),

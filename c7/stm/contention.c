@@ -164,7 +164,8 @@ static void contention_management(uint8_t other_segment_num,
 
         change_timing_state(wait_category);
 
-        /* XXX should also tell other_pseg "please commit soon" */
+        /* tell the other to commit ASAP */
+        signal_other_to_commit_soon(contmgr.other_pseg);
 
         dprintf(("pausing...\n"));
         cond_signal(C_AT_SAFE_POINT);
@@ -180,6 +181,9 @@ static void contention_management(uint8_t other_segment_num,
     }
 
     else if (!contmgr.abort_other) {
+        /* tell the other to commit ASAP, since it causes aborts */
+        signal_other_to_commit_soon(contmgr.other_pseg);
+
         dprintf(("abort in contention\n"));
         STM_SEGMENT->nursery_end = abort_category;
         abort_with_mutex();
@@ -256,6 +260,10 @@ static void contention_management(uint8_t other_segment_num,
             abort_data_structures_from_segment_num(other_segment_num);
         }
         dprintf(("killed other thread\n"));
+
+        /* we should commit soon, we caused an abort */
+        //signal_other_to_commit_soon(get_priv_segment(STM_SEGMENT->segment_num));
+        stmcb_commit_soon();
     }
 }
 
