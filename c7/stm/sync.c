@@ -2,6 +2,10 @@
 #include <sys/prctl.h>
 #include <asm/prctl.h>
 
+#ifndef _STM_CORE_H_
+# error "must be compiled via stmgc.c"
+#endif
+
 
 /* Each segment can be in one of three possible states, described by
    the segment variable 'safe_point':
@@ -260,6 +264,16 @@ void _stm_stop_safe_point(void)
 static bool _safe_points_requested = false;
 #endif
 
+static void signal_other_to_commit_soon(struct stm_priv_segment_info_s *other_pseg)
+{
+    assert(_has_mutex());
+    /* never overwrite abort signals or safepoint requests
+       (too messy to deal with) */
+    if (!is_abort(other_pseg->pub.nursery_end)
+        && !pause_signalled)
+        other_pseg->pub.nursery_end = NSE_SIGCOMMITSOON;
+}
+
 static void signal_everybody_to_pause_running(void)
 {
     assert(_safe_points_requested == false);
@@ -323,7 +337,20 @@ static void enter_safe_point_if_requested(void)
         if (STM_SEGMENT->nursery_end == NURSERY_END)
             break;    /* no safe point requested */
 
+        if (STM_SEGMENT->nursery_end == NSE_SIGCOMMITSOON) {
+            if (previous_state == -1) {
+                previous_state = change_timing_state(STM_TIME_SYNC_COMMIT_SOON);
+            }
+
+            stmcb_commit_soon();
+            if (!pause_signalled) {
+                STM_SEGMENT->nursery_end = NURSERY_END;
+                break;
+            }
+            STM_SEGMENT->nursery_end = NSE_SIGPAUSE;
+        }
         assert(STM_SEGMENT->nursery_end == NSE_SIGPAUSE);
+        assert(pause_signalled);
 
         /* If we are requested to enter a safe-point, we cannot proceed now.
            Wait until the safe-point request is removed for us. */
