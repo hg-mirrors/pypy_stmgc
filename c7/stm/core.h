@@ -78,8 +78,16 @@ struct stm_priv_segment_info_s {
     /* List of old objects (older than the current transaction) that the
        current transaction attempts to modify.  This is used to track
        the STM status: they are old objects that where written to and
-       that need to be copied to other segments upon commit. */
+       that need to be copied to other segments upon commit.  Note that
+       every object takes three list items: the object, and two words for
+       the location marker. */
     struct list_s *modified_old_objects;
+
+    /* For each entry in 'modified_old_objects', we have two entries
+       in the following list, which give the marker at the time we added
+       the entry to modified_old_objects. */
+    struct list_s *modified_old_objects_markers;
+    uintptr_t modified_old_objects_markers_num_old;
 
     /* List of out-of-nursery objects that may contain pointers to
        nursery objects.  This is used to track the GC status: they are

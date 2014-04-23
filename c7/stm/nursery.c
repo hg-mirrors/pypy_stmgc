@@ -232,6 +232,18 @@ static void collect_modified_old_objects(void)
                    _collect_now(item));
 }
 
+static void collect_roots_from_markers(uintptr_t num_old)
+{
+    /* visit the marker objects */
+    struct list_s *mlst = STM_PSEGMENT->modified_old_objects_markers;
+    STM_PSEGMENT->modified_old_objects_markers_num_old = list_count(mlst);
+    uintptr_t i, total = list_count(mlst);
+    assert((total & 1) == 0);
+    for (i = num_old + 1; i < total; i += 2) {
+        minor_trace_if_young((object_t **)list_ptr_to_item(mlst, i));
+    }
+}
+
 static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 {
     /* reset the nursery by zeroing it */
@@ -296,6 +308,7 @@ static void _do_minor_collection(bool commit)
     /* All the objects we move out of the nursery become "overflow"
        objects.  We use the list 'objects_pointing_to_nursery'
        to hold the ones we didn't trace so far. */
+    uintptr_t num_old;
     if (STM_PSEGMENT->objects_pointing_to_nursery == NULL) {
         STM_PSEGMENT->objects_pointing_to_nursery = list_create();
 
@@ -305,7 +318,12 @@ static void _do_minor_collection(bool commit)
            into objects_pointing_to_nursery, but instead we use the
            following shortcut */
         collect_modified_old_objects();
+        num_old = 0;
     }
+    else
+        num_old = STM_PSEGMENT->modified_old_objects_markers_num_old;
+
+    collect_roots_from_markers(num_old);
 
     collect_roots_in_nursery();
 
