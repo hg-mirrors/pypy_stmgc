@@ -192,6 +192,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
     change_timing_state(STM_TIME_RUN_CURRENT);
     STM_PSEGMENT->start_time = tl->_timing_cur_start;
+    STM_PSEGMENT->signalled_to_commit_soon = false;
     STM_PSEGMENT->safe_point = SP_RUNNING;
     STM_PSEGMENT->transaction_state = (jmpbuf != NULL ? TS_REGULAR
                                                       : TS_INEVITABLE);
