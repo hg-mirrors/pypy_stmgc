@@ -162,6 +162,9 @@ struct stm_priv_segment_info_s {
     struct stm_shadowentry_s *shadowstack_at_start_of_transaction;
     object_t *threadlocal_at_start_of_transaction;
 
+    /* Already signalled to commit soon: */
+    bool signalled_to_commit_soon;
+
     /* For debugging */
 #ifndef NDEBUG
     pthread_t running_pthread;

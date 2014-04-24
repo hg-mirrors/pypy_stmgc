@@ -269,9 +269,11 @@ static void signal_other_to_commit_soon(struct stm_priv_segment_info_s *other_ps
     assert(_has_mutex());
     /* never overwrite abort signals or safepoint requests
        (too messy to deal with) */
-    if (!is_abort(other_pseg->pub.nursery_end)
-        && !pause_signalled)
+    if (!other_pseg->signalled_to_commit_soon
+        && !is_abort(other_pseg->pub.nursery_end)
+        && !pause_signalled) {
         other_pseg->pub.nursery_end = NSE_SIGCOMMITSOON;
+    }
 }
 
 static void signal_everybody_to_pause_running(void)
@@ -342,6 +344,7 @@ static void enter_safe_point_if_requested(void)
                 previous_state = change_timing_state(STM_TIME_SYNC_COMMIT_SOON);
             }
 
+            STM_PSEGMENT->signalled_to_commit_soon = true;
             stmcb_commit_soon();
             if (!pause_signalled) {
                 STM_SEGMENT->nursery_end = NURSERY_END;

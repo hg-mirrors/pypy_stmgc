@@ -263,7 +263,10 @@ static void contention_management(uint8_t other_segment_num,
 
         /* we should commit soon, we caused an abort */
         //signal_other_to_commit_soon(get_priv_segment(STM_SEGMENT->segment_num));
-        stmcb_commit_soon();
+        if (!STM_PSEGMENT->signalled_to_commit_soon) {
+            STM_PSEGMENT->signalled_to_commit_soon = true;
+            stmcb_commit_soon();
+        }
     }
 }
 
