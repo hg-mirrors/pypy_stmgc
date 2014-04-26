@@ -76,9 +76,15 @@ void _stm_write_slowpath(object_t *obj)
     assert(lock_idx < sizeof(write_locks));
  retry:
     if (write_locks[lock_idx] == 0) {
+        /* A lock to prevent reading garbage from
+           lookup_other_thread_recorded_marker() */
+        acquire_segment_lock(STM_SEGMENT->segment_base);
+
         if (UNLIKELY(!__sync_bool_compare_and_swap(&write_locks[lock_idx],
-                                                   0, lock_num)))
+                                                   0, lock_num))) {
+            release_segment_lock(STM_SEGMENT->segment_base);
             goto retry;
+        }
 
         dprintf_test(("write_slowpath %p -> mod_old\n", obj));
 
@@ -92,6 +98,8 @@ void _stm_write_slowpath(object_t *obj)
         STM_PSEGMENT->modified_old_objects_markers =
             list_append2(STM_PSEGMENT->modified_old_objects_markers,
                          marker[0], marker[1]);
+
+        release_segment_lock(STM_SEGMENT->segment_base);
 
         /* We need to privatize the pages containing the object, if they
            are still SHARED_PAGE.  The common case is that there is only
@@ -134,7 +142,7 @@ void _stm_write_slowpath(object_t *obj)
     else {
         /* call the contention manager, and then retry (unless we were
            aborted). */
-        write_write_contention_management(lock_idx);
+        write_write_contention_management(lock_idx, obj);
         goto retry;
     }
 
