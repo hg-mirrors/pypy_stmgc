@@ -174,6 +174,7 @@ struct stm_priv_segment_info_s {
     /* Temporarily stores the marker information */
     char marker_self[_STM_MARKER_LEN];
     char marker_other[_STM_MARKER_LEN];
+    uintptr_t marker_inev[2];
 };
 
 enum /* safe_point */ {
