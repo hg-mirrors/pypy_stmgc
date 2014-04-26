@@ -80,7 +80,7 @@ class TestMarker(BaseTest):
         assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_OTHER
         assert 0.099 <= tl.longest_marker_time <= 0.9
         assert ffi.string(tl.longest_marker_self) == '29 %r' % (p,)
-        assert tl.longest_marker_other[0] == '\x00'
+        assert ffi.string(tl.longest_marker_other) == ''
 
     def test_macros(self):
         self.start_transaction()
@@ -231,3 +231,31 @@ class TestMarker(BaseTest):
         assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_INEVITABLE
         assert ffi.string(tl.longest_marker_self) == '21'
         assert ffi.string(tl.longest_marker_other) == '19'
+
+    def test_read_write_contention(self):
+        @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(base, number, ptr, outbuf, outbufsize):
+            s = '%d\x00' % (number,)
+            assert len(s) <= outbufsize
+            outbuf[0:len(s)] = s
+        lib.stmcb_expand_marker = expand_marker
+        p = stm_allocate_old(16)
+        #
+        self.start_transaction()
+        assert stm_get_char(p) == '\x00'
+        #
+        self.switch(1)
+        self.start_transaction()
+        self.push_root(ffi.cast("object_t *", 19))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        stm_set_char(p, 'A')
+        self.pop_root()
+        self.pop_root()
+        self.push_root(ffi.cast("object_t *", 17))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        py.test.raises(Conflict, self.commit_transaction)
+        #
+        tl = self.get_stm_thread_local()
+        assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_WRITE_READ
+        assert ffi.string(tl.longest_marker_self) == '19'
+        assert ffi.string(tl.longest_marker_other) == ''

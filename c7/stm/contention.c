@@ -187,6 +187,8 @@ static void contention_management(uint8_t other_segment_num,
             marker_lookup_other_thread_write_write(other_segment_num, obj);
         else if (kind == INEVITABLE_CONTENTION)
             marker_lookup_other_thread_inev(other_segment_num);
+        else if (kind == WRITE_READ_CONTENTION)
+            marker_lookup_same_thread_write_read(obj);
         abort_with_mutex();
     }
 
@@ -285,9 +287,10 @@ static void write_write_contention_management(uintptr_t lock_idx,
     s_mutex_unlock();
 }
 
-static void write_read_contention_management(uint8_t other_segment_num)
+static void write_read_contention_management(uint8_t other_segment_num,
+                                             object_t *obj)
 {
-    contention_management(other_segment_num, WRITE_READ_CONTENTION, NULL);
+    contention_management(other_segment_num, WRITE_READ_CONTENTION, obj);
 }
 
 static void inevitable_contention_management(uint8_t other_segment_num)

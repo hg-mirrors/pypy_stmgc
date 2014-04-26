@@ -288,7 +288,7 @@ static bool detect_write_read_conflicts(void)
             ({
                 if (was_read_remote(remote_base, item, remote_version)) {
                     /* A write-read conflict! */
-                    write_read_contention_management(i);
+                    write_read_contention_management(i, item);
 
                     /* If we reach this point, we didn't abort, but maybe we
                        had to wait for the other thread to commit.  If we
