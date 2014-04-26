@@ -82,6 +82,28 @@ static void marker_copy(stm_thread_local_t *tl,
         memcpy(tl->longest_marker_other, pseg->marker_other, _STM_MARKER_LEN);
     }
     pseg->marker_self[0] = 0;
+    pseg->marker_other[0] = 0;
+}
+
+static void marker_lookup_from_thread(struct stm_priv_segment_info_s *pseg,
+                                      object_t *obj, char *outmarker)
+{
+    outmarker[0] = 0;
+
+    long i;
+    struct list_s *mlst = pseg->modified_old_objects;
+    struct list_s *mlstm = pseg->modified_old_objects_markers;
+    for (i = list_count(mlst); --i >= 0; ) {
+        if (list_item(mlst, i) == (uintptr_t)obj) {
+            uintptr_t marker[2];
+            assert(list_count(mlstm) == 2 * list_count(mlst));
+            marker[0] = list_item(mlstm, i * 2 + 0);
+            marker[1] = list_item(mlstm, i * 2 + 1);
+
+            marker_expand(marker, pseg->pub.segment_base, outmarker);
+            break;
+        }
+    }
 }
 
 static void marker_lookup_other_thread_write_write(uint8_t other_segment_num,
@@ -91,7 +113,6 @@ static void marker_lookup_other_thread_write_write(uint8_t other_segment_num,
     char *other_segment_base = get_segment_base(other_segment_num);
     acquire_segment_lock(other_segment_base);
     assert(_has_mutex());
-    STM_PSEGMENT->marker_other[0] = 0;
 
     /* here, we acquired the other thread's segment_lock, which means that:
 
@@ -101,24 +122,10 @@ static void marker_lookup_other_thread_write_write(uint8_t other_segment_num,
        (2) it is not mutating 'modified_old_objects' right now (we have
            the global mutex_lock at this point too).
     */
-
+    my_pseg = get_priv_segment(STM_SEGMENT->segment_num);
     other_pseg = get_priv_segment(other_segment_num);
-    long i;
-    struct list_s *mlst = other_pseg->modified_old_objects;
-    struct list_s *mlstm = other_pseg->modified_old_objects_markers;
-    for (i = list_count(mlst); --i >= 0; ) {
-        if (list_item(mlst, i) == (uintptr_t)obj) {
-            uintptr_t marker[2];
-            assert(list_count(mlstm) == 2 * list_count(mlst));
-            marker[0] = list_item(mlstm, i * 2 + 0);
-            marker[1] = list_item(mlstm, i * 2 + 1);
 
-            my_pseg = get_priv_segment(STM_SEGMENT->segment_num);
-            marker_expand(marker, other_pseg->pub.segment_base,
-                          my_pseg->marker_other);
-            break;
-        }
-    }
+    marker_lookup_from_thread(other_pseg, obj, my_pseg->marker_other);
 
     release_segment_lock(other_segment_base);
 }
@@ -133,6 +140,14 @@ static void marker_lookup_other_thread_inev(uint8_t other_segment_num)
     my_pseg = get_priv_segment(STM_SEGMENT->segment_num);
     marker_expand(other_pseg->marker_inev, other_pseg->pub.segment_base,
                   my_pseg->marker_other);
+}
+
+static void marker_lookup_same_thread_write_read(object_t *obj)
+{
+    struct stm_priv_segment_info_s *my_pseg;
+
+    my_pseg = get_priv_segment(STM_SEGMENT->segment_num);
+    marker_lookup_from_thread(my_pseg, obj, my_pseg->marker_self);
 }
 
 static void marker_fetch_inev(void)

@@ -1,7 +1,8 @@
 
 static void write_write_contention_management(uintptr_t lock_idx,
                                               object_t *obj);
-static void write_read_contention_management(uint8_t other_segment_num);
+static void write_read_contention_management(uint8_t other_segment_num,
+                                             object_t *obj);
 static void inevitable_contention_management(uint8_t other_segment_num);
 
 static inline bool is_abort(uintptr_t nursery_end) {
