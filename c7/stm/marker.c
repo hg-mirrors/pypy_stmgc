@@ -84,8 +84,8 @@ static void marker_copy(stm_thread_local_t *tl,
     pseg->marker_self[0] = 0;
 }
 
-static void lookup_other_thread_recorded_marker(uint8_t other_segment_num,
-                                                object_t *obj)
+static void marker_lookup_other_thread_write_write(uint8_t other_segment_num,
+                                                   object_t *obj)
 {
     struct stm_priv_segment_info_s *my_pseg, *other_pseg;
     char *other_segment_base = get_segment_base(other_segment_num);
@@ -121,4 +121,24 @@ static void lookup_other_thread_recorded_marker(uint8_t other_segment_num,
     }
 
     release_segment_lock(other_segment_base);
+}
+
+static void marker_lookup_other_thread_inev(uint8_t other_segment_num)
+{
+    /* same as marker_lookup_other_thread_write_write(), but for
+       an inevitable contention instead of a write-write contention */
+    struct stm_priv_segment_info_s *my_pseg, *other_pseg;
+    assert(_has_mutex());
+    other_pseg = get_priv_segment(other_segment_num);
+    my_pseg = get_priv_segment(STM_SEGMENT->segment_num);
+    marker_expand(other_pseg->marker_inev, other_pseg->pub.segment_base,
+                  my_pseg->marker_other);
+}
+
+static void marker_fetch_inev(void)
+{
+    uintptr_t marker[2];
+    marker_fetch(STM_SEGMENT->running_thread, marker);
+    STM_PSEGMENT->marker_inev[0] = marker[0];
+    STM_PSEGMENT->marker_inev[1] = marker[1];
 }

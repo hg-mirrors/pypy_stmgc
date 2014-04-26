@@ -211,6 +211,11 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     change_timing_state(STM_TIME_RUN_CURRENT);
     STM_PSEGMENT->start_time = tl->_timing_cur_start;
     STM_PSEGMENT->safe_point = SP_RUNNING;
+#ifndef NDEBUG
+    STM_PSEGMENT->marker_inev[1] = 99999999999999999L;
+#endif
+    if (jmpbuf == NULL)
+        marker_fetch_inev();
     STM_PSEGMENT->transaction_state = (jmpbuf != NULL ? TS_REGULAR
                                                       : TS_INEVITABLE);
     STM_SEGMENT->jmpbuf_ptr = jmpbuf;
@@ -727,6 +732,7 @@ void _stm_become_inevitable(const char *msg)
     if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
         dprintf(("become_inevitable: %s\n", msg));
 
+        marker_fetch_inev();
         wait_for_end_of_inevitable_transaction(NULL);
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
         STM_SEGMENT->jmpbuf_ptr = NULL;

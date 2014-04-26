@@ -184,7 +184,9 @@ static void contention_management(uint8_t other_segment_num,
         dprintf(("abort in contention\n"));
         STM_SEGMENT->nursery_end = abort_category;
         if (kind == WRITE_WRITE_CONTENTION)
-            lookup_other_thread_recorded_marker(other_segment_num, obj);
+            marker_lookup_other_thread_write_write(other_segment_num, obj);
+        else if (kind == INEVITABLE_CONTENTION)
+            marker_lookup_other_thread_inev(other_segment_num);
         abort_with_mutex();
     }
 

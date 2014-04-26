@@ -203,3 +203,31 @@ class TestMarker(BaseTest):
         assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_WRITE_WRITE
         assert ffi.string(tl.longest_marker_self) == '21'
         assert ffi.string(tl.longest_marker_other) == '19'
+
+    def test_double_abort_markers_cb_inevitable(self):
+        @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(base, number, ptr, outbuf, outbufsize):
+            s = '%d\x00' % (number,)
+            assert len(s) <= outbufsize
+            outbuf[0:len(s)] = s
+        lib.stmcb_expand_marker = expand_marker
+        #
+        self.start_transaction()
+        self.push_root(ffi.cast("object_t *", 19))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        self.become_inevitable()
+        self.pop_root()
+        self.pop_root()
+        self.push_root(ffi.cast("object_t *", 17))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        #
+        self.switch(1)
+        self.start_transaction()
+        self.push_root(ffi.cast("object_t *", 21))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        py.test.raises(Conflict, self.become_inevitable)
+        #
+        tl = self.get_stm_thread_local()
+        assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_INEVITABLE
+        assert ffi.string(tl.longest_marker_self) == '21'
+        assert ffi.string(tl.longest_marker_other) == '19'

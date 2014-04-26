@@ -428,6 +428,10 @@ static void mark_visit_from_markers(void)
         for (i = list_count(lst); i > 0; i -= 2) {
             mark_visit_object((object_t *)list_item(lst, i - 1), base);
         }
+        if (get_priv_segment(j)->transaction_state == TS_INEVITABLE) {
+            uintptr_t marker_inev_obj = get_priv_segment(j)->marker_inev[1];
+            mark_visit_object((object_t *)marker_inev_obj, base);
+        }
     }
 }
 

@@ -6,5 +6,7 @@ static void marker_fetch_expand(struct stm_priv_segment_info_s *pseg);
 static void marker_copy(stm_thread_local_t *tl,
                         struct stm_priv_segment_info_s *pseg,
                         enum stm_time_e attribute_to, double time);
-static void lookup_other_thread_recorded_marker(uint8_t other_segment_num,
-                                                object_t *obj);
+static void marker_lookup_other_thread_write_write(uint8_t other_segment_num,
+                                                   object_t *obj);
+static void marker_lookup_other_thread_inev(uint8_t other_segment_num);
+static void marker_fetch_inev(void);
