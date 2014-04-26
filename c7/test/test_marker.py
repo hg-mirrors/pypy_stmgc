@@ -175,7 +175,7 @@ class TestMarker(BaseTest):
         assert ffi.string(raw).startswith('29 ')
         assert seen == [29]
 
-    def test_double_abort_markers_cb(self):
+    def test_double_abort_markers_cb_write_write(self):
         @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
         def expand_marker(base, number, ptr, outbuf, outbufsize):
             s = '%d\x00' % (number,)

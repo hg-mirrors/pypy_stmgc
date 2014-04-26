@@ -99,7 +99,8 @@ static void cm_pause_if_younger(struct contmgr_s *cm)
 
 
 static void contention_management(uint8_t other_segment_num,
-                                  enum contention_kind_e kind)
+                                  enum contention_kind_e kind,
+                                  object_t *obj)
 {
     assert(_has_mutex());
     assert(other_segment_num != STM_SEGMENT->segment_num);
@@ -182,6 +183,8 @@ static void contention_management(uint8_t other_segment_num,
     else if (!contmgr.abort_other) {
         dprintf(("abort in contention\n"));
         STM_SEGMENT->nursery_end = abort_category;
+        if (kind == WRITE_WRITE_CONTENTION)
+            lookup_other_thread_recorded_marker(other_segment_num, obj);
         abort_with_mutex();
     }
 
@@ -259,7 +262,8 @@ static void contention_management(uint8_t other_segment_num,
     }
 }
 
-static void write_write_contention_management(uintptr_t lock_idx)
+static void write_write_contention_management(uintptr_t lock_idx,
+                                              object_t *obj)
 {
     s_mutex_lock();
 
@@ -270,7 +274,7 @@ static void write_write_contention_management(uintptr_t lock_idx)
         assert(get_priv_segment(other_segment_num)->write_lock_num ==
                prev_owner);
 
-        contention_management(other_segment_num, WRITE_WRITE_CONTENTION);
+        contention_management(other_segment_num, WRITE_WRITE_CONTENTION, obj);
 
         /* now we return into _stm_write_slowpath() and will try again
            to acquire the write lock on our object. */
@@ -281,10 +285,10 @@ static void write_write_contention_management(uintptr_t lock_idx)
 
 static void write_read_contention_management(uint8_t other_segment_num)
 {
-    contention_management(other_segment_num, WRITE_READ_CONTENTION);
+    contention_management(other_segment_num, WRITE_READ_CONTENTION, NULL);
 }
 
 static void inevitable_contention_management(uint8_t other_segment_num)
 {
-    contention_management(other_segment_num, INEVITABLE_CONTENTION);
+    contention_management(other_segment_num, INEVITABLE_CONTENTION, NULL);
 }
