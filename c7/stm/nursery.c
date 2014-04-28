@@ -215,7 +215,9 @@ static void collect_oldrefs_to_nursery(void)
                content); or add the object to 'large_overflow_objects'.
             */
             if (STM_PSEGMENT->minor_collect_will_commit_now) {
+                acquire_privatization_lock();
                 synchronize_object_now(obj);
+                release_privatization_lock();
             }
             else
                 LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
@@ -293,6 +295,8 @@ static void _do_minor_collection(bool commit)
 
     dprintf(("minor_collection commit=%d\n", (int)commit));
 
+    acquire_marker_lock(STM_SEGMENT->segment_base);
+
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
     if (!commit) {
         /* 'STM_PSEGMENT->overflow_number' is used now by this collection,
@@ -336,6 +340,8 @@ static void _do_minor_collection(bool commit)
 
     assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
+
+    release_marker_lock(STM_SEGMENT->segment_base);
 }
 
 static void minor_collection(bool commit)

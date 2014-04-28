@@ -58,6 +58,7 @@ static const char *timer_names[] = {
     "wait write read",
     "wait inevitable",
     "wait other",
+    "sync commit soon",
     "bookkeeping",
     "minor gc",
     "major gc",

@@ -44,6 +44,8 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     visit((object_t **)&n->next);
 }
 
+void stmcb_commit_soon() {}
+
 static void expand_marker(char *base, uintptr_t odd_number,
                           object_t *following_object,
                           char *outputbuf, size_t outputbufsize)

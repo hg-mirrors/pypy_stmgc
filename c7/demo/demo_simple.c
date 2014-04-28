@@ -39,6 +39,8 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     visit((object_t **)&n->next);
 }
 
+void stmcb_commit_soon() {}
+
 
 
 static sem_t done;

@@ -302,6 +302,9 @@ void stm_pop_marker(stm_thread_local_t *tl)
     STM_POP_MARKER(*tl);
 }
 
+void stmcb_commit_soon()
+{
+}
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
                     ('STM_LARGEMALLOC_TEST', '1'),

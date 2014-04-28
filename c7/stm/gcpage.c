@@ -92,17 +92,20 @@ static char *allocate_outside_nursery_large(uint64_t size)
     /* uncommon case: need to initialize some more pages */
     spinlock_acquire(lock_growth_large);
 
-    if (addr + size > uninitialized_page_start) {
+    char *start = uninitialized_page_start;
+    if (addr + size > start) {
         uintptr_t npages;
-        npages = (addr + size - uninitialized_page_start) / 4096UL;
+        npages = (addr + size - start) / 4096UL;
         npages += GCPAGE_NUM_PAGES;
-        if (uninitialized_page_stop - uninitialized_page_start <
-                npages * 4096UL) {
+        if (uninitialized_page_stop - start < npages * 4096UL) {
             stm_fatalerror("out of memory!");   /* XXX */
         }
-        setup_N_pages(uninitialized_page_start, npages);
-        __sync_synchronize();
-        uninitialized_page_start += npages * 4096UL;
+        setup_N_pages(start, npages);
+        if (!__sync_bool_compare_and_swap(&uninitialized_page_start,
+                                          start,
+                                          start + npages * 4096UL)) {
+            stm_fatalerror("uninitialized_page_start changed?");
+        }
     }
     spinlock_release(lock_growth_large);
     return addr;
