@@ -162,6 +162,7 @@ static void contention_management(uint8_t other_segment_num,
              itself already paused here.
         */
         contmgr.other_pseg->signal_when_done = true;
+        marker_contention(kind, false, other_segment_num, obj);
 
         change_timing_state(wait_category);
 
@@ -178,7 +179,13 @@ static void contention_management(uint8_t other_segment_num,
         if (must_abort())
             abort_with_mutex();
 
-        change_timing_state(STM_TIME_RUN_CURRENT);
+        struct stm_priv_segment_info_s *pseg =
+            get_priv_segment(STM_SEGMENT->segment_num);
+        double elapsed =
+            change_timing_state_tl(pseg->pub.running_thread,
+                                   STM_TIME_RUN_CURRENT);
+        marker_copy(pseg->pub.running_thread, pseg,
+                    wait_category, elapsed);
     }
 
     else if (!contmgr.abort_other) {
@@ -187,7 +194,7 @@ static void contention_management(uint8_t other_segment_num,
 
         dprintf(("abort in contention\n"));
         STM_SEGMENT->nursery_end = abort_category;
-        marker_contention(abort_category, false, other_segment_num, obj);
+        marker_contention(kind, false, other_segment_num, obj);
         abort_with_mutex();
     }
 
@@ -195,7 +202,7 @@ static void contention_management(uint8_t other_segment_num,
         /* We have to signal the other thread to abort, and wait until
            it does. */
         contmgr.other_pseg->pub.nursery_end = abort_category;
-        marker_contention(abort_category, true, other_segment_num, obj);
+        marker_contention(kind, true, other_segment_num, obj);
 
         int sp = contmgr.other_pseg->safe_point;
         switch (sp) {

@@ -51,7 +51,7 @@ static void expand_marker(char *base, uintptr_t odd_number,
                           char *outputbuf, size_t outputbufsize)
 {
     assert(following_object == NULL);
-    snprintf(outputbuf, outputbufsize, "<%lu>", odd_number);
+    snprintf(outputbuf, outputbufsize, "<%p %lu>", base, odd_number);
 }
 
 
@@ -97,6 +97,18 @@ nodeptr_t swap_nodes(nodeptr_t initial)
     assert(initial != NULL);
 
     STM_START_TRANSACTION(&stm_thread_local, here);
+
+    if (stm_thread_local.longest_marker_state != 0) {
+        fprintf(stderr, "[%p] marker %d for %.6f seconds:\n",
+                &stm_thread_local,
+                stm_thread_local.longest_marker_state,
+                stm_thread_local.longest_marker_time);
+        fprintf(stderr, "\tself:\t\"%s\"\n\tother:\t\"%s\"\n",
+                stm_thread_local.longest_marker_self,
+                stm_thread_local.longest_marker_other);
+        stm_thread_local.longest_marker_state = 0;
+        stm_thread_local.longest_marker_time = 0.0;
+    }
 
     nodeptr_t prev = initial;
     stm_read((objptr_t)prev);
