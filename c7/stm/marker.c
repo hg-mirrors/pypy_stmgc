@@ -134,9 +134,8 @@ static void marker_fetch_obj_write(uint8_t in_segment_num, object_t *obj,
     marker[1] = 0;
 }
 
-static void marker_contention_abort_self(int category,
-                                         uint8_t other_segment_num,
-                                         object_t *obj)
+static void marker_contention(int category, bool abort_other,
+                              uint8_t other_segment_num, object_t *obj)
 {
     uintptr_t self_marker[2];
     uintptr_t other_marker[2];
@@ -148,25 +147,30 @@ static void marker_contention_abort_self(int category,
     char *my_segment_base = STM_SEGMENT->segment_base;
     char *other_segment_base = get_segment_base(other_segment_num);
 
-    /* I'm aborting.  Collect the location for myself.  It's usually
-       the current location, except in a write-read abort, in which
-       case it's the older location of the write. */
+    acquire_marker_lock(other_segment_base);
+
+    /* Collect the location for myself.  It's usually the current
+       location, except in a write-read abort, in which case it's the
+       older location of the write. */
     if (category == STM_TIME_RUN_ABORTED_WRITE_READ)
         marker_fetch_obj_write(my_pseg->pub.segment_num, obj, self_marker);
     else
         marker_fetch(my_pseg->pub.running_thread, self_marker);
 
-    marker_expand(self_marker, my_segment_base, my_pseg->marker_self);
+    /* Expand this location into either my_pseg->marker_self or
+       other_pseg->marker_other, depending on who aborts. */
+    marker_expand(self_marker, my_segment_base,
+                  abort_other ? other_pseg->marker_other
+                              : my_pseg->marker_self);
 
     /* For some categories, we can also collect the relevant information
        for the other segment. */
-    acquire_marker_lock(other_segment_base);
-
     switch (category) {
     case STM_TIME_RUN_ABORTED_WRITE_WRITE:
         marker_fetch_obj_write(other_segment_num, obj, other_marker);
         break;
     case STM_TIME_RUN_ABORTED_INEVITABLE:
+        assert(abort_other == false);
         other_marker[0] = other_pseg->marker_inev[0];
         other_marker[1] = other_pseg->marker_inev[1];
         break;
@@ -176,7 +180,16 @@ static void marker_contention_abort_self(int category,
         break;
     }
 
-    marker_expand(other_marker, other_segment_base, my_pseg->marker_other);
+    marker_expand(other_marker, other_segment_base,
+                  abort_other ? other_pseg->marker_self
+                              : my_pseg->marker_other);
+
+    if (abort_other && other_pseg->marker_self[0] == 0) {
+        if (category == STM_TIME_RUN_ABORTED_WRITE_READ)
+            strcpy(other_pseg->marker_self, "<read at unknown location>");
+        else
+            strcpy(other_pseg->marker_self, "<no location information>");
+    }
 
     release_marker_lock(other_segment_base);
 }

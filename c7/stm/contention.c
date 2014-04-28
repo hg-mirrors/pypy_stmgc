@@ -187,7 +187,7 @@ static void contention_management(uint8_t other_segment_num,
 
         dprintf(("abort in contention\n"));
         STM_SEGMENT->nursery_end = abort_category;
-        marker_contention_abort_self(abort_category, other_segment_num, obj);
+        marker_contention(abort_category, false, other_segment_num, obj);
         abort_with_mutex();
     }
 
@@ -195,10 +195,7 @@ static void contention_management(uint8_t other_segment_num,
         /* We have to signal the other thread to abort, and wait until
            it does. */
         contmgr.other_pseg->pub.nursery_end = abort_category;
-        if (kind == WRITE_WRITE_CONTENTION) {
-            //marker_fetch_obj_write(contmgr.other_pseg->pub.segment_num,
-            //                       obj, contmgr.other_pseg->...);
-        }
+        marker_contention(abort_category, true, other_segment_num, obj);
 
         int sp = contmgr.other_pseg->safe_point;
         switch (sp) {
