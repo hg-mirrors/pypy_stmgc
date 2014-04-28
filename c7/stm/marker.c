@@ -134,7 +134,7 @@ static void marker_fetch_obj_write(uint8_t in_segment_num, object_t *obj,
     marker[1] = 0;
 }
 
-static void marker_contention(int category, bool abort_other,
+static void marker_contention(int kind, bool abort_other,
                               uint8_t other_segment_num, object_t *obj)
 {
     uintptr_t self_marker[2];
@@ -152,7 +152,7 @@ static void marker_contention(int category, bool abort_other,
     /* Collect the location for myself.  It's usually the current
        location, except in a write-read abort, in which case it's the
        older location of the write. */
-    if (category == STM_TIME_RUN_ABORTED_WRITE_READ)
+    if (kind == WRITE_READ_CONTENTION)
         marker_fetch_obj_write(my_pseg->pub.segment_num, obj, self_marker);
     else
         marker_fetch(my_pseg->pub.running_thread, self_marker);
@@ -165,11 +165,11 @@ static void marker_contention(int category, bool abort_other,
 
     /* For some categories, we can also collect the relevant information
        for the other segment. */
-    switch (category) {
-    case STM_TIME_RUN_ABORTED_WRITE_WRITE:
+    switch (kind) {
+    case WRITE_WRITE_CONTENTION:
         marker_fetch_obj_write(other_segment_num, obj, other_marker);
         break;
-    case STM_TIME_RUN_ABORTED_INEVITABLE:
+    case INEVITABLE_CONTENTION:
         assert(abort_other == false);
         other_marker[0] = other_pseg->marker_inev[0];
         other_marker[1] = other_pseg->marker_inev[1];
@@ -185,7 +185,7 @@ static void marker_contention(int category, bool abort_other,
                               : my_pseg->marker_other);
 
     if (abort_other && other_pseg->marker_self[0] == 0) {
-        if (category == STM_TIME_RUN_ABORTED_WRITE_READ)
+        if (kind == WRITE_READ_CONTENTION)
             strcpy(other_pseg->marker_self, "<read at unknown location>");
         else
             strcpy(other_pseg->marker_self, "<no location information>");

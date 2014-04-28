@@ -8,5 +8,5 @@ static void marker_copy(stm_thread_local_t *tl,
                         struct stm_priv_segment_info_s *pseg,
                         enum stm_time_e attribute_to, double time);
 
-static void marker_contention(int category, bool abort_other,
+static void marker_contention(int kind, bool abort_other,
                               uint8_t other_segment_num, object_t *obj);
