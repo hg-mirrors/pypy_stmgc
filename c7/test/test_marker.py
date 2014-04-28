@@ -299,3 +299,36 @@ class TestMarker(BaseTest):
         assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_WRITE_WRITE
         assert ffi.string(tl.longest_marker_self) == '19'
         assert ffi.string(tl.longest_marker_other) == '21'
+
+    def test_double_remote_markers_cb_write_read(self):
+        @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(base, number, ptr, outbuf, outbufsize):
+            s = '%d\x00' % (number,)
+            assert len(s) <= outbufsize
+            outbuf[0:len(s)] = s
+        lib.stmcb_expand_marker = expand_marker
+        p = stm_allocate_old(16)
+        #
+        self.start_transaction()
+        assert stm_get_char(p) == '\x00'    # read
+        tl0 = self.get_stm_thread_local()
+        #
+        self.switch(1)
+        self.start_transaction()
+        self.become_inevitable()
+        self.push_root(ffi.cast("object_t *", 21))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        stm_set_char(p, 'B')                # write, will abort #0
+        self.pop_root()
+        self.pop_root()
+        self.push_root(ffi.cast("object_t *", 23))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        self.commit_transaction()
+        #
+        py.test.raises(Conflict, self.switch, 0)
+        #
+        tl = self.get_stm_thread_local()
+        assert tl is tl0
+        assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_WRITE_READ
+        assert ffi.string(tl.longest_marker_self)=='<read at unknown location>'
+        assert ffi.string(tl.longest_marker_other) == '21'
