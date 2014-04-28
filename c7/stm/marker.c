@@ -92,10 +92,10 @@ static void marker_fetch_obj_write(uint8_t in_segment_num, object_t *obj,
                                    uintptr_t marker[2])
 {
     char *segment_base = get_segment_base(in_segment_num);
-    acquire_segment_lock(segment_base);
+    acquire_marker_lock(segment_base);
     assert(_has_mutex());
 
-    /* here, we acquired the other thread's segment_lock, which means that:
+    /* here, we acquired the other thread's marker_lock, which means that:
 
        (1) it has finished filling 'modified_old_objects' after it sets
            up the write_locks[] value that we're conflicting with
@@ -118,7 +118,7 @@ static void marker_fetch_obj_write(uint8_t in_segment_num, object_t *obj,
     marker[0] = 0;
     marker[1] = 0;
  done:
-    release_segment_lock(segment_base);
+    release_marker_lock(segment_base);
 }
 
 static void marker_lookup_other_thread_write_write(uint8_t other_segment_num,
