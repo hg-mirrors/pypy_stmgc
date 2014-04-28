@@ -635,8 +635,9 @@ static void abort_data_structures_from_segment_num(int segment_num)
                        (int)pseg->transaction_state);
     }
 
-    /* look up and preserve the marker information as a string */
-    marker_fetch_expand(pseg);
+    /* if we don't have marker information already, look up and preserve
+       the marker information from the shadowstack as a string */
+    marker_default_for_abort(pseg);
 
     /* throw away the content of the nursery */
     long bytes_in_nursery = throw_away_nursery(pseg);
