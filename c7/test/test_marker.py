@@ -159,7 +159,7 @@ class TestMarker(BaseTest):
         @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
         def expand_marker(base, number, ptr, outbuf, outbufsize):
             seen.append(number)
-            s = '%d %r\x00' % (number, ptr)
+            s = '%d %r\x00' % (number, ptr == ffi.NULL)
             assert len(s) <= outbufsize
             outbuf[0:len(s)] = s
         seen = []
@@ -172,7 +172,7 @@ class TestMarker(BaseTest):
         self.push_root(ffi.cast("object_t *", 29))
         self.push_root(ffi.cast("object_t *", ffi.NULL))
         raw = lib._stm_expand_marker()
-        assert ffi.string(raw).startswith('29 ')
+        assert ffi.string(raw) == '29 True'
         assert seen == [29]
 
     def test_double_abort_markers_cb_write_write(self):
@@ -192,6 +192,7 @@ class TestMarker(BaseTest):
         self.pop_root()
         self.push_root(ffi.cast("object_t *", 17))
         self.push_root(ffi.cast("object_t *", ffi.NULL))
+        stm_minor_collect()
         #
         self.switch(1)
         self.start_transaction()
@@ -220,6 +221,7 @@ class TestMarker(BaseTest):
         self.pop_root()
         self.push_root(ffi.cast("object_t *", 17))
         self.push_root(ffi.cast("object_t *", ffi.NULL))
+        stm_minor_collect()
         #
         self.switch(1)
         self.start_transaction()
@@ -259,3 +261,41 @@ class TestMarker(BaseTest):
         assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_WRITE_READ
         assert ffi.string(tl.longest_marker_self) == '19'
         assert ffi.string(tl.longest_marker_other) == ''
+
+    def test_double_remote_markers_cb_write_write(self):
+        @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
+        def expand_marker(base, number, ptr, outbuf, outbufsize):
+            s = '%d\x00' % (number,)
+            assert len(s) <= outbufsize
+            outbuf[0:len(s)] = s
+        lib.stmcb_expand_marker = expand_marker
+        p = stm_allocate_old(16)
+        #
+        self.start_transaction()
+        self.push_root(ffi.cast("object_t *", 19))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        stm_set_char(p, 'A')
+        self.pop_root()
+        self.pop_root()
+        self.push_root(ffi.cast("object_t *", 17))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        tl0 = self.get_stm_thread_local()
+        #
+        self.switch(1)
+        self.start_transaction()
+        self.become_inevitable()
+        self.push_root(ffi.cast("object_t *", 21))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        stm_set_char(p, 'B')    # aborts in #0
+        self.pop_root()
+        self.pop_root()
+        self.push_root(ffi.cast("object_t *", 23))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
+        #
+        py.test.raises(Conflict, self.switch, 0)
+        #
+        tl = self.get_stm_thread_local()
+        assert tl is tl0
+        assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_WRITE_WRITE
+        assert ffi.string(tl.longest_marker_self) == '19'
+        assert ffi.string(tl.longest_marker_other) == '21'

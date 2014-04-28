@@ -196,6 +196,10 @@ static void contention_management(uint8_t other_segment_num,
         /* We have to signal the other thread to abort, and wait until
            it does. */
         contmgr.other_pseg->pub.nursery_end = abort_category;
+        if (kind == WRITE_WRITE_CONTENTION) {
+            //marker_fetch_obj_write(contmgr.other_pseg->pub.segment_num,
+            //                       obj, contmgr.other_pseg->...);
+        }
 
         int sp = contmgr.other_pseg->safe_point;
         switch (sp) {
