@@ -44,6 +44,7 @@ struct stm_segment_info_s {
     stm_jmpbuf_t *jmpbuf_ptr;  /* compat only -- always NULL */
     char *nursery_current;     /* updated... */
     int segment_num;  /* compat only -- always NULL */
+    stm_thread_local_t *running_thread;
 };
 //extern struct stm_segment_info_s _stm_segment;
 extern __thread struct stm_segment_info_s *_stm_segment;
@@ -157,5 +158,7 @@ inline static void stm_call_on_abort(stm_thread_local_t *tl, void *key,
                                      void callback(void *)) {
     // XXX ignored
 }
+
+inline static void stm_flush_timing(stm_thread_local_t *tl, int verbose) {}
 
 #endif
