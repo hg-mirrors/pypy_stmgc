@@ -260,7 +260,8 @@ class TestMarker(BaseTest):
         tl = self.get_stm_thread_local()
         assert tl.longest_marker_state == lib.STM_TIME_RUN_ABORTED_WRITE_READ
         assert ffi.string(tl.longest_marker_self) == '19'
-        assert ffi.string(tl.longest_marker_other) == ''
+        assert ffi.string(tl.longest_marker_other) == (
+            '<read at unknown location>')
 
     def test_double_remote_markers_cb_write_write(self):
         @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
