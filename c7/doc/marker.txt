@@ -1,0 +1,42 @@
+
+Reports
+=======
+
+- self-abort:
+    WRITE_WRITE_CONTENTION, INEVITABLE_CONTENTION:
+       marker in both threads, time lost by this thread
+    WRITE_READ_CONTENTION:
+       marker pointing back to the write, time lost by this thread
+
+- aborted by a different thread:
+    WRITE_WRITE_CONTENTION:
+       marker in both threads, time lost by this thread
+    WRITE_READ_CONTENTION:
+       remote marker pointing back to the write, time lost by this thread
+       (no local marker available to know where we've read the object from)
+    INEVITABLE_CONTENTION:
+       n/a
+
+- self-pausing:
+    same as self-abort, but reporting the time lost by pausing
+
+- waiting for a free segment:
+    - if we're waiting because of inevitability, report with a
+      marker and the time lost
+    - if we're just waiting because of no free segment, don't report it,
+      or maybe with only the total time lost and no marker
+
+- more internal reasons for cond_wait(), like synchronizing the threads,
+  should all be resolved quickly and are unlikely worth a report
+
+
+Internal Measurements
+=====================
+
+- use clock_gettime(CLOCK_MONOTONIC), it seems to be the fastest way
+  (less than 5 times slower than a RDTSC instruction, which is itself
+  not safe in the presence of threads migrating among CPUs)
+
+- record only the highest-time entry.  The user of the library is
+  responsible for getting and clearing it often enough if it wants
+  more details.

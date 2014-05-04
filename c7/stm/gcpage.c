@@ -382,7 +382,7 @@ static void mark_visit_from_roots(void)
         struct stm_shadowentry_s *current = tl->shadowstack;
         struct stm_shadowentry_s *base = tl->shadowstack_base;
         while (current-- != base) {
-            if (((uintptr_t)current->ss) > STM_STACK_MARKER_OLD)
+            if ((((uintptr_t)current->ss) & 3) == 0)
                 mark_visit_object(current->ss, segment_base);
         }
         mark_visit_object(tl->thread_local_obj, segment_base);
@@ -418,6 +418,23 @@ static void mark_visit_from_modified_objects(void)
                 mark_trace(item, stm_object_pages);  /* shared version */
                 mark_trace(item, base);              /* private version */
             }));
+    }
+}
+
+static void mark_visit_from_markers(void)
+{
+    long j;
+    for (j = 1; j <= NB_SEGMENTS; j++) {
+        char *base = get_segment_base(j);
+        struct list_s *lst = get_priv_segment(j)->modified_old_objects_markers;
+        uintptr_t i;
+        for (i = list_count(lst); i > 0; i -= 2) {
+            mark_visit_object((object_t *)list_item(lst, i - 1), base);
+        }
+        if (get_priv_segment(j)->transaction_state == TS_INEVITABLE) {
+            uintptr_t marker_inev_obj = get_priv_segment(j)->marker_inev[1];
+            mark_visit_object((object_t *)marker_inev_obj, base);
+        }
     }
 }
 
@@ -523,6 +540,7 @@ static void major_collection_now_at_safe_point(void)
     /* marking */
     LIST_CREATE(mark_objects_to_trace);
     mark_visit_from_modified_objects();
+    mark_visit_from_markers();
     mark_visit_from_roots();
     LIST_FREE(mark_objects_to_trace);
 
