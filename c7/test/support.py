@@ -28,6 +28,10 @@ typedef struct {
     int associated_segment_num;
     uint32_t events[];
     float timing[];
+    int longest_marker_state;
+    double longest_marker_time;
+    char longest_marker_self[];
+    char longest_marker_other[];
     ...;
 } stm_thread_local_t;
 
@@ -118,6 +122,17 @@ void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 #define STM_TIME_SYNC_PAUSE ...
 
 void stm_flush_timing(stm_thread_local_t *, int);
+
+void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,
+                            object_t *following_object,
+                            char *outputbuf, size_t outputbufsize);
+void (*stmcb_debug_print)(const char *cause, double time,
+                          const char *marker);
+
+void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
+void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
+void stm_pop_marker(stm_thread_local_t *);
+char *_stm_expand_marker(void);
 """)
 
 
@@ -272,10 +287,24 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     }
 }
 
+void stm_push_marker(stm_thread_local_t *tl, uintptr_t onum, object_t *ob)
+{
+    STM_PUSH_MARKER(*tl, onum, ob);
+}
+
+void stm_update_marker_num(stm_thread_local_t *tl, uintptr_t onum)
+{
+    STM_UPDATE_MARKER_NUM(*tl, onum);
+}
+
+void stm_pop_marker(stm_thread_local_t *tl)
+{
+    STM_POP_MARKER(*tl);
+}
+
 void stmcb_commit_soon()
 {
 }
-
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
                     ('STM_LARGEMALLOC_TEST', '1'),
@@ -439,6 +468,8 @@ class BaseTest(object):
         self.current_thread = 0
 
     def teardown_method(self, meth):
+        lib.stmcb_expand_marker = ffi.NULL
+        lib.stmcb_debug_print = ffi.NULL
         tl = self.tls[self.current_thread]
         if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
             self.commit_transaction()      # must succeed!
