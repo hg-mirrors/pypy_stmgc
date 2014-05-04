@@ -208,7 +208,8 @@ class TestMarker(BaseTest):
     def test_double_abort_markers_cb_inevitable(self):
         @ffi.callback("void(char *, uintptr_t, object_t *, char *, size_t)")
         def expand_marker(base, number, ptr, outbuf, outbufsize):
-            s = '%d %r\x00' % (number, stm_get_char(p))
+            c = (base + int(ffi.cast("uintptr_t", ptr)))[8]
+            s = '%d %r\x00' % (number, c)
             assert len(s) <= outbufsize
             outbuf[0:len(s)] = s
         lib.stmcb_expand_marker = expand_marker
