@@ -86,15 +86,16 @@ void stm_setup(void)
         pr->callbacks_on_abort = tree_create();
         pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * i;
         highest_overflow_number = pr->overflow_number;
+        pr->pub.transaction_read_version = 0xff;
     }
 
     /* The pages are shared lazily, as remap_file_pages() takes a relatively
        long time for each page.
 
-       The read markers are initially zero, which is correct:
-       STM_SEGMENT->transaction_read_version never contains zero,
-       so a null read marker means "not read" whatever the
-       current transaction_read_version is.
+       The read markers are initially zero, but we set anyway
+       transaction_read_version to 0xff in order to force the first
+       transaction to "clear" the read markers by mapping a different,
+       private range of addresses.
     */
 
     setup_sync();
