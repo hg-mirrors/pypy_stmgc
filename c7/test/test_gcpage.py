@@ -228,3 +228,22 @@ class TestGCPage(BaseTest):
 
         self.start_transaction()
         assert stm_get_char(self.get_thread_local_obj()) == 'L'
+
+    def test_marker_1(self):
+        self.start_transaction()
+        p1 = stm_allocate(600)
+        stm_set_char(p1, 'o')
+        self.push_root(p1)
+        self.push_root(ffi.cast("object_t *", lib.STM_STACK_MARKER_NEW))
+        p2 = stm_allocate(600)
+        stm_set_char(p2, 't')
+        self.push_root(p2)
+        stm_major_collect()
+        assert lib._stm_total_allocated() == 2 * 616
+        #
+        p2 = self.pop_root()
+        m = self.pop_root()
+        assert m == ffi.cast("object_t *", lib.STM_STACK_MARKER_OLD)
+        p1 = self.pop_root()
+        assert stm_get_char(p1) == 'o'
+        assert stm_get_char(p2) == 't'

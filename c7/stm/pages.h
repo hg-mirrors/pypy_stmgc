@@ -19,6 +19,8 @@
 #define PAGE_FLAG_START   END_NURSERY_PAGE
 #define PAGE_FLAG_END     NB_PAGES
 
+#define USE_REMAP_FILE_PAGES
+
 struct page_shared_s {
 #if NB_SEGMENTS <= 8
     uint8_t by_segment;
@@ -34,20 +36,6 @@ struct page_shared_s {
 };
 
 static struct page_shared_s pages_privatized[PAGE_FLAG_END - PAGE_FLAG_START];
-/* Rules for concurrent access to this array, possibly with is_private_page():
-
-   - we clear bits only during major collection, when all threads are
-     synchronized anyway
-
-   - we set only the bit corresponding to our segment number, using
-     an atomic addition; and we do it _before_ we actually make the
-     page private.
-
-   - concurrently, other threads checking the bits might (rarely)
-     get the answer 'true' to is_private_page() even though it is not
-     actually private yet.  This inconsistency is in the direction
-     that we want for synchronize_object_now().
-*/
 
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
 static void page_privatize(uintptr_t pagenum);
@@ -86,7 +74,3 @@ static inline void page_check_and_reshare(uintptr_t pagenum)
     if (pages_privatized[pagenum - PAGE_FLAG_START].by_segment != 0)
         page_reshare(pagenum);
 }
-
-#ifndef NDEBUG
-static char lock_pages_privatizing[NB_SEGMENTS + 1] = { 0 };
-#endif

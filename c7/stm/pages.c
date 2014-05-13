@@ -81,9 +81,18 @@ static void d_remap_file_pages(char *addr, size_t size, ssize_t pgoff)
        can only be remapped to page N in another segment */
     assert(((addr - stm_object_pages) / 4096UL - pgoff) % NB_PAGES == 0);
 
+#ifdef USE_REMAP_FILE_PAGES
     int res = remap_file_pages(addr, size, 0, pgoff, 0);
     if (UNLIKELY(res < 0))
         stm_fatalerror("remap_file_pages: %m");
+#else
+    char *res = mmap(addr, size,
+                     PROT_READ | PROT_WRITE,
+                     (MAP_PAGES_FLAGS & ~MAP_ANONYMOUS) | MAP_FIXED,
+                     stm_object_pages_fd, pgoff * 4096UL);
+    if (UNLIKELY(res != addr))
+        stm_fatalerror("mmap (remapping page): %m");
+#endif
 }
 
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
@@ -108,18 +117,20 @@ static void page_privatize(uintptr_t pagenum)
 {
     /* check this thread's 'pages_privatized' bit */
     uint64_t bitmask = 1UL << (STM_SEGMENT->segment_num - 1);
-    struct page_shared_s *ps = &pages_privatized[pagenum - PAGE_FLAG_START];
+    volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
+        &pages_privatized[pagenum - PAGE_FLAG_START];
     if (ps->by_segment & bitmask) {
         /* the page is already privatized; nothing to do */
         return;
     }
 
-#ifndef NDEBUG
-    spinlock_acquire(lock_pages_privatizing[STM_SEGMENT->segment_num]);
-#endif
+    long i;
+    for (i = 1; i <= NB_SEGMENTS; i++) {
+        spinlock_acquire(get_priv_segment(i)->privatization_lock);
+    }
 
     /* add this thread's 'pages_privatized' bit */
-    __sync_fetch_and_add(&ps->by_segment, bitmask);
+    ps->by_segment |= bitmask;
 
     /* "unmaps" the page to make the address space location correspond
        again to its underlying file offset (XXX later we should again
@@ -133,9 +144,9 @@ static void page_privatize(uintptr_t pagenum)
     /* copy the content from the shared (segment 0) source */
     pagecopy(new_page, stm_object_pages + pagenum * 4096UL);
 
-#ifndef NDEBUG
-    spinlock_release(lock_pages_privatizing[STM_SEGMENT->segment_num]);
-#endif
+    for (i = NB_SEGMENTS; i >= 1; i--) {
+        spinlock_release(get_priv_segment(i)->privatization_lock);
+    }
 }
 
 static void _page_do_reshare(long segnum, uintptr_t pagenum)
@@ -167,6 +178,7 @@ static void page_reshare(uintptr_t pagenum)
 
 static void pages_setup_readmarkers_for_nursery(void)
 {
+#ifdef USE_REMAP_FILE_PAGES
     /* The nursery page's read markers are never read, but must still
        be writeable.  We'd like to map the pages to a general "trash
        page"; missing one, we remap all the pages over to the same one.
@@ -185,4 +197,5 @@ static void pages_setup_readmarkers_for_nursery(void)
             /* errors here ignored */
         }
     }
+#endif
 }

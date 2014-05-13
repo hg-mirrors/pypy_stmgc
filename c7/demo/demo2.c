@@ -44,6 +44,16 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     visit((object_t **)&n->next);
 }
 
+void stmcb_commit_soon() {}
+
+static void expand_marker(char *base, uintptr_t odd_number,
+                          object_t *following_object,
+                          char *outputbuf, size_t outputbufsize)
+{
+    assert(following_object == NULL);
+    snprintf(outputbuf, outputbufsize, "<%p %lu>", base, odd_number);
+}
+
 
 nodeptr_t global_chained_list;
 
@@ -87,6 +97,18 @@ nodeptr_t swap_nodes(nodeptr_t initial)
     assert(initial != NULL);
 
     STM_START_TRANSACTION(&stm_thread_local, here);
+
+    if (stm_thread_local.longest_marker_state != 0) {
+        fprintf(stderr, "[%p] marker %d for %.6f seconds:\n",
+                &stm_thread_local,
+                stm_thread_local.longest_marker_state,
+                stm_thread_local.longest_marker_time);
+        fprintf(stderr, "\tself:\t\"%s\"\n\tother:\t\"%s\"\n",
+                stm_thread_local.longest_marker_self,
+                stm_thread_local.longest_marker_other);
+        stm_thread_local.longest_marker_state = 0;
+        stm_thread_local.longest_marker_time = 0.0;
+    }
 
     nodeptr_t prev = initial;
     stm_read((objptr_t)prev);
@@ -194,15 +216,24 @@ void *demo2(void *arg)
 {
     int status;
     stm_register_thread_local(&stm_thread_local);
+    char *org = (char *)stm_thread_local.shadowstack;
 
     STM_PUSH_ROOT(stm_thread_local, global_chained_list);  /* remains forever in the shadow stack */
 
+    int loops = 0;
+
     while (check_sorted() == -1) {
+
+        STM_PUSH_MARKER(stm_thread_local, 2 * loops + 1, NULL);
+
         bubble_run();
+
+        STM_POP_MARKER(stm_thread_local);
+        loops++;
     }
 
     STM_POP_ROOT(stm_thread_local, global_chained_list);
-    assert(stm_thread_local.shadowstack == stm_thread_local.shadowstack_base);
+    OPT_ASSERT(org == (char *)stm_thread_local.shadowstack);
 
     unregister_thread_local();
     status = sem_post(&done); assert(status == 0);
@@ -245,6 +276,7 @@ int main(void)
 
     stm_setup();
     stm_register_thread_local(&stm_thread_local);
+    stmcb_expand_marker = expand_marker;
 
 
     setup_list();

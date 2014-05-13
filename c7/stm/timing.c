@@ -25,18 +25,26 @@ static enum stm_time_e change_timing_state(enum stm_time_e newstate)
     return oldstate;
 }
 
-static void change_timing_state_tl(stm_thread_local_t *tl,
-                                   enum stm_time_e newstate)
+static double change_timing_state_tl(stm_thread_local_t *tl,
+                                     enum stm_time_e newstate)
 {
     TIMING_CHANGE(tl, newstate);
+    return elasped;
 }
 
 static void timing_end_transaction(enum stm_time_e attribute_to)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     TIMING_CHANGE(tl, STM_TIME_OUTSIDE_TRANSACTION);
-    add_timing(tl, attribute_to, tl->timing[STM_TIME_RUN_CURRENT]);
+    double time_this_transaction = tl->timing[STM_TIME_RUN_CURRENT];
+    add_timing(tl, attribute_to, time_this_transaction);
     tl->timing[STM_TIME_RUN_CURRENT] = 0.0f;
+
+    if (attribute_to != STM_TIME_RUN_COMMITTED) {
+        struct stm_priv_segment_info_s *pseg =
+            get_priv_segment(STM_SEGMENT->segment_num);
+        marker_copy(tl, pseg, attribute_to, time_this_transaction);
+    }
 }
 
 static const char *timer_names[] = {
@@ -51,6 +59,7 @@ static const char *timer_names[] = {
     "wait write read",
     "wait inevitable",
     "wait other",
+    "sync commit soon",
     "bookkeeping",
     "minor gc",
     "major gc",
@@ -70,9 +79,13 @@ void stm_flush_timing(stm_thread_local_t *tl, int verbose)
         s_mutex_lock();
         fprintf(stderr, "thread %p:\n", tl);
         for (i = 0; i < _STM_TIME_N; i++) {
-            fprintf(stderr, "    %-24s %9u  %.3f s\n",
+            fprintf(stderr, "    %-24s %9u %8.3f s\n",
                     timer_names[i], tl->events[i], (double)tl->timing[i]);
         }
+        fprintf(stderr, "    %-24s %6s %11.6f s\n",
+                "longest recorded marker", "", tl->longest_marker_time);
+        fprintf(stderr, "    \"%.*s\"\n",
+                (int)_STM_MARKER_LEN, tl->longest_marker_self);
         s_mutex_unlock();
     }
 }
