@@ -29,6 +29,7 @@ __thread struct htm_transaction_info_s _htm_info __attribute__((aligned(64)));
 static void acquire_gil(stm_thread_local_t *tl) {
     if (pthread_mutex_lock(&_stm_gil) == 0) {
         _stm_tloc = tl;
+        STM_SEGMENT->running_thread = tl;
         _htm_info.use_gil = 1;
         return;
     }
@@ -121,11 +122,14 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
     }
 
     _stm_tloc = tl;
+    STM_SEGMENT->running_thread = tl;
 }
+
 
 void stm_commit_transaction(void) {
     stm_collect(0);
     _stm_tloc = NULL;
+    STM_SEGMENT->running_thread = NULL;
     if (_htm_info.use_gil) {
         OPT_ASSERT(!xtest());
         if (pthread_mutex_unlock(&_stm_gil) != 0) abort();
@@ -338,7 +342,7 @@ object_t *_stm_allocate_external(ssize_t size)
 /************************************************************/
 
 
-#define NB_NURSERY_PAGES    1024          // 4MB
+#define NB_NURSERY_PAGES    1          // 1 page
 #define NURSERY_SIZE        (NB_NURSERY_PAGES * 4096UL)
 
 __thread char *_stm_nursery_base    = NULL;

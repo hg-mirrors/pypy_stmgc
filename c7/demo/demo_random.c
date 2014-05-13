@@ -79,6 +79,8 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     assert(n->next == *last_next);
 }
 
+void stmcb_commit_soon() {}
+
 int get_rand(int max)
 {
     if (max == 0)

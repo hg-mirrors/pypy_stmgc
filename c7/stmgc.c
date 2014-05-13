@@ -8,6 +8,7 @@
 #include "stm/pages.h"
 #include "stm/gcpage.h"
 #include "stm/sync.h"
+#include "stm/setup.h"
 #include "stm/largemalloc.h"
 #include "stm/nursery.h"
 #include "stm/contention.h"
@@ -15,6 +16,7 @@
 #include "stm/fprintcolor.h"
 #include "stm/weakref.h"
 #include "stm/timing.h"
+#include "stm/marker.h"
 
 #include "stm/misc.c"
 #include "stm/list.c"
@@ -35,3 +37,4 @@
 #include "stm/fprintcolor.c"
 #include "stm/weakref.c"
 #include "stm/timing.c"
+#include "stm/marker.c"

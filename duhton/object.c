@@ -35,6 +35,8 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
         trace((struct DuObject_s *)obj, visit);
 }
 
+void stmcb_commit_soon(void) { }
+
 
 DuObject *DuObject_New(DuType *tp)
 {

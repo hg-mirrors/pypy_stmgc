@@ -39,6 +39,8 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     visit((object_t **)&n->next);
 }
 
+void stmcb_commit_soon() {}
+
 
 
 static sem_t done;
@@ -50,6 +52,7 @@ void *demo2(void *arg)
 {
     int status;
     stm_register_thread_local(&stm_thread_local);
+    char *org = (char *)stm_thread_local.shadowstack;
     tl_counter = 0;
 
     object_t *tmp;
@@ -65,7 +68,7 @@ void *demo2(void *arg)
         i++;
     }
 
-    assert(stm_thread_local.shadowstack == stm_thread_local.shadowstack_base);
+    assert(org == (char *)stm_thread_local.shadowstack);
 
     stm_unregister_thread_local(&stm_thread_local);
     status = sem_post(&done); assert(status == 0);

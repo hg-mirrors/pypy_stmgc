@@ -14,13 +14,10 @@ static void teardown_core(void)
 #define EVENTUALLY(condition)                                   \
     {                                                           \
         if (!(condition)) {                                     \
-            int _i;                                             \
-            for (_i = 1; _i <= NB_SEGMENTS; _i++)               \
-                spinlock_acquire(lock_pages_privatizing[_i]);   \
+            acquire_privatization_lock();                       \
             if (!(condition))                                   \
                 stm_fatalerror("fails: " #condition);           \
-            for (_i = 1; _i <= NB_SEGMENTS; _i++)               \
-                spinlock_release(lock_pages_privatizing[_i]);   \
+            release_privatization_lock();                       \
         }                                                       \
     }
 #endif
@@ -76,15 +73,30 @@ void _stm_write_slowpath(object_t *obj)
     assert(lock_idx < sizeof(write_locks));
  retry:
     if (write_locks[lock_idx] == 0) {
+        /* A lock to prevent reading garbage from
+           lookup_other_thread_recorded_marker() */
+        acquire_marker_lock(STM_SEGMENT->segment_base);
+
         if (UNLIKELY(!__sync_bool_compare_and_swap(&write_locks[lock_idx],
-                                                   0, lock_num)))
+                                                   0, lock_num))) {
+            release_marker_lock(STM_SEGMENT->segment_base);
             goto retry;
+        }
 
         dprintf_test(("write_slowpath %p -> mod_old\n", obj));
 
         /* First change to this old object from this transaction.
            Add it to the list 'modified_old_objects'. */
         LIST_APPEND(STM_PSEGMENT->modified_old_objects, obj);
+
+        /* Add the current marker, recording where we wrote to this object */
+        uintptr_t marker[2];
+        marker_fetch(STM_SEGMENT->running_thread, marker);
+        STM_PSEGMENT->modified_old_objects_markers =
+            list_append2(STM_PSEGMENT->modified_old_objects_markers,
+                         marker[0], marker[1]);
+
+        release_marker_lock(STM_SEGMENT->segment_base);
 
         /* We need to privatize the pages containing the object, if they
            are still SHARED_PAGE.  The common case is that there is only
@@ -127,7 +139,7 @@ void _stm_write_slowpath(object_t *obj)
     else {
         /* call the contention manager, and then retry (unless we were
            aborted). */
-        write_write_contention_management(lock_idx);
+        write_write_contention_management(lock_idx, obj);
         goto retry;
     }
 
@@ -195,7 +207,13 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
     change_timing_state(STM_TIME_RUN_CURRENT);
     STM_PSEGMENT->start_time = tl->_timing_cur_start;
+    STM_PSEGMENT->signalled_to_commit_soon = false;
     STM_PSEGMENT->safe_point = SP_RUNNING;
+#ifndef NDEBUG
+    STM_PSEGMENT->marker_inev[1] = 99999999999999999L;
+#endif
+    if (jmpbuf == NULL)
+        marker_fetch_inev();
     STM_PSEGMENT->transaction_state = (jmpbuf != NULL ? TS_REGULAR
                                                       : TS_INEVITABLE);
     STM_SEGMENT->jmpbuf_ptr = jmpbuf;
@@ -223,12 +241,17 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
+    assert(list_is_empty(STM_PSEGMENT->modified_old_objects_markers));
     assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
     assert(tree_is_cleared(STM_PSEGMENT->nursery_objects_shadows));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_abort));
     assert(STM_PSEGMENT->objects_pointing_to_nursery == NULL);
     assert(STM_PSEGMENT->large_overflow_objects == NULL);
+#ifndef NDEBUG
+    /* this should not be used when objects_pointing_to_nursery == NULL */
+    STM_PSEGMENT->modified_old_objects_markers_num_old = 99999999999999999L;
+#endif
 
     check_nursery_at_transaction_start();
 }
@@ -263,7 +286,7 @@ static bool detect_write_read_conflicts(void)
             ({
                 if (was_read_remote(remote_base, item, remote_version)) {
                     /* A write-read conflict! */
-                    write_read_contention_management(i);
+                    write_read_contention_management(i, item);
 
                     /* If we reach this point, we didn't abort, but maybe we
                        had to wait for the other thread to commit.  If we
@@ -359,12 +382,15 @@ static void synchronize_object_enqueue(object_t *obj)
        It is first copied into the shared pages, and then into other
        segments' own private pages.  (The second part might be done
        later; call synchronize_objects_flush() to flush this queue.)
+
+       Must be called with the privatization lock acquired.
     */
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     ssize_t obj_size = stmcb_size_rounded_up(
         (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
     OPT_ASSERT(obj_size >= 16);
+    assert(STM_PSEGMENT->privatization_lock == 1);
 
     if (LIKELY(is_small_uniform(obj))) {
         _synchronize_fragment((stm_char *)obj, obj_size);
@@ -444,13 +470,16 @@ static void push_overflow_objects_from_privatized_pages(void)
     if (STM_PSEGMENT->large_overflow_objects == NULL)
         return;
 
+    acquire_privatization_lock();
     LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
                    synchronize_object_enqueue(item));
     synchronize_objects_flush();
+    release_privatization_lock();
 }
 
 static void push_modified_to_other_segments(void)
 {
+    acquire_privatization_lock();
     LIST_FOREACH_R(
         STM_PSEGMENT->modified_old_objects,
         object_t * /*item*/,
@@ -470,9 +499,11 @@ static void push_modified_to_other_segments(void)
                private pages as needed */
             synchronize_object_enqueue(item);
         }));
+    release_privatization_lock();
 
     synchronize_objects_flush();
     list_clear(STM_PSEGMENT->modified_old_objects);
+    list_clear(STM_PSEGMENT->modified_old_objects_markers);
 }
 
 static void _finish_transaction(int attribute_to)
@@ -614,6 +645,7 @@ reset_modified_from_other_segments(int segment_num)
         }));
 
     list_clear(pseg->modified_old_objects);
+    list_clear(pseg->modified_old_objects_markers);
 }
 
 static void abort_data_structures_from_segment_num(int segment_num)
@@ -638,6 +670,10 @@ static void abort_data_structures_from_segment_num(int segment_num)
                        (int)pseg->transaction_state);
     }
 
+    /* if we don't have marker information already, look up and preserve
+       the marker information from the shadowstack as a string */
+    marker_default_for_abort(pseg);
+
     /* throw away the content of the nursery */
     long bytes_in_nursery = throw_away_nursery(pseg);
 
@@ -648,6 +684,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
        value before the transaction start */
     stm_thread_local_t *tl = pseg->pub.running_thread;
     assert(tl->shadowstack >= pseg->shadowstack_at_start_of_transaction);
+    pseg->shadowstack_at_abort = tl->shadowstack;
     tl->shadowstack = pseg->shadowstack_at_start_of_transaction;
     tl->thread_local_obj = pseg->threadlocal_at_start_of_transaction;
     tl->last_abort__bytes_in_nursery = bytes_in_nursery;
@@ -719,6 +756,7 @@ void _stm_become_inevitable(const char *msg)
     if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
         dprintf(("become_inevitable: %s\n", msg));
 
+        marker_fetch_inev();
         wait_for_end_of_inevitable_transaction(NULL);
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
         STM_SEGMENT->jmpbuf_ptr = NULL;

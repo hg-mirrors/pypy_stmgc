@@ -1,7 +1,7 @@
 from support import *
 import py
 
-class TestBasic(BaseTest):
+class TestNursery(BaseTest):
 
     def test_nursery_full(self):
         lib._stm_set_nursery_free_count(2048)
@@ -224,3 +224,42 @@ class TestBasic(BaseTest):
         self.switch(1)
         self.start_transaction()
         assert stm_get_char(new2) == 'a'
+
+    def test_marker_1(self):
+        self.start_transaction()
+        p1 = stm_allocate(600)
+        stm_set_char(p1, 'o')
+        self.push_root(p1)
+        self.push_root(ffi.cast("object_t *", lib.STM_STACK_MARKER_NEW))
+        p2 = stm_allocate(600)
+        stm_set_char(p2, 't')
+        self.push_root(p2)
+        stm_minor_collect()
+        assert lib._stm_total_allocated() == 2 * 616
+        #
+        p2 = self.pop_root()
+        m = self.pop_root()
+        assert m == ffi.cast("object_t *", lib.STM_STACK_MARKER_OLD)
+        p1 = self.pop_root()
+        assert stm_get_char(p1) == 'o'
+        assert stm_get_char(p2) == 't'
+
+    def test_marker_2(self):
+        self.start_transaction()
+        p1 = stm_allocate(600)
+        stm_set_char(p1, 'o')
+        self.push_root(p1)
+        self.push_root(ffi.cast("object_t *", lib.STM_STACK_MARKER_OLD))
+        p2 = stm_allocate(600)
+        stm_set_char(p2, 't')
+        self.push_root(p2)
+        stm_minor_collect()
+        assert lib._stm_total_allocated() == 1 * 616
+        #
+        p2 = self.pop_root()
+        m = self.pop_root()
+        assert m == ffi.cast("object_t *", lib.STM_STACK_MARKER_OLD)
+        assert stm_get_char(p2) == 't'
+        # the 'p1' reference is invalid now, don't try to read it.
+        # we check that it's invalid because _stm_total_allocated()
+        # only records one of the two objects.
