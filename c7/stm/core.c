@@ -58,7 +58,7 @@ static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t offset)
                here for every card to mark */
             if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
                 /* not yet in the list */
-                LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+                LIST_APPEND(STM_PSEGMENT->old_objects_with_cards, obj);
                 obj->stm_flags |= GCFLAG_CARDS_SET;
             }
 
@@ -68,8 +68,12 @@ static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t offset)
             assert(!write_locks[lock_idx]);
             write_locks[lock_idx] = STM_PSEGMENT->write_lock_num;
         }
+
+        /* We don't need to do anything in the STM part of the WB slowpath: */
         return true;
     }
+
+    /* continue in STM part with no-overflow object */
     return false;
 }
 
@@ -512,6 +516,7 @@ static void _finish_transaction(int attribute_to)
 
     /* reset these lists to NULL for the next transaction */
     LIST_FREE(STM_PSEGMENT->objects_pointing_to_nursery);
+    LIST_FREE(STM_PSEGMENT->old_objects_with_cards);
     LIST_FREE(STM_PSEGMENT->large_overflow_objects);
 
     timing_end_transaction(attribute_to);
@@ -690,6 +695,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     /* reset these lists to NULL too on abort */
     LIST_FREE(pseg->objects_pointing_to_nursery);
+    LIST_FREE(pseg->old_objects_with_cards);
     LIST_FREE(pseg->large_overflow_objects);
     list_clear(pseg->young_weakrefs);
 }

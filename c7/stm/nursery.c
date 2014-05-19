@@ -332,6 +332,7 @@ static void _do_minor_collection(bool commit)
     uintptr_t num_old;
     if (STM_PSEGMENT->objects_pointing_to_nursery == NULL) {
         STM_PSEGMENT->objects_pointing_to_nursery = list_create();
+        STM_PSEGMENT->old_objects_with_cards = list_create();
 
         /* See the doc of 'objects_pointing_to_nursery': if it is NULL,
            then it is implicitly understood to be equal to
