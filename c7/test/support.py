@@ -12,6 +12,8 @@ typedef ... stm_jmpbuf_t;
 #define STM_NB_SEGMENTS ...
 #define _STM_FAST_ALLOC ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
+#define _STM_GCFLAG_HAS_CARDS ...
+#define _STM_CARD_SIZE ...
 #define STM_STACK_MARKER_NEW ...
 #define STM_STACK_MARKER_OLD ...
 
@@ -41,6 +43,11 @@ object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
+void stm_use_cards(object_t* o);
+void stm_read_card(object_t *obj, uintptr_t offset);
+/*void stm_write_card(); use _checked_stm_write_card() instead */
+
+
 void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
@@ -49,6 +56,7 @@ object_t *stm_setup_prebuilt(object_t *);
 object_t *stm_setup_prebuilt_weakref(object_t *);
 
 bool _checked_stm_write(object_t *obj);
+bool _checked_stm_write_card(object_t *obj, uintptr_t offset);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 char *_stm_real_address(object_t *obj);
@@ -179,6 +187,10 @@ int _stm_get_flags(object_t *obj) {
 
 bool _checked_stm_write(object_t *object) {
     CHECKED(stm_write(object));
+}
+
+bool _checked_stm_write_card(object_t *object, uintptr_t offset) {
+    CHECKED(stm_write_card(object, offset));
 }
 
 bool _check_stop_safe_point(void) {
@@ -323,6 +335,8 @@ WORD = 8
 HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
+GCFLAG_HAS_CARDS = lib._STM_GCFLAG_HAS_CARDS
+CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
 
 
@@ -335,20 +349,26 @@ class EmptyStack(Exception):
 def is_in_nursery(o):
     return lib.stm_can_move(o)
 
-def stm_allocate_old(size):
+def stm_allocate_old(size, use_cards=False):
     o = lib._stm_allocate_old(size)
+    if use_cards:
+        lib.stm_use_cards(o)
     tid = 42 + size
     lib._set_type_id(o, tid)
     return o
 
-def stm_allocate_old_refs(n):
+def stm_allocate_old_refs(n, use_cards=False):
     o = lib._stm_allocate_old(HDR + n * WORD)
+    if use_cards:
+        lib.stm_use_cards(o)
     tid = 421420 + n
     lib._set_type_id(o, tid)
     return o
 
-def stm_allocate(size):
+def stm_allocate(size, use_cards=False):
     o = lib.stm_allocate(size)
+    if use_cards:
+        lib.stm_use_cards(o)
     tid = 42 + size
     lib._set_type_id(o, tid)
     return o
@@ -365,8 +385,10 @@ def stm_allocate_weakref(point_to_obj, size=None):
 def stm_get_weakref(o):
     return lib._get_weakref(o)
 
-def stm_allocate_refs(n):
+def stm_allocate_refs(n, use_cards=False):
     o = lib.stm_allocate(HDR + n * WORD)
+    if use_cards:
+        lib.stm_use_cards(o)
     tid = 421420 + n
     lib._set_type_id(o, tid)
     return o
@@ -395,8 +417,19 @@ def stm_get_real_address(obj):
 def stm_read(o):
     lib.stm_read(o)
 
+def stm_read_card(o, offset):
+    assert stm_get_flags(o) & GCFLAG_HAS_CARDS
+    assert offset < stm_get_obj_size(o)
+    lib.stm_read_card(o, offset)
+
 def stm_write(o):
     if lib._checked_stm_write(o):
+        raise Conflict()
+
+def stm_write_card(o, offset):
+    assert stm_get_flags(o) & GCFLAG_HAS_CARDS
+    assert offset < stm_get_obj_size(o)
+    if lib._checked_stm_write_card(o, offset):
         raise Conflict()
 
 def stm_was_read(o):
