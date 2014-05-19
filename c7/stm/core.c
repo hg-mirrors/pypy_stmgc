@@ -44,8 +44,6 @@ void _stm_write_slowpath(object_t *obj, uintptr_t offset)
 {
     assert(IMPLY(!(obj->stm_flags & GCFLAG_HAS_CARDS),
                  offset == 0));
-    if (offset)
-        abort();
 
     assert(_seems_to_be_running_transaction());
     assert(!_is_young(obj));
@@ -73,7 +71,7 @@ void _stm_write_slowpath(object_t *obj, uintptr_t offset)
        'modified_old_objects' (but, because it had GCFLAG_WRITE_BARRIER,
        not in 'objects_pointing_to_nursery').  We'll detect this case
        by finding that we already own the write-lock. */
-    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
+    uintptr_t lock_idx = get_write_lock_idx(obj);
     uint8_t lock_num = STM_PSEGMENT->write_lock_num;
     assert(lock_idx < sizeof(write_locks));
  retry:

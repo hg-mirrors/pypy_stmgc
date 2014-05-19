@@ -220,6 +220,10 @@ static uint8_t write_locks[WRITELOCK_END - WRITELOCK_START];
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
 
+static inline uintptr_t get_write_lock_idx(object_t *obj) {
+    return (((uintptr_t)obj) >> 4) - WRITELOCK_START;
+}
+
 static inline char *get_segment_base(long segment_num) {
     return stm_object_pages + segment_num * (NB_PAGES * 4096UL);
 }
@@ -248,6 +252,15 @@ static inline bool was_read_remote(char *base, object_t *obj,
 {
     uint8_t rm = ((struct stm_read_marker_s *)
                   (base + (((uintptr_t)obj) >> 4)))->rm;
+    assert(rm <= other_transaction_read_version);
+    return rm == other_transaction_read_version;
+}
+
+static inline bool was_read_remote_card(char *base, object_t *obj, uintptr_t offset,
+                                        uint8_t other_transaction_read_version)
+{
+    uint8_t rm = ((struct stm_read_marker_s *)
+                  (base + (((uintptr_t)obj + offset) >> 4)))->rm;
     assert(rm <= other_transaction_read_version);
     return rm == other_transaction_read_version;
 }

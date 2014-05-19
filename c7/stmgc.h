@@ -120,6 +120,8 @@ char *_stm_real_address(object_t *o);
 #include <stdbool.h>
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
+bool _stm_was_read_card(object_t *obj, uintptr_t offset);
+bool _stm_was_written_card(object_t *obj, uintptr_t offset);
 uintptr_t _stm_get_private_page(uintptr_t pagenum);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 char *_stm_get_segment_base(long index);
