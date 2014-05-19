@@ -183,19 +183,42 @@ static void collect_roots_in_nursery(void)
     minor_trace_if_young(&tl->thread_local_obj);
 }
 
+static void minor_trace_if_young_cards(object_t **pobj)
+{
+    /* XXX: maybe add a specialised stmcb_trace_cards() */
+    object_t *obj = *pobj;
+    if (write_locks[get_write_lock_idx((uintptr_t)obj)])
+        minor_trace_if_young(pobj);
+}
+
 static inline void _collect_now(object_t *obj)
 {
     assert(!_is_young(obj));
 
-    /* We must not have GCFLAG_WRITE_BARRIER so far.  Add it now. */
-    assert(!(obj->stm_flags & GCFLAG_WRITE_BARRIER));
-    obj->stm_flags |= GCFLAG_WRITE_BARRIER;
+    /* If WRITE_BARRIER: CARDS_SET */
+    /* If not WRITE_BARRIER: maybe CARDS_SET */
+    assert(IMPLY(obj->stm_flags & GCFLAG_WRITE_BARRIER,
+                 obj->stm_flags & GCFLAG_CARDS_SET));
+    if (!(obj->stm_flags & GCFLAG_WRITE_BARRIER)) {
+        /* do normal full trace, even if also card-marked */
+        obj->stm_flags |= GCFLAG_WRITE_BARRIER;
 
-    /* Trace the 'obj' to replace pointers to nursery with pointers
-       outside the nursery, possibly forcing nursery objects out and
-       adding them to 'objects_pointing_to_nursery' as well. */
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+        /* Trace the 'obj' to replace pointers to nursery with pointers
+           outside the nursery, possibly forcing nursery objects out and
+           adding them to 'objects_pointing_to_nursery' as well. */
+        char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+        stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+    } else {
+        /* only trace cards */
+        char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+        stmcb_trace((struct object_s *)realobj, &minor_trace_if_young_cards);
+    }
+
+    /* clear the CARDS_SET, but not the real cards since they are
+       still needed by STM conflict detection
+       XXX: maybe separate them since we now have to also trace all
+       these cards again in the next minor_collection */
+    obj->stm_flags &= ~GCFLAG_CARDS_SET;
 }
 
 static void collect_oldrefs_to_nursery(void)
