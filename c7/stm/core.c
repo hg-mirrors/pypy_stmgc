@@ -40,6 +40,39 @@ static void check_flag_write_barrier(object_t *obj)
 #endif
 }
 
+static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t offset)
+{
+    /* is this an object from the same transaction, outside the nursery? */
+    if ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0)
+        == STM_PSEGMENT->overflow_number) {
+
+        assert(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
+        dprintf_test(("write_slowpath %p -> ovf obj_to_nurs\n", obj));
+
+        if (!offset) {
+            /* no card to be marked */
+            obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+            LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+        } else {
+            /* don't remove GCFLAG_WRITE_BARRIER because we need to be
+               here for every card to mark */
+            if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
+                /* not yet in the list */
+                LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+                obj->stm_flags |= GCFLAG_CARDS_SET;
+            }
+
+            /* just acquire the corresponding lock for the next minor_collection
+               to know what may have changed. only we know about this object: */
+            uintptr_t lock_idx = get_write_lock_idx((uintptr_t)obj + offset);
+            assert(!write_locks[lock_idx]);
+            write_locks[lock_idx] = STM_PSEGMENT->write_lock_num;
+        }
+        return true;
+    }
+    return false;
+}
+
 void _stm_write_slowpath(object_t *obj, uintptr_t offset)
 {
     assert(IMPLY(!(obj->stm_flags & GCFLAG_HAS_CARDS),
@@ -49,16 +82,8 @@ void _stm_write_slowpath(object_t *obj, uintptr_t offset)
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
-    /* is this an object from the same transaction, outside the nursery? */
-    if ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) ==
-            STM_PSEGMENT->overflow_number) {
-
-        dprintf_test(("write_slowpath %p -> ovf obj_to_nurs\n", obj));
-        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-        assert(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
-        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+    if (_stm_write_slowpath_overflow_objs(obj, offset))
         return;
-    }
 
     /* do a read-barrier now.  Note that this must occur before the
        safepoints that may be issued in write_write_contention_management(). */
@@ -71,7 +96,7 @@ void _stm_write_slowpath(object_t *obj, uintptr_t offset)
        'modified_old_objects' (but, because it had GCFLAG_WRITE_BARRIER,
        not in 'objects_pointing_to_nursery').  We'll detect this case
        by finding that we already own the write-lock. */
-    uintptr_t lock_idx = get_write_lock_idx(obj);
+    uintptr_t lock_idx = get_write_lock_idx((uintptr_t)obj);
     uint8_t lock_num = STM_PSEGMENT->write_lock_num;
     assert(lock_idx < sizeof(write_locks));
  retry:

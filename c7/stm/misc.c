@@ -47,9 +47,9 @@ bool _stm_was_read_card(object_t *obj, uintptr_t offset)
         STM_SEGMENT->transaction_read_version);
 }
 
-bool _stm_was_written_card(object_t *obj, uintptr_t offset)
+bool _stm_was_written_card(object_t *obj)
 {
-    return write_locks[get_write_lock_idx((object_t*)((uintptr_t)obj + offset))];
+    return obj->stm_flags & _STM_GCFLAG_CARDS_SET;
 }
 
 #ifdef STM_TESTS
