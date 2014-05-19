@@ -79,9 +79,7 @@ static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t offset)
 
 void _stm_write_slowpath(object_t *obj, uintptr_t offset)
 {
-    assert(IMPLY(!(obj->stm_flags & GCFLAG_HAS_CARDS),
-                 offset == 0));
-
+    assert(IMPLY(!(obj->stm_flags & GCFLAG_HAS_CARDS), offset == 0));
     assert(_seems_to_be_running_transaction());
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
@@ -100,16 +98,18 @@ void _stm_write_slowpath(object_t *obj, uintptr_t offset)
        'modified_old_objects' (but, because it had GCFLAG_WRITE_BARRIER,
        not in 'objects_pointing_to_nursery').  We'll detect this case
        by finding that we already own the write-lock. */
-    uintptr_t lock_idx = get_write_lock_idx((uintptr_t)obj);
+    bool lock_whole = offset == 0;
+    uintptr_t base_lock_idx = get_write_lock_idx((uintptr_t)obj);
+    //uintptr_t card_lock_idx = get_write_lock_idx((uintptr_t)obj + offset);
     uint8_t lock_num = STM_PSEGMENT->write_lock_num;
-    assert(lock_idx < sizeof(write_locks));
+    assert(base_lock_idx < sizeof(write_locks));
  retry:
-    if (write_locks[lock_idx] == 0) {
+    if (write_locks[base_lock_idx] == 0) {
         /* A lock to prevent reading garbage from
            lookup_other_thread_recorded_marker() */
         acquire_marker_lock(STM_SEGMENT->segment_base);
 
-        if (UNLIKELY(!__sync_bool_compare_and_swap(&write_locks[lock_idx],
+        if (UNLIKELY(!__sync_bool_compare_and_swap(&write_locks[base_lock_idx],
                                                    0, lock_num))) {
             release_marker_lock(STM_SEGMENT->segment_base);
             goto retry;
@@ -159,7 +159,7 @@ void _stm_write_slowpath(object_t *obj, uintptr_t offset)
             }
         }
     }
-    else if (write_locks[lock_idx] == lock_num) {
+    else if (write_locks[base_lock_idx] == lock_num) {
         OPT_ASSERT(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
 #ifdef STM_TESTS
         bool found = false;
@@ -171,33 +171,47 @@ void _stm_write_slowpath(object_t *obj, uintptr_t offset)
     else {
         /* call the contention manager, and then retry (unless we were
            aborted). */
-        write_write_contention_management(lock_idx, obj);
+        write_write_contention_management(base_lock_idx, obj);
         goto retry;
     }
 
     /* A common case for write_locks[] that was either 0 or lock_num:
-       we need to add the object to 'objects_pointing_to_nursery'
-       if there is such a list. */
-    if (STM_PSEGMENT->objects_pointing_to_nursery != NULL) {
-        dprintf_test(("write_slowpath %p -> old obj_to_nurs\n", obj));
-        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+       we need to add the object to the appropriate list if there is one. */
+    if (lock_whole) {
+        if (STM_PSEGMENT->objects_pointing_to_nursery != NULL) {
+            dprintf_test(("write_slowpath %p -> old obj_to_nurs\n", obj));
+            LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+        }
+
+        /* check that we really have a private page */
+        assert(is_private_page(STM_SEGMENT->segment_num,
+                               ((uintptr_t)obj) / 4096));
+        /* check that so far all copies of the object have the flag */
+        check_flag_write_barrier(obj);
+
+        /* remove GCFLAG_WRITE_BARRIER if we succeeded in getting the base
+           write-lock (not for card marking). */
+        assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+
+        /* for sanity, check again that all other segment copies of this
+           object still have the flag (so privatization worked) */
+        check_flag_write_barrier(obj);
+
+    } else { /* card marking case */
+
+        if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
+            /* not yet in the list (may enter here multiple times) */
+            if (STM_PSEGMENT->old_objects_with_cards != NULL) {
+                LIST_APPEND(STM_PSEGMENT->old_objects_with_cards, obj);
+            }
+            obj->stm_flags |= GCFLAG_CARDS_SET;
+        }
+
+        /* check that we really have a private page */
+        assert(is_private_page(STM_SEGMENT->segment_num,
+                               ((uintptr_t)obj + offset) / 4096));
     }
-
-    /* check that we really have a private page */
-    assert(is_private_page(STM_SEGMENT->segment_num,
-                           ((uintptr_t)obj) / 4096));
-
-    /* check that so far all copies of the object have the flag */
-    check_flag_write_barrier(obj);
-
-    /* remove GCFLAG_WRITE_BARRIER, but only if we succeeded in
-       getting the write-lock */
-    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
-    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-
-    /* for sanity, check again that all other segment copies of this
-       object still have the flag (so privatization worked) */
-    check_flag_write_barrier(obj);
 }
 
 static void reset_transaction_read_version(void)
