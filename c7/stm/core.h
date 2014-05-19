@@ -103,6 +103,10 @@ struct stm_priv_segment_info_s {
        understood as meaning implicitly "this is the same as
        'modified_old_objects'". */
     struct list_s *objects_pointing_to_nursery;
+    /* Like objects_pointing_to_nursery it holds the old objects that
+       we did a stm_write_card() on. Objects can be in both lists.
+       It is NULL iff objects_pointing_to_nursery is NULL. */
+    struct list_s *old_objects_with_cards;
 
     /* List of all large, overflowed objects.  Only non-NULL after the
        current transaction spanned a minor collection. */
