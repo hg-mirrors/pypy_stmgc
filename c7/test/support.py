@@ -60,7 +60,7 @@ bool _checked_stm_write_card(object_t *obj, uintptr_t offset);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_read_card(object_t *obj, uintptr_t offset);
 bool _stm_was_written(object_t *obj);
-bool _stm_was_written_card(object_t *obj, uintptr_t offset);
+bool _stm_was_written_card(object_t *obj);
 char *_stm_real_address(object_t *obj);
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
@@ -443,8 +443,8 @@ def stm_was_written(o):
 def stm_was_read_card(o, offset):
     return lib._stm_was_read_card(o, offset)
 
-def stm_was_written_card(o, offset):
-    return lib._stm_was_written_card(o, offset)
+def stm_was_written_card(o):
+    return lib._stm_was_written_card(o)
 
 
 def stm_start_safe_point():

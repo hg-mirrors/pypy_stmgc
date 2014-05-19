@@ -58,6 +58,8 @@ enum /* stm_flags */ {
 
     /* Set on objects after allocation that may use card marking */
     GCFLAG_HAS_CARDS = _STM_GCFLAG_HAS_CARDS,
+    /* Set on objects that have at least one card marked */
+    GCFLAG_CARDS_SET = _STM_GCFLAG_CARDS_SET,
 
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by
        the "overflow number".  This is a number that identifies the
@@ -66,7 +68,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x10   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x20   /* must be last */
 };
 
 
@@ -220,8 +222,8 @@ static uint8_t write_locks[WRITELOCK_END - WRITELOCK_START];
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
 
-static inline uintptr_t get_write_lock_idx(object_t *obj) {
-    return (((uintptr_t)obj) >> 4) - WRITELOCK_START;
+static inline uintptr_t get_write_lock_idx(uintptr_t obj) {
+    return (obj >> 4) - WRITELOCK_START;
 }
 
 static inline char *get_segment_base(long segment_num) {
