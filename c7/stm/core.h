@@ -35,6 +35,8 @@
 #define WRITELOCK_START       ((END_NURSERY_PAGE * 4096UL) >> 4)
 #define WRITELOCK_END         READMARKER_END
 
+#define CARD_SIZE   _STM_CARD_SIZE
+
 enum /* stm_flags */ {
     /* This flag is set on non-nursery objects.  It forces stm_write()
        to call _stm_write_slowpath().
@@ -54,6 +56,9 @@ enum /* stm_flags */ {
        after the object. */
     GCFLAG_HAS_SHADOW = 0x04,
 
+    /* Set on objects after allocation that may use card marking */
+    GCFLAG_HAS_CARDS = _STM_GCFLAG_HAS_CARDS,
+
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by
        the "overflow number".  This is a number that identifies the
        "overflow objects" from the current transaction among all old
@@ -61,7 +66,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x8   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x10   /* must be last */
 };
 
 

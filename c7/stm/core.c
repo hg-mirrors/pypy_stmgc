@@ -40,8 +40,13 @@ static void check_flag_write_barrier(object_t *obj)
 #endif
 }
 
-void _stm_write_slowpath(object_t *obj)
+void _stm_write_slowpath(object_t *obj, uintptr_t offset)
 {
+    assert(IMPLY(!(obj->stm_flags & GCFLAG_HAS_CARDS),
+                 offset == 0));
+    if (offset)
+        abort();
+
     assert(_seems_to_be_running_transaction());
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);

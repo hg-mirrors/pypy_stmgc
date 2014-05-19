@@ -106,7 +106,7 @@ typedef struct stm_thread_local_s {
 
 /* this should use llvm's coldcc calling convention,
    but it's not exposed to C code so far */
-void _stm_write_slowpath(object_t *);
+void _stm_write_slowpath(object_t *, uintptr_t);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
@@ -143,6 +143,8 @@ uint64_t _stm_total_allocated(void);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
+#define _STM_GCFLAG_HAS_CARDS          0x08
+#define _STM_CARD_SIZE                 16 /* modulo 16 == 0! */
 #define _STM_NSE_SIGNAL_MAX     _STM_TIME_N
 #define _STM_FAST_ALLOC           (66*1024)
 
@@ -210,7 +212,24 @@ __attribute__((always_inline))
 static inline void stm_write(object_t *obj)
 {
     if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
-        _stm_write_slowpath(obj);
+        _stm_write_slowpath(obj, 0);
+}
+
+/* The following are barriers that work on the granularity of CARD_SIZE.
+   They can only be used on objects one called stm_use_cards() on. */
+__attribute__((always_inline))
+static inline void stm_read_card(object_t *obj, uintptr_t offset)
+{
+    OPT_ASSERT(obj->stm_flags & _STM_GCFLAG_HAS_CARDS);
+    ((stm_read_marker_t *)(((uintptr_t)obj + offset) >> 4))->rm =
+        STM_SEGMENT->transaction_read_version;
+}
+__attribute__((always_inline))
+static inline void stm_write_card(object_t *obj, uintptr_t offset)
+{
+    OPT_ASSERT(obj->stm_flags & _STM_GCFLAG_HAS_CARDS);
+    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
+        _stm_write_slowpath(obj, offset);
 }
 
 /* Must be provided by the user of this library.
@@ -246,6 +265,16 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
         return _stm_allocate_slowpath(size_rounded_up);
 
     return (object_t *)p;
+}
+
+/* directly after allocation one can enable card marking for any
+   kind of object with stm_use_cards(obj). This enables the use
+   of stm_write/read_card() barriers that do more fine-grained
+   conflict detection and garbage collection. */
+__attribute__((always_inline))
+static inline void stm_use_cards(object_t* o)
+{
+    o->stm_flags |= _STM_GCFLAG_HAS_CARDS;
 }
 
 /* Allocate a weakref object. Weakref objects have a
