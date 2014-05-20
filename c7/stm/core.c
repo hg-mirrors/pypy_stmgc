@@ -181,8 +181,6 @@ void _stm_write_slowpath(object_t *obj, uintptr_t card_index)
         }
     }
     else if (write_locks[base_lock_idx] == lock_num) {
-        assert(IMPLY(!(obj->stm_flags & GCFLAG_CARDS_SET),
-                     STM_PSEGMENT->objects_pointing_to_nursery != NULL));
 #ifdef STM_TESTS
         bool found = false;
         LIST_FOREACH_R(STM_PSEGMENT->modified_old_objects, object_t *,

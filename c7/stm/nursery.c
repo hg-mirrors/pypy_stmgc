@@ -383,7 +383,10 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     } else {
         LIST_FOREACH_R(pseg->modified_old_objects, object_t * /*item*/,
            {
-               if (item->stm_flags & GCFLAG_CARDS_SET) {
+               struct object_s *realobj = (struct object_s *)
+                   REAL_ADDRESS(pseg->pub.segment_base, item);
+
+               if (realobj->stm_flags & GCFLAG_CARDS_SET) {
                    _reset_object_cards(&pseg->pub, item);
                }
            });
