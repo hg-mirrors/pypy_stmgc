@@ -6,6 +6,7 @@
 
 static uint32_t highest_overflow_number;
 
+static void _reset_object_cards(struct stm_segment_info_s *seg, object_t *obj);
 static void minor_collection(bool commit);
 static void check_nursery_at_transaction_start(void);
 static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg);

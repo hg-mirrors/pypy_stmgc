@@ -1,7 +1,20 @@
 from support import *
 import py
 
+
 class TestBasic(BaseTest):
+
+    def _collect(self, kind):
+        if kind == 0:
+            stm_minor_collect()
+        elif kind == 1:
+            stm_major_collect()
+        elif kind == 2:
+            self.switch(1)
+            self.start_transaction()
+            stm_major_collect()
+            self.abort_transaction()
+            self.switch(0)
 
     def test_simple(self):
         o = stm_allocate_old(1024, True)
@@ -9,7 +22,6 @@ class TestBasic(BaseTest):
         stm_read(o)
         stm_write(o)
         self.commit_transaction()
-
 
     def test_simple2(self):
         o = stm_allocate_old(1024, True)
@@ -19,13 +31,20 @@ class TestBasic(BaseTest):
         assert stm_was_written_card(o)
         self.commit_transaction()
 
-    def test_overflow(self):
+    @py.test.mark.parametrize("k", range(3))
+    def test_overflow(self, k):
         self.start_transaction()
         o = stm_allocate(1024, True)
+
         self.push_root(o)
-        stm_minor_collect()
+        self._collect(k)
         o = self.pop_root()
+
         stm_write_card(o, 5)
+
+        assert o in old_objects_with_cards()
+        assert o not in modified_old_objects() # overflow object
+        assert o not in objects_pointing_to_nursery()
         # don't remove GCFLAG_WB
         assert not stm_was_written(o)
         stm_write(o)
@@ -80,7 +99,7 @@ class TestBasic(BaseTest):
         e = stm_allocate(64)
         stm_set_ref(o, 199, p, True)
         stm_set_ref(o, 1, d, False)
-        lib._set_ptr(o, 100, e)
+        lib._set_ptr(o, 100, e) # no barrier
 
         self.push_root(o)
         stm_minor_collect()
@@ -144,3 +163,26 @@ class TestBasic(BaseTest):
 
         assert not is_in_nursery(stm_get_ref(o, 1))
         assert is_in_nursery(stm_get_ref(o, 199)) # not traced
+
+    @py.test.mark.parametrize("k", range(3))
+    def test_major_gc(self, k):
+        o = stm_allocate_old_refs(200, True)
+        self.start_transaction()
+        p = stm_allocate(64)
+        stm_set_ref(o, 0, p, True)
+
+        self.push_root(o)
+        stm_major_collect()
+        o = self.pop_root()
+
+        stm_set_ref(o, 1, ffi.NULL, True)
+        p = stm_get_ref(o, 0)
+        assert stm_was_written_card(o)
+
+        self.push_root(o)
+        self._collect(k)
+        o = self.pop_root()
+
+        assert not stm_was_written_card(o)
+        assert stm_get_ref(o, 0) == p
+        self.commit_transaction()

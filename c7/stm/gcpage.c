@@ -166,7 +166,7 @@ static struct list_s *mark_objects_to_trace;
 
 static inline uintptr_t mark_loc(object_t *obj)
 {
-    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
+    uintptr_t lock_idx = get_write_lock_idx((uintptr_t)obj);
     assert(lock_idx < sizeof(write_locks));
     return lock_idx;
 }
@@ -450,7 +450,7 @@ static void clean_up_segment_lists(void)
            written to but don't actually point to the nursery.  Clear
            it up and set GCFLAG_WRITE_BARRIER again on the objects.
            This is the case for transactions where
-               MINOR_NOTHING_TO_DO() == false
+               MINOR_NOTHING_TO_DO() == true
            but they still did write-barriers on objects
         */
         lst = pseg->objects_pointing_to_nursery;
@@ -461,6 +461,16 @@ static void clean_up_segment_lists(void)
                         REAL_ADDRESS(pseg->pub.segment_base, item);
                     assert(!(realobj->stm_flags & GCFLAG_WRITE_BARRIER));
                     realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
+                }));
+            list_clear(lst);
+
+            lst = pseg->old_objects_with_cards;
+            LIST_FOREACH_R(lst, object_t* /*item*/,
+                ({
+                    struct object_s *realobj = (struct object_s *)
+                        REAL_ADDRESS(pseg->pub.segment_base, item);
+                    OPT_ASSERT(realobj->stm_flags & GCFLAG_CARDS_SET);
+                    _reset_object_cards(&pseg->pub, item);
                 }));
             list_clear(lst);
         }

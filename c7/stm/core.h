@@ -231,7 +231,9 @@ static inline uintptr_t get_card_index(uintptr_t byte_offset) {
     return (byte_offset >> 5) + 1;
 }
 static inline uintptr_t get_write_lock_idx(uintptr_t obj) {
-    return (obj >> 4) - WRITELOCK_START;
+    uintptr_t res = (obj >> 4) - WRITELOCK_START;
+    assert(res < sizeof(write_locks));
+    return res;
 }
 
 static inline char *get_segment_base(long segment_num) {

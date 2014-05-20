@@ -183,10 +183,14 @@ static void collect_roots_in_nursery(void)
     minor_trace_if_young(&tl->thread_local_obj);
 }
 
-static void _reset_cards(object_t *obj)
+static void _reset_object_cards(struct stm_segment_info_s *seg, object_t *obj)
 {
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+#pragma push_macro("STM_PSEGMENT")
+#pragma push_macro("STM_SEGMENT")
+#undef STM_PSEGMENT
+#undef STM_SEGMENT
+    struct object_s *realobj = (struct object_s *)REAL_ADDRESS(seg->segment_base, obj);
+    size_t size = stmcb_size_rounded_up(realobj);
 
     uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
     uintptr_t card_index = 1;
@@ -197,7 +201,10 @@ static void _reset_cards(object_t *obj)
         card_index++;
     }
 
-    obj->stm_flags &= ~GCFLAG_CARDS_SET;
+    realobj->stm_flags &= ~GCFLAG_CARDS_SET;
+    dprintf(("reset cards on %p\n", obj));
+#pragma pop_macro("STM_SEGMENT")
+#pragma pop_macro("STM_PSEGMENT")
 }
 
 static __thread object_t *_card_base_obj;
@@ -229,7 +236,8 @@ static void _trace_card_object(object_t *obj)
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     stmcb_trace((struct object_s *)realobj, &minor_trace_if_young_cards);
 
-    _reset_cards(obj);
+    _reset_object_cards(
+        get_segment(STM_SEGMENT->segment_num), obj);
 }
 
 
@@ -249,7 +257,8 @@ static inline void _collect_now(object_t *obj)
 
         obj->stm_flags |= GCFLAG_WRITE_BARRIER;
         if (obj->stm_flags & GCFLAG_CARDS_SET) {
-            _reset_cards(obj);
+            _reset_object_cards(
+                get_segment(STM_SEGMENT->segment_num), obj);
         }
     } if (obj->stm_flags & GCFLAG_CARDS_SET) {
         _trace_card_object(obj);
@@ -366,7 +375,7 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 
     if (pseg->old_objects_with_cards) {
         LIST_FOREACH_R(pseg->old_objects_with_cards, object_t * /*item*/,
-                       _reset_cards(item));
+                       _reset_object_cards(&pseg->pub, item));
     }
 
     return nursery_used;
