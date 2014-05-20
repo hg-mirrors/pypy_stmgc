@@ -138,8 +138,10 @@ void _stm_stop_safe_point(void);
 void _stm_set_nursery_free_count(uint64_t free_count);
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
+long _stm_count_old_objects_with_cards(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
+object_t *_stm_enum_old_objects_with_cards(long index);
 uint64_t _stm_total_allocated(void);
 #endif
 

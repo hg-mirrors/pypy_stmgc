@@ -42,6 +42,9 @@ static void check_flag_write_barrier(object_t *obj)
 
 static void _stm_mark_card(object_t *obj, uintptr_t card_index)
 {
+    assert(card_index > 0);
+    dprintf(("mark %p card %lu\n", obj, card_index));
+
     if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
         /* not yet in the list */
         if (STM_PSEGMENT->old_objects_with_cards) {
@@ -56,8 +59,11 @@ static void _stm_mark_card(object_t *obj, uintptr_t card_index)
        to know what may have changed.
        We already own the object here or it is an overflow obj. */
     uintptr_t card_lock_idx = get_write_lock_idx((uintptr_t)obj) + card_index;
+
     assert(write_locks[card_lock_idx] == 0
            || write_locks[card_lock_idx] == STM_PSEGMENT->write_lock_num);
+    assert(get_write_lock_idx((uintptr_t)obj) != card_lock_idx);
+
     if (!write_locks[card_lock_idx])
         write_locks[card_lock_idx] = STM_PSEGMENT->write_lock_num;
 }
@@ -175,7 +181,8 @@ void _stm_write_slowpath(object_t *obj, uintptr_t card_index)
         }
     }
     else if (write_locks[base_lock_idx] == lock_num) {
-        OPT_ASSERT(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
+        assert(IMPLY(!(obj->stm_flags & GCFLAG_CARDS_SET),
+                     STM_PSEGMENT->objects_pointing_to_nursery != NULL));
 #ifdef STM_TESTS
         bool found = false;
         LIST_FOREACH_R(STM_PSEGMENT->modified_old_objects, object_t *,
