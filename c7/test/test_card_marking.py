@@ -106,10 +106,6 @@ class TestBasic(BaseTest):
         assert not stm_was_written(o)
         assert stm_was_written_card(o)
 
-        print modified_old_objects()
-        print objects_pointing_to_nursery()
-        print old_objects_with_cards()
-
         self.push_root(o)
         stm_minor_collect()
         o = self.pop_root()
@@ -117,3 +113,34 @@ class TestBasic(BaseTest):
         assert not is_in_nursery(stm_get_ref(o, 199))
         assert not is_in_nursery(stm_get_ref(o, 1))
         assert stm_get_ref(o, 100) == e # not traced
+
+    def test_abort_cleanup(self):
+        o = stm_allocate_old_refs(200, True)
+        self.start_transaction()
+        stm_minor_collect()
+
+        p = stm_allocate_refs(64)
+        d = stm_allocate(64)
+        e = stm_allocate(64)
+        stm_set_ref(o, 199, p, True)
+        stm_set_ref(o, 1, d, True)
+        stm_set_ref(p, 1, e)
+
+        self.abort_transaction()
+
+        assert not modified_old_objects()
+        assert not objects_pointing_to_nursery()
+        assert not old_objects_with_cards()
+
+        self.start_transaction()
+        d = stm_allocate(64)
+        e = stm_allocate(64)
+        lib._set_ptr(o, 199, d) # no barrier
+        stm_set_ref(o, 1, e, True) # card barrier
+
+        self.push_root(o)
+        stm_minor_collect()
+        o = self.pop_root()
+
+        assert not is_in_nursery(stm_get_ref(o, 1))
+        assert is_in_nursery(stm_get_ref(o, 199)) # not traced
