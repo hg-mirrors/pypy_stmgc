@@ -186,23 +186,24 @@ static void collect_roots_in_nursery(void)
 static void minor_trace_if_young_cards(object_t **pobj)
 {
     /* XXX: maybe add a specialised stmcb_trace_cards() */
-    object_t *obj = *pobj;
-    if (write_locks[get_write_lock_idx((uintptr_t)obj)])
+    uintptr_t obj = (uintptr_t)((char*)pobj - STM_SEGMENT->segment_base);
+    if (write_locks[get_write_lock_idx(obj)]) {
+        dprintf(("minor_trace_if_young_cards: trace %p\n", *pobj));
         minor_trace_if_young(pobj);
+    }
 }
 
 static inline void _collect_now(object_t *obj)
 {
     assert(!_is_young(obj));
 
-    /* If WRITE_BARRIER: CARDS_SET */
-    /* If not WRITE_BARRIER: maybe CARDS_SET */
+    dprintf(("_collect_now: %p\n", obj));
     assert(IMPLY(obj->stm_flags & GCFLAG_WRITE_BARRIER,
                  obj->stm_flags & GCFLAG_CARDS_SET));
     if (!(obj->stm_flags & GCFLAG_WRITE_BARRIER)) {
         /* do normal full trace, even if also card-marked */
         obj->stm_flags |= GCFLAG_WRITE_BARRIER;
-
+        dprintf(("-> has no cards\n"));
         /* Trace the 'obj' to replace pointers to nursery with pointers
            outside the nursery, possibly forcing nursery objects out and
            adding them to 'objects_pointing_to_nursery' as well. */
@@ -210,6 +211,8 @@ static inline void _collect_now(object_t *obj)
         stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
     } else {
         /* only trace cards */
+        dprintf(("-> has cards\n"));
+        assert(!_is_in_nursery(obj));
         char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         stmcb_trace((struct object_s *)realobj, &minor_trace_if_young_cards);
     }

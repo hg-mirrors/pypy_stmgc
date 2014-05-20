@@ -79,6 +79,7 @@ void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
+uintptr_t _index_to_offset(object_t *obj, int n);
 
 void _set_weakref(object_t *obj, object_t *v);
 object_t* _get_weakref(object_t *obj);
@@ -267,6 +268,16 @@ object_t * _get_ptr(object_t *obj, int n)
     return *field;
 }
 
+uintptr_t _index_to_offset(object_t *obj, int n)
+{
+    long nrefs = (long)((myobj_t*)obj)->type_id - 421420;
+    assert(n < nrefs);
+
+    stm_char *field_addr = NULL;
+    field_addr += SIZEOF_MYOBJ; /* header */
+    field_addr += n * sizeof(void*); /* field */
+    return (uintptr_t)field_addr;
+}
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj)
 {
@@ -395,22 +406,34 @@ def stm_allocate_refs(n, use_cards=False):
     lib._set_type_id(o, tid)
     return o
 
-def stm_set_ref(obj, idx, ref):
-    stm_write(obj)
+def stm_set_ref(obj, idx, ref, use_cards=False):
+    if use_cards:
+        stm_write_card(obj, lib._index_to_offset(obj, idx))
+    else:
+        stm_write(obj)
     lib._set_ptr(obj, idx, ref)
 
-def stm_get_ref(obj, idx):
-    stm_read(obj)
+def stm_get_ref(obj, idx, use_cards=False):
+    if use_cards:
+        stm_read_card(obj, lib._index_to_offset(obj, idx))
+    else:
+        stm_read(obj)
     return lib._get_ptr(obj, idx)
 
-def stm_set_char(obj, c, offset=HDR):
-    stm_write(obj)
+def stm_set_char(obj, c, offset=HDR, use_cards=False):
     assert HDR <= offset < stm_get_obj_size(obj)
+    if use_cards:
+        stm_write_card(obj, offset)
+    else:
+        stm_write(obj)
     stm_get_real_address(obj)[offset] = c
 
-def stm_get_char(obj, offset=HDR):
-    stm_read(obj)
+def stm_get_char(obj, offset=HDR, use_cards=False):
     assert HDR <= offset < stm_get_obj_size(obj)
+    if use_cards:
+        stm_read_card(obj, offset)
+    else:
+        stm_read(obj)
     return stm_get_real_address(obj)[offset]
 
 def stm_get_real_address(obj):
