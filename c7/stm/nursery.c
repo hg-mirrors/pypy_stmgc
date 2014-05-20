@@ -326,6 +326,10 @@ static void collect_roots_from_markers(uintptr_t num_old)
 
 static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 {
+#pragma push_macro("STM_PSEGMENT")
+#pragma push_macro("STM_SEGMENT")
+#undef STM_PSEGMENT
+#undef STM_SEGMENT
     /* reset the nursery by zeroing it */
     size_t nursery_used;
     char *realnursery;
@@ -360,12 +364,14 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 
     tree_clear(pseg->nursery_objects_shadows);
 
-    if (STM_PSEGMENT->old_objects_with_cards) {
-        LIST_FOREACH_R(STM_PSEGMENT->old_objects_with_cards, object_t * /*item*/,
+    if (pseg->old_objects_with_cards) {
+        LIST_FOREACH_R(pseg->old_objects_with_cards, object_t * /*item*/,
                        _reset_cards(item));
     }
 
     return nursery_used;
+#pragma pop_macro("STM_SEGMENT")
+#pragma pop_macro("STM_PSEGMENT")
 }
 
 #define MINOR_NOTHING_TO_DO(pseg)                                       \
