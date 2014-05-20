@@ -120,7 +120,6 @@ char *_stm_real_address(object_t *o);
 #include <stdbool.h>
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
-bool _stm_was_read_card(object_t *obj, uintptr_t offset);
 bool _stm_was_written_card(object_t *obj);
 uintptr_t _stm_get_private_page(uintptr_t pagenum);
 bool _stm_in_transaction(stm_thread_local_t *tl);
@@ -147,7 +146,7 @@ uint64_t _stm_total_allocated(void);
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
 #define _STM_GCFLAG_HAS_CARDS          0x08
 #define _STM_GCFLAG_CARDS_SET          0x10
-#define _STM_CARD_SIZE                 16 /* modulo 16 == 0! */
+#define _STM_CARD_SIZE                 32 /* 16 may be safe too */
 #define _STM_NSE_SIGNAL_MAX     _STM_TIME_N
 #define _STM_FAST_ALLOC           (66*1024)
 
@@ -218,21 +217,18 @@ static inline void stm_write(object_t *obj)
         _stm_write_slowpath(obj, 0);
 }
 
-/* The following are barriers that work on the granularity of CARD_SIZE.
-   They can only be used on objects one called stm_use_cards() on. */
+/* The following is a GC-optimized barrier that works on the granularity
+   of CARD_SIZE. It can only be used on objects one called stm_use_cards()
+   on. It has the same purpose as stm_write() for TM.
+   'index' is the byte-offset into the object divided by _STM_CARD_SIZE
+   plus 1: (offset // CARD_SIZE) + 1
+*/
 __attribute__((always_inline))
-static inline void stm_read_card(object_t *obj, uintptr_t offset)
-{
-    OPT_ASSERT(obj->stm_flags & _STM_GCFLAG_HAS_CARDS);
-    ((stm_read_marker_t *)(((uintptr_t)obj + offset) >> 4))->rm =
-        STM_SEGMENT->transaction_read_version;
-}
-__attribute__((always_inline))
-static inline void stm_write_card(object_t *obj, uintptr_t offset)
+static inline void stm_write_card(object_t *obj, uintptr_t index)
 {
     OPT_ASSERT(obj->stm_flags & _STM_GCFLAG_HAS_CARDS);
     if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
-        _stm_write_slowpath(obj, offset);
+        _stm_write_slowpath(obj, index);
 }
 
 /* Must be provided by the user of this library.

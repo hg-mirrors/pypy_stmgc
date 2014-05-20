@@ -44,7 +44,6 @@ object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
 void stm_use_cards(object_t* o);
-void stm_read_card(object_t *obj, uintptr_t offset);
 /*void stm_write_card(); use _checked_stm_write_card() instead */
 
 
@@ -56,9 +55,8 @@ object_t *stm_setup_prebuilt(object_t *);
 object_t *stm_setup_prebuilt_weakref(object_t *);
 
 bool _checked_stm_write(object_t *obj);
-bool _checked_stm_write_card(object_t *obj, uintptr_t offset);
+bool _checked_stm_write_card(object_t *obj, uintptr_t index);
 bool _stm_was_read(object_t *obj);
-bool _stm_was_read_card(object_t *obj, uintptr_t offset);
 bool _stm_was_written(object_t *obj);
 bool _stm_was_written_card(object_t *obj);
 char *_stm_real_address(object_t *obj);
@@ -79,7 +77,7 @@ void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
-uintptr_t _index_to_offset(object_t *obj, int n);
+uintptr_t _index_to_card_index(object_t *obj, int n);
 
 void _set_weakref(object_t *obj, object_t *v);
 object_t* _get_weakref(object_t *obj);
@@ -192,8 +190,8 @@ bool _checked_stm_write(object_t *object) {
     CHECKED(stm_write(object));
 }
 
-bool _checked_stm_write_card(object_t *object, uintptr_t offset) {
-    CHECKED(stm_write_card(object, offset));
+bool _checked_stm_write_card(object_t *object, uintptr_t index) {
+    CHECKED(stm_write_card(object, index));
 }
 
 bool _check_stop_safe_point(void) {
@@ -268,7 +266,7 @@ object_t * _get_ptr(object_t *obj, int n)
     return *field;
 }
 
-uintptr_t _index_to_offset(object_t *obj, int n)
+uintptr_t _index_to_card_index(object_t *obj, int n)
 {
     long nrefs = (long)((myobj_t*)obj)->type_id - 421420;
     assert(n < nrefs);
@@ -276,7 +274,7 @@ uintptr_t _index_to_offset(object_t *obj, int n)
     stm_char *field_addr = NULL;
     field_addr += SIZEOF_MYOBJ; /* header */
     field_addr += n * sizeof(void*); /* field */
-    return (uintptr_t)field_addr;
+    return ((uintptr_t)field_addr / _STM_CARD_SIZE) + 1;
 }
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj)
@@ -358,6 +356,8 @@ class Conflict(Exception):
 
 class EmptyStack(Exception):
     pass
+def byte_offset_to_card_index(offset):
+    return (offset // CARD_SIZE) + 1
 
 def is_in_nursery(o):
     return lib.stm_can_move(o)
@@ -408,32 +408,27 @@ def stm_allocate_refs(n, use_cards=False):
 
 def stm_set_ref(obj, idx, ref, use_cards=False):
     if use_cards:
-        stm_write_card(obj, lib._index_to_offset(obj, idx))
+        stm_write_card(obj, lib._index_to_card_index(obj, idx))
     else:
         stm_write(obj)
     lib._set_ptr(obj, idx, ref)
 
-def stm_get_ref(obj, idx, use_cards=False):
-    if use_cards:
-        stm_read_card(obj, lib._index_to_offset(obj, idx))
-    else:
-        stm_read(obj)
+def stm_get_ref(obj, idx):
+    stm_read(obj)
     return lib._get_ptr(obj, idx)
 
 def stm_set_char(obj, c, offset=HDR, use_cards=False):
     assert HDR <= offset < stm_get_obj_size(obj)
     if use_cards:
-        stm_write_card(obj, offset)
+        index = byte_offset_to_card_index(offset)
+        stm_write_card(obj, index)
     else:
         stm_write(obj)
     stm_get_real_address(obj)[offset] = c
 
-def stm_get_char(obj, offset=HDR, use_cards=False):
+def stm_get_char(obj, offset=HDR):
     assert HDR <= offset < stm_get_obj_size(obj)
-    if use_cards:
-        stm_read_card(obj, offset)
-    else:
-        stm_read(obj)
+    stm_read(obj)
     return stm_get_real_address(obj)[offset]
 
 def stm_get_real_address(obj):
@@ -442,19 +437,14 @@ def stm_get_real_address(obj):
 def stm_read(o):
     lib.stm_read(o)
 
-def stm_read_card(o, offset):
-    assert stm_get_flags(o) & GCFLAG_HAS_CARDS
-    assert offset < stm_get_obj_size(o)
-    lib.stm_read_card(o, offset)
 
 def stm_write(o):
     if lib._checked_stm_write(o):
         raise Conflict()
 
-def stm_write_card(o, offset):
+def stm_write_card(o, index):
     assert stm_get_flags(o) & GCFLAG_HAS_CARDS
-    assert offset < stm_get_obj_size(o)
-    if lib._checked_stm_write_card(o, offset):
+    if lib._checked_stm_write_card(o, index):
         raise Conflict()
 
 def stm_was_read(o):
@@ -462,9 +452,6 @@ def stm_was_read(o):
 
 def stm_was_written(o):
     return lib._stm_was_written(o)
-
-def stm_was_read_card(o, offset):
-    return lib._stm_was_read_card(o, offset)
 
 def stm_was_written_card(o):
     return lib._stm_was_written_card(o)
