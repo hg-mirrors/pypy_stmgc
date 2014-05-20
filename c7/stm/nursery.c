@@ -183,14 +183,30 @@ static void collect_roots_in_nursery(void)
     minor_trace_if_young(&tl->thread_local_obj);
 }
 
+static __thread object_t *_card_base_obj;
 static void minor_trace_if_young_cards(object_t **pobj)
 {
-    /* XXX: maybe add a specialised stmcb_trace_cards() */
-    uintptr_t obj = (uintptr_t)((char*)pobj - STM_SEGMENT->segment_base);
-    if (write_locks[get_write_lock_idx(obj)]) {
+    /* XXX: add a specialised stmcb_trace_cards() that
+       also gives the obj-base */
+    assert(_card_base_obj);
+    uintptr_t base_lock_idx = get_write_lock_idx((uintptr_t)_card_base_obj);
+    uintptr_t card_lock_idx = base_lock_idx;
+    card_lock_idx += get_card_index(
+        (uintptr_t)((char*)pobj - STM_SEGMENT->segment_base) - (uintptr_t)_card_base_obj);
+
+    if (write_locks[card_lock_idx]) {
         dprintf(("minor_trace_if_young_cards: trace %p\n", *pobj));
         minor_trace_if_young(pobj);
     }
+}
+
+static void _trace_card_object(object_t *obj)
+{
+    /* XXX HACK XXX: */
+    _card_base_obj = obj;
+    assert(!_is_in_nursery(obj));
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    stmcb_trace((struct object_s *)realobj, &minor_trace_if_young_cards);
 }
 
 static inline void _collect_now(object_t *obj)
@@ -212,9 +228,7 @@ static inline void _collect_now(object_t *obj)
     } else {
         /* only trace cards */
         dprintf(("-> has cards\n"));
-        assert(!_is_in_nursery(obj));
-        char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-        stmcb_trace((struct object_s *)realobj, &minor_trace_if_young_cards);
+        _trace_card_object(obj);
     }
 
     /* clear the CARDS_SET, but not the real cards since they are

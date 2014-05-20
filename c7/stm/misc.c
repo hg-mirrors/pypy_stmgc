@@ -40,12 +40,6 @@ bool _stm_was_written(object_t *obj)
     return (obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) == 0;
 }
 
-bool _stm_was_read_card(object_t *obj, uintptr_t offset)
-{
-    return was_read_remote_card(
-        STM_SEGMENT->segment_base, obj, offset,
-        STM_SEGMENT->transaction_read_version);
-}
 
 bool _stm_was_written_card(object_t *obj)
 {
