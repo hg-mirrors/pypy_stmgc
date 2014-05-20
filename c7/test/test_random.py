@@ -378,7 +378,7 @@ def op_allocate_ref(ex, global_state, thread_state):
     num = str(global_state.rnd.randrange(1, 100))
     r = global_state.get_new_root_name(True, num)
     thread_state.push_roots(ex)
-    ex.do('%s = stm_allocate_refs(%s)' % (r, num))
+    ex.do('%s = stm_allocate_refs(%s, True)' % (r, num))
     ex.do('# 0x%x' % (int(ffi.cast("uintptr_t", ex.content[r]))))
     thread_state.transaction_state.add_root(r, "ffi.NULL", True)
 
@@ -438,9 +438,9 @@ def op_write(ex, global_state, thread_state):
         thread_state.abort_transaction()
     offset = global_state.get_root_size(r) + " - 1"
     if is_ref:
-        ex.do(raising_call(aborts, "stm_set_ref", r, offset, v))
+        ex.do(raising_call(aborts, "stm_set_ref", r, offset, v, "True"))
         if not aborts:
-            ex.do(raising_call(False, "stm_set_ref", r, "0", v))
+            ex.do(raising_call(False, "stm_set_ref", r, "0", v, "True"))
     else:
         ex.do(raising_call(aborts, "stm_set_char", r, repr(chr(v)), offset))
         if not aborts:
@@ -562,7 +562,7 @@ class TestRandom(BaseTest):
             global_state.prebuilt_roots.append(r)
 
             r = global_state.get_new_root_name(True, "50")
-            ex.do('%s = stm_allocate_old_refs(50)' % r)
+            ex.do('%s = stm_allocate_old_refs(50, True)' % r)
             global_state.committed_transaction_state.add_root(r, "ffi.NULL", False)
             global_state.prebuilt_roots.append(r)
         global_state.committed_transaction_state.write_set = set()

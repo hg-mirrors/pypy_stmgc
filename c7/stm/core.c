@@ -49,7 +49,7 @@ static void _stm_mark_card(object_t *obj, uintptr_t card_index)
         /* not yet in the list */
         if (STM_PSEGMENT->old_objects_with_cards) {
             /* if we never had a minor collection in this transaction,
-               this list doesn't exist */
+               this list doesn't exist, we rely on modified_old_objs instead */
             LIST_APPEND(STM_PSEGMENT->old_objects_with_cards, obj);
         }
         obj->stm_flags |= GCFLAG_CARDS_SET;

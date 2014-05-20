@@ -459,7 +459,10 @@ static void clean_up_segment_lists(void)
                 ({
                     struct object_s *realobj = (struct object_s *)
                         REAL_ADDRESS(pseg->pub.segment_base, item);
+
                     assert(!(realobj->stm_flags & GCFLAG_WRITE_BARRIER));
+                    OPT_ASSERT(!(realobj->stm_flags & GCFLAG_CARDS_SET));
+
                     realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
                 }));
             list_clear(lst);
@@ -473,6 +476,16 @@ static void clean_up_segment_lists(void)
                     _reset_object_cards(&pseg->pub, item);
                 }));
             list_clear(lst);
+        } else {
+            LIST_FOREACH_R(pseg->modified_old_objects, object_t * /*item*/,
+               {
+                   struct object_s *realobj = (struct object_s *)
+                       REAL_ADDRESS(pseg->pub.segment_base, item);
+
+                   if (realobj->stm_flags & GCFLAG_CARDS_SET) {
+                       _reset_object_cards(&pseg->pub, item);
+                   }
+               });
         }
 
         /* Remove from 'large_overflow_objects' all objects that die */

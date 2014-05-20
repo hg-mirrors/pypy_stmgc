@@ -195,8 +195,12 @@ static void _reset_object_cards(struct stm_segment_info_s *seg, object_t *obj)
     uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
     uintptr_t card_index = 1;
     uintptr_t last_card_index = get_card_index(size - 1);
-    OPT_ASSERT(last_card_index >= card_index);
+
     while (card_index <= last_card_index) {
+        #ifndef NDEBUG
+        if (write_locks[first_card_index + card_index])
+            dprintf(("cleared card %lu on %p\n", card_index, obj));
+        #endif
         write_locks[first_card_index + card_index] = 0;
         card_index++;
     }
@@ -236,8 +240,7 @@ static void _trace_card_object(object_t *obj)
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     stmcb_trace((struct object_s *)realobj, &minor_trace_if_young_cards);
 
-    _reset_object_cards(
-        get_segment(STM_SEGMENT->segment_num), obj);
+    _reset_object_cards(get_segment(STM_SEGMENT->segment_num), obj);
 }
 
 
@@ -257,8 +260,7 @@ static inline void _collect_now(object_t *obj)
 
         obj->stm_flags |= GCFLAG_WRITE_BARRIER;
         if (obj->stm_flags & GCFLAG_CARDS_SET) {
-            _reset_object_cards(
-                get_segment(STM_SEGMENT->segment_num), obj);
+            _reset_object_cards(get_segment(STM_SEGMENT->segment_num), obj);
         }
     } if (obj->stm_flags & GCFLAG_CARDS_SET) {
         _trace_card_object(obj);
@@ -275,6 +277,7 @@ static void collect_cardrefs_to_nursery(void)
 
         assert(obj->stm_flags & GCFLAG_CARDS_SET);
         _collect_now(obj);
+        assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
     }
 }
 
@@ -287,6 +290,7 @@ static void collect_oldrefs_to_nursery(void)
         object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE);
 
         _collect_now(obj);
+        assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
 
         if (obj_sync_now & FLAG_SYNC_LARGE) {
             /* this was a large object.  We must either synchronize the
@@ -376,6 +380,13 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     if (pseg->old_objects_with_cards) {
         LIST_FOREACH_R(pseg->old_objects_with_cards, object_t * /*item*/,
                        _reset_object_cards(&pseg->pub, item));
+    } else {
+        LIST_FOREACH_R(pseg->modified_old_objects, object_t * /*item*/,
+           {
+               if (item->stm_flags & GCFLAG_CARDS_SET) {
+                   _reset_object_cards(&pseg->pub, item);
+               }
+           });
     }
 
     return nursery_used;
