@@ -101,8 +101,11 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
+long _stm_count_old_objects_with_cards(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
+object_t *_stm_enum_old_objects_with_cards(long index);
+
 
 void stm_collect(long level);
 uint64_t _stm_total_allocated(void);
@@ -495,6 +498,14 @@ def objects_pointing_to_nursery():
     if count < 0:
         return None
     return map(lib._stm_enum_objects_pointing_to_nursery, range(count))
+
+def old_objects_with_cards():
+    count = lib._stm_count_old_objects_with_cards()
+    if count < 0:
+        return None
+    return map(lib._stm_enum_old_objects_with_cards, range(count))
+
+
 
 
 SHADOWSTACK_LENGTH = 1000

@@ -183,6 +183,23 @@ static void collect_roots_in_nursery(void)
     minor_trace_if_young(&tl->thread_local_obj);
 }
 
+static void _reset_cards(object_t *obj)
+{
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+    uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
+    uintptr_t card_index = 1;
+    uintptr_t last_card_index = get_card_index(size - 1);
+    OPT_ASSERT(last_card_index >= card_index);
+    while (card_index <= last_card_index) {
+        write_locks[first_card_index + card_index] = 0;
+        card_index++;
+    }
+
+    obj->stm_flags &= ~GCFLAG_CARDS_SET;
+}
+
 static __thread object_t *_card_base_obj;
 static void minor_trace_if_young_cards(object_t **pobj)
 {
@@ -205,37 +222,51 @@ static void _trace_card_object(object_t *obj)
     /* XXX HACK XXX: */
     _card_base_obj = obj;
     assert(!_is_in_nursery(obj));
+    assert(obj->stm_flags & GCFLAG_CARDS_SET);
+
+    dprintf(("_trace_card_object(%p)\n", obj));
+
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     stmcb_trace((struct object_s *)realobj, &minor_trace_if_young_cards);
+
+    _reset_cards(obj);
 }
+
+
 
 static inline void _collect_now(object_t *obj)
 {
     assert(!_is_young(obj));
 
     dprintf(("_collect_now: %p\n", obj));
-    assert(IMPLY(obj->stm_flags & GCFLAG_WRITE_BARRIER,
-                 obj->stm_flags & GCFLAG_CARDS_SET));
+
     if (!(obj->stm_flags & GCFLAG_WRITE_BARRIER)) {
-        /* do normal full trace, even if also card-marked */
-        obj->stm_flags |= GCFLAG_WRITE_BARRIER;
-        dprintf(("-> has no cards\n"));
         /* Trace the 'obj' to replace pointers to nursery with pointers
            outside the nursery, possibly forcing nursery objects out and
            adding them to 'objects_pointing_to_nursery' as well. */
         char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
-    } else {
-        /* only trace cards */
-        dprintf(("-> has cards\n"));
+
+        obj->stm_flags |= GCFLAG_WRITE_BARRIER;
+        if (obj->stm_flags & GCFLAG_CARDS_SET) {
+            _reset_cards(obj);
+        }
+    } if (obj->stm_flags & GCFLAG_CARDS_SET) {
         _trace_card_object(obj);
     }
+}
 
-    /* clear the CARDS_SET, but not the real cards since they are
-       still needed by STM conflict detection
-       XXX: maybe separate them since we now have to also trace all
-       these cards again in the next minor_collection */
-    obj->stm_flags &= ~GCFLAG_CARDS_SET;
+
+static void collect_cardrefs_to_nursery(void)
+{
+    struct list_s *lst = STM_PSEGMENT->old_objects_with_cards;
+
+    while (!list_is_empty(lst)) {
+        object_t *obj = (object_t*)list_pop_item(lst);
+
+        assert(obj->stm_flags & GCFLAG_CARDS_SET);
+        _collect_now(obj);
+    }
 }
 
 static void collect_oldrefs_to_nursery(void)
@@ -270,8 +301,9 @@ static void collect_oldrefs_to_nursery(void)
 
 static void collect_modified_old_objects(void)
 {
-    LIST_FOREACH_R(STM_PSEGMENT->modified_old_objects, object_t * /*item*/,
-                   _collect_now(item));
+    LIST_FOREACH_R(
+        STM_PSEGMENT->modified_old_objects, object_t * /*item*/,
+        _collect_now(item));
 }
 
 static void collect_roots_from_markers(uintptr_t num_old)
@@ -371,6 +403,7 @@ static void _do_minor_collection(bool commit)
        to hold the ones we didn't trace so far. */
     uintptr_t num_old;
     if (STM_PSEGMENT->objects_pointing_to_nursery == NULL) {
+        assert(STM_PSEGMENT->old_objects_with_cards == NULL);
         STM_PSEGMENT->objects_pointing_to_nursery = list_create();
         STM_PSEGMENT->old_objects_with_cards = list_create();
 
@@ -390,7 +423,9 @@ static void _do_minor_collection(bool commit)
 
     collect_roots_in_nursery();
 
+    collect_cardrefs_to_nursery();
     collect_oldrefs_to_nursery();
+    assert(list_is_empty(STM_PSEGMENT->old_objects_with_cards));
 
     /* now all surviving nursery objects have been moved out */
     stm_move_young_weakrefs();
