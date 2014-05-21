@@ -43,7 +43,18 @@ static void check_flag_write_barrier(object_t *obj)
 static void _stm_mark_card(object_t *obj, uintptr_t card_index)
 {
     assert(card_index > 0);
-    dprintf(("mark %p card %lu\n", obj, card_index));
+
+    assert(obj->stm_flags & GCFLAG_HAS_CARDS);
+    assert(!(obj->stm_flags & GCFLAG_SMALL_UNIFORM)); /* not supported/tested */
+#ifndef NDEBUG
+    struct object_s *realobj = (struct object_s *)
+        REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t size = stmcb_size_rounded_up(realobj);
+    assert(size >= 32);
+    /* we need at least one lock in addition to the STM-reserved object write-lock */
+#endif
+
+    dprintf(("mark %p card %lu with %d\n", obj, card_index, CARD_MARKED));
 
     if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
         /* not yet in the list */
@@ -60,19 +71,18 @@ static void _stm_mark_card(object_t *obj, uintptr_t card_index)
        We already own the object here or it is an overflow obj. */
     uintptr_t card_lock_idx = get_write_lock_idx((uintptr_t)obj) + card_index;
 
-    assert(write_locks[card_lock_idx] == 0
-           || write_locks[card_lock_idx] == STM_PSEGMENT->write_lock_num);
+    assert(write_locks[get_write_lock_idx((uintptr_t)obj)] == 0 /* overflow obj */
+           || write_locks[get_write_lock_idx((uintptr_t)obj)] == STM_PSEGMENT->write_lock_num);
     assert(get_write_lock_idx((uintptr_t)obj) != card_lock_idx);
 
-    if (!write_locks[card_lock_idx])
-        write_locks[card_lock_idx] = STM_PSEGMENT->write_lock_num;
+    if (write_locks[card_lock_idx] != CARD_MARKED)
+        write_locks[card_lock_idx] = CARD_MARKED;
 }
 
 static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t card_index)
 {
     /* is this an object from the same transaction, outside the nursery? */
-    if ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0)
-        == STM_PSEGMENT->overflow_number) {
+    if (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
 
         assert(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
         dprintf_test(("write_slowpath %p -> ovf obj_to_nurs\n", obj));
@@ -542,6 +552,7 @@ static void _finish_transaction(int attribute_to)
     STM_PSEGMENT->marker_inev[1] = 0;
 
     /* reset these lists to NULL for the next transaction */
+    _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
     LIST_FREE(STM_PSEGMENT->objects_pointing_to_nursery);
     LIST_FREE(STM_PSEGMENT->old_objects_with_cards);
     LIST_FREE(STM_PSEGMENT->large_overflow_objects);
@@ -681,6 +692,10 @@ reset_modified_from_other_segments(int segment_num)
 
 static void abort_data_structures_from_segment_num(int segment_num)
 {
+#pragma push_macro("STM_PSEGMENT")
+#pragma push_macro("STM_SEGMENT")
+#undef STM_PSEGMENT
+#undef STM_SEGMENT
     /* This function clears the content of the given segment undergoing
        an abort.  It is called from abort_with_mutex(), but also sometimes
        from other threads that figure out that this segment should abort.
@@ -725,6 +740,8 @@ static void abort_data_structures_from_segment_num(int segment_num)
     LIST_FREE(pseg->old_objects_with_cards);
     LIST_FREE(pseg->large_overflow_objects);
     list_clear(pseg->young_weakrefs);
+#pragma pop_macro("STM_SEGMENT")
+#pragma pop_macro("STM_PSEGMENT")
 }
 
 static void abort_with_mutex(void)

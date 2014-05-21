@@ -227,13 +227,18 @@ class GlobalState(object):
         self.root_numbering = 0
         self.ref_type_map = {}
         self.root_sizes = {}
+        self.with_cards = {}
 
-    def get_new_root_name(self, is_ref_type, size):
+    def get_new_root_name(self, is_ref_type, size, with_cards):
         self.root_numbering += 1
         r = "lp_%s_%d" % ("ref" if is_ref_type else "char", self.root_numbering)
         self.ref_type_map[r] = is_ref_type
         self.root_sizes[r] = size
+        self.with_cards[r] = with_cards
         return r
+
+    def has_cards(self, r):
+        return self.with_cards[r]
 
     def has_ref_type(self, r):
         return self.ref_type_map[r]
@@ -363,10 +368,11 @@ def op_allocate(ex, global_state, thread_state):
         #"SOME_MEDIUM_SIZE+16",
         #"SOME_LARGE_SIZE+16",
     ])
-    r = global_state.get_new_root_name(False, size)
+    with_cards = int(size) >= 32
+    r = global_state.get_new_root_name(False, size, with_cards)
     thread_state.push_roots(ex)
 
-    ex.do('%s = stm_allocate(%s)' % (r, size))
+    ex.do('%s = stm_allocate(%s, %s)' % (r, size, bool(with_cards)))
     ex.do('# 0x%x' % (int(ffi.cast("uintptr_t", ex.content[r]))))
     thread_state.transaction_state.add_root(r, 0, True)
 
@@ -376,9 +382,10 @@ def op_allocate(ex, global_state, thread_state):
 
 def op_allocate_ref(ex, global_state, thread_state):
     num = str(global_state.rnd.randrange(1, 100))
-    r = global_state.get_new_root_name(True, num)
+    with_cards = int(num) >= 4
+    r = global_state.get_new_root_name(True, num, with_cards)
     thread_state.push_roots(ex)
-    ex.do('%s = stm_allocate_refs(%s, True)' % (r, num))
+    ex.do('%s = stm_allocate_refs(%s, %s)' % (r, num, bool(with_cards)))
     ex.do('# 0x%x' % (int(ffi.cast("uintptr_t", ex.content[r]))))
     thread_state.transaction_state.add_root(r, "ffi.NULL", True)
 
@@ -410,6 +417,7 @@ def op_write(ex, global_state, thread_state):
     r = thread_state.get_random_root()
     trs = thread_state.transaction_state
     is_ref = global_state.has_ref_type(r)
+    has_cards = global_state.has_cards(r)
     #
     # check for possible write-write conflict:
     was_written = False
@@ -438,13 +446,13 @@ def op_write(ex, global_state, thread_state):
         thread_state.abort_transaction()
     offset = global_state.get_root_size(r) + " - 1"
     if is_ref:
-        ex.do(raising_call(aborts, "stm_set_ref", r, offset, v, "True"))
+        ex.do(raising_call(aborts, "stm_set_ref", r, offset, v, has_cards))
         if not aborts:
-            ex.do(raising_call(False, "stm_set_ref", r, "0", v, "True"))
+            ex.do(raising_call(False, "stm_set_ref", r, "0", v, has_cards))
     else:
-        ex.do(raising_call(aborts, "stm_set_char", r, repr(chr(v)), offset))
+        ex.do(raising_call(aborts, "stm_set_char", r, repr(chr(v)), offset, has_cards))
         if not aborts:
-            ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR"))
+            ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR", has_cards))
 
 def op_read(ex, global_state, thread_state):
     r = thread_state.get_random_root()
@@ -556,12 +564,12 @@ class TestRandom(BaseTest):
         curr_thread = global_state.thread_states[0]
 
         for i in range(N_OBJECTS):
-            r = global_state.get_new_root_name(False, "384")
-            ex.do('%s = stm_allocate_old(384)' % r)
+            r = global_state.get_new_root_name(False, "384", True)
+            ex.do('%s = stm_allocate_old(384, True)' % r)
             global_state.committed_transaction_state.add_root(r, 0, False)
             global_state.prebuilt_roots.append(r)
 
-            r = global_state.get_new_root_name(True, "50")
+            r = global_state.get_new_root_name(True, "50", True)
             ex.do('%s = stm_allocate_old_refs(50, True)' % r)
             global_state.committed_transaction_state.add_root(r, "ffi.NULL", False)
             global_state.prebuilt_roots.append(r)

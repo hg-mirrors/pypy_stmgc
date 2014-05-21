@@ -271,7 +271,9 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
 /* directly after allocation one can enable card marking for any
    kind of object with stm_use_cards(obj). This enables the use
    of stm_write/read_card() barriers that do more fine-grained
-   conflict detection and garbage collection. */
+   conflict detection and garbage collection.
+   These objects need to be at least 32bytes in size!
+*/
 __attribute__((always_inline))
 static inline void stm_use_cards(object_t* o)
 {
