@@ -223,8 +223,18 @@ static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 static uint8_t write_locks[WRITELOCK_END - WRITELOCK_START];
 
+enum /* card values for write_locks */ {
+    CARD_CLEAR = 0,             /* card not used at all */
+    CARD_MARKED = 100,            /* card marked for tracing in the next gc */
+    CARD_MARKED_OLD = 101,        /* card was marked before, but cleared
+                                     in a GC */
+};
+
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
+
+#define IS_OVERFLOW_OBJ(pseg, obj) ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) \
+                                    == pseg->overflow_number)
 
 static inline uintptr_t get_card_index(uintptr_t byte_offset) {
     assert(_STM_CARD_SIZE == 32);
