@@ -555,6 +555,9 @@ static void assert_cleared_locks(size_t n)
 #ifndef NDEBUG
     size_t i;
     uint8_t *s = write_locks;
+# ifndef STM_TESTS
+    if (n > 5000) n = 5000;
+# endif
     for (i = 0; i < n; i++)
         assert(s[i] == CARD_CLEAR || s[i] == CARD_MARKED
                || s[i] == CARD_MARKED_OLD);
