@@ -237,9 +237,16 @@ enum /* card values for write_locks */ {
                                     == pseg->overflow_number)
 
 static inline uintptr_t get_card_index(uintptr_t byte_offset) {
-    assert(_STM_CARD_SIZE == 32);
+    assert(CARD_SIZE == 32);
     return (byte_offset >> 5) + 1;
 }
+
+static inline uintptr_t get_card_byte_offset(uintptr_t card_index) {
+    assert(CARD_SIZE == 32);
+    return (card_index - 1) << 5;
+}
+
+
 static inline uintptr_t get_write_lock_idx(uintptr_t obj) {
     uintptr_t res = (obj >> 4) - WRITELOCK_START;
     assert(res < sizeof(write_locks));

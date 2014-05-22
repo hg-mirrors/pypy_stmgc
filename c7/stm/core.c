@@ -424,6 +424,121 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
     }
 }
 
+static void _page_wise_synchronize_object_now(object_t *obj)
+{
+    uintptr_t start = (uintptr_t)obj;
+    uintptr_t first_page = start / 4096UL;
+
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
+    assert(obj_size >= 16);
+    uintptr_t end = start + obj_size;
+    uintptr_t last_page = (end - 1) / 4096UL;
+    long i, myself = STM_SEGMENT->segment_num;
+
+    for (; first_page <= last_page; first_page++) {
+
+        uintptr_t copy_size;
+        if (first_page == last_page) {
+            /* this is the final fragment */
+            copy_size = end - start;
+        }
+        else {
+            /* this is a non-final fragment, going up to the
+               page's end */
+            copy_size = 4096 - (start & 4095);
+        }
+        /* double-check that the result fits in one page */
+        assert(copy_size > 0);
+        assert(copy_size + (start & 4095) <= 4096);
+
+        /* First copy the object into the shared page, if needed */
+        char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
+        char *dst = REAL_ADDRESS(stm_object_pages, start);
+        if (is_private_page(myself, first_page)) {
+            if (copy_size == 4096)
+                pagecopy(dst, src);
+            else
+                memcpy(dst, src, copy_size);
+        }
+        else {
+            assert(memcmp(dst, src, copy_size) == 0);  /* same page */
+        }
+
+        for (i = 1; i <= NB_SEGMENTS; i++) {
+            if (i == myself)
+                continue;
+
+            src = REAL_ADDRESS(stm_object_pages, start);
+            dst = REAL_ADDRESS(get_segment_base(i), start);
+            if (is_private_page(i, first_page)) {
+                /* The page is a private page.  We need to diffuse this
+                   fragment of object from the shared page to this private
+                   page. */
+                if (copy_size == 4096)
+                    pagecopy(dst, src);
+                else
+                    memcpy(dst, src, copy_size);
+            }
+            else {
+                assert(!memcmp(dst, src, copy_size));  /* same page */
+            }
+        }
+
+        start = (start + 4096) & ~4095;
+    }
+}
+
+static void _card_wise_synchronize_object_now(object_t *obj)
+{
+    assert(obj->stm_flags & GCFLAG_HAS_CARDS);
+    assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
+    assert(!IS_OVERFLOW_OBJ(STM_PSEGMENT, obj));
+
+    struct object_s *realobj = (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t obj_size = stmcb_size_rounded_up(realobj);
+    assert(obj_size >= 32);
+
+    uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
+    uintptr_t card_index = 1;
+    uintptr_t last_card_index = get_card_index(obj_size - 1);
+    long i, myself = STM_SEGMENT->segment_num;
+
+    while (card_index <= last_card_index) {
+        uintptr_t card_lock_idx = first_card_index + card_index;
+
+        if (write_locks[card_lock_idx] == CARD_MARKED_OLD) {
+            write_locks[card_lock_idx] = CARD_CLEAR;
+
+            uintptr_t card_byte_offset = get_card_byte_offset(card_index);
+            uintptr_t start = (uintptr_t)obj + card_byte_offset;
+            uintptr_t copy_size = CARD_SIZE;
+
+            if (start - (uintptr_t)obj + copy_size > obj_size) {
+                /* don't copy over the object's bounds */
+                copy_size = obj_size - (start - (uintptr_t)obj);
+            }
+
+            /* copy to shared segment: */
+            char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
+            char *dst = REAL_ADDRESS(stm_object_pages, start);
+            memcpy(dst, src, copy_size);
+
+            for (i = 1; i <= NB_SEGMENTS; i++) {
+                if (i == myself)
+                    continue;
+
+                /* src = REAL_ADDRESS(stm_object_pages, start); */
+                dst = REAL_ADDRESS(get_segment_base(i), start);
+                memcpy(dst, src, copy_size);
+            }
+        }
+
+        card_index++;
+    }
+}
+
+
 static void synchronize_object_now(object_t *obj, bool ignore_cards)
 {
     /* Copy around the version of 'obj' that lives in our own segment.
@@ -436,71 +551,13 @@ static void synchronize_object_now(object_t *obj, bool ignore_cards)
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     assert(STM_PSEGMENT->privatization_lock == 1);
 
-    uintptr_t start = (uintptr_t)obj;
-    uintptr_t first_page = start / 4096UL;
-
     if (obj->stm_flags & GCFLAG_SMALL_UNIFORM) {
+        assert(!(obj->stm_flags & GCFLAG_HAS_CARDS));
         abort();//XXX WRITE THE FAST CASE
-    }
-    else {
-        char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-        ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
-        assert(obj_size >= 16);
-        uintptr_t end = start + obj_size;
-        uintptr_t last_page = (end - 1) / 4096UL;
-        long i, myself = STM_SEGMENT->segment_num;
-
-        for (; first_page <= last_page; first_page++) {
-
-            uintptr_t copy_size;
-            if (first_page == last_page) {
-                /* this is the final fragment */
-                copy_size = end - start;
-            }
-            else {
-                /* this is a non-final fragment, going up to the
-                   page's end */
-                copy_size = 4096 - (start & 4095);
-            }
-            /* double-check that the result fits in one page */
-            assert(copy_size > 0);
-            assert(copy_size + (start & 4095) <= 4096);
-
-            /* First copy the object into the shared page, if needed */
-            char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
-            char *dst = REAL_ADDRESS(stm_object_pages, start);
-            if (is_private_page(myself, first_page)) {
-                if (copy_size == 4096)
-                    pagecopy(dst, src);
-                else
-                    memcpy(dst, src, copy_size);
-            }
-            else {
-                assert(memcmp(dst, src, copy_size) == 0);  /* same page */
-            }
-
-            for (i = 1; i <= NB_SEGMENTS; i++) {
-                if (i == myself)
-                    continue;
-
-                src = REAL_ADDRESS(stm_object_pages, start);
-                dst = REAL_ADDRESS(get_segment_base(i), start);
-                if (is_private_page(i, first_page)) {
-                    /* The page is a private page.  We need to diffuse this
-                       fragment of object from the shared page to this private
-                       page. */
-                    if (copy_size == 4096)
-                        pagecopy(dst, src);
-                    else
-                        memcpy(dst, src, copy_size);
-                }
-                else {
-                    assert(!memcmp(dst, src, copy_size));  /* same page */
-                }
-            }
-
-            start = (start + 4096) & ~4095;
-        }
+    } else if (ignore_cards || !(obj->stm_flags & GCFLAG_HAS_CARDS)) {
+        _page_wise_synchronize_object_now(obj);
+    } else {
+        _card_wise_synchronize_object_now(obj);
     }
 
     _cards_cleared_in_object(get_priv_segment(STM_SEGMENT->segment_num), obj);
@@ -534,10 +591,6 @@ static void push_modified_to_other_segments(void)
             /* the WRITE_BARRIER flag should have been set again by
                minor_collection() */
             assert((item->stm_flags & GCFLAG_WRITE_BARRIER) != 0);
-
-            if (item->stm_flags & GCFLAG_HAS_CARDS)
-                _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
-                                    item, CARD_CLEAR, false);
 
             /* copy the object to the shared page, and to the other
                private pages as needed */
