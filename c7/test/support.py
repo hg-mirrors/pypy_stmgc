@@ -324,7 +324,7 @@ HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
-
+FAST_ALLOC = lib._STM_FAST_ALLOC
 
 class Conflict(Exception):
     pass
