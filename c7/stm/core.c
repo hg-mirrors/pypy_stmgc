@@ -424,7 +424,7 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
     }
 }
 
-static void synchronize_object_now(object_t *obj)
+static void synchronize_object_now(object_t *obj, bool ignore_cards)
 {
     /* Copy around the version of 'obj' that lives in our own segment.
        It is first copied into the shared pages, and then into other
@@ -502,6 +502,8 @@ static void synchronize_object_now(object_t *obj)
             start = (start + 4096) & ~4095;
         }
     }
+
+    _cards_cleared_in_object(get_priv_segment(STM_SEGMENT->segment_num), obj);
 }
 
 static void push_overflow_objects_from_privatized_pages(void)
@@ -511,7 +513,7 @@ static void push_overflow_objects_from_privatized_pages(void)
 
     acquire_privatization_lock();
     LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
-                   synchronize_object_now(item));
+                   synchronize_object_now(item, true /*ignore_cards*/));
     release_privatization_lock();
 }
 
@@ -533,9 +535,13 @@ static void push_modified_to_other_segments(void)
                minor_collection() */
             assert((item->stm_flags & GCFLAG_WRITE_BARRIER) != 0);
 
+            if (item->stm_flags & GCFLAG_HAS_CARDS)
+                _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
+                                    item, CARD_CLEAR, false);
+
             /* copy the object to the shared page, and to the other
                private pages as needed */
-            synchronize_object_now(item);
+            synchronize_object_now(item, false); /* don't ignore_cards */
         }));
     release_privatization_lock();
 
@@ -605,6 +611,7 @@ void stm_commit_transaction(void)
 
     /* synchronize modified old objects to other threads */
     push_modified_to_other_segments();
+    _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
 
     /* update 'overflow_number' if needed */
     if (STM_PSEGMENT->overflow_number_has_been_used) {
@@ -663,6 +670,9 @@ reset_modified_from_other_segments(int segment_num)
             char *dst = REAL_ADDRESS(local_base, item);
             ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
             memcpy(dst, src, size);
+
+            if (item->stm_flags & GCFLAG_HAS_CARDS)
+                _reset_object_cards(pseg, item, CARD_CLEAR, false);
 
             /* objects in 'modified_old_objects' usually have the
                WRITE_BARRIER flag, unless they have been modified
@@ -725,6 +735,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
     reset_modified_from_other_segments(segment_num);
+    _verify_cards_cleared_in_all_lists(pseg);
 
     /* reset the tl->shadowstack and thread_local_obj to their original
        value before the transaction start */
