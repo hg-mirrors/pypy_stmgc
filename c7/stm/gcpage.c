@@ -469,8 +469,8 @@ static void clean_up_segment_lists(void)
                     OPT_ASSERT(!(realobj->stm_flags & GCFLAG_CARDS_SET));
 
                     realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
-                    /* XXX: this will be necessary when only synchronising cards */
 
+                    /* logic corresponds to _collect_now() in nursery.c */
                     if (realobj->stm_flags & GCFLAG_HAS_CARDS) {
                         /* We called a normal WB on these objs. If we wrote
                            a value to some place in them, we need to
@@ -493,7 +493,7 @@ static void clean_up_segment_lists(void)
                     OPT_ASSERT(realobj->stm_flags & GCFLAG_CARDS_SET);
                     OPT_ASSERT(realobj->stm_flags & GCFLAG_WRITE_BARRIER);
 
-                    /* XXX: this will be necessary when only synchronising cards */
+                    /* logic corresponds to _trace_card_object() in nursery.c */
                     uint8_t mark_value = IS_OVERFLOW_OBJ(pseg, realobj) ?
                         CARD_CLEAR : CARD_MARKED_OLD;
                     _reset_object_cards(pseg, item, mark_value, false);

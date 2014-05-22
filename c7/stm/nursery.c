@@ -390,7 +390,7 @@ static void collect_oldrefs_to_nursery(void)
             struct stm_priv_segment_info_s *pseg = get_priv_segment(STM_SEGMENT->segment_num);
             if (STM_PSEGMENT->minor_collect_will_commit_now) {
                 acquire_privatization_lock();
-                synchronize_object_now(obj);
+                synchronize_object_now(obj, true); /* ignore cards! */
                 release_privatization_lock();
             } else {
                 LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
@@ -480,21 +480,11 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     tree_clear(pseg->nursery_objects_shadows);
 
 
-    /* nearly all objs in old_objects_with_cards are also in modified_old_objects,
-       so we don't need to go through both lists: */
-    LIST_FOREACH_R(pseg->modified_old_objects, object_t * /*item*/,
-        {
-            struct object_s *realobj = (struct object_s *)
-                REAL_ADDRESS(pseg->pub.segment_base, item);
-
-            if (realobj->stm_flags & GCFLAG_HAS_CARDS) {
-                /* clear all possibly used cards in this transaction */
-                _reset_object_cards(pseg, item, CARD_CLEAR, false);
-            }
-        });
-    /* overflow objects with cards are not in modified_old_objects */
+    /* modified_old_objects' cards get cleared in push_modified_to_other_segments
+       or reset_modified_from_other_segments. Objs in old_objs_with_cards but not
+       in modified_old_objs are overflow objects and handled here: */
     if (pseg->large_overflow_objects != NULL) {
-        /* some overflow objects may have cards, clear them too */
+        /* some overflow objects may have cards when aborting, clear them too */
         LIST_FOREACH_R(pseg->large_overflow_objects, object_t * /*item*/,
             {
                 struct object_s *realobj = (struct object_s *)
@@ -507,8 +497,6 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
                 }
             });
     }
-
-    _verify_cards_cleared_in_all_lists(pseg);
 
     return nursery_used;
 #pragma pop_macro("STM_SEGMENT")

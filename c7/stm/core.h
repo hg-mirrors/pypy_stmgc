@@ -288,7 +288,7 @@ static inline void _duck(void) {
 }
 
 static void copy_object_to_shared(object_t *obj, int source_segment_num);
-static void synchronize_object_now(object_t *obj);
+static void synchronize_object_now(object_t *obj, bool ignore_cards);
 
 static inline void acquire_privatization_lock(void)
 {
