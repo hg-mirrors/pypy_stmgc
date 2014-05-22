@@ -188,7 +188,7 @@ class TestBasic(BaseTest):
         self.commit_transaction()
 
     def test_synchronize_objs(self):
-        o = stm_allocate_old(2000)
+        o = stm_allocate_old(1000+20*CARD_SIZE)
 
         self.start_transaction()
         stm_set_char(o, 'a', 1000, False)

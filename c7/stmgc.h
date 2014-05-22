@@ -149,7 +149,7 @@ uint64_t _stm_total_allocated(void);
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
 #define _STM_GCFLAG_HAS_CARDS          0x08
 #define _STM_GCFLAG_CARDS_SET          0x10
-#define _STM_CARD_SIZE                 32 /* >= 32 */
+#define _STM_CARD_SIZE                 128 /* >= 32 */
 #define _STM_NSE_SIGNAL_MAX     _STM_TIME_N
 #define _STM_FAST_ALLOC           (66*1024)
 
