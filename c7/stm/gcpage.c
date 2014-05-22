@@ -527,7 +527,22 @@ static void clean_up_segment_lists(void)
 static inline bool largemalloc_keep_object_at(char *data)
 {
     /* this is called by _stm_largemalloc_sweep() */
-    return mark_visited_test_and_clear((object_t *)(data - stm_object_pages));
+    object_t *obj = (object_t *)(data - stm_object_pages);
+    if (!mark_visited_test_and_clear(obj)) {
+#ifndef NDEBUG
+        /* This is actually needed in order to avoid random write-read
+           conflicts with objects read and freed long in the past. Still,
+           it is probably rare enough so that we don't need this additional
+           overhead. (test_random hits it sometimes) */
+        long i;
+        for (i = 1; i <= NB_SEGMENTS; i++) {
+            ((struct stm_read_marker_s *)
+             (get_segment_base(i) + (((uintptr_t)obj) >> 4)))->rm = 0;
+        }
+#endif
+        return false;
+    }
+    return true;
 }
 
 static void sweep_large_objects(void)
