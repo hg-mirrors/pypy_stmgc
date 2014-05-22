@@ -476,6 +476,8 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
                 _reset_object_cards(pseg, obj, CARD_CLEAR, false);
             _cards_cleared_in_object(pseg, obj);
 
+            /* mark slot as unread */
+            ((stm_read_marker_t *)(item->addr >> 4))->rm = 0;
             _stm_large_free(stm_object_pages + item->addr);
         } TREE_LOOP_END;
 

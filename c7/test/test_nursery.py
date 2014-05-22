@@ -236,3 +236,14 @@ class TestNursery(BaseTest):
         # the 'p1' reference is invalid now, don't try to read it.
         # we check that it's invalid because _stm_total_allocated()
         # only records one of the two objects.
+
+    def test_clear_read_marker_for_external_young(self):
+        self.start_transaction()
+        big = stm_allocate(FAST_ALLOC + 1000) # young outside nursery
+        stm_read(big)
+        assert stm_was_read(big)
+        stm_minor_collect() # free young outside
+        assert not stm_was_read(big)
+        # if the read marker is not cleared, we get false conflicts
+        # with later transactions using the same large-malloced slot
+        # as our outside-nursery-obj
