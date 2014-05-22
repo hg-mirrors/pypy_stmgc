@@ -83,6 +83,8 @@ void stm_setup(void)
 {
     /* Check that some values are acceptable */
     assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
+    assert(CARD_SIZE > 0 && CARD_SIZE % 16 == 0);
+    assert(CARD_SIZE == 32);    /* actually, it is hardcoded in some places right now.. */
     assert(4096 <= ((uintptr_t)STM_SEGMENT));
     assert((uintptr_t)STM_SEGMENT == (uintptr_t)STM_PSEGMENT);
     assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= 8192);
@@ -117,6 +119,7 @@ void stm_setup(void)
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
         pr->objects_pointing_to_nursery = NULL;
+        pr->old_objects_with_cards = NULL;
         pr->large_overflow_objects = NULL;
         pr->modified_old_objects = list_create();
         pr->modified_old_objects_markers = list_create();
@@ -156,6 +159,7 @@ void stm_teardown(void)
     for (i = 1; i <= NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
         assert(pr->objects_pointing_to_nursery == NULL);
+        assert(pr->old_objects_with_cards == NULL);
         assert(pr->large_overflow_objects == NULL);
         list_free(pr->modified_old_objects);
         list_free(pr->modified_old_objects_markers);

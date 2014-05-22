@@ -35,6 +35,8 @@
 #define WRITELOCK_START       ((END_NURSERY_PAGE * 4096UL) >> 4)
 #define WRITELOCK_END         READMARKER_END
 
+#define CARD_SIZE   _STM_CARD_SIZE
+
 enum /* stm_flags */ {
     /* This flag is set on non-nursery objects.  It forces stm_write()
        to call _stm_write_slowpath().
@@ -54,6 +56,11 @@ enum /* stm_flags */ {
        after the object. */
     GCFLAG_HAS_SHADOW = 0x04,
 
+    /* Set on objects after allocation that may use card marking */
+    GCFLAG_HAS_CARDS = _STM_GCFLAG_HAS_CARDS,
+    /* Set on objects that have at least one card marked */
+    GCFLAG_CARDS_SET = _STM_GCFLAG_CARDS_SET,
+
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by
        the "overflow number".  This is a number that identifies the
        "overflow objects" from the current transaction among all old
@@ -61,7 +68,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x8   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x20   /* must be last */
 };
 
 
@@ -96,6 +103,10 @@ struct stm_priv_segment_info_s {
        understood as meaning implicitly "this is the same as
        'modified_old_objects'". */
     struct list_s *objects_pointing_to_nursery;
+    /* Like objects_pointing_to_nursery it holds the old objects that
+       we did a stm_write_card() on. Objects can be in both lists.
+       It is NULL iff objects_pointing_to_nursery is NULL. */
+    struct list_s *old_objects_with_cards;
 
     /* List of all large, overflowed objects.  Only non-NULL after the
        current transaction spanned a minor collection. */
@@ -212,8 +223,35 @@ static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 static uint8_t write_locks[WRITELOCK_END - WRITELOCK_START];
 
+enum /* card values for write_locks */ {
+    CARD_CLEAR = 0,             /* card not used at all */
+    CARD_MARKED = 100,            /* card marked for tracing in the next gc */
+    CARD_MARKED_OLD = 101,        /* card was marked before, but cleared
+                                     in a GC */
+};
+
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
+
+#define IS_OVERFLOW_OBJ(pseg, obj) ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) \
+                                    == pseg->overflow_number)
+
+static inline uintptr_t get_card_index(uintptr_t byte_offset) {
+    assert(CARD_SIZE == 32);
+    return (byte_offset >> 5) + 1;
+}
+
+static inline uintptr_t get_card_byte_offset(uintptr_t card_index) {
+    assert(CARD_SIZE == 32);
+    return (card_index - 1) << 5;
+}
+
+
+static inline uintptr_t get_write_lock_idx(uintptr_t obj) {
+    uintptr_t res = (obj >> 4) - WRITELOCK_START;
+    assert(res < sizeof(write_locks));
+    return res;
+}
 
 static inline char *get_segment_base(long segment_num) {
     return stm_object_pages + segment_num * (NB_PAGES * 4096UL);
@@ -257,7 +295,7 @@ static inline void _duck(void) {
 }
 
 static void copy_object_to_shared(object_t *obj, int source_segment_num);
-static void synchronize_object_now(object_t *obj);
+static void synchronize_object_now(object_t *obj, bool ignore_cards);
 
 static inline void acquire_privatization_lock(void)
 {
