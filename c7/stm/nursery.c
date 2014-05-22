@@ -263,7 +263,7 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
 
     dprintf(("mark cards of %p, size %lu with %d, all: %d\n",
              obj, size, mark_value, mark_all));
-
+    dprintf(("obj has %lu cards\n", last_card_index));
     while (card_index <= last_card_index) {
         uintptr_t card_lock_idx = first_card_index + card_index;
 

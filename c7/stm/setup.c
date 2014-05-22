@@ -83,8 +83,7 @@ void stm_setup(void)
 {
     /* Check that some values are acceptable */
     assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
-    assert(CARD_SIZE > 0 && CARD_SIZE % 16 == 0);
-    assert(CARD_SIZE == 32);    /* actually, it is hardcoded in some places right now.. */
+    assert(CARD_SIZE >= 32 && CARD_SIZE % 16 == 0);
     assert(4096 <= ((uintptr_t)STM_SEGMENT));
     assert((uintptr_t)STM_SEGMENT == (uintptr_t)STM_PSEGMENT);
     assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= 8192);
