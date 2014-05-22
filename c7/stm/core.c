@@ -489,6 +489,17 @@ static void _page_wise_synchronize_object_now(object_t *obj)
     }
 }
 
+static inline bool _has_private_page_in_range(
+    long seg_num, uintptr_t start, uintptr_t size)
+{
+    uintptr_t first_page = start / 4096UL;
+    uintptr_t last_page = (start + size) / 4096UL;
+    for (; first_page <= last_page; first_page++)
+        if (is_private_page(seg_num, first_page))
+            return true;
+    return false;
+}
+
 static void _card_wise_synchronize_object_now(object_t *obj)
 {
     assert(obj->stm_flags & GCFLAG_HAS_CARDS);
@@ -534,6 +545,9 @@ static void _card_wise_synchronize_object_now(object_t *obj)
                 copy_size = obj_size - (start - (uintptr_t)obj);
             }
 
+            /* since we have marked cards, at least one page here must be private */
+            assert(_has_private_page_in_range(myself, start, copy_size));
+
             /* copy to shared segment: */
             char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
             char *dst = REAL_ADDRESS(stm_object_pages, start);
@@ -542,7 +556,8 @@ static void _card_wise_synchronize_object_now(object_t *obj)
             for (i = 1; i <= NB_SEGMENTS; i++) {
                 if (i == myself)
                     continue;
-
+                if (!_has_private_page_in_range(i, start, copy_size))
+                    continue;
                 /* src = REAL_ADDRESS(stm_object_pages, start); */
                 dst = REAL_ADDRESS(get_segment_base(i), start);
                 memcpy(dst, src, copy_size);
