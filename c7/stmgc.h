@@ -106,7 +106,8 @@ typedef struct stm_thread_local_s {
 
 /* this should use llvm's coldcc calling convention,
    but it's not exposed to C code so far */
-void _stm_write_slowpath(object_t *, uintptr_t);
+void _stm_write_slowpath(object_t *);
+void _stm_write_slowpath_card(object_t *, uintptr_t);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
@@ -216,7 +217,7 @@ __attribute__((always_inline))
 static inline void stm_write(object_t *obj)
 {
     if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
-        _stm_write_slowpath(obj, 0);
+        _stm_write_slowpath(obj);
 }
 
 /* The following is a GC-optimized barrier that works on the granularity
@@ -228,9 +229,8 @@ static inline void stm_write(object_t *obj)
 __attribute__((always_inline))
 static inline void stm_write_card(object_t *obj, uintptr_t index)
 {
-    OPT_ASSERT(obj->stm_flags & _STM_GCFLAG_HAS_CARDS);
     if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
-        _stm_write_slowpath(obj, index);
+        _stm_write_slowpath_card(obj, index);
 }
 
 /* Must be provided by the user of this library.
@@ -268,17 +268,6 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
     return (object_t *)p;
 }
 
-/* directly after allocation one can enable card marking for any
-   kind of object with stm_use_cards(obj). This enables the use
-   of stm_write/read_card() barriers that do more fine-grained
-   conflict detection and garbage collection.
-   These objects need to be at least 32bytes in size!
-*/
-__attribute__((always_inline))
-static inline void stm_use_cards(object_t* o)
-{
-    o->stm_flags |= _STM_GCFLAG_HAS_CARDS;
-}
 
 /* Allocate a weakref object. Weakref objects have a
    reference to an object at the byte-offset

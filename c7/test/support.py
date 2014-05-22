@@ -43,7 +43,6 @@ object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
-void stm_use_cards(object_t* o);
 /*void stm_write_card(); use _checked_stm_write_card() instead */
 
 
@@ -352,7 +351,7 @@ GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 GCFLAG_HAS_CARDS = lib._STM_GCFLAG_HAS_CARDS
 CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
-
+FAST_ALLOC = lib._STM_FAST_ALLOC
 
 class Conflict(Exception):
     pass
@@ -365,26 +364,20 @@ def byte_offset_to_card_index(offset):
 def is_in_nursery(o):
     return lib.stm_can_move(o)
 
-def stm_allocate_old(size, use_cards=False):
+def stm_allocate_old(size):
     o = lib._stm_allocate_old(size)
-    if use_cards:
-        lib.stm_use_cards(o)
     tid = 42 + size
     lib._set_type_id(o, tid)
     return o
 
-def stm_allocate_old_refs(n, use_cards=False):
+def stm_allocate_old_refs(n):
     o = lib._stm_allocate_old(HDR + n * WORD)
-    if use_cards:
-        lib.stm_use_cards(o)
     tid = 421420 + n
     lib._set_type_id(o, tid)
     return o
 
-def stm_allocate(size, use_cards=False):
+def stm_allocate(size):
     o = lib.stm_allocate(size)
-    if use_cards:
-        lib.stm_use_cards(o)
     tid = 42 + size
     lib._set_type_id(o, tid)
     return o
@@ -401,10 +394,8 @@ def stm_allocate_weakref(point_to_obj, size=None):
 def stm_get_weakref(o):
     return lib._get_weakref(o)
 
-def stm_allocate_refs(n, use_cards=False):
+def stm_allocate_refs(n):
     o = lib.stm_allocate(HDR + n * WORD)
-    if use_cards:
-        lib.stm_use_cards(o)
     tid = 421420 + n
     lib._set_type_id(o, tid)
     return o
@@ -446,7 +437,6 @@ def stm_write(o):
         raise Conflict()
 
 def stm_write_card(o, index):
-    assert stm_get_flags(o) & GCFLAG_HAS_CARDS
     if lib._checked_stm_write_card(o, index):
         raise Conflict()
 

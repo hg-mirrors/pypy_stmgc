@@ -6,6 +6,7 @@
 
 static uint32_t highest_overflow_number;
 
+static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, object_t *obj);
 static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
                                 object_t *obj, uint8_t mark_value,
                                 bool mark_all);
