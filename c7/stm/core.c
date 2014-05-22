@@ -469,7 +469,7 @@ static void _page_wise_synchronize_object_now(object_t *obj)
             if (i == myself)
                 continue;
 
-            src = REAL_ADDRESS(stm_object_pages, start);
+            /* src = REAL_ADDRESS(stm_object_pages, start); */
             dst = REAL_ADDRESS(get_segment_base(i), start);
             if (is_private_page(i, first_page)) {
                 /* The page is a private page.  We need to diffuse this
@@ -504,6 +504,21 @@ static void _card_wise_synchronize_object_now(object_t *obj)
     uintptr_t last_card_index = get_card_index(obj_size - 1);
     long i, myself = STM_SEGMENT->segment_num;
 
+    /* simple heuristic to check if probably the whole object is
+       marked anyway so we can do page-wise synchronize */
+    if (write_locks[first_card_index + 1] == CARD_MARKED_OLD
+        && write_locks[first_card_index + last_card_index] == CARD_MARKED_OLD
+        && write_locks[first_card_index + (last_card_index >> 1) + 1] == CARD_MARKED_OLD) {
+
+        dprintf(("card_wise_sync assumes %p,size:%lu is fully marked\n", obj, obj_size));
+        _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
+                            obj, CARD_CLEAR, false);
+        _page_wise_synchronize_object_now(obj);
+        return;
+    }
+
+    dprintf(("card_wise_sync syncs %p,size:%lu card-wise\n", obj, obj_size));
+
     while (card_index <= last_card_index) {
         uintptr_t card_lock_idx = first_card_index + card_index;
 
@@ -532,6 +547,8 @@ static void _card_wise_synchronize_object_now(object_t *obj)
                 dst = REAL_ADDRESS(get_segment_base(i), start);
                 memcpy(dst, src, copy_size);
             }
+        } else {
+            assert(write_locks[card_lock_idx] != CARD_MARKED); /* always only MARKED_OLD */
         }
 
         card_index++;
