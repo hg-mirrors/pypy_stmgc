@@ -119,6 +119,8 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
 
     object_t *o = (object_t *)(p - stm_object_pages);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
+    if (size_rounded_up > CARD_SIZE)
+        o->stm_flags |= GCFLAG_HAS_CARDS;
 
     if (testing_prebuilt_objs == NULL)
         testing_prebuilt_objs = list_create();

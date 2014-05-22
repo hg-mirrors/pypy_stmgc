@@ -83,7 +83,6 @@ static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t card_inde
 {
     /* is this an object from the same transaction, outside the nursery? */
     if (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
-
         assert(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
         dprintf_test(("write_slowpath %p -> ovf obj_to_nurs\n", obj));
 
@@ -106,16 +105,22 @@ static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t card_inde
     return false;
 }
 
-void _stm_write_slowpath(object_t *obj, uintptr_t card_index)
+void _stm_write_slowpath(object_t *obj)
 {
-    assert(IMPLY(!(obj->stm_flags & GCFLAG_HAS_CARDS), card_index == 0));
-    assert(
-        IMPLY(card_index, (card_index - 1) * CARD_SIZE < stmcb_size_rounded_up(
-                  (struct object_s*)REAL_ADDRESS(STM_SEGMENT->segment_base,
-                                                 obj))));
+    _stm_write_slowpath_card(obj, 0);
+}
+
+void _stm_write_slowpath_card(object_t *obj, uintptr_t card_index)
+{
     assert(_seems_to_be_running_transaction());
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+
+    if (!(obj->stm_flags & GCFLAG_HAS_CARDS))
+        card_index = 0;         /* assume no cards */
+
+    assert(IMPLY(card_index, (card_index - 1) * CARD_SIZE < stmcb_size_rounded_up(
+                (struct object_s*)REAL_ADDRESS(STM_SEGMENT->segment_base, obj))));
 
     if (_stm_write_slowpath_overflow_objs(obj, card_index))
         return;
@@ -353,6 +358,8 @@ static bool detect_write_read_conflicts(void)
             ({
                 if (was_read_remote(remote_base, item, remote_version)) {
                     /* A write-read conflict! */
+                    dprintf(("write-read conflict on %p, our seg: %d, other: %ld\n",
+                             item, STM_SEGMENT->segment_num, i));
                     if (write_read_contention_management(i, item)) {
                         /* If we reach this point, we didn't abort, but we
                            had to wait for the other thread to commit.  If we

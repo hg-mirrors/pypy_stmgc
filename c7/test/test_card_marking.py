@@ -17,14 +17,14 @@ class TestBasic(BaseTest):
             self.switch(0)
 
     def test_simple(self):
-        o = stm_allocate_old(1024, True)
+        o = stm_allocate_old(1024)
         self.start_transaction()
         stm_read(o)
         stm_write(o)
         self.commit_transaction()
 
     def test_simple2(self):
-        o = stm_allocate_old(1024, True)
+        o = stm_allocate_old(1024)
         self.start_transaction()
         stm_write_card(o, 5)
         assert not stm_was_written(o) # don't remove GCFLAG_WRITE_BARRIER
@@ -34,7 +34,7 @@ class TestBasic(BaseTest):
     @py.test.mark.parametrize("k", range(3))
     def test_overflow(self, k):
         self.start_transaction()
-        o = stm_allocate(1024, True)
+        o = stm_allocate(1024)
 
         self.push_root(o)
         self._collect(k)
@@ -52,10 +52,10 @@ class TestBasic(BaseTest):
         self.commit_transaction()
 
     def test_nursery(self):
-        o = stm_allocate_old_refs(200, True)
+        o = stm_allocate_old_refs(200)
         self.start_transaction()
-        p = stm_allocate(64, True)
-        d = stm_allocate(64, True)
+        p = stm_allocate(64)
+        d = stm_allocate(64)
         stm_set_ref(o, 199, p, True)
 
         # without a write-barrier:
@@ -80,7 +80,7 @@ class TestBasic(BaseTest):
 
         # card cleared after last collection,
         # so no retrace of index 199:
-        d2 = stm_allocate(64, True)
+        d2 = stm_allocate(64)
         # without a write-barrier:
         lib._set_ptr(o, 199, d2)
         self.push_root(o)
@@ -92,7 +92,7 @@ class TestBasic(BaseTest):
         assert dn == d2
 
     def test_nursery2(self):
-        o = stm_allocate_old_refs(200, True)
+        o = stm_allocate_old_refs(200)
         self.start_transaction()
         p = stm_allocate(64)
         d = stm_allocate(64)
@@ -111,7 +111,7 @@ class TestBasic(BaseTest):
         assert not is_in_nursery(stm_get_ref(o, 100))
 
     def test_nursery3(self):
-        o = stm_allocate_old_refs(200, True)
+        o = stm_allocate_old_refs(200)
         self.start_transaction()
         stm_minor_collect()
 
@@ -134,7 +134,7 @@ class TestBasic(BaseTest):
         assert stm_get_ref(o, 100) == e # not traced
 
     def test_abort_cleanup(self):
-        o = stm_allocate_old_refs(200, True)
+        o = stm_allocate_old_refs(200)
         self.start_transaction()
         stm_minor_collect()
 
@@ -166,7 +166,7 @@ class TestBasic(BaseTest):
 
     @py.test.mark.parametrize("k", range(3))
     def test_major_gc(self, k):
-        o = stm_allocate_old_refs(200, True)
+        o = stm_allocate_old_refs(200)
         self.start_transaction()
         p = stm_allocate(64)
         stm_set_ref(o, 0, p, True)
@@ -188,7 +188,7 @@ class TestBasic(BaseTest):
         self.commit_transaction()
 
     def test_synchronize_objs(self):
-        o = stm_allocate_old(2000, True)
+        o = stm_allocate_old(2000)
 
         self.start_transaction()
         stm_set_char(o, 'a', 1000, False)

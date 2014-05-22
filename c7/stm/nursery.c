@@ -114,6 +114,8 @@ static void minor_trace_if_young(object_t **pobj)
          copy_large_object:;
             char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
             memcpy(realnobj, realobj, size);
+            if (size > CARD_SIZE)
+                nobj->stm_flags |= GCFLAG_HAS_CARDS;
 
             nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
         }
@@ -149,6 +151,7 @@ static void minor_trace_if_young(object_t **pobj)
 
     /* Must trace the object later */
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
+    _cards_cleared_in_object(get_priv_segment(STM_SEGMENT->segment_num), nobj);
 }
 
 static void collect_roots_in_nursery(void)
@@ -332,19 +335,20 @@ static inline void _collect_now(object_t *obj, bool was_definitely_young)
         if (obj->stm_flags & GCFLAG_HAS_CARDS) {
             /* all objects that had WB cleared need to be fully synchronised
                on commit, so we have to mark all their cards */
+            struct stm_priv_segment_info_s *pseg = get_priv_segment(
+                STM_SEGMENT->segment_num);
+
             if (was_definitely_young) {
-                /* we don't mark cards on young objects */
+                /* stm_wb-slowpath should never have triggered for young objs */
                 assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
                 return;
             }
 
             if (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
                 /* we do not need the old cards for overflow objects */
-                _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
-                                    obj, CARD_CLEAR, false);
+                _reset_object_cards(pseg, obj, CARD_CLEAR, false);
             } else {
-                _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
-                                    obj, CARD_MARKED_OLD, true); /* mark all */
+                _reset_object_cards(pseg, obj, CARD_MARKED_OLD, true); /* mark all */
             }
         }
     } if (obj->stm_flags & GCFLAG_CARDS_SET) {
@@ -362,6 +366,7 @@ static void collect_cardrefs_to_nursery(void)
     while (!list_is_empty(lst)) {
         object_t *obj = (object_t*)list_pop_item(lst);
 
+        assert(!_is_young(obj));
         assert(obj->stm_flags & GCFLAG_CARDS_SET);
         _collect_now(obj, false);
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
@@ -640,6 +645,10 @@ object_t *_stm_allocate_external(ssize_t size_rounded_up)
 
     char *result = allocate_outside_nursery_large(size_rounded_up);
     object_t *o = (object_t *)(result - stm_object_pages);
+
+    if (size_rounded_up > CARD_SIZE)
+        o->stm_flags |= GCFLAG_HAS_CARDS;
+
     tree_insert(STM_PSEGMENT->young_outside_nursery, (uintptr_t)o, 0);
 
     memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
@@ -741,6 +750,9 @@ static object_t *allocate_shadow(object_t *obj)
     memcpy(realnobj, realobj, size);
 
     obj->stm_flags |= GCFLAG_HAS_SHADOW;
+    if (size > CARD_SIZE)             /* probably not necessary */
+        nobj->stm_flags |= GCFLAG_HAS_CARDS;
+
     tree_insert(STM_PSEGMENT->nursery_objects_shadows,
                 (uintptr_t)obj, (uintptr_t)nobj);
     return nobj;
