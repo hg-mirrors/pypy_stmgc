@@ -255,10 +255,12 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
     uintptr_t card_index = 1;
     uintptr_t last_card_index = get_card_index(size - 1);
 
-    dprintf(("mark cards of %p, size %lu with %d\n", obj, size, mark_value));
-
     OPT_ASSERT(write_locks[first_card_index] <= NB_SEGMENTS
                || write_locks[first_card_index] == 255); /* see gcpage.c */
+
+    dprintf(("mark cards of %p, size %lu with %d, all: %d\n",
+             obj, size, mark_value, mark_all));
+
     while (card_index <= last_card_index) {
         uintptr_t card_lock_idx = first_card_index + card_index;
 
@@ -269,10 +271,9 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
         }
         card_index++;
     }
-    OPT_ASSERT(write_locks[first_card_index] <= NB_SEGMENTS
-               || write_locks[first_card_index] == 255); /* see gcpage.c */
 
     realobj->stm_flags &= ~GCFLAG_CARDS_SET;
+
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
@@ -314,7 +315,7 @@ static void _trace_card_object(object_t *obj)
 
 
 
-static inline void _collect_now(object_t *obj)
+static inline void _collect_now(object_t *obj, bool was_definitely_young)
 {
     assert(!_is_young(obj));
 
@@ -329,6 +330,14 @@ static inline void _collect_now(object_t *obj)
 
         obj->stm_flags |= GCFLAG_WRITE_BARRIER;
         if (obj->stm_flags & GCFLAG_HAS_CARDS) {
+            /* all objects that had WB cleared need to be fully synchronised
+               on commit, so we have to mark all their cards */
+            if (was_definitely_young) {
+                /* we don't mark cards on young objects */
+                assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
+                return;
+            }
+
             if (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
                 /* we do not need the old cards for overflow objects */
                 _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
@@ -339,6 +348,7 @@ static inline void _collect_now(object_t *obj)
             }
         }
     } if (obj->stm_flags & GCFLAG_CARDS_SET) {
+        assert(!was_definitely_young);
         _trace_card_object(obj);
     }
 }
@@ -346,26 +356,29 @@ static inline void _collect_now(object_t *obj)
 
 static void collect_cardrefs_to_nursery(void)
 {
+    dprintf(("collect_cardrefs_to_nursery\n"));
     struct list_s *lst = STM_PSEGMENT->old_objects_with_cards;
 
     while (!list_is_empty(lst)) {
         object_t *obj = (object_t*)list_pop_item(lst);
 
         assert(obj->stm_flags & GCFLAG_CARDS_SET);
-        _collect_now(obj);
+        _collect_now(obj, false);
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
     }
 }
 
 static void collect_oldrefs_to_nursery(void)
 {
+    dprintf(("collect_oldrefs_to_nursery\n"));
     struct list_s *lst = STM_PSEGMENT->objects_pointing_to_nursery;
 
     while (!list_is_empty(lst)) {
         uintptr_t obj_sync_now = list_pop_item(lst);
         object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE);
 
-        _collect_now(obj);
+        bool was_definitely_young = (obj_sync_now & FLAG_SYNC_LARGE);
+        _collect_now(obj, was_definitely_young);
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
 
         if (obj_sync_now & FLAG_SYNC_LARGE) {
@@ -379,9 +392,6 @@ static void collect_oldrefs_to_nursery(void)
                 acquire_privatization_lock();
                 synchronize_object_now(obj);
                 release_privatization_lock();
-                if (obj->stm_flags & GCFLAG_HAS_CARDS) {
-                    _reset_object_cards(pseg, obj, CARD_CLEAR, false); /* was young */
-                }
             } else {
                 LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
             }
@@ -395,13 +405,15 @@ static void collect_oldrefs_to_nursery(void)
 
 static void collect_modified_old_objects(void)
 {
+    dprintf(("collect_modified_old_objects\n"));
     LIST_FOREACH_R(
         STM_PSEGMENT->modified_old_objects, object_t * /*item*/,
-        _collect_now(item));
+        _collect_now(item, false));
 }
 
 static void collect_roots_from_markers(uintptr_t num_old)
 {
+    dprintf(("collect_roots_from_markers\n"));
     /* visit the marker objects */
     struct list_s *mlst = STM_PSEGMENT->modified_old_objects_markers;
     STM_PSEGMENT->modified_old_objects_markers_num_old = list_count(mlst);
@@ -424,6 +436,7 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 #pragma push_macro("STM_SEGMENT")
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
+    dprintf(("throw_away_nursery\n"));
     /* reset the nursery by zeroing it */
     size_t nursery_used;
     char *realnursery;
