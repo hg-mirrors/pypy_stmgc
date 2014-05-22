@@ -281,7 +281,8 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
         TREE_LOOP_FORWARD(*pseg->young_outside_nursery, item) {
             assert(!_is_in_nursery((object_t *)item->addr));
             /* mark slot as unread */
-            ((stm_read_marker_t *)(item->addr >> 4))->rm = 0;
+            ((struct stm_read_marker_s *)
+             (pseg->pub.segment_base + (item->addr >> 4)))->rm = 0;
 
             _stm_large_free(stm_object_pages + item->addr);
         } TREE_LOOP_END;
