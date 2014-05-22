@@ -186,3 +186,46 @@ class TestBasic(BaseTest):
         assert not stm_was_written_card(o)
         assert stm_get_ref(o, 0) == p
         self.commit_transaction()
+
+    def test_synchronize_objs(self):
+        o = stm_allocate_old(2000, True)
+
+        self.start_transaction()
+        stm_set_char(o, 'a', 1000, False)
+        self.commit_transaction()
+
+        self.switch(1)
+
+        self.start_transaction()
+        stm_set_char(o, 'b', 1001, False)
+        assert stm_get_char(o, 1000) == 'a'
+        self.commit_transaction()
+
+        self.switch(0)
+
+        self.start_transaction()
+        assert stm_get_char(o, 1001) == 'b'
+
+        stm_set_char(o, 'c', 1000, True)
+        stm_set_char(o, 'c', 1000+CARD_SIZE, True)
+        stm_set_char(o, 'c', 1000+CARD_SIZE*2, True)
+        stm_set_char(o, 'c', 1000+CARD_SIZE*3, True)
+
+        stm_set_char(o, 'd', 1000+CARD_SIZE*10, True)
+
+        stm_set_char(o, 'e', 1000+CARD_SIZE*12, True)
+        self.commit_transaction()
+
+        self.switch(1)
+
+        self.start_transaction()
+        assert stm_get_char(o, 1000) == 'c'
+        assert stm_get_char(o, 1000+CARD_SIZE) == 'c'
+        assert stm_get_char(o, 1000+CARD_SIZE*2) == 'c'
+        assert stm_get_char(o, 1000+CARD_SIZE*3) == 'c'
+
+        assert stm_get_char(o, 1000+CARD_SIZE*10) == 'd'
+
+        assert stm_get_char(o, 1000+CARD_SIZE*12) == 'e'
+
+        self.commit_transaction()

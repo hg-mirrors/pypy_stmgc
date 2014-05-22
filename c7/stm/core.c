@@ -516,7 +516,7 @@ static void _card_wise_synchronize_object_now(object_t *obj)
     long i, myself = STM_SEGMENT->segment_num;
 
     /* simple heuristic to check if probably the whole object is
-       marked anyway so we can do page-wise synchronize */
+       marked anyway so we should do page-wise synchronize */
     if (write_locks[first_card_index + 1] == CARD_MARKED_OLD
         && write_locks[first_card_index + last_card_index] == CARD_MARKED_OLD
         && write_locks[first_card_index + (last_card_index >> 1) + 1] == CARD_MARKED_OLD) {
@@ -530,20 +530,38 @@ static void _card_wise_synchronize_object_now(object_t *obj)
 
     dprintf(("card_wise_sync syncs %p,size:%lu card-wise\n", obj, obj_size));
 
+    /* Combine multiple marked cards and do a memcpy for them. We don't
+       try yet to use page_copy() or otherwise take into account privatization
+       of pages (except _has_private_page_in_range) */
+    uintptr_t start = 0;
+    uintptr_t copy_size = 0;
     while (card_index <= last_card_index) {
         uintptr_t card_lock_idx = first_card_index + card_index;
+        uintptr_t card_byte_offset = get_card_byte_offset(card_index);
+        uint8_t card_value = write_locks[card_lock_idx];
 
-        if (write_locks[card_lock_idx] == CARD_MARKED_OLD) {
+        OPT_ASSERT(card_value != CARD_MARKED); /* always only MARKED_OLD or CLEAR */
+
+        if (card_value == CARD_MARKED_OLD) {
             write_locks[card_lock_idx] = CARD_CLEAR;
 
-            uintptr_t card_byte_offset = get_card_byte_offset(card_index);
-            uintptr_t start = (uintptr_t)obj + card_byte_offset;
-            uintptr_t copy_size = CARD_SIZE;
+            if (start == 0) {   /* first marked card */
+                start = (uintptr_t)obj + card_byte_offset;
+            }
 
-            if (start - (uintptr_t)obj + copy_size > obj_size) {
+            copy_size += CARD_SIZE;
+
+            if ((start - (uintptr_t)obj) + copy_size > obj_size) {
                 /* don't copy over the object's bounds */
                 copy_size = obj_size - (start - (uintptr_t)obj);
             }
+        }
+
+        if (start                                     /* something to copy */
+            && (card_value != CARD_MARKED_OLD         /* found non-marked card */
+                || card_index == last_card_index)) {  /* this is the last card */
+            /* do the copying: */
+            //dprintf(("copy %lu bytes\n", copy_size));
 
             /* since we have marked cards, at least one page here must be private */
             assert(_has_private_page_in_range(myself, start, copy_size));
@@ -553,6 +571,7 @@ static void _card_wise_synchronize_object_now(object_t *obj)
             char *dst = REAL_ADDRESS(stm_object_pages, start);
             memcpy(dst, src, copy_size);
 
+            /* copy to other segments */
             for (i = 1; i <= NB_SEGMENTS; i++) {
                 if (i == myself)
                     continue;
@@ -562,12 +581,22 @@ static void _card_wise_synchronize_object_now(object_t *obj)
                 dst = REAL_ADDRESS(get_segment_base(i), start);
                 memcpy(dst, src, copy_size);
             }
-        } else {
-            assert(write_locks[card_lock_idx] != CARD_MARKED); /* always only MARKED_OLD */
+
+            copy_size = 0;
+            start = 0;
         }
 
         card_index++;
     }
+
+#ifndef NDEBUG
+    char *src = REAL_ADDRESS(stm_object_pages, (uintptr_t)obj);
+    char *dst;
+    for (i = 1; i <= NB_SEGMENTS; i++) {
+        dst = REAL_ADDRESS(get_segment_base(i), (uintptr_t)obj);
+        assert(memcmp(dst, src, obj_size) == 0);
+    }
+#endif
 }
 
 
