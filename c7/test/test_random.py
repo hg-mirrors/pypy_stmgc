@@ -622,6 +622,5 @@ class TestRandom(BaseTest):
         return test_fun
 
     for _seed in range(5000, 5100):
-        _seed = 5004
         _fn = _make_fun(_seed)
         locals()[_fn.__name__] = _fn
