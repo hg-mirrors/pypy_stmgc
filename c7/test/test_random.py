@@ -368,7 +368,7 @@ def op_allocate(ex, global_state, thread_state):
         #"SOME_MEDIUM_SIZE+16",
         #"SOME_LARGE_SIZE+16",
     ])
-    with_cards = int(size) >= 32
+    with_cards = int(size) >= 32 and global_state.rnd.randrange(1, 100) > 10
     r = global_state.get_new_root_name(False, size, with_cards)
     thread_state.push_roots(ex)
 
@@ -382,7 +382,7 @@ def op_allocate(ex, global_state, thread_state):
 
 def op_allocate_ref(ex, global_state, thread_state):
     num = str(global_state.rnd.randrange(1, 100))
-    with_cards = int(num) >= 4
+    with_cards = int(num) >= 4 and global_state.rnd.randrange(1, 100) > 10
     r = global_state.get_new_root_name(True, num, with_cards)
     thread_state.push_roots(ex)
     ex.do('%s = stm_allocate_refs(%s, %s)' % (r, num, bool(with_cards)))
@@ -417,7 +417,7 @@ def op_write(ex, global_state, thread_state):
     r = thread_state.get_random_root()
     trs = thread_state.transaction_state
     is_ref = global_state.has_ref_type(r)
-    has_cards = global_state.has_cards(r)
+    has_cards = global_state.has_cards(r) and global_state.rnd.randrange(1, 100) > 5
     #
     # check for possible write-write conflict:
     was_written = False
