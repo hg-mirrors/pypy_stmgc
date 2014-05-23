@@ -108,6 +108,7 @@ typedef struct stm_thread_local_s {
    but it's not exposed to C code so far */
 void _stm_write_slowpath(object_t *);
 void _stm_write_slowpath_card(object_t *, uintptr_t);
+void _stm_mark_card(object_t *obj, uintptr_t card_index);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
@@ -221,16 +222,23 @@ static inline void stm_write(object_t *obj)
 }
 
 /* The following is a GC-optimized barrier that works on the granularity
-   of CARD_SIZE. It can only be used on objects one called stm_use_cards()
-   on. It has the same purpose as stm_write() for TM.
+   of CARD_SIZE. It can only be used on objects one any object, but only
+   helps with those that were internally marked with GCFLAG_HAS_CARDS
+   It has the same purpose as stm_write() for TM.
    'index' is the byte-offset into the object divided by _STM_CARD_SIZE
    plus 1: (offset // CARD_SIZE) + 1
 */
 __attribute__((always_inline))
 static inline void stm_write_card(object_t *obj, uintptr_t index)
 {
-    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
-        _stm_write_slowpath_card(obj, index);
+    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0)) {
+        if (LIKELY((obj->stm_flags & _STM_GCFLAG_CARDS_SET) != 0)) {
+            /* XXX: check how well clang optimizes this */
+            _stm_mark_card(obj, index);
+        } else {
+            _stm_write_slowpath_card(obj, index);
+        }
+    }
 }
 
 /* Must be provided by the user of this library.
