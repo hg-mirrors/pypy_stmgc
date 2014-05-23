@@ -111,7 +111,7 @@ static char *allocate_outside_nursery_large(uint64_t size)
     return addr;
 }
 
-object_t *_stm_allocate_old(ssize_t size_rounded_up)
+object_t *_stm_allocate_old(ssize_t size_rounded_up, long use_cards)
 {
     /* only for tests xxx but stm_setup_prebuilt() uses this now too */
     char *p = allocate_outside_nursery_large(size_rounded_up);
@@ -119,7 +119,7 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
 
     object_t *o = (object_t *)(p - stm_object_pages);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
-    if (size_rounded_up > CARD_SIZE)
+    if (use_cards && size_rounded_up > CARD_SIZE)
         o->stm_flags |= GCFLAG_HAS_CARDS;
 
     if (testing_prebuilt_objs == NULL)

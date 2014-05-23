@@ -380,7 +380,7 @@ def op_allocate(ex, global_state, thread_state):
     thread_state.register_root(r)
 
 def op_allocate_ref(ex, global_state, thread_state):
-    num = str(global_state.rnd.randrange(1, 100))
+    num = str(global_state.rnd.randrange(1, 1000))
     r = global_state.get_new_root_name(True, num)
     thread_state.push_roots(ex)
     ex.do('%s = stm_allocate_refs(%s)' % (r, num))
@@ -415,7 +415,7 @@ def op_write(ex, global_state, thread_state):
     r = thread_state.get_random_root()
     trs = thread_state.transaction_state
     is_ref = global_state.has_ref_type(r)
-    try_cards = global_state.rnd.randrange(1, 100) > 5
+    try_cards = global_state.rnd.randrange(1, 100) > 5# and False
     #
     # check for possible write-write conflict:
     was_written = False
