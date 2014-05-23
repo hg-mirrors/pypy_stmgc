@@ -65,6 +65,8 @@ static void minor_trace_if_young(object_t **pobj)
     object_t *obj = *pobj;
     object_t *nobj;
     uintptr_t nobj_sync_now;
+    char *realobj;
+    size_t size;
 
     if (obj == NULL)
         return;
@@ -75,8 +77,6 @@ static void minor_trace_if_young(object_t **pobj)
            to GCWORD_MOVED.  In that case, the forwarding location, i.e.
            where the object moved to, is stored in the second word in 'obj'. */
         object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
-        char *realobj;
-        size_t size;
 
         if (obj->stm_flags & GCFLAG_HAS_SHADOW) {
             /* ^^ the single check above detects both already-moved objects
@@ -114,7 +114,7 @@ static void minor_trace_if_young(object_t **pobj)
          copy_large_object:;
             char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
             memcpy(realnobj, realobj, size);
-            if (size > CARD_SIZE)
+            if (size > CARD_SIZE && stmcb_should_use_cards((struct object_s*)realnobj))
                 nobj->stm_flags |= GCFLAG_HAS_CARDS;
 
             nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
@@ -141,6 +141,11 @@ static void minor_trace_if_young(object_t **pobj)
         nobj = obj;
         tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)nobj);
         nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
+
+        realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+        size = stmcb_size_rounded_up((struct object_s *)realobj);
+        if (size > CARD_SIZE && stmcb_should_use_cards((struct object_s*)realobj))
+            nobj->stm_flags |= GCFLAG_HAS_CARDS;
     }
 
     /* Set the overflow_number if nedeed */
@@ -655,9 +660,6 @@ object_t *_stm_allocate_external(ssize_t size_rounded_up)
     char *result = allocate_outside_nursery_large(size_rounded_up);
     object_t *o = (object_t *)(result - stm_object_pages);
 
-    if (size_rounded_up > CARD_SIZE)
-        o->stm_flags |= GCFLAG_HAS_CARDS;
-
     tree_insert(STM_PSEGMENT->young_outside_nursery, (uintptr_t)o, 0);
 
     memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
@@ -759,8 +761,6 @@ static object_t *allocate_shadow(object_t *obj)
     memcpy(realnobj, realobj, size);
 
     obj->stm_flags |= GCFLAG_HAS_SHADOW;
-    if (size > CARD_SIZE)             /* probably not necessary */
-        nobj->stm_flags |= GCFLAG_HAS_CARDS;
 
     tree_insert(STM_PSEGMENT->nursery_objects_shadows,
                 (uintptr_t)obj, (uintptr_t)nobj);

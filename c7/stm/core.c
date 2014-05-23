@@ -579,9 +579,16 @@ static void _card_wise_synchronize_object_now(object_t *obj)
                 || card_index == last_card_index)) {  /* this is the last card */
             /* do the copying: */
             uintptr_t copy_size;
+            uintptr_t next_card_offset;
+            uintptr_t next_card = card_index;
 
-            uintptr_t next_card_offset = stmcb_index_to_byte_offset(
-                realobj, get_card_index_to_index(card_index + 1));
+            if (card_value == CARD_MARKED_OLD) {
+                /* card_index is the last card of the object, but we need
+                   to go one further to get the right offset */
+                next_card++;
+            }
+            next_card_offset = stmcb_index_to_byte_offset(
+                realobj, get_card_index_to_index(next_card));
 
             if (next_card_offset > obj_size)
                 next_card_offset = obj_size;
