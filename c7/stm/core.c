@@ -40,7 +40,7 @@ static void check_flag_write_barrier(object_t *obj)
 #endif
 }
 
-static void _stm_mark_card(object_t *obj, uintptr_t card_index)
+void _stm_mark_card(object_t *obj, uintptr_t card_index)
 {
     assert(card_index > 0);
 
@@ -115,12 +115,27 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t card_index)
     assert(_seems_to_be_running_transaction());
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    assert(IMPLY(card_index, (card_index - 1) * CARD_SIZE < stmcb_size_rounded_up(
+                     (struct object_s*)REAL_ADDRESS(STM_SEGMENT->segment_base, obj))));
+
+    uintptr_t base_lock_idx = get_write_lock_idx((uintptr_t)obj);
+    uint8_t lock_num = STM_PSEGMENT->write_lock_num;
+    assert(base_lock_idx < sizeof(write_locks));
 
     if (!(obj->stm_flags & GCFLAG_HAS_CARDS))
         card_index = 0;         /* assume no cards */
 
-    assert(IMPLY(card_index, (card_index - 1) * CARD_SIZE < stmcb_size_rounded_up(
-                (struct object_s*)REAL_ADDRESS(STM_SEGMENT->segment_base, obj))));
+    /* if card_index and obj->stm_flags & CARDS_SET:
+           directly mark the card of obj at card_index
+           return (no STM part needed)
+       -> see stmgc.h */
+    /* if CARDS_SET, we entered here at least once, so we own the write_lock
+       OR this is an overflow object and the write_lock is not owned */
+    OPT_ASSERT(
+        IMPLY(obj->stm_flags & GCFLAG_CARDS_SET,
+              (!IS_OVERFLOW_OBJ(STM_PSEGMENT, obj) && write_locks[base_lock_idx] == lock_num)
+              || (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj) && write_locks[base_lock_idx] == 0)
+              ));
 
     if (_stm_write_slowpath_overflow_objs(obj, card_index))
         return;
@@ -136,9 +151,7 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t card_index)
        'modified_old_objects' (but, because it had GCFLAG_WRITE_BARRIER,
        not in 'objects_pointing_to_nursery').  We'll detect this case
        by finding that we already own the write-lock. */
-    uintptr_t base_lock_idx = get_write_lock_idx((uintptr_t)obj);
-    uint8_t lock_num = STM_PSEGMENT->write_lock_num;
-    assert(base_lock_idx < sizeof(write_locks));
+
  retry:
     if (write_locks[base_lock_idx] == 0) {
         /* A lock to prevent reading garbage from

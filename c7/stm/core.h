@@ -233,8 +233,8 @@ enum /* card values for write_locks */ {
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
 
-#define IS_OVERFLOW_OBJ(pseg, obj) ((obj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) \
-                                    == pseg->overflow_number)
+#define IS_OVERFLOW_OBJ(pseg, obj) (((obj)->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) \
+                                    == (pseg)->overflow_number)
 
 static inline uintptr_t get_card_index(uintptr_t byte_offset) {
     return (byte_offset / CARD_SIZE) + 1;
