@@ -225,8 +225,7 @@ static inline void stm_write(object_t *obj)
    of CARD_SIZE. It can only be used on objects one any object, but only
    helps with those that were internally marked with GCFLAG_HAS_CARDS
    It has the same purpose as stm_write() for TM.
-   'index' is the byte-offset into the object divided by _STM_CARD_SIZE
-   plus 1: (offset // CARD_SIZE) + 1
+   'index' can be anything < size of the object
 */
 __attribute__((always_inline))
 static inline void stm_write_card(object_t *obj, uintptr_t index)
@@ -251,6 +250,12 @@ static inline void stm_write_card(object_t *obj, uintptr_t index)
 */
 extern ssize_t stmcb_size_rounded_up(struct object_s *);
 extern void stmcb_trace(struct object_s *, void (object_t **));
+extern void stmcb_trace_cards(struct object_s *, void (object_t **),
+                              uintptr_t start, uintptr_t stop);
+/* needs to work with index > any valid index (can just return
+   object's size then) */
+extern uintptr_t stmcb_index_to_byte_offset(struct object_s *,
+                                            uintptr_t index);
 extern void stmcb_commit_soon(void);
 
 
