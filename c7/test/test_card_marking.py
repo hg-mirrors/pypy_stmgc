@@ -55,24 +55,20 @@ class TestBasic(BaseTest):
         o = stm_allocate_old_refs(200)
         self.start_transaction()
         p = stm_allocate(64)
-        d = stm_allocate(64)
         stm_set_ref(o, 199, p, True)
 
         # without a write-barrier:
-        lib._set_ptr(o, 0, d)
+        lib._set_ptr(o, 0, ffi.cast("object_t*", -1))
 
         self.push_root(o)
         stm_minor_collect()
         o = self.pop_root()
 
+        lib._set_ptr(o, 0, ffi.NULL)
+
         pn = stm_get_ref(o, 199)
         assert not is_in_nursery(pn)
         assert pn != p
-
-        # d was not traced!
-        dn = stm_get_ref(o, 0)
-        assert is_in_nursery(dn)
-        assert dn == d
 
         assert not stm_was_written(o)
         stm_write_card(o, 2)
@@ -80,16 +76,12 @@ class TestBasic(BaseTest):
 
         # card cleared after last collection,
         # so no retrace of index 199:
-        d2 = stm_allocate(64)
+
         # without a write-barrier:
-        lib._set_ptr(o, 199, d2)
+        lib._set_ptr(o, 199, ffi.cast("object_t*", -1))
         self.push_root(o)
         stm_minor_collect()
         o = self.pop_root()
-        # d2 was not traced!
-        dn = stm_get_ref(o, 199)
-        assert is_in_nursery(dn)
-        assert dn == d2
 
     def test_nursery2(self):
         o = stm_allocate_old_refs(200)
@@ -111,16 +103,16 @@ class TestBasic(BaseTest):
         assert not is_in_nursery(stm_get_ref(o, 100))
 
     def test_nursery3(self):
-        o = stm_allocate_old_refs(200)
+        o = stm_allocate_old_refs(2000)
         self.start_transaction()
         stm_minor_collect()
 
         p = stm_allocate(64)
         d = stm_allocate(64)
-        e = stm_allocate(64)
-        stm_set_ref(o, 199, p, True)
+        stm_set_ref(o, 1999, p, True)
         stm_set_ref(o, 1, d, True)
-        lib._set_ptr(o, 100, e) # no card marked!
+
+        lib._set_ptr(o, 1000, ffi.cast("object_t*", -1))
 
         assert not stm_was_written(o)
         assert stm_was_written_card(o)
@@ -129,9 +121,9 @@ class TestBasic(BaseTest):
         stm_minor_collect()
         o = self.pop_root()
 
-        assert not is_in_nursery(stm_get_ref(o, 199))
+        assert not is_in_nursery(stm_get_ref(o, 1999))
         assert not is_in_nursery(stm_get_ref(o, 1))
-        assert stm_get_ref(o, 100) == e # not traced
+
 
     def test_abort_cleanup(self):
         o = stm_allocate_old_refs(200)

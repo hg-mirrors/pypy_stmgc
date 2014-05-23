@@ -40,9 +40,10 @@ static void check_flag_write_barrier(object_t *obj)
 #endif
 }
 
-void _stm_mark_card(object_t *obj, uintptr_t card_index)
+__attribute__((always_inline))
+void _stm_mark_card(object_t *obj, uintptr_t index)
 {
-    assert(card_index > 0);
+    assert(index != -1);
 
     assert(obj->stm_flags & GCFLAG_HAS_CARDS);
     assert(!(obj->stm_flags & GCFLAG_SMALL_UNIFORM)); /* not supported/tested */
@@ -53,8 +54,6 @@ void _stm_mark_card(object_t *obj, uintptr_t card_index)
     assert(size >= 32);
     /* we need at least one lock in addition to the STM-reserved object write-lock */
 #endif
-
-    dprintf(("mark %p card %lu with %d\n", obj, card_index, CARD_MARKED));
 
     if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
         /* not yet in the list */
@@ -69,24 +68,27 @@ void _stm_mark_card(object_t *obj, uintptr_t card_index)
     /* Just acquire the corresponding lock for the next minor_collection
        to know what may have changed.
        We already own the object here or it is an overflow obj. */
-    uintptr_t card_lock_idx = get_write_lock_idx((uintptr_t)obj) + card_index;
+    uintptr_t card_lock_idx = get_write_lock_idx((uintptr_t)obj);
+    card_lock_idx += get_index_to_card_index(index);
 
     assert(write_locks[get_write_lock_idx((uintptr_t)obj)] == 0 /* overflow obj */
            || write_locks[get_write_lock_idx((uintptr_t)obj)] == STM_PSEGMENT->write_lock_num);
     assert(get_write_lock_idx((uintptr_t)obj) != card_lock_idx);
 
+    dprintf(("mark %p index %lu, card:%lu with %d\n",
+             obj, index, get_index_to_card_index(index), CARD_MARKED));
     if (write_locks[card_lock_idx] != CARD_MARKED)
         write_locks[card_lock_idx] = CARD_MARKED;
 }
 
-static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t card_index)
+static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t index)
 {
     /* is this an object from the same transaction, outside the nursery? */
     if (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
         assert(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
-        dprintf_test(("write_slowpath %p -> ovf obj_to_nurs\n", obj));
+        dprintf_test(("write_slowpath %p -> ovf obj_to_nurs, index:%lu\n", obj, index));
 
-        if (!card_index) {
+        if (index == -1) {
             /* no card to be marked, don't call again until next collection */
             obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
             LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
@@ -94,7 +96,7 @@ static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t card_inde
             /* don't remove GCFLAG_WRITE_BARRIER because we need to be
                here for every card to mark */
             assert(STM_PSEGMENT->old_objects_with_cards);
-            _stm_mark_card(obj, card_index);
+            _stm_mark_card(obj, index);
         }
 
         /* We don't need to do anything in the STM part of the WB slowpath: */
@@ -107,26 +109,29 @@ static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t card_inde
 
 void _stm_write_slowpath(object_t *obj)
 {
-    _stm_write_slowpath_card(obj, 0);
+    _stm_write_slowpath_card(obj, -1);
 }
 
-void _stm_write_slowpath_card(object_t *obj, uintptr_t card_index)
+void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
 {
     assert(_seems_to_be_running_transaction());
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
-    assert(IMPLY(card_index, (card_index - 1) * CARD_SIZE < stmcb_size_rounded_up(
-                     (struct object_s*)REAL_ADDRESS(STM_SEGMENT->segment_base, obj))));
+    assert(IMPLY(index != -1, index < stmcb_size_rounded_up(
+                 (struct object_s*)REAL_ADDRESS(STM_SEGMENT->segment_base, obj))));
 
     uintptr_t base_lock_idx = get_write_lock_idx((uintptr_t)obj);
     uint8_t lock_num = STM_PSEGMENT->write_lock_num;
+    bool mark_cards = index != -1;
+
     assert(base_lock_idx < sizeof(write_locks));
+    if (!(obj->stm_flags & GCFLAG_HAS_CARDS)) {
+        index = -1;
+        mark_cards = false;         /* assume no cards */
+    }
 
-    if (!(obj->stm_flags & GCFLAG_HAS_CARDS))
-        card_index = 0;         /* assume no cards */
-
-    /* if card_index and obj->stm_flags & CARDS_SET:
-           directly mark the card of obj at card_index
+    /* if mark_cards and obj->stm_flags & CARDS_SET:
+           directly mark the card of obj at index
            return (no STM part needed)
        -> see stmgc.h */
     /* if CARDS_SET, we entered here at least once, so we own the write_lock
@@ -137,7 +142,7 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t card_index)
               || (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj) && write_locks[base_lock_idx] == 0)
               ));
 
-    if (_stm_write_slowpath_overflow_objs(obj, card_index))
+    if (_stm_write_slowpath_overflow_objs(obj, index))
         return;
 
     /* do a read-barrier now.  Note that this must occur before the
@@ -233,7 +238,7 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t card_index)
 
     /* A common case for write_locks[] that was either 0 or lock_num:
        we need to add the object to the appropriate list if there is one. */
-    if (!card_index) {
+    if (!mark_cards) {
         if (STM_PSEGMENT->objects_pointing_to_nursery != NULL) {
             dprintf_test(("write_slowpath %p -> old obj_to_nurs\n", obj));
             LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
@@ -246,7 +251,7 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t card_index)
 
     } else {
         /* don't remove WRITE_BARRIER */
-        _stm_mark_card(obj, card_index);
+        _stm_mark_card(obj, index);
     }
 
     /* for sanity, check again that all other segment copies of this
@@ -532,7 +537,7 @@ static void _card_wise_synchronize_object_now(object_t *obj)
 
     uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
     uintptr_t card_index = 1;
-    uintptr_t last_card_index = get_card_index(obj_size - 1);
+    uintptr_t last_card_index = get_index_to_card_index(obj_size - 1); /* max valid index */
     long i, myself = STM_SEGMENT->segment_num;
 
     /* simple heuristic to check if probably the whole object is
@@ -554,10 +559,8 @@ static void _card_wise_synchronize_object_now(object_t *obj)
        try yet to use page_copy() or otherwise take into account privatization
        of pages (except _has_private_page_in_range) */
     uintptr_t start = 0;
-    uintptr_t copy_size = 0;
     while (card_index <= last_card_index) {
         uintptr_t card_lock_idx = first_card_index + card_index;
-        uintptr_t card_byte_offset = get_card_byte_offset(card_index);
         uint8_t card_value = write_locks[card_lock_idx];
 
         OPT_ASSERT(card_value != CARD_MARKED); /* always only MARKED_OLD or CLEAR */
@@ -566,14 +569,8 @@ static void _card_wise_synchronize_object_now(object_t *obj)
             write_locks[card_lock_idx] = CARD_CLEAR;
 
             if (start == 0) {   /* first marked card */
-                start = (uintptr_t)obj + card_byte_offset;
-            }
-
-            copy_size += CARD_SIZE;
-
-            if ((start - (uintptr_t)obj) + copy_size > obj_size) {
-                /* don't copy over the object's bounds */
-                copy_size = obj_size - (start - (uintptr_t)obj);
+                start = (uintptr_t)obj + stmcb_index_to_byte_offset(
+                    realobj, get_card_index_to_index(card_index));
             }
         }
 
@@ -581,7 +578,17 @@ static void _card_wise_synchronize_object_now(object_t *obj)
             && (card_value != CARD_MARKED_OLD         /* found non-marked card */
                 || card_index == last_card_index)) {  /* this is the last card */
             /* do the copying: */
-            //dprintf(("copy %lu bytes\n", copy_size));
+            uintptr_t copy_size;
+
+            uintptr_t next_card_offset = stmcb_index_to_byte_offset(
+                realobj, get_card_index_to_index(card_index + 1));
+
+            if (next_card_offset > obj_size)
+                next_card_offset = obj_size;
+
+            copy_size = next_card_offset - (start - (uintptr_t)obj);
+
+            /* dprintf(("copy %lu bytes\n", copy_size)); */
 
             /* since we have marked cards, at least one page here must be private */
             assert(_has_private_page_in_range(myself, start, copy_size));

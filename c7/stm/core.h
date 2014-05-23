@@ -236,11 +236,11 @@ enum /* card values for write_locks */ {
 #define IS_OVERFLOW_OBJ(pseg, obj) (((obj)->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) \
                                     == (pseg)->overflow_number)
 
-static inline uintptr_t get_card_index(uintptr_t byte_offset) {
-    return (byte_offset / CARD_SIZE) + 1;
+static inline uintptr_t get_index_to_card_index(uintptr_t index) {
+    return (index / CARD_SIZE) + 1;
 }
 
-static inline uintptr_t get_card_byte_offset(uintptr_t card_index) {
+static inline uintptr_t get_card_index_to_index(uintptr_t card_index) {
     return (card_index - 1) * CARD_SIZE;
 }
 

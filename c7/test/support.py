@@ -76,7 +76,6 @@ void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
-uintptr_t _index_to_card_index(object_t *obj, int n);
 
 void _set_weakref(object_t *obj, object_t *v);
 object_t* _get_weakref(object_t *obj);
@@ -268,16 +267,6 @@ object_t * _get_ptr(object_t *obj, int n)
     return *field;
 }
 
-uintptr_t _index_to_card_index(object_t *obj, int n)
-{
-    long nrefs = (long)((myobj_t*)obj)->type_id - 421420;
-    assert(n < nrefs);
-
-    stm_char *field_addr = NULL;
-    field_addr += SIZEOF_MYOBJ; /* header */
-    field_addr += n * sizeof(void*); /* field */
-    return ((uintptr_t)field_addr / _STM_CARD_SIZE) + 1;
-}
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj)
 {
@@ -310,6 +299,32 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
         object_t **ref = ((object_t **)(myobj + 1)) + i;
         visit(ref);
     }
+}
+
+void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
+                       uintptr_t start, uintptr_t stop)
+{
+    int i;
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 421420) {
+        /* basic case: no references */
+        return;
+    }
+
+    for (i=start; (i < myobj->type_id - 421420) && (i < stop); i++) {
+        object_t **ref = ((object_t **)(myobj + 1)) + i;
+        visit(ref);
+    }
+}
+
+uintptr_t stmcb_index_to_byte_offset(struct object_s *obj, uintptr_t index)
+{
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 421420) {
+        /* basic case: no references */
+        return sizeof(struct myobj_s) + index;
+    }
+    return sizeof(struct myobj_s) + index * sizeof(object_t*);
 }
 
 void stm_push_marker(stm_thread_local_t *tl, uintptr_t onum, object_t *ob)
@@ -358,8 +373,6 @@ class Conflict(Exception):
 
 class EmptyStack(Exception):
     pass
-def byte_offset_to_card_index(offset):
-    return (offset // CARD_SIZE) + 1
 
 def is_in_nursery(o):
     return lib.stm_can_move(o)
@@ -402,7 +415,7 @@ def stm_allocate_refs(n):
 
 def stm_set_ref(obj, idx, ref, use_cards=False):
     if use_cards:
-        stm_write_card(obj, lib._index_to_card_index(obj, idx))
+        stm_write_card(obj, idx)
     else:
         stm_write(obj)
     lib._set_ptr(obj, idx, ref)
@@ -414,8 +427,7 @@ def stm_get_ref(obj, idx):
 def stm_set_char(obj, c, offset=HDR, use_cards=False):
     assert HDR <= offset < stm_get_obj_size(obj)
     if use_cards:
-        index = byte_offset_to_card_index(offset)
-        stm_write_card(obj, index)
+        stm_write_card(obj, offset)
     else:
         stm_write(obj)
     stm_get_real_address(obj)[offset] = c

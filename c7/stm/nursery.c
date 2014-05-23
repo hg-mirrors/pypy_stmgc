@@ -197,7 +197,7 @@ static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, objec
 
     uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
     uintptr_t card_index = 1;
-    uintptr_t last_card_index = get_card_index(size - 1);
+    uintptr_t last_card_index = get_index_to_card_index(size - 1); /* max valid index */
 
     OPT_ASSERT(write_locks[first_card_index] <= NB_SEGMENTS_MAX
                || write_locks[first_card_index] == 255); /* see gcpage.c */
@@ -256,7 +256,7 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
 
     uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
     uintptr_t card_index = 1;
-    uintptr_t last_card_index = get_card_index(size - 1);
+    uintptr_t last_card_index = get_index_to_card_index(size - 1); /* max valid index */
 
     OPT_ASSERT(write_locks[first_card_index] <= NB_SEGMENTS
                || write_locks[first_card_index] == 255); /* see gcpage.c */
@@ -281,39 +281,51 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
 #pragma pop_macro("STM_PSEGMENT")
 }
 
-static __thread object_t *_card_base_obj;
-static void minor_trace_if_young_cards(object_t **pobj)
-{
-    /* XXX: add a specialised stmcb_trace_cards() that
-       also gives the obj-base */
-    assert(_card_base_obj);
-    uintptr_t base_lock_idx = get_write_lock_idx((uintptr_t)_card_base_obj);
-    uintptr_t card_lock_idx = base_lock_idx + get_card_index(
-        (uintptr_t)((char*)pobj - STM_SEGMENT->segment_base) - (uintptr_t)_card_base_obj);
-
-    if (write_locks[card_lock_idx] == CARD_MARKED) {
-        dprintf(("minor_trace_if_young_cards: trace %p\n", *pobj));
-        minor_trace_if_young(pobj);
-    }
-}
 
 static void _trace_card_object(object_t *obj)
 {
-    /* XXX HACK XXX: */
-    _card_base_obj = obj;
     assert(!_is_in_nursery(obj));
     assert(obj->stm_flags & GCFLAG_CARDS_SET);
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
     dprintf(("_trace_card_object(%p)\n", obj));
-
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    stmcb_trace((struct object_s *)realobj, &minor_trace_if_young_cards);
-
     bool obj_is_overflow = IS_OVERFLOW_OBJ(STM_PSEGMENT, obj);
     uint8_t mark_value = obj_is_overflow ? CARD_CLEAR : CARD_MARKED_OLD;
-    _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
-                        obj, mark_value, false); /* mark marked */
+
+    struct object_s *realobj = (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t size = stmcb_size_rounded_up(realobj);
+
+    uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
+    uintptr_t card_index = 1;
+    uintptr_t last_card_index = get_index_to_card_index(size - 1); /* max valid index */
+
+    OPT_ASSERT(write_locks[first_card_index] <= NB_SEGMENTS_MAX
+               || write_locks[first_card_index] == 255); /* see gcpage.c */
+
+    /* XXX: merge ranges */
+    while (card_index <= last_card_index) {
+        uintptr_t card_lock_idx = first_card_index + card_index;
+        if (write_locks[card_lock_idx] == CARD_MARKED) {
+            /* clear or set to old: */
+            write_locks[card_lock_idx] = mark_value;
+
+            uintptr_t start = get_card_index_to_index(card_index);
+            uintptr_t stop = get_card_index_to_index(card_index + 1);
+
+            dprintf(("trace_cards on %p with start:%lu stop:%lu\n",
+                     obj, start, stop));
+            stmcb_trace_cards(realobj, &minor_trace_if_young,
+                              start, stop);
+
+        }
+
+        /* all cards should be cleared on overflow objs */
+        assert(IMPLY(obj_is_overflow,
+                     write_locks[card_lock_idx] == CARD_CLEAR));
+
+        card_index++;
+    }
+    obj->stm_flags &= ~GCFLAG_CARDS_SET;
 }
 
 
