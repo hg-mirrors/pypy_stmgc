@@ -317,15 +317,16 @@ void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
     }
 }
 
-uintptr_t stmcb_index_to_byte_offset(struct object_s *obj, uintptr_t index)
+void stmcb_get_card_base_itemsize(
+    struct object_s *obj, uintptr_t *base_offset, ssize_t *item_size)
 {
     struct myobj_s *myobj = (struct myobj_s*)obj;
     if (myobj->type_id < 421420) {
         abort(); // works, but we want to test otherwise
         /* basic case: index=byteoffset */
-        return index;
     }
-    return sizeof(struct myobj_s) + index * sizeof(object_t*);
+    *base_offset = sizeof(struct myobj_s);
+    *item_size = sizeof(object_t *);
 }
 
 long stmcb_should_use_cards(struct object_s *obj)

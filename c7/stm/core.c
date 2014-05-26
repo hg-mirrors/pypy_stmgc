@@ -558,7 +558,11 @@ static void _card_wise_synchronize_object_now(object_t *obj)
     /* Combine multiple marked cards and do a memcpy for them. We don't
        try yet to use page_copy() or otherwise take into account privatization
        of pages (except _has_private_page_in_range) */
-    uintptr_t start = 0;
+    uintptr_t base_offset;
+    ssize_t item_size;
+    stmcb_get_card_base_itemsize(realobj, &base_offset, &item_size);
+
+    uintptr_t start_card_index = -1;
     while (card_index <= last_card_index) {
         uintptr_t card_lock_idx = first_card_index + card_index;
         uint8_t card_value = write_locks[card_lock_idx];
@@ -568,32 +572,40 @@ static void _card_wise_synchronize_object_now(object_t *obj)
         if (card_value == CARD_MARKED_OLD) {
             write_locks[card_lock_idx] = CARD_CLEAR;
 
-            if (start == 0) {   /* first marked card */
-                start = (uintptr_t)obj + stmcb_index_to_byte_offset(
-                    realobj, get_card_index_to_index(card_index));
+            if (start_card_index == -1) {   /* first marked card */
+                start_card_index = card_index;
+                /* start = (uintptr_t)obj + stmcb_index_to_byte_offset( */
+                /*     realobj, get_card_index_to_index(card_index)); */
             }
         }
 
-        if (start                                     /* something to copy */
+        if (start_card_index != -1                    /* something to copy */
             && (card_value != CARD_MARKED_OLD         /* found non-marked card */
                 || card_index == last_card_index)) {  /* this is the last card */
             /* do the copying: */
-            uintptr_t copy_size;
+            uintptr_t start, copy_size;
             uintptr_t next_card_offset;
-            uintptr_t next_card = card_index;
+            uintptr_t start_card_offset;
+            uintptr_t next_card_index = card_index;
 
             if (card_value == CARD_MARKED_OLD) {
                 /* card_index is the last card of the object, but we need
                    to go one further to get the right offset */
-                next_card++;
+                next_card_index++;
             }
-            next_card_offset = stmcb_index_to_byte_offset(
-                realobj, get_card_index_to_index(next_card));
+
+            start_card_offset = base_offset +
+                get_card_index_to_index(start_card_index) * item_size;
+
+            next_card_offset = base_offset +
+                get_card_index_to_index(next_card_index) * item_size;
 
             if (next_card_offset > obj_size)
                 next_card_offset = obj_size;
 
-            copy_size = next_card_offset - (start - (uintptr_t)obj);
+            start = (uintptr_t)obj + start_card_offset;
+            copy_size = next_card_offset - start_card_offset;
+            OPT_ASSERT(copy_size > 0);
 
             /* dprintf(("copy %lu bytes\n", copy_size)); */
 
@@ -616,8 +628,7 @@ static void _card_wise_synchronize_object_now(object_t *obj)
                 memcpy(dst, src, copy_size);
             }
 
-            copy_size = 0;
-            start = 0;
+            start_card_index = -1;
         }
 
         card_index++;
