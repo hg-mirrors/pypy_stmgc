@@ -79,8 +79,31 @@ static void setup_protection_settings(void)
     pages_setup_readmarkers_for_nursery();
 }
 
+#define MEASURE_MEM
+#include <unistd.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+
+pthread_t m_thread;
+static volatile long kill_measurement = 0;
+void* measurement_thread(void *arg)
+{
+    while (!kill_measurement) {
+        usleep(100000);         /* 100ms */
+        double time = get_stm_time();
+#ifdef MEASURE_MEM
+        struct rusage usage;
+        getrusage(RUSAGE_SELF, &usage);
+        fprintf(stderr, "{%f:%ld/%ld}\n", time,
+                (long)pages_ctl.total_allocated, usage.ru_maxrss*1024);
+#endif
+    }
+    return NULL;
+}
+
 void stm_setup(void)
 {
+    pthread_create(&m_thread, NULL, measurement_thread, NULL);
     /* Check that some values are acceptable */
     assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
     assert(4096 <= ((uintptr_t)STM_SEGMENT));
@@ -151,6 +174,9 @@ void stm_teardown(void)
     /* This function is called during testing, but normal programs don't
        need to call it. */
     assert(!_has_mutex());
+
+    kill_measurement = 1;
+    pthread_join(m_thread, NULL);
 
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
