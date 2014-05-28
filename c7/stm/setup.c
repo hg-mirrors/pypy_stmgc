@@ -94,8 +94,35 @@ void* measurement_thread(void *arg)
 #ifdef MEASURE_MEM
         struct rusage usage;
         getrusage(RUSAGE_SELF, &usage);
-        fprintf(stderr, "{%f:%ld/%ld}\n", time,
-                (long)pages_ctl.total_allocated, usage.ru_maxrss*1024);
+
+        uintptr_t pagenum, endpagenum,
+            total_used_pages = 0, total_privatized_pages = 0;
+        pagenum = END_NURSERY_PAGE;   /* starts after the nursery */
+        endpagenum = (uninitialized_page_start - stm_object_pages) / 4096UL;
+        while (1) {
+            if (UNLIKELY(pagenum == endpagenum)) {
+                /* we reach this point usually twice, because there are
+                   more pages after 'uninitialized_page_stop' */
+                if (endpagenum == NB_PAGES)
+                    break;   /* done */
+                pagenum = (uninitialized_page_stop - stm_object_pages) / 4096UL;
+                endpagenum = NB_PAGES;
+                continue;
+            }
+
+            total_used_pages++;
+            long i;
+            for (i = 1; i <= NB_SEGMENTS; i++) {
+                if (is_private_page(i, pagenum)) {
+                    total_privatized_pages++;
+                }
+            }
+            pagenum++;
+        }
+
+        fprintf(stderr, "{%f:%ld/%ld/%f}\n", time,
+                (long)pages_ctl.total_allocated, usage.ru_maxrss*1024,
+                (float)total_privatized_pages / total_used_pages);
 #endif
     }
     return NULL;
