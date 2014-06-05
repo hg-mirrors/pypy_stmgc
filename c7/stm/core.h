@@ -56,9 +56,9 @@ enum /* stm_flags */ {
        after the object. */
     GCFLAG_HAS_SHADOW = 0x04,
 
-    /* Set on objects after allocation that may use card marking */
-    GCFLAG_HAS_CARDS = _STM_GCFLAG_HAS_CARDS,
-    /* Set on objects that have at least one card marked */
+    /* Set on objects that are large enough to have multiple cards
+       (at least _STM_MIN_CARD_COUNT), and that have at least one card
+       marked.  This flag implies GCFLAG_WRITE_BARRIER. */
     GCFLAG_CARDS_SET = _STM_GCFLAG_CARDS_SET,
 
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by
@@ -68,7 +68,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x20   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x10   /* must be last */
 };
 
 
