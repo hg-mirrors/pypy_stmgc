@@ -41,113 +41,62 @@ static void check_flag_write_barrier(object_t *obj)
 }
 
 __attribute__((always_inline))
-void _stm_mark_card(object_t *obj, uintptr_t index)
+static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
 {
-    assert(index != -1);
+    /* An overflow object is an object from the same transaction, but
+       outside the nursery.  More precisely, it is no longer young,
+       i.e. it comes from before the most recent minor collection.
+    */
+    assert(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
+    dprintf_test(("write_slowpath %p -> ovf obj_to_nurs, index:%lu\n",
+                  obj, mark_card ? index : (uintptr_t)-1));
 
-    assert(obj->stm_flags & GCFLAG_HAS_CARDS);
-    assert(!(obj->stm_flags & GCFLAG_SMALL_UNIFORM)); /* not supported/tested */
-#ifndef NDEBUG
-    struct object_s *realobj = (struct object_s *)
-        REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    size_t size = stmcb_size_rounded_up(realobj);
-    assert(size >= 32);
-    /* we need at least one lock in addition to the STM-reserved object write-lock */
-#endif
-
-    if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
-        /* not yet in the list */
-        if (STM_PSEGMENT->old_objects_with_cards) {
-            /* if we never had a minor collection in this transaction,
-               this list doesn't exist, we rely on modified_old_objs instead */
-            LIST_APPEND(STM_PSEGMENT->old_objects_with_cards, obj);
-        }
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    if (!mark_card) {
+        /* The basic case, with no card marking.  We append the object
+           into 'objects_pointing_to_nursery', and remove the flag so
+           that the write_slowpath will not be called again until the
+           next minor collection. */
+        obj->stm_flags &= ~(GCFLAG_WRITE_BARRIER | GCFLAG_CARDS_SET);
+        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+    }
+    else {
+        /* Card marking.  Don't remove GCFLAG_WRITE_BARRIER because we
+           need to come back to _stm_write_slowpath_card() for every
+           card to mark.  Add GCFLAG_CARDS_SET. */
         obj->stm_flags |= GCFLAG_CARDS_SET;
+        assert(STM_PSEGMENT->old_objects_with_cards);
+        LIST_APPEND(STM_PSEGMENT->old_objects_with_cards, obj);
     }
-
-    /* Just acquire the corresponding lock for the next minor_collection
-       to know what may have changed.
-       We already own the object here or it is an overflow obj. */
-    uintptr_t card_lock_idx = get_write_lock_idx((uintptr_t)obj);
-    card_lock_idx += get_index_to_card_index(index);
-
-    assert(write_locks[get_write_lock_idx((uintptr_t)obj)] == 0 /* overflow obj */
-           || write_locks[get_write_lock_idx((uintptr_t)obj)] == STM_PSEGMENT->write_lock_num);
-    assert(get_write_lock_idx((uintptr_t)obj) != card_lock_idx);
-
-    dprintf(("mark %p index %lu, card:%lu with %d\n",
-             obj, index, get_index_to_card_index(index), CARD_MARKED));
-    if (write_locks[card_lock_idx] != CARD_MARKED)
-        write_locks[card_lock_idx] = CARD_MARKED;
 }
 
-static bool _stm_write_slowpath_overflow_objs(object_t *obj, uintptr_t index)
-{
-    /* is this an object from the same transaction, outside the nursery? */
-    if (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
-        assert(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
-        dprintf_test(("write_slowpath %p -> ovf obj_to_nurs, index:%lu\n", obj, index));
-
-        if (index == -1) {
-            /* no card to be marked, don't call again until next collection */
-            obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-            LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
-        } else {
-            /* don't remove GCFLAG_WRITE_BARRIER because we need to be
-               here for every card to mark */
-            assert(STM_PSEGMENT->old_objects_with_cards);
-            _stm_mark_card(obj, index);
-        }
-
-        /* We don't need to do anything in the STM part of the WB slowpath: */
-        return true;
-    }
-
-    /* continue in STM part with no-overflow object */
-    return false;
-}
-
-void _stm_write_slowpath(object_t *obj)
-{
-    _stm_write_slowpath_card(obj, -1);
-}
-
-void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
+__attribute__((always_inline))
+static void write_slowpath_common(object_t *obj, bool mark_card)
 {
     assert(_seems_to_be_running_transaction());
     assert(!_is_young(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
-    assert(IMPLY(index != -1, index < stmcb_size_rounded_up(
-                 (struct object_s*)REAL_ADDRESS(STM_SEGMENT->segment_base, obj))));
 
     uintptr_t base_lock_idx = get_write_lock_idx((uintptr_t)obj);
-    uint8_t lock_num = STM_PSEGMENT->write_lock_num;
-    bool mark_cards = index != -1;
 
-    assert(base_lock_idx < sizeof(write_locks));
-    if (!(obj->stm_flags & GCFLAG_HAS_CARDS)) {
-        index = -1;
-        mark_cards = false;         /* assume no cards */
-    }
-
-    /* if mark_cards and obj->stm_flags & CARDS_SET:
-           directly mark the card of obj at index
-           return (no STM part needed)
-       -> see stmgc.h */
-    /* if CARDS_SET, we entered here at least once, so we own the write_lock
-       OR this is an overflow object and the write_lock is not owned */
-    OPT_ASSERT(
-        IMPLY(obj->stm_flags & GCFLAG_CARDS_SET,
-              (!IS_OVERFLOW_OBJ(STM_PSEGMENT, obj) && write_locks[base_lock_idx] == lock_num)
-              || (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj) && write_locks[base_lock_idx] == 0)
-              ));
-
-    if (_stm_write_slowpath_overflow_objs(obj, index))
+    if (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
+        assert(write_locks[base_lock_idx] == 0);
+        write_slowpath_overflow_obj(obj, mark_card);
         return;
-
-    /* do a read-barrier now.  Note that this must occur before the
-       safepoints that may be issued in write_write_contention_management(). */
+    }
+    /* Else, it's an old object and we need to privatise it.
+       Do a read-barrier now.  Note that this must occur before the
+       safepoints that may be issued in write_write_contention_management().
+    */
     stm_read(obj);
+
+    /* Take the segment's own lock number */
+    uint8_t lock_num = STM_PSEGMENT->write_lock_num;
+
+    /* If CARDS_SET, we entered here at least once already, so we
+       already own the write_lock */
+    assert(IMPLY(obj->stm_flags & GCFLAG_CARDS_SET,
+                 write_locks[base_lock_idx] == lock_num));
 
     /* XXX XXX XXX make the logic of write-locking objects optional! */
 
@@ -205,10 +154,10 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
             realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
             obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
 
-            /* that's the page *following* the last page with the object */
-            end_page = (((uintptr_t)obj) + obj_size + 4095) / 4096UL;
+            /* get the last page containing data from the object */
+            end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
 
-            for (i = first_page; i < end_page; i++) {
+            for (i = first_page; i <= end_page; i++) {
                 page_privatize(i);
             }
         }
@@ -236,9 +185,11 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
     /* check that so far all copies of the object have the flag */
     check_flag_write_barrier(obj);
 
-    /* A common case for write_locks[] that was either 0 or lock_num:
-       we need to add the object to the appropriate list if there is one. */
-    if (!mark_cards) {
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    if (!mark_card) {
+        /* A common case for write_locks[] that was either 0 or lock_num:
+           we need to add the object to the appropriate list if there is one.
+        */
         if (STM_PSEGMENT->objects_pointing_to_nursery != NULL) {
             dprintf_test(("write_slowpath %p -> old obj_to_nurs\n", obj));
             LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
@@ -246,18 +197,70 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
 
         /* remove GCFLAG_WRITE_BARRIER if we succeeded in getting the base
            write-lock (not for card marking). */
-        assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
-        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-
-    } else {
-        /* don't remove WRITE_BARRIER */
-        _stm_mark_card(obj, index);
+        obj->stm_flags &= ~(GCFLAG_WRITE_BARRIER | GCFLAG_CARDS_SET);
+    }
+    else {
+        /* don't remove WRITE_BARRIER, but add CARDS_SET */
+        obj->stm_flags |= GCFLAG_CARDS_SET;
+        assert(STM_PSEGMENT->old_objects_with_cards);
+        LIST_APPEND(STM_PSEGMENT->old_objects_with_cards, obj);
     }
 
     /* for sanity, check again that all other segment copies of this
        object still have the flag (so privatization worked) */
     check_flag_write_barrier(obj);
+}
 
+void _stm_write_slowpath(object_t *obj)
+{
+    write_slowpath_common(obj, /*mark_card=*/false, -1);
+}
+
+void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
+{
+    /* If CARDS_SET is not set so far, issue a normal write barrier.
+       If the object is large enough, ask it to set up the object for
+       card marking instead.
+    */
+    if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
+        bool mark_card = obj_uses_cards(obj);
+        write_slowpath_common(obj, mark_card);
+        if (!mark_card)
+            return;
+    }
+
+    /* We reach this point if we have to mark the card.
+     */
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    assert(obj->stm_flags & GCFLAG_CARDS_SET);
+    assert(!(obj->stm_flags & GCFLAG_SMALL_UNIFORM)); /* not supported/tested */
+
+#ifndef NDEBUG
+    struct object_s *realobj = (struct object_s *)
+        REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t size = stmcb_size_rounded_up(realobj);
+    /* we need at least one lock in addition to the STM-reserved object
+       write-lock */
+    assert(size >= 32);
+    /* the 'index' must be in range(length-of-obj), but we don't have
+       a direct way to know the length.  We know that it is smaller
+       than the size in bytes. */
+    assert(index < size);
+#endif
+
+    /* Write into the card's lock.  This is used by the next minor
+       collection to know what parts of the big object may have changed.
+       We already own the object here or it is an overflow obj. */
+    uintptr_t base_lock_idx = get_write_lock_idx((uintptr_t)obj);
+    uintptr_t card_lock_idx = base_lock_idx + get_index_to_card_index(index);
+    write_locks[card_lock_idx] = CARD_MARKED;
+
+    /* More debug checks */
+    dprintf(("mark %p index %lu, card:%lu with %d\n",
+             obj, index, get_index_to_card_index(index), CARD_MARKED));
+    assert(IMPLY(IS_OVERFLOW_OBJ(obj), write_locks[base_lock_idx] == 0));
+    assert(IMPLY(!IS_OVERFLOW_OBJ(obj), write_locks[base_lock_idx] ==
+                                            STM_PSEGMENT->write_lock_num));
 }
 
 static void reset_transaction_read_version(void)

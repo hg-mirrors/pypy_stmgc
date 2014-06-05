@@ -108,7 +108,6 @@ typedef struct stm_thread_local_s {
    but it's not exposed to C code so far */
 void _stm_write_slowpath(object_t *);
 void _stm_write_slowpath_card(object_t *, uintptr_t);
-void _stm_mark_card(object_t *obj, uintptr_t card_index);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
@@ -148,9 +147,9 @@ uint64_t _stm_total_allocated(void);
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
-#define _STM_GCFLAG_HAS_CARDS          0x08
-#define _STM_GCFLAG_CARDS_SET          0x10
-#define _STM_CARD_SIZE                 128 /* >= 32 */
+#define _STM_GCFLAG_CARDS_SET          0x08
+#define _STM_CARD_SIZE                 32     /* must be >= 32 */
+#define _STM_MIN_CARD_COUNT            17
 #define _STM_NSE_SIGNAL_MAX     _STM_TIME_N
 #define _STM_FAST_ALLOC           (66*1024)
 
@@ -222,22 +221,17 @@ static inline void stm_write(object_t *obj)
 }
 
 /* The following is a GC-optimized barrier that works on the granularity
-   of CARD_SIZE. It can only be used on objects one any object, but only
-   helps with those that were internally marked with GCFLAG_HAS_CARDS
+   of CARD_SIZE.  It can be used on any array object, but it is only
+   useful with those that were internally marked with GCFLAG_HAS_CARDS.
    It has the same purpose as stm_write() for TM.
-   'index' can be anything < size of the object
+   'index' is the array-item-based position within the object, which
+   is measured in units returned by stmcb_get_card_base_itemsize().
 */
 __attribute__((always_inline))
 static inline void stm_write_card(object_t *obj, uintptr_t index)
 {
-    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0)) {
-        if (LIKELY((obj->stm_flags & _STM_GCFLAG_CARDS_SET) != 0)) {
-            /* XXX: check how well clang optimizes this */
-            _stm_mark_card(obj, index);
-        } else {
-            _stm_write_slowpath_card(obj, index);
-        }
-    }
+    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
+        _stm_write_slowpath_card(obj, index);
 }
 
 /* Must be provided by the user of this library.
