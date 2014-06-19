@@ -428,14 +428,17 @@ static void synchronize_object_now(object_t *obj, bool lazy_on_commit)
                     /* The page is a private page.  We need to diffuse this
                        fragment of object from the shared page to this private
                        page. */
-                    if (!lazy_on_commit) {
+                    if ((!lazy_on_commit)
+                        || (get_priv_segment(i)->safe_point == SP_NO_TRANSACTION)) {
+                        /* not lazily synchronize or there is no transaction running there
+                           (this is to avoid the list of outdated objs growing infinitely) */
                         if (copy_size == 4096)
                             pagecopy(dst, src);
                         else
                             memcpy(dst, src, copy_size);
+                    } else {
+                        private_in_segment[i-1] = true;
                     }
-
-                    private_in_segment[i-1] = true;
                 }
                 else {
                     assert(!memcmp(dst, src, copy_size));  /* same page */
@@ -540,6 +543,8 @@ void stm_commit_transaction(void)
     if (detect_write_read_conflicts())
         goto restart;
 
+    /* pull changes in case we waited for a transaction to commit
+       in contention management. */
     pull_committed_changes();
 
     /* cannot abort any more from here */
