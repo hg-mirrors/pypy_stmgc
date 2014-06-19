@@ -262,7 +262,7 @@ static inline void _duck(void) {
 
 static void copy_object_to_shared(object_t *obj, int source_segment_num);
 static void synchronize_object_now(object_t *obj, bool lazy_on_commit);
-static void pull_committed_changes();
+static void pull_committed_changes(struct stm_priv_segment_info_s *pseg);
 
 static inline void acquire_privatization_lock(void)
 {

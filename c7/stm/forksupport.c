@@ -66,7 +66,7 @@ static void forksupport_prepare(void)
 
     s_mutex_lock();
     synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
-    pull_committed_changes();   /* XXX: unclear if necessary */
+    pull_committed_changes(get_priv_segment(STM_SEGMENT->segment_num));   /* XXX: unclear if necessary */
 
     /* Make a new mmap at some other address, but of the same size as
        the standard mmap at stm_object_pages
@@ -81,6 +81,8 @@ static void forksupport_prepare(void)
     for (i = 1; i <= NB_SEGMENTS; i++) {
         char *src, *dst;
         struct stm_priv_segment_info_s *psrc = get_priv_segment(i);
+        pull_committed_changes(psrc);
+
         dst = big_copy + (((char *)psrc) - stm_object_pages);
         *(struct stm_priv_segment_info_s *)dst = *psrc;
 
