@@ -119,8 +119,6 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up, long use_cards)
 
     object_t *o = (object_t *)(p - stm_object_pages);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
-    if (use_cards && size_rounded_up > CARD_SIZE)
-        o->stm_flags |= GCFLAG_HAS_CARDS;
 
     if (testing_prebuilt_objs == NULL)
         testing_prebuilt_objs = list_create();
@@ -472,41 +470,38 @@ static void clean_up_segment_lists(void)
 
                     realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
 
-                    /* logic corresponds to _collect_now() in nursery.c */
-                    if (realobj->stm_flags & GCFLAG_HAS_CARDS) {
-                        /* We called a normal WB on these objs. If we wrote
-                           a value to some place in them, we need to
-                           synchronise the whole object on commit */
-                        if (IS_OVERFLOW_OBJ(pseg, realobj)) {
-                            /* we do not need the old cards for overflow objects */
-                            _reset_object_cards(pseg, item, CARD_CLEAR, false);
-                        } else {
+                    if (realobj->stm_flags & GCFLAG_CARDS_SET) {
+                        /* we called a normal WB on this object, so all cards
+                           need to be marked OLD */
+                        if (!IS_OVERFLOW_OBJ(pseg, realobj)) {
                             _reset_object_cards(pseg, item, CARD_MARKED_OLD, true); /* mark all */
+                        } else {
+                            /* simply clear overflow */
+                            _reset_object_cards(pseg, item, CARD_CLEAR, false);
                         }
                     }
                 }));
             list_clear(lst);
-
-            lst = pseg->old_objects_with_cards;
-            LIST_FOREACH_R(lst, object_t* /*item*/,
-                ({
-                    struct object_s *realobj = (struct object_s *)
-                        REAL_ADDRESS(pseg->pub.segment_base, item);
-                    OPT_ASSERT(realobj->stm_flags & GCFLAG_CARDS_SET);
-                    OPT_ASSERT(realobj->stm_flags & GCFLAG_WRITE_BARRIER);
-
-                    /* logic corresponds to _trace_card_object() in nursery.c */
-                    uint8_t mark_value = IS_OVERFLOW_OBJ(pseg, realobj) ?
-                        CARD_CLEAR : CARD_MARKED_OLD;
-                    _reset_object_cards(pseg, item, mark_value, false);
-                }));
-            list_clear(lst);
-
         } else {
             /* if here MINOR_NOTHING_TO_DO() was true before, it's like
                we "didn't do a collection" at all. So nothing to do on
                modified_old_objs. */
         }
+
+        lst = pseg->old_objects_with_cards;
+        LIST_FOREACH_R(lst, object_t* /*item*/,
+            ({
+                struct object_s *realobj = (struct object_s *)
+                    REAL_ADDRESS(pseg->pub.segment_base, item);
+                OPT_ASSERT(realobj->stm_flags & GCFLAG_CARDS_SET);
+                OPT_ASSERT(realobj->stm_flags & GCFLAG_WRITE_BARRIER);
+
+                /* clear cards if overflow, or mark marked cards as old otherwise */
+                uint8_t mark_value = IS_OVERFLOW_OBJ(pseg, realobj) ?
+                    CARD_CLEAR : CARD_MARKED_OLD;
+                _reset_object_cards(pseg, item, mark_value, false);
+            }));
+        list_clear(lst);
 
         /* Remove from 'large_overflow_objects' all objects that die */
         lst = pseg->large_overflow_objects;

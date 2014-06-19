@@ -150,6 +150,7 @@ uint64_t _stm_total_allocated(void);
 #define _STM_GCFLAG_CARDS_SET          0x08
 #define _STM_CARD_SIZE                 32     /* must be >= 32 */
 #define _STM_MIN_CARD_COUNT            17
+#define _STM_MIN_CARD_OBJ_SIZE         (_STM_CARD_SIZE * _STM_MIN_CARD_COUNT)
 #define _STM_NSE_SIGNAL_MAX     _STM_TIME_N
 #define _STM_FAST_ALLOC           (66*1024)
 

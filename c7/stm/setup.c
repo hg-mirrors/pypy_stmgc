@@ -118,7 +118,7 @@ void stm_setup(void)
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
         pr->objects_pointing_to_nursery = NULL;
-        pr->old_objects_with_cards = NULL;
+        pr->old_objects_with_cards = list_create();
         pr->large_overflow_objects = NULL;
         pr->modified_old_objects = list_create();
         pr->modified_old_objects_markers = list_create();
@@ -158,7 +158,7 @@ void stm_teardown(void)
     for (i = 1; i <= NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
         assert(pr->objects_pointing_to_nursery == NULL);
-        assert(pr->old_objects_with_cards == NULL);
+        list_free(pr->old_objects_with_cards);
         assert(pr->large_overflow_objects == NULL);
         list_free(pr->modified_old_objects);
         list_free(pr->modified_old_objects_markers);
