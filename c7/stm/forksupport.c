@@ -66,6 +66,7 @@ static void forksupport_prepare(void)
 
     s_mutex_lock();
     synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
+    pull_committed_changes();   /* XXX: unclear if necessary */
 
     /* Make a new mmap at some other address, but of the same size as
        the standard mmap at stm_object_pages

@@ -75,6 +75,10 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
 
+    /* list of objects that were committed while we waited in a
+       safe point. This means we have an outdated copy of them. */
+    struct list_s *outdated_objects;
+
     /* List of old objects (older than the current transaction) that the
        current transaction attempts to modify.  This is used to track
        the STM status: they are old objects that where written to and
@@ -257,7 +261,8 @@ static inline void _duck(void) {
 }
 
 static void copy_object_to_shared(object_t *obj, int source_segment_num);
-static void synchronize_object_now(object_t *obj);
+static void synchronize_object_now(object_t *obj, bool lazy_on_commit);
+static void pull_committed_changes();
 
 static inline void acquire_privatization_lock(void)
 {
