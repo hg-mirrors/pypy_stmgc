@@ -56,9 +56,10 @@ enum /* stm_flags */ {
        after the object. */
     GCFLAG_HAS_SHADOW = 0x04,
 
-    /* Set on objects that are large enough to have multiple cards
-       (at least _STM_MIN_CARD_COUNT), and that have at least one card
-       marked.  This flag implies GCFLAG_WRITE_BARRIER. */
+    /* Set on objects that are large enough (_STM_MIN_CARD_OBJ_SIZE)
+       to have multiple cards (at least _STM_MIN_CARD_COUNT), and that
+       have at least one card marked.  This flag implies
+       GCFLAG_WRITE_BARRIER. */
     GCFLAG_CARDS_SET = _STM_GCFLAG_CARDS_SET,
 
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by

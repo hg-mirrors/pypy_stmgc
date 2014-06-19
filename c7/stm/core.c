@@ -48,8 +48,6 @@ static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
        i.e. it comes from before the most recent minor collection.
     */
     assert(STM_PSEGMENT->objects_pointing_to_nursery != NULL);
-    dprintf_test(("write_slowpath %p -> ovf obj_to_nurs, index:%lu\n",
-                  obj, mark_card ? index : (uintptr_t)-1));
 
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     if (!mark_card) {
@@ -57,6 +55,11 @@ static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
            into 'objects_pointing_to_nursery', and remove the flag so
            that the write_slowpath will not be called again until the
            next minor collection. */
+        if (obj->stm_flags & GCFLAG_CARDS_SET) {
+            /* if we clear this flag, we also need to clear the cards */
+            _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
+                                obj, CARD_CLEAR, false);
+        }
         obj->stm_flags &= ~(GCFLAG_WRITE_BARRIER | GCFLAG_CARDS_SET);
         LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
     }
@@ -195,6 +198,13 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
             LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
         }
 
+        if (obj->stm_flags & GCFLAG_CARDS_SET) {
+            /* if we clear this flag, we have to tell sync_old_objs that
+               everything needs to be synced */
+            _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
+                                obj, CARD_MARKED_OLD, true); /* mark all */
+        }
+
         /* remove GCFLAG_WRITE_BARRIER if we succeeded in getting the base
            write-lock (not for card marking). */
         obj->stm_flags &= ~(GCFLAG_WRITE_BARRIER | GCFLAG_CARDS_SET);
@@ -213,7 +223,19 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
 
 void _stm_write_slowpath(object_t *obj)
 {
-    write_slowpath_common(obj, /*mark_card=*/false, -1);
+    write_slowpath_common(obj, /*mark_card=*/false);
+}
+
+static bool obj_should_use_cards(object_t *obj)
+{
+    struct object_s *realobj = (struct object_s *)
+        REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t size = stmcb_size_rounded_up(realobj);
+
+    if (size < _STM_MIN_CARD_OBJ_SIZE)
+        return false;
+
+    return !!stmcb_should_use_cards(realobj);
 }
 
 void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
@@ -223,11 +245,14 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
        card marking instead.
     */
     if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
-        bool mark_card = obj_uses_cards(obj);
+        bool mark_card = obj_should_use_cards(obj);
         write_slowpath_common(obj, mark_card);
         if (!mark_card)
             return;
     }
+
+    dprintf_test(("write_slowpath_card %p -> index:%lu\n",
+                  obj, index));
 
     /* We reach this point if we have to mark the card.
      */
@@ -258,9 +283,10 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
     /* More debug checks */
     dprintf(("mark %p index %lu, card:%lu with %d\n",
              obj, index, get_index_to_card_index(index), CARD_MARKED));
-    assert(IMPLY(IS_OVERFLOW_OBJ(obj), write_locks[base_lock_idx] == 0));
-    assert(IMPLY(!IS_OVERFLOW_OBJ(obj), write_locks[base_lock_idx] ==
-                                            STM_PSEGMENT->write_lock_num));
+    assert(IMPLY(IS_OVERFLOW_OBJ(STM_PSEGMENT, obj),
+                 write_locks[base_lock_idx] == 0));
+    assert(IMPLY(!IS_OVERFLOW_OBJ(STM_PSEGMENT, obj),
+                 write_locks[base_lock_idx] == STM_PSEGMENT->write_lock_num));
 }
 
 static void reset_transaction_read_version(void)
@@ -530,7 +556,7 @@ static inline bool _has_private_page_in_range(
 
 static void _card_wise_synchronize_object_now(object_t *obj)
 {
-    assert(obj->stm_flags & GCFLAG_HAS_CARDS);
+    assert(obj_should_use_cards(obj));
     assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
     assert(!IS_OVERFLOW_OBJ(STM_PSEGMENT, obj));
 
@@ -563,6 +589,7 @@ static void _card_wise_synchronize_object_now(object_t *obj)
        of pages (except _has_private_page_in_range) */
     uintptr_t base_offset;
     ssize_t item_size;
+    bool all_cards_were_cleared = true;
     stmcb_get_card_base_itemsize(realobj, &base_offset, &item_size);
 
     uintptr_t start_card_index = -1;
@@ -573,6 +600,7 @@ static void _card_wise_synchronize_object_now(object_t *obj)
         OPT_ASSERT(card_value != CARD_MARKED); /* always only MARKED_OLD or CLEAR */
 
         if (card_value == CARD_MARKED_OLD) {
+            all_cards_were_cleared = false;
             write_locks[card_lock_idx] = CARD_CLEAR;
 
             if (start_card_index == -1) {   /* first marked card */
@@ -637,6 +665,13 @@ static void _card_wise_synchronize_object_now(object_t *obj)
         card_index++;
     }
 
+    if (all_cards_were_cleared) {
+        /* well, seems like we never called stm_write_card() on it, so actually
+           we need to fall back to synchronize the whole object */
+        _page_wise_synchronize_object_now(obj);
+        return;
+    }
+
 #ifndef NDEBUG
     char *src = REAL_ADDRESS(stm_object_pages, (uintptr_t)obj);
     char *dst;
@@ -661,9 +696,9 @@ static void synchronize_object_now(object_t *obj, bool ignore_cards)
     assert(STM_PSEGMENT->privatization_lock == 1);
 
     if (obj->stm_flags & GCFLAG_SMALL_UNIFORM) {
-        assert(!(obj->stm_flags & GCFLAG_HAS_CARDS));
+        assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
         abort();//XXX WRITE THE FAST CASE
-    } else if (ignore_cards || !(obj->stm_flags & GCFLAG_HAS_CARDS)) {
+    } else if (ignore_cards || !obj_should_use_cards(obj)) {
         _page_wise_synchronize_object_now(obj);
     } else {
         _card_wise_synchronize_object_now(obj);
@@ -722,7 +757,7 @@ static void _finish_transaction(int attribute_to)
     /* reset these lists to NULL for the next transaction */
     _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
     LIST_FREE(STM_PSEGMENT->objects_pointing_to_nursery);
-    LIST_FREE(STM_PSEGMENT->old_objects_with_cards);
+    list_clear(STM_PSEGMENT->old_objects_with_cards);
     LIST_FREE(STM_PSEGMENT->large_overflow_objects);
 
     timing_end_transaction(attribute_to);
@@ -833,7 +868,7 @@ reset_modified_from_other_segments(int segment_num)
             ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
             memcpy(dst, src, size);
 
-            if (item->stm_flags & GCFLAG_HAS_CARDS)
+            if (obj_should_use_cards(item))
                 _reset_object_cards(pseg, item, CARD_CLEAR, false);
 
             /* objects in 'modified_old_objects' usually have the
@@ -910,7 +945,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     /* reset these lists to NULL too on abort */
     LIST_FREE(pseg->objects_pointing_to_nursery);
-    LIST_FREE(pseg->old_objects_with_cards);
+    list_clear(pseg->old_objects_with_cards);
     LIST_FREE(pseg->large_overflow_objects);
     list_clear(pseg->young_weakrefs);
 #pragma pop_macro("STM_SEGMENT")

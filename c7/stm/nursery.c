@@ -114,8 +114,6 @@ static void minor_trace_if_young(object_t **pobj)
          copy_large_object:;
             char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
             memcpy(realnobj, realobj, size);
-            if (size > CARD_SIZE && stmcb_should_use_cards((struct object_s*)realnobj))
-                nobj->stm_flags |= GCFLAG_HAS_CARDS;
 
             nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
         }
@@ -141,11 +139,6 @@ static void minor_trace_if_young(object_t **pobj)
         nobj = obj;
         tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)nobj);
         nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
-
-        realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-        size = stmcb_size_rounded_up((struct object_s *)realobj);
-        if (size > CARD_SIZE && stmcb_should_use_cards((struct object_s*)realobj))
-            nobj->stm_flags |= GCFLAG_HAS_CARDS;
     }
 
     /* Set the overflow_number if nedeed */
@@ -197,8 +190,8 @@ static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, objec
     struct object_s *realobj = (struct object_s *)REAL_ADDRESS(pseg->pub.segment_base, obj);
     size_t size = stmcb_size_rounded_up(realobj);
 
-    if (!(realobj->stm_flags & GCFLAG_HAS_CARDS))
-        return;
+    if (size < _STM_MIN_CARD_OBJ_SIZE)
+        return;                 /* too small for cards */
 
     uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
     uintptr_t card_index = 1;
@@ -233,11 +226,9 @@ static void _verify_cards_cleared_in_all_lists(struct stm_priv_segment_info_s *p
             pseg->objects_pointing_to_nursery, object_t * /*item*/,
             _cards_cleared_in_object(pseg, item));
     }
-    if (pseg->old_objects_with_cards) {
-        LIST_FOREACH_R(
-            pseg->old_objects_with_cards, object_t * /*item*/,
-            _cards_cleared_in_object(pseg, item));
-    }
+    LIST_FOREACH_R(
+        pseg->old_objects_with_cards, object_t * /*item*/,
+        _cards_cleared_in_object(pseg, item));
 #endif
 }
 
@@ -252,8 +243,7 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
     struct object_s *realobj = (struct object_s *)REAL_ADDRESS(pseg->pub.segment_base, obj);
     size_t size = stmcb_size_rounded_up(realobj);
 
-    OPT_ASSERT(size >= 32);
-    assert(realobj->stm_flags & GCFLAG_HAS_CARDS);
+    OPT_ASSERT(size >= _STM_MIN_CARD_OBJ_SIZE);
     assert(IMPLY(mark_value == CARD_CLEAR, !mark_all)); /* not necessary */
     assert(IMPLY(mark_all, mark_value == CARD_MARKED_OLD)); /* set *all* to OLD */
     assert(IMPLY(IS_OVERFLOW_OBJ(pseg, realobj),
@@ -349,29 +339,24 @@ static inline void _collect_now(object_t *obj, bool was_definitely_young)
         stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
 
         obj->stm_flags |= GCFLAG_WRITE_BARRIER;
-        if (obj->stm_flags & GCFLAG_HAS_CARDS) {
+        if (obj->stm_flags & GCFLAG_CARDS_SET) {
             /* all objects that had WB cleared need to be fully synchronised
                on commit, so we have to mark all their cards */
             struct stm_priv_segment_info_s *pseg = get_priv_segment(
                 STM_SEGMENT->segment_num);
 
-            if (was_definitely_young) {
-                /* stm_wb-slowpath should never have triggered for young objs */
-                assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
-                return;
-            }
+            /* stm_wb-slowpath should never have triggered for young objs */
+            assert(!was_definitely_young);
 
-            if (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
-                /* we do not need the old cards for overflow objects */
-                _reset_object_cards(pseg, obj, CARD_CLEAR, false);
-            } else {
+            if (!IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
                 _reset_object_cards(pseg, obj, CARD_MARKED_OLD, true); /* mark all */
+            } else {
+                /* simply clear overflow */
+                _reset_object_cards(pseg, obj, CARD_CLEAR, false);
             }
         }
-    } if (obj->stm_flags & GCFLAG_CARDS_SET) {
-        assert(!was_definitely_young);
-        _trace_card_object(obj);
     }
+    /* else traced in collect_cardrefs_to_nursery if necessary */
 }
 
 
@@ -384,8 +369,16 @@ static void collect_cardrefs_to_nursery(void)
         object_t *obj = (object_t*)list_pop_item(lst);
 
         assert(!_is_young(obj));
-        assert(obj->stm_flags & GCFLAG_CARDS_SET);
-        _collect_now(obj, false);
+
+        if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
+            /* handled in _collect_now() */
+            continue;
+        }
+
+        /* traces cards, clears marked cards or marks them old if
+           necessary */
+        _trace_card_object(obj);
+
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
     }
 }
@@ -563,9 +556,7 @@ static void _do_minor_collection(bool commit)
        to hold the ones we didn't trace so far. */
     uintptr_t num_old;
     if (STM_PSEGMENT->objects_pointing_to_nursery == NULL) {
-        assert(STM_PSEGMENT->old_objects_with_cards == NULL);
         STM_PSEGMENT->objects_pointing_to_nursery = list_create();
-        STM_PSEGMENT->old_objects_with_cards = list_create();
 
         /* See the doc of 'objects_pointing_to_nursery': if it is NULL,
            then it is implicitly understood to be equal to
