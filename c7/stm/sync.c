@@ -255,6 +255,7 @@ void _stm_stop_safe_point(void)
     STM_PSEGMENT->safe_point = SP_RUNNING;
 
     stm_safe_point();
+    pull_committed_changes();
 }
 #endif
 
@@ -439,4 +440,5 @@ void _stm_collectable_safe_point(void)
     s_mutex_lock();
     enter_safe_point_if_requested();
     s_mutex_unlock();
+    pull_committed_changes();
 }

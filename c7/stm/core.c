@@ -225,6 +225,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     dprintf(("start_transaction\n"));
 
     s_mutex_unlock();
+    pull_committed_changes();
 
     /* Now running the SP_RUNNING start.  We can set our
        'transaction_read_version' after releasing the mutex,
@@ -355,7 +356,7 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
     }
 }
 
-static void synchronize_object_now(object_t *obj)
+static void synchronize_object_now(object_t *obj, bool lazy_on_commit)
 {
     /* Copy around the version of 'obj' that lives in our own segment.
        It is first copied into the shared pages, and then into other
@@ -380,6 +381,12 @@ static void synchronize_object_now(object_t *obj)
         uintptr_t end = start + obj_size;
         uintptr_t last_page = (end - 1) / 4096UL;
         long i, myself = STM_SEGMENT->segment_num;
+
+        bool private_in_segment[NB_SEGMENTS];
+        if (lazy_on_commit) {
+            for (i = 1; i <= NB_SEGMENTS; i++)
+                private_in_segment[i-1] = false;
+        }
 
         for (; first_page <= last_page; first_page++) {
 
@@ -410,20 +417,25 @@ static void synchronize_object_now(object_t *obj)
                 assert(memcmp(dst, src, copy_size) == 0);  /* same page */
             }
 
+            /* now copy from the shared page to all private pages */
+            src = REAL_ADDRESS(stm_object_pages, start);
             for (i = 1; i <= NB_SEGMENTS; i++) {
                 if (i == myself)
                     continue;
 
-                src = REAL_ADDRESS(stm_object_pages, start);
                 dst = REAL_ADDRESS(get_segment_base(i), start);
                 if (is_private_page(i, first_page)) {
                     /* The page is a private page.  We need to diffuse this
                        fragment of object from the shared page to this private
                        page. */
-                    if (copy_size == 4096)
-                        pagecopy(dst, src);
-                    else
-                        memcpy(dst, src, copy_size);
+                    if (!lazy_on_commit) {
+                        if (copy_size == 4096)
+                            pagecopy(dst, src);
+                        else
+                            memcpy(dst, src, copy_size);
+                    }
+
+                    private_in_segment[i-1] = true;
                 }
                 else {
                     assert(!memcmp(dst, src, copy_size));  /* same page */
@@ -431,6 +443,15 @@ static void synchronize_object_now(object_t *obj)
             }
 
             start = (start + 4096) & ~4095;
+        }
+
+        if (lazy_on_commit) {
+            for (i = 1; i <= NB_SEGMENTS; i++) {
+                if (private_in_segment[i-1]) {
+                    struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+                    LIST_APPEND(pseg->outdated_objects, obj);
+                }
+            }
         }
     }
 }
@@ -442,7 +463,7 @@ static void push_overflow_objects_from_privatized_pages(void)
 
     acquire_privatization_lock();
     LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
-                   synchronize_object_now(item));
+                   synchronize_object_now(item, false));
     release_privatization_lock();
 }
 
@@ -466,7 +487,7 @@ static void push_modified_to_other_segments(void)
 
             /* copy the object to the shared page, and to the other
                private pages as needed */
-            synchronize_object_now(item);
+            synchronize_object_now(item, true);
         }));
     release_privatization_lock();
 
@@ -559,6 +580,7 @@ void stm_commit_transaction(void)
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
+    pull_committed_changes();
 }
 
 void stm_abort_transaction(void)
@@ -566,6 +588,41 @@ void stm_abort_transaction(void)
     s_mutex_lock();
     abort_with_mutex();
 }
+
+static void copy_objs_from_segment_0(int segment_num, struct list_s *lst)
+{
+    /* pull the list of objects from segment 0. This either resets
+       modifications or just updates the view of the current segment.
+    */
+    char *local_base = get_segment_base(segment_num);
+    char *zero_base = get_segment_base(0);
+
+    LIST_FOREACH_R(lst, object_t * /*item*/,
+        ({
+            /* memcpy in the opposite direction than
+               push_modified_to_other_segments() */
+            char *src = REAL_ADDRESS(zero_base, item);
+            char *dst = REAL_ADDRESS(local_base, item);
+            ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
+            memcpy(dst, src, size);
+
+            /* all objs in segment 0 should have the WB flag: */
+            assert(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
+        }));
+    write_fence();
+}
+
+static void pull_committed_changes()
+{
+    struct list_s *lst = STM_PSEGMENT->outdated_objects;
+
+    if (list_count(lst)) {
+        dprintf(("pulling %lu objects from shared segment\n", list_count(lst)));
+        copy_objs_from_segment_0(STM_SEGMENT->segment_num, lst);
+        list_clear(lst);
+    }
+}
+
 
 static void
 reset_modified_from_other_segments(int segment_num)
@@ -723,6 +780,7 @@ void _stm_become_inevitable(const char *msg)
 {
     s_mutex_lock();
     enter_safe_point_if_requested();
+    pull_committed_changes();   /* XXX: not sure if necessary */
 
     if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
         dprintf(("become_inevitable: %s\n", msg));
@@ -739,6 +797,7 @@ void _stm_become_inevitable(const char *msg)
     }
 
     s_mutex_unlock();
+    pull_committed_changes();
 }
 
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
@@ -749,4 +808,5 @@ void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
     s_mutex_lock();
     synchronize_all_threads(STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE);
     s_mutex_unlock();
+    pull_committed_changes();
 }
