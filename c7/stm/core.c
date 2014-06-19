@@ -540,6 +540,8 @@ void stm_commit_transaction(void)
     if (detect_write_read_conflicts())
         goto restart;
 
+    pull_committed_changes();
+
     /* cannot abort any more from here */
     dprintf(("commit_transaction\n"));
 
