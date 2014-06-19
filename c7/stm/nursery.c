@@ -477,6 +477,11 @@ static void major_do_minor_collections(void)
 
     for (i = 1; i <= NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+
+        /* we pull committed changes here so that we are definitely
+           sure all segments are up-to-date */
+        pull_committed_changes(pseg);
+
         if (MINOR_NOTHING_TO_DO(pseg))  /*TS_NONE segments have NOTHING_TO_DO*/
             continue;
 

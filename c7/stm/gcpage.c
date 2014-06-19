@@ -153,7 +153,7 @@ static void major_collection_if_requested(void)
     }
 
     s_mutex_unlock();
-    pull_committed_changes();
+    pull_committed_changes(get_priv_segment(STM_SEGMENT->segment_num));
 }
 
 

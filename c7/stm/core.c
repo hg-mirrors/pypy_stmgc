@@ -225,7 +225,7 @@ void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf)
     dprintf(("start_transaction\n"));
 
     s_mutex_unlock();
-    pull_committed_changes();
+    pull_committed_changes(get_priv_segment(STM_SEGMENT->segment_num));
 
     /* Now running the SP_RUNNING start.  We can set our
        'transaction_read_version' after releasing the mutex,
@@ -543,10 +543,6 @@ void stm_commit_transaction(void)
     if (detect_write_read_conflicts())
         goto restart;
 
-    /* pull changes in case we waited for a transaction to commit
-       in contention management. */
-    pull_committed_changes();
-
     /* cannot abort any more from here */
     dprintf(("commit_transaction\n"));
 
@@ -587,7 +583,6 @@ void stm_commit_transaction(void)
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
-    pull_committed_changes();
 }
 
 void stm_abort_transaction(void)
@@ -608,24 +603,63 @@ static void copy_objs_from_segment_0(int segment_num, struct list_s *lst)
         ({
             /* memcpy in the opposite direction than
                push_modified_to_other_segments() */
-            char *src = REAL_ADDRESS(zero_base, item);
-            char *dst = REAL_ADDRESS(local_base, item);
-            ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
-            memcpy(dst, src, size);
+            char *realobj = REAL_ADDRESS(zero_base, item);
+            ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+            /* XXX: copied from sync_object_now */
+            uintptr_t start = (uintptr_t)item;
+            uintptr_t first_page = start / 4096UL;
+
+            if (((struct object_s *)realobj)->stm_flags & GCFLAG_SMALL_UNIFORM) {
+                abort();//XXX WRITE THE FAST CASE
+            }
+            else {
+                uintptr_t end = start + size;
+                uintptr_t last_page = (end - 1) / 4096UL;
+                long myself = segment_num;
+
+                for (; first_page <= last_page; first_page++) {
+                    uintptr_t copy_size;
+                    if (first_page == last_page) {
+                        /* this is the final fragment */
+                        copy_size = end - start;
+                    }
+                    else {
+                        /* this is a non-final fragment, going up to the
+                           page's end */
+                        copy_size = 4096 - (start & 4095);
+                    }
+
+                    /* copy from shared page to private, if needed */
+                    char *dst = REAL_ADDRESS(local_base, start);
+                    char *src = REAL_ADDRESS(zero_base, start);
+                    if (is_private_page(myself, first_page)) {
+                        if (copy_size == 4096)
+                            pagecopy(dst, src);
+                        else
+                            memcpy(dst, src, copy_size);
+                    }
+                    else {
+                        assert(memcmp(dst, src, copy_size) == 0);  /* same page */
+                    }
+
+                    start = (start + 4096) & ~4095;
+                }
+            }
 
             /* all objs in segment 0 should have the WB flag: */
-            assert(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
+            assert(((struct object_s *)realobj)->stm_flags & GCFLAG_WRITE_BARRIER);
         }));
     write_fence();
 }
 
-static void pull_committed_changes()
+static void pull_committed_changes(struct stm_priv_segment_info_s *pseg)
 {
-    struct list_s *lst = STM_PSEGMENT->outdated_objects;
+    struct list_s *lst = pseg->outdated_objects;
 
     if (list_count(lst)) {
         dprintf(("pulling %lu objects from shared segment\n", list_count(lst)));
-        copy_objs_from_segment_0(STM_SEGMENT->segment_num, lst);
+        copy_objs_from_segment_0(pseg->pub.segment_num, lst);
         list_clear(lst);
     }
 }
@@ -787,7 +821,7 @@ void _stm_become_inevitable(const char *msg)
 {
     s_mutex_lock();
     enter_safe_point_if_requested();
-    pull_committed_changes();   /* XXX: not sure if necessary */
+    pull_committed_changes(get_priv_segment(STM_SEGMENT->segment_num));   /* XXX: not sure if necessary */
 
     if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
         dprintf(("become_inevitable: %s\n", msg));
@@ -804,7 +838,7 @@ void _stm_become_inevitable(const char *msg)
     }
 
     s_mutex_unlock();
-    pull_committed_changes();
+    pull_committed_changes(get_priv_segment(STM_SEGMENT->segment_num));
 }
 
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
@@ -815,5 +849,5 @@ void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
     s_mutex_lock();
     synchronize_all_threads(STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE);
     s_mutex_unlock();
-    pull_committed_changes();
+    pull_committed_changes(get_priv_segment(STM_SEGMENT->segment_num));
 }
