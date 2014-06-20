@@ -119,8 +119,8 @@ static bool contention_management(uint8_t other_segment_num,
     /* Pick one contention management... could be made dynamically choosable */
 #ifdef STM_TESTS
     cm_abort_the_younger(&contmgr);
-#else
-    cm_pause_if_younger(&contmgr);
+/* #else */
+/*     cm_pause_if_younger(&contmgr); */
 #endif
 
     /* Fix the choices that are found incorrect due to TS_INEVITABLE
