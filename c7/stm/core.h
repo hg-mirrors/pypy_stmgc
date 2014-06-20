@@ -260,7 +260,8 @@ static inline void _duck(void) {
     asm("/* workaround for llvm bug */");
 }
 
-static void copy_object_to_shared(object_t *obj, int source_segment_num);
+static void copy_obj_from_to_segment(
+    int from_segment_num, int to_segment_num, object_t *obj, bool nodebug);
 static void synchronize_object_now(object_t *obj, bool lazy_on_commit);
 static void pull_committed_changes(struct stm_priv_segment_info_s *pseg);
 

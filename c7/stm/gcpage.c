@@ -281,7 +281,11 @@ static void major_reshare_pages(void)
         */
         struct list_s *lst = get_priv_segment(i)->large_overflow_objects;
         if (lst != NULL) {
-            LIST_FOREACH_R(lst, object_t *, copy_object_to_shared(item, i));
+            LIST_FOREACH_R(lst, object_t *,
+                 ({
+                     copy_obj_from_to_segment(i, 0, item,
+                                              /* nodebug */ true);
+                 }));
         }
     }
 

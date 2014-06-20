@@ -301,60 +301,67 @@ static bool detect_write_read_conflicts(void)
     return false;
 }
 
-static void copy_object_to_shared(object_t *obj, int source_segment_num)
+static void copy_obj_from_to_segment(
+    int from_segment_num, int to_segment_num, object_t *obj,
+    bool nodebug)
 {
-    /* Only used by major GC.  XXX There is a lot of code duplication
-       with synchronize_object_now() but I don't completely see how to
-       improve...
-    */
-    assert(!_is_young(obj));
+    /* page-wise copy of an object from one segment to another */
 
-    char *segment_base = get_segment_base(source_segment_num);
+    OPT_ASSERT(from_segment_num != to_segment_num);
+
+    char *from_base = get_segment_base(from_segment_num);
+    char *to_base = get_segment_base(to_segment_num);
+
+    char *realobj = REAL_ADDRESS(from_base, obj);
+    ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+    /* XXX: copied from sync_object_now */
     uintptr_t start = (uintptr_t)obj;
     uintptr_t first_page = start / 4096UL;
-    struct object_s *realobj = (struct object_s *)
-        REAL_ADDRESS(segment_base, obj);
 
-    if (realobj->stm_flags & GCFLAG_SMALL_UNIFORM) {
+    if (((struct object_s *)realobj)->stm_flags & GCFLAG_SMALL_UNIFORM) {
         abort();//XXX WRITE THE FAST CASE
-    }
-    else {
-        ssize_t obj_size = stmcb_size_rounded_up(realobj);
-        assert(obj_size >= 16);
-        uintptr_t end = start + obj_size;
+    } else {
+        uintptr_t end = start + size;
         uintptr_t last_page = (end - 1) / 4096UL;
 
         for (; first_page <= last_page; first_page++) {
+            uintptr_t copy_size;
+            if (first_page == last_page) {
+                /* this is the final fragment */
+                copy_size = end - start;
+            }
+            else {
+                /* this is a non-final fragment, going up to the
+                   page's end */
+                copy_size = 4096 - (start & 4095);
+            }
 
-            /* Copy the object into the shared page, if needed */
-            if (is_private_page(source_segment_num, first_page)) {
-
-                uintptr_t copy_size;
-                if (first_page == last_page) {
-                    /* this is the final fragment */
-                    copy_size = end - start;
-                }
-                else {
-                    /* this is a non-final fragment, going up to the
-                       page's end */
-                    copy_size = 4096 - (start & 4095);
-                }
-                /* double-check that the result fits in one page */
-                assert(copy_size > 0);
-                assert(copy_size + (start & 4095) <= 4096);
-
-                char *src = REAL_ADDRESS(segment_base, start);
-                char *dst = REAL_ADDRESS(stm_object_pages, start);
+            /* copy from shared page to private, if needed */
+            char *dst = REAL_ADDRESS(to_base, start);
+            char *src = REAL_ADDRESS(from_base, start);
+            if ((from_segment_num == 0 || is_private_page(from_segment_num, first_page))
+                && (to_segment_num == 0 || is_private_page(to_segment_num, first_page))) {
+                /* at least one of them is a private page, or both */
                 if (copy_size == 4096)
                     pagecopy(dst, src);
                 else
                     memcpy(dst, src, copy_size);
             }
+            else if (!nodebug) {
+                /* nodebug=true only used for the trick in major_reshare_pages that
+                   removes the privatization bit even if contents differ */
+                assert(memcmp(dst, src, copy_size) == 0);  /* same page */
+            }
 
             start = (start + 4096) & ~4095;
         }
     }
+
+    write_fence();
 }
+
+
 
 static void synchronize_object_now(object_t *obj, bool lazy_on_commit)
 {
@@ -591,67 +598,7 @@ void stm_abort_transaction(void)
     abort_with_mutex();
 }
 
-static void copy_objs_from_segment_0(int segment_num, struct list_s *lst)
-{
-    /* pull the list of objects from segment 0. This either resets
-       modifications or just updates the view of the current segment.
-    */
-    char *local_base = get_segment_base(segment_num);
-    char *zero_base = get_segment_base(0);
 
-    LIST_FOREACH_R(lst, object_t * /*item*/,
-        ({
-            /* memcpy in the opposite direction than
-               push_modified_to_other_segments() */
-            char *realobj = REAL_ADDRESS(zero_base, item);
-            ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
-
-            /* XXX: copied from sync_object_now */
-            uintptr_t start = (uintptr_t)item;
-            uintptr_t first_page = start / 4096UL;
-
-            if (((struct object_s *)realobj)->stm_flags & GCFLAG_SMALL_UNIFORM) {
-                abort();//XXX WRITE THE FAST CASE
-            }
-            else {
-                uintptr_t end = start + size;
-                uintptr_t last_page = (end - 1) / 4096UL;
-                long myself = segment_num;
-
-                for (; first_page <= last_page; first_page++) {
-                    uintptr_t copy_size;
-                    if (first_page == last_page) {
-                        /* this is the final fragment */
-                        copy_size = end - start;
-                    }
-                    else {
-                        /* this is a non-final fragment, going up to the
-                           page's end */
-                        copy_size = 4096 - (start & 4095);
-                    }
-
-                    /* copy from shared page to private, if needed */
-                    char *dst = REAL_ADDRESS(local_base, start);
-                    char *src = REAL_ADDRESS(zero_base, start);
-                    if (is_private_page(myself, first_page)) {
-                        if (copy_size == 4096)
-                            pagecopy(dst, src);
-                        else
-                            memcpy(dst, src, copy_size);
-                    }
-                    else {
-                        assert(memcmp(dst, src, copy_size) == 0);  /* same page */
-                    }
-
-                    start = (start + 4096) & ~4095;
-                }
-            }
-
-            /* all objs in segment 0 should have the WB flag: */
-            assert(((struct object_s *)realobj)->stm_flags & GCFLAG_WRITE_BARRIER);
-        }));
-    write_fence();
-}
 
 static void pull_committed_changes(struct stm_priv_segment_info_s *pseg)
 {
@@ -659,7 +606,14 @@ static void pull_committed_changes(struct stm_priv_segment_info_s *pseg)
 
     if (list_count(lst)) {
         dprintf(("pulling %lu objects from shared segment\n", list_count(lst)));
-        copy_objs_from_segment_0(pseg->pub.segment_num, lst);
+
+        LIST_FOREACH_R(lst, object_t * /*item*/,
+            ({
+                /* memcpy in the opposite direction than
+                   push_modified_to_other_segments() */
+                copy_obj_from_to_segment(0, pseg->pub.segment_num, item, false);
+            }));
+
         list_clear(lst);
     }
 }
@@ -678,7 +632,6 @@ reset_modified_from_other_segments(int segment_num)
     */
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
     char *local_base = get_segment_base(segment_num);
-    char *remote_base = get_segment_base(0);
 
     LIST_FOREACH_R(
         pseg->modified_old_objects,
@@ -686,16 +639,14 @@ reset_modified_from_other_segments(int segment_num)
         ({
             /* memcpy in the opposite direction than
                push_modified_to_other_segments() */
-            char *src = REAL_ADDRESS(remote_base, item);
-            char *dst = REAL_ADDRESS(local_base, item);
-            ssize_t size = stmcb_size_rounded_up((struct object_s *)src);
-            memcpy(dst, src, size);
+            copy_obj_from_to_segment(0, segment_num, item, false);
 
             /* objects in 'modified_old_objects' usually have the
                WRITE_BARRIER flag, unless they have been modified
                recently.  Ignore the old flag; after copying from the
                other segment, we should have the flag. */
-            assert(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
+            char *dst = REAL_ADDRESS(local_base, item);
+            OPT_ASSERT(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
 
             /* write all changes to the object before we release the
                write lock below.  This is needed because we need to
@@ -704,7 +655,7 @@ reset_modified_from_other_segments(int segment_num)
                write_fence() ensures in particular that 'src' has been
                fully read before we release the lock: reading it
                is necessary to write 'dst'. */
-            write_fence();
+            //write_fence(); - done by copy_obj_from_to_segment()
 
             /* clear the write-lock */
             uintptr_t lock_idx = (((uintptr_t)item) >> 4) - WRITELOCK_START;
