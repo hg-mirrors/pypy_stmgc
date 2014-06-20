@@ -607,6 +607,10 @@ static void pull_committed_changes(struct stm_priv_segment_info_s *pseg)
     if (list_count(lst)) {
         dprintf(("pulling %lu objects from shared segment\n", list_count(lst)));
 
+        /* not completely accurate as it counts for the thread doing the
+           pulling (may be someone else during major collections) */
+        enum stm_time_e old_state = change_timing_state(STM_TIME_PULL_OBJS);
+
         LIST_FOREACH_R(lst, object_t * /*item*/,
             ({
                 /* memcpy in the opposite direction than
@@ -615,6 +619,7 @@ static void pull_committed_changes(struct stm_priv_segment_info_s *pseg)
             }));
 
         list_clear(lst);
+        change_timing_state(old_state);
     }
 }
 

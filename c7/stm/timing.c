@@ -64,6 +64,7 @@ static const char *timer_names[] = {
     "minor gc",
     "major gc",
     "sync pause",
+    "pull objs"
 };
 
 void stm_flush_timing(stm_thread_local_t *tl, int verbose)

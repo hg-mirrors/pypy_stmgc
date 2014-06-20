@@ -71,6 +71,7 @@ enum stm_time_e {
     STM_TIME_MINOR_GC,
     STM_TIME_MAJOR_GC,
     STM_TIME_SYNC_PAUSE,
+    STM_TIME_PULL_OBJS,
     _STM_TIME_N
 };
 
