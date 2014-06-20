@@ -493,6 +493,7 @@ static void _finish_transaction(int attribute_to)
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 }
 
+static __thread bool commit_in_progress = false;
 void stm_commit_transaction(void)
 {
     assert(!_has_mutex());
@@ -508,16 +509,97 @@ void stm_commit_transaction(void)
     push_overflow_objects_from_privatized_pages();
 
     s_mutex_lock();
-
  restart:
     /* force all other threads to be paused.  They will unpause
        automatically when we are done here, i.e. at mutex_unlock().
        Important: we should not call cond_wait() in the meantime. */
-    synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
 
-    /* detect conflicts */
-    if (detect_write_read_conflicts())
-        goto restart;
+    //synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
+    enter_safe_point_if_requested();
+
+    if (UNLIKELY(globally_unique_transaction)) {
+        assert(count_other_threads_sp_running() == 0);
+        /* detect conflicts */
+        if (detect_write_read_conflicts())
+            goto restart;
+
+    } else {
+        signal_everybody_to_pause_running();
+        commit_in_progress = true;
+
+        /* keep track of who we already checked against: */
+        bool conflict_checked[NB_SEGMENTS];
+        int my_num = STM_SEGMENT->segment_num;
+        long i;
+        for (i = 1; i <= NB_SEGMENTS; i++)
+            conflict_checked[i-1] = (i == my_num);
+
+        /* incrementally check for conflicts in all other threads
+           until we checked all of them (and all reached their safe point) */
+        long to_check = NB_SEGMENTS - 1; /* without me */
+        while (to_check > 0) {
+            /* check against all that are in a safe point: */
+            for (i = 1; i <= NB_SEGMENTS; i++) {
+                struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+
+                if (!conflict_checked[i-1] && pseg->safe_point != SP_RUNNING) {
+                    OPT_ASSERT(i != my_num);
+                    /* not us, in a safe point / not running, and not checked already */
+                    conflict_checked[i-1] = true;
+                    to_check--;
+
+                    /* actual checking: */
+                    bool retry_required = false;
+                    if (pseg->transaction_state == TS_NONE)
+                        continue;    /* no need to check */
+
+                    if (is_aborting_now(i))
+                        continue;    /* no need to check: is pending immediate abort */
+
+                    char *remote_base = get_segment_base(i);
+                    uint8_t remote_version = get_segment(i)->transaction_read_version;
+
+                    LIST_FOREACH_R(
+                        STM_PSEGMENT->modified_old_objects,
+                        object_t * /*item*/,
+                        ({
+                            if (was_read_remote(remote_base, item, remote_version)) {
+                                /* A write-read conflict! */
+                                if (write_read_contention_management(i, item)) {
+                                    /* If we reach this point, we didn't abort, but we
+                                       had to wait for the other thread to commit.  If we
+                                       did, then we have to restart committing from our call
+                                       to synchronize_all_threads(). */
+                                    retry_required = true;
+                                    break;
+                                }
+                                /* we aborted the other transaction without waiting, so
+                                   we can just continue */
+                            }
+                        }));
+
+                    if (retry_required) {
+                        remove_requests_for_safe_point();
+                        commit_in_progress = false;
+                        goto restart;
+                    }
+                }
+            }
+
+            if (count_other_threads_sp_running()) {
+                STM_PSEGMENT->safe_point = SP_WAIT_FOR_C_AT_SAFE_POINT;
+                cond_wait(C_AT_SAFE_POINT);
+                STM_PSEGMENT->safe_point = SP_RUNNING;
+
+                if (must_abort())
+                    abort_with_mutex();
+            }
+        }
+
+        assert(!count_other_threads_sp_running());
+        remove_requests_for_safe_point();
+        commit_in_progress = false;
+    }
 
     /* cannot abort any more from here */
     dprintf(("commit_transaction\n"));
@@ -670,6 +752,11 @@ static void abort_with_mutex(void)
 {
     assert(_has_mutex());
     dprintf(("~~~ ABORT\n"));
+
+    if (commit_in_progress) {
+        remove_requests_for_safe_point();
+        commit_in_progress = false;
+    }
 
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
