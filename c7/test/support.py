@@ -40,7 +40,7 @@ void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
-object_t *_stm_allocate_old(ssize_t size_rounded_up, long use_cards);
+object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
 /*void stm_write_card(); use _checked_stm_write_card() instead */
 
@@ -386,13 +386,13 @@ def is_in_nursery(o):
     return lib.stm_can_move(o)
 
 def stm_allocate_old(size):
-    o = lib._stm_allocate_old(size, False)
+    o = lib._stm_allocate_old(size)
     tid = 42 + size
     lib._set_type_id(o, tid)
     return o
 
 def stm_allocate_old_refs(n):
-    o = lib._stm_allocate_old(HDR + n * WORD, True)
+    o = lib._stm_allocate_old(HDR + n * WORD)
     tid = 421420 + n
     lib._set_type_id(o, tid)
     return o
