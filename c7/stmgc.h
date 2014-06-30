@@ -253,8 +253,8 @@ extern void stmcb_trace_cards(struct object_s *, void (object_t **),
    It returns the base_offset (in bytes) inside the object from
    where the indices start, and item_size (in bytes) for the size of
    one item */
-extern void stmcb_get_card_base_itemsize(
-    struct object_s *, uintptr_t *base_offset, ssize_t *item_size);
+extern void stmcb_get_card_base_itemsize(struct object_s *,
+                                         uintptr_t offset_itemsize[2]);
 extern void stmcb_commit_soon(void);
 
 
