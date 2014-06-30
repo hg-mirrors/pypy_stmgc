@@ -584,8 +584,7 @@ static void _card_wise_synchronize_object_now(object_t *obj)
     /* Combine multiple marked cards and do a memcpy for them. We don't
        try yet to use page_copy() or otherwise take into account privatization
        of pages (except _has_private_page_in_range) */
-    uintptr_t base_offset;
-    ssize_t item_size;
+    uintptr_t offset_itemsize[2];
     bool all_cards_were_cleared = true;
 
     uintptr_t start_card_index = -1;
@@ -602,8 +601,7 @@ static void _card_wise_synchronize_object_now(object_t *obj)
                 /*     realobj, get_card_index_to_index(card_index)); */
                 if (all_cards_were_cleared) {
                     all_cards_were_cleared = false;
-                    stmcb_get_card_base_itemsize(realobj, &base_offset,
-                                                 &item_size);
+                    stmcb_get_card_base_itemsize(realobj, offset_itemsize);
                 }
             }
         }
@@ -626,11 +624,11 @@ static void _card_wise_synchronize_object_now(object_t *obj)
                 next_card_index++;
             }
 
-            start_card_offset = base_offset +
-                get_card_index_to_index(start_card_index) * item_size;
+            start_card_offset = offset_itemsize[0] +
+                get_card_index_to_index(start_card_index) * offset_itemsize[1];
 
-            next_card_offset = base_offset +
-                get_card_index_to_index(next_card_index) * item_size;
+            next_card_offset = offset_itemsize[0] +
+                get_card_index_to_index(next_card_index) * offset_itemsize[1];
 
             if (next_card_offset > obj_size)
                 next_card_offset = obj_size;

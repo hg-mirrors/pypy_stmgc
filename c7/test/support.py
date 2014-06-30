@@ -316,17 +316,17 @@ void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
     }
 }
 
-void stmcb_get_card_base_itemsize(
-    struct object_s *obj, uintptr_t *base_offset, ssize_t *item_size)
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2])
 {
     struct myobj_s *myobj = (struct myobj_s*)obj;
     if (myobj->type_id < 421420) {
-        *base_offset = SIZEOF_MYOBJ;
-        *item_size = 1;
+        offset_itemsize[0] = SIZEOF_MYOBJ;
+        offset_itemsize[1] = 1;
     }
     else {
-        *base_offset = sizeof(struct myobj_s);
-        *item_size = sizeof(object_t *);
+        offset_itemsize[0] = sizeof(struct myobj_s);
+        offset_itemsize[1] = sizeof(object_t *);
     }
 }
 
