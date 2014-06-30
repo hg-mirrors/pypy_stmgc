@@ -110,6 +110,7 @@ void _stm_write_slowpath(object_t *);
 void _stm_write_slowpath_card(object_t *, uintptr_t);
 char _stm_write_slowpath_card_extra(object_t *);
 char *_stm_write_slowpath_card_extra_base(void);
+#define _STM_CARD_MARKED 100
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
