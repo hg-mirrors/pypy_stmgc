@@ -244,6 +244,14 @@ char _stm_write_slowpath_card_extra(object_t *obj)
     return mark_card;
 }
 
+char *_stm_write_slowpath_card_extra_base(void)
+{
+    /* for the PyPy JIT: _stm_write_slowpath_card_extra_base[obj >> 4]
+       is the byte that must be set to CARD_MARKED.  The logic below
+       does the same, but more explicitly. */
+    return (char *)write_locks - WRITELOCK_START + 1;
+}
+
 void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
 {
     /* If CARDS_SET is not set so far, issue a normal write barrier.
