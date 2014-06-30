@@ -328,14 +328,6 @@ void stmcb_get_card_base_itemsize(
     *item_size = sizeof(object_t *);
 }
 
-long stmcb_should_use_cards(struct object_s *obj)
-{
-    struct myobj_s *myobj = (struct myobj_s*)obj;
-    if (myobj->type_id < 421420)
-        return 0; /*no refs*/
-    return 1;
-}
-
 void stm_push_marker(stm_thread_local_t *tl, uintptr_t onum, object_t *ob)
 {
     STM_PUSH_MARKER(*tl, onum, ob);
