@@ -587,24 +587,28 @@ static void _card_wise_synchronize_object_now(object_t *obj)
     uintptr_t base_offset;
     ssize_t item_size;
     bool all_cards_were_cleared = true;
-    stmcb_get_card_base_itemsize(realobj, &base_offset, &item_size);
 
     uintptr_t start_card_index = -1;
     while (card_index <= last_card_index) {
         uintptr_t card_lock_idx = first_card_index + card_index;
         uint8_t card_value = write_locks[card_lock_idx];
 
-        OPT_ASSERT(card_value != CARD_MARKED); /* always only MARKED_OLD or CLEAR */
-
         if (card_value == CARD_MARKED_OLD) {
-            all_cards_were_cleared = false;
             write_locks[card_lock_idx] = CARD_CLEAR;
 
             if (start_card_index == -1) {   /* first marked card */
                 start_card_index = card_index;
                 /* start = (uintptr_t)obj + stmcb_index_to_byte_offset( */
                 /*     realobj, get_card_index_to_index(card_index)); */
+                if (all_cards_were_cleared) {
+                    all_cards_were_cleared = false;
+                    stmcb_get_card_base_itemsize(realobj, &base_offset,
+                                                 &item_size);
+                }
             }
+        }
+        else {
+            OPT_ASSERT(card_value == CARD_CLEAR);
         }
 
         if (start_card_index != -1                    /* something to copy */
