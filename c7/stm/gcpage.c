@@ -111,7 +111,7 @@ static char *allocate_outside_nursery_large(uint64_t size)
     return addr;
 }
 
-object_t *_stm_allocate_old(ssize_t size_rounded_up, long use_cards)
+object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
     /* only for tests xxx but stm_setup_prebuilt() uses this now too */
     char *p = allocate_outside_nursery_large(size_rounded_up);

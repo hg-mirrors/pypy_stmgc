@@ -115,7 +115,7 @@ void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *);
 void _stm_collectable_safe_point(void);
 
 /* for tests, but also used in duhton: */
-object_t *_stm_allocate_old(ssize_t size_rounded_up, long use_cards);
+object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
 #include <stdbool.h>
