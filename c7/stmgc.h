@@ -245,17 +245,13 @@ static inline void stm_write_card(object_t *obj, uintptr_t index)
 */
 extern ssize_t stmcb_size_rounded_up(struct object_s *);
 extern void stmcb_trace(struct object_s *, void (object_t **));
-/* called to determine if we should use cards for this object.
-   (makes most sense for big arrays with references) */
-extern long stmcb_should_use_cards(struct object_s *);
 /* a special trace-callback that is only called for the marked
    ranges of indices (using stm_write_card(o, index)) */
 extern void stmcb_trace_cards(struct object_s *, void (object_t **),
                               uintptr_t start, uintptr_t stop);
-/* this function will be called on objects that support cards
-   (stmcb_should_use_cards() returned True). It returns the
-   base_offset (in bytes) inside the object from where the
-   indices start, and item_size (in bytes) for the size of
+/* this function will be called on objects that support cards.
+   It returns the base_offset (in bytes) inside the object from
+   where the indices start, and item_size (in bytes) for the size of
    one item */
 extern void stmcb_get_card_base_itemsize(
     struct object_s *, uintptr_t *base_offset, ssize_t *item_size);

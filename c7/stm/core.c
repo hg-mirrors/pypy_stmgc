@@ -232,10 +232,7 @@ static bool obj_should_use_cards(object_t *obj)
         REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     size_t size = stmcb_size_rounded_up(realobj);
 
-    if (size < _STM_MIN_CARD_OBJ_SIZE)
-        return false;
-
-    return !!stmcb_should_use_cards(realobj);
+    return (size >= _STM_MIN_CARD_OBJ_SIZE);
 }
 
 void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
