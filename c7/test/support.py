@@ -321,11 +321,13 @@ void stmcb_get_card_base_itemsize(
 {
     struct myobj_s *myobj = (struct myobj_s*)obj;
     if (myobj->type_id < 421420) {
-        abort(); // works, but we want to test otherwise
-        /* basic case: index=byteoffset */
+        *base_offset = SIZEOF_MYOBJ;
+        *item_size = 1;
     }
-    *base_offset = sizeof(struct myobj_s);
-    *item_size = sizeof(object_t *);
+    else {
+        *base_offset = sizeof(struct myobj_s);
+        *item_size = sizeof(object_t *);
+    }
 }
 
 void stm_push_marker(stm_thread_local_t *tl, uintptr_t onum, object_t *ob)
@@ -427,7 +429,7 @@ def stm_get_ref(obj, idx):
 def stm_set_char(obj, c, offset=HDR, use_cards=False):
     assert HDR <= offset < stm_get_obj_size(obj)
     if use_cards:
-        stm_write_card(obj, offset)
+        stm_write_card(obj, offset - HDR)
     else:
         stm_write(obj)
     stm_get_real_address(obj)[offset] = c
