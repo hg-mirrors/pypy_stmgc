@@ -325,7 +325,7 @@ static void _trace_card_object(object_t *obj)
 
 
 
-static inline void _collect_now(object_t *obj, bool was_definitely_young)
+static inline void _collect_now(object_t *obj)
 {
     assert(!_is_young(obj));
     assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
@@ -376,8 +376,7 @@ static void collect_oldrefs_to_nursery(void)
         uintptr_t obj_sync_now = list_pop_item(lst);
         object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE);
 
-        bool was_definitely_young = (obj_sync_now & FLAG_SYNC_LARGE);
-        _collect_now(obj, was_definitely_young);
+        _collect_now(obj);
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
 
         if (obj_sync_now & FLAG_SYNC_LARGE) {
@@ -407,7 +406,7 @@ static void collect_modified_old_objects(void)
     dprintf(("collect_modified_old_objects\n"));
     LIST_FOREACH_R(
         STM_PSEGMENT->modified_old_objects, object_t * /*item*/,
-        _collect_now(item, false));
+        _collect_now(item));
 }
 
 static void collect_roots_from_markers(uintptr_t num_old)
@@ -474,25 +473,6 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     }
 
     tree_clear(pseg->nursery_objects_shadows);
-
-
-    /* modified_old_objects' cards get cleared in push_modified_to_other_segments
-       or reset_modified_from_other_segments. Objs in old_objs_with_cards but not
-       in modified_old_objs are overflow objects and handled here: */
-    if (pseg->large_overflow_objects != NULL) {
-        /* some overflow objects may have cards when aborting, clear them too */
-        LIST_FOREACH_R(pseg->large_overflow_objects, object_t * /*item*/,
-            {
-                struct object_s *realobj = (struct object_s *)
-                    REAL_ADDRESS(pseg->pub.segment_base, item);
-
-                if (realobj->stm_flags & GCFLAG_CARDS_SET) {
-                    /* CARDS_SET is enough since other HAS_CARDS objs
-                       are already cleared */
-                    _reset_object_cards(pseg, item, CARD_CLEAR, false);
-                }
-            });
-    }
 
     return nursery_used;
 #pragma pop_macro("STM_SEGMENT")
