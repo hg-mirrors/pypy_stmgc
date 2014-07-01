@@ -67,6 +67,7 @@ static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
         /* Card marking.  Don't remove GCFLAG_WRITE_BARRIER because we
            need to come back to _stm_write_slowpath_card() for every
            card to mark.  Add GCFLAG_CARDS_SET. */
+        assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
         obj->stm_flags |= GCFLAG_CARDS_SET;
         assert(STM_PSEGMENT->old_objects_with_cards);
         LIST_APPEND(STM_PSEGMENT->old_objects_with_cards, obj);
