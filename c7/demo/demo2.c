@@ -303,7 +303,7 @@ int main(void)
 
 
     unregister_thread_local();
-    stm_teardown();
+    //stm_teardown();
 
     return 0;
 }
