@@ -946,6 +946,24 @@ static void abort_data_structures_from_segment_num(int segment_num)
     /* throw away the content of the nursery */
     long bytes_in_nursery = throw_away_nursery(pseg);
 
+    /* modified_old_objects' cards get cleared in
+       reset_modified_from_other_segments. Objs in old_objs_with_cards but not
+       in modified_old_objs are overflow objects and handled here: */
+    if (pseg->large_overflow_objects != NULL) {
+        /* some overflow objects may have cards when aborting, clear them too */
+        LIST_FOREACH_R(pseg->large_overflow_objects, object_t * /*item*/,
+            {
+                struct object_s *realobj = (struct object_s *)
+                    REAL_ADDRESS(pseg->pub.segment_base, item);
+
+                if (realobj->stm_flags & GCFLAG_CARDS_SET) {
+                    /* CARDS_SET is enough since other HAS_CARDS objs
+                       are already cleared */
+                    _reset_object_cards(pseg, item, CARD_CLEAR, false);
+                }
+            });
+    }
+
     /* reset all the modified objects (incl. re-adding GCFLAG_WRITE_BARRIER) */
     reset_modified_from_other_segments(segment_num);
     _verify_cards_cleared_in_all_lists(pseg);
