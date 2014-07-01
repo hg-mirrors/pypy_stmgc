@@ -328,6 +328,7 @@ static void _trace_card_object(object_t *obj)
 static inline void _collect_now(object_t *obj, bool was_definitely_young)
 {
     assert(!_is_young(obj));
+    assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
 
     dprintf(("_collect_now: %p\n", obj));
 
@@ -339,22 +340,6 @@ static inline void _collect_now(object_t *obj, bool was_definitely_young)
         stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
 
         obj->stm_flags |= GCFLAG_WRITE_BARRIER;
-        if (obj->stm_flags & GCFLAG_CARDS_SET) {
-            /* all objects that had WB cleared need to be fully synchronised
-               on commit, so we have to mark all their cards */
-            struct stm_priv_segment_info_s *pseg = get_priv_segment(
-                STM_SEGMENT->segment_num);
-
-            /* stm_wb-slowpath should never have triggered for young objs */
-            assert(!was_definitely_young);
-
-            if (!IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
-                _reset_object_cards(pseg, obj, CARD_MARKED_OLD, true); /* mark all */
-            } else {
-                /* simply clear overflow */
-                _reset_object_cards(pseg, obj, CARD_CLEAR, false);
-            }
-        }
     }
     /* else traced in collect_cardrefs_to_nursery if necessary */
 }
@@ -371,12 +356,11 @@ static void collect_cardrefs_to_nursery(void)
         assert(!_is_young(obj));
 
         if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
-            /* handled in _collect_now() */
+            /* sometimes we remove the CARDS_SET in the WB slowpath, see core.c */
             continue;
         }
 
-        /* traces cards, clears marked cards or marks them old if
-           necessary */
+        /* traces cards, clears marked cards or marks them old if necessary */
         _trace_card_object(obj);
 
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
@@ -551,12 +535,18 @@ static void _do_minor_collection(bool commit)
     if (!commit && STM_PSEGMENT->large_overflow_objects == NULL)
         STM_PSEGMENT->large_overflow_objects = list_create();
 
+
     /* All the objects we move out of the nursery become "overflow"
        objects.  We use the list 'objects_pointing_to_nursery'
        to hold the ones we didn't trace so far. */
     uintptr_t num_old;
     if (STM_PSEGMENT->objects_pointing_to_nursery == NULL) {
         STM_PSEGMENT->objects_pointing_to_nursery = list_create();
+
+        /* collect objs with cards, adds to objects_pointing_to_nursery
+           and makes sure there are no objs with cards left in
+           modified_old_objs */
+        collect_cardrefs_to_nursery();
 
         /* See the doc of 'objects_pointing_to_nursery': if it is NULL,
            then it is implicitly understood to be equal to
@@ -567,6 +557,7 @@ static void _do_minor_collection(bool commit)
         num_old = 0;
     }
     else {
+        collect_cardrefs_to_nursery();
         num_old = STM_PSEGMENT->modified_old_objects_markers_num_old;
     }
 
@@ -574,7 +565,6 @@ static void _do_minor_collection(bool commit)
 
     collect_roots_in_nursery();
 
-    collect_cardrefs_to_nursery();
     collect_oldrefs_to_nursery();
     assert(list_is_empty(STM_PSEGMENT->old_objects_with_cards));
 
