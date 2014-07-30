@@ -1,8 +1,6 @@
 
 - use small uniform gcpages
 
-- write barrier for big arrays
-
 - finalizers
 
 - the highest_overflow_number can overflow after 2**30 non-collect-time
@@ -16,3 +14,13 @@
   the unused pages away --- or maybe use consecutive addresses from the
   lowest ones from segment N, instead of the page corresponding to the page
   number in segment 0 (possibly a bit messy)
+
+- possibly messy too, but think about not using N+1 segments but only N
+
+- use a call/cc-style variant of setjmp/longjmp to avoid inevitable
+  transactions when we need to return
+
+- kill "atomic" and use regular lock elision
+
+- increase the memory limit, currently 2.5GB; this requires, apparently,
+  more fighting against LLVM bugs
