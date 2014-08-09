@@ -354,7 +354,7 @@ void stm_abort_transaction(void) __attribute__((noreturn));
 int stm_is_inevitable(void);
 #else
 static inline int stm_is_inevitable(void) {
-    return !rewind_jmp_armed(STM_SEGMENT->running_thread->rjthread); 
+    return !rewind_jmp_armed(&STM_SEGMENT->running_thread->rjthread); 
 }
 #endif
 static inline void stm_become_inevitable(stm_thread_local_t *tl,
