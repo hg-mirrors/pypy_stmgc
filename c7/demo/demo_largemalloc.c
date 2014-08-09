@@ -25,6 +25,15 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 
 void stmcb_commit_soon() {}
 
+void stmcb_trace_cards(struct object_s *obj, void cb(object_t **),
+                       uintptr_t start, uintptr_t stop) {
+    abort();
+}
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2]) {
+    abort();
+}
+
 /************************************************************/
 
 #define ARENA_SIZE  (1024*1024*1024)
@@ -67,7 +76,7 @@ int main(void)
     int i;
     arena_data = malloc(ARENA_SIZE);
     assert(arena_data != NULL);
-    _stm_mutex_pages_lock();
+    //_stm_mutex_pages_lock();
     for (i = 0; i < 25; i++)
         timing(i);
     return 0;
