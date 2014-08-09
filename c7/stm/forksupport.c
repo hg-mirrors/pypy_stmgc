@@ -193,6 +193,7 @@ static void fork_abort_thread(long i)
         strcpy(pr->marker_self, "fork");
         stm_abort_transaction();
     }
+    rewind_jmp_forget(&tl->rjthread);
     stm_rewind_jmp_leaveframe(tl, &rjbuf);
 }
 
