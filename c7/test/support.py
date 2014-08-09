@@ -7,7 +7,6 @@ from common import parent_dir, source_files
 ffi = cffi.FFI()
 ffi.cdef("""
 typedef ... object_t;
-typedef ... stm_jmpbuf_t;
 #define SIZEOF_MYOBJ ...
 #define STM_NB_SEGMENTS ...
 #define _STM_FAST_ALLOC ...
@@ -64,7 +63,8 @@ void _stm_test_switch(stm_thread_local_t *tl);
 uintptr_t _stm_get_private_page(uintptr_t pagenum);
 int _stm_get_flags(object_t *obj);
 
-void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
+void clear_jmpbuf(stm_thread_local_t *tl);
+long stm_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
@@ -148,7 +148,7 @@ char *_stm_expand_marker(void);
 GC_N_SMALL_REQUESTS = 36      # from gcpage.c
 LARGE_MALLOC_OVERHEAD = 16    # from largemalloc.h
 
-lib = ffi.verify('''
+lib = ffi.verify(r'''
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -167,23 +167,26 @@ int _stm_get_flags(object_t *obj) {
     return obj->stm_flags;
 }
 
+void clear_jmpbuf(stm_thread_local_t *tl) {
+    memset(&tl->rjthread, 0, sizeof(rewind_jmp_thread));
+}
+
+__attribute__((noreturn))
+void _test_run_abort(stm_thread_local_t *tl) {
+    void **jmpbuf = tl->rjthread.jmpbuf;
+    fprintf(stderr, "~~~~~ ABORT ~~~~~\n");
+    __builtin_longjmp(jmpbuf, 1);
+}
+
 #define CHECKED(CALL)                                           \
-    stm_jmpbuf_t here;                                          \
-    stm_segment_info_t *segment = STM_SEGMENT;                  \
-    if (__builtin_setjmp(here) == 0) { /* returned directly */  \
-        if (segment->jmpbuf_ptr != NULL) {                      \
-            assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);  \
-            segment->jmpbuf_ptr = &here;                        \
-        }                                                       \
+    stm_thread_local_t *_tl = STM_SEGMENT->running_thread;      \
+    void **jmpbuf = _tl->rjthread.jmpbuf;                       \
+    if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
         CALL;                                                   \
-        if (segment->jmpbuf_ptr != NULL) {                      \
-            segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;           \
-        }                                                       \
+        clear_jmpbuf(_tl);                                      \
         return 0;                                               \
     }                                                           \
-    if (segment->jmpbuf_ptr != NULL) {                          \
-        segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;               \
-    }                                                           \
+    clear_jmpbuf(_tl);                                          \
     return 1
 
 bool _checked_stm_write(object_t *object) {
@@ -350,6 +353,7 @@ void stmcb_commit_soon()
 }
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
+                    ('STM_NO_AUTOMATIC_SETJMP', '1'),
                     ('STM_LARGEMALLOC_TEST', '1'),
                     ('STM_NO_COND_WAIT', '1'),
                     ('STM_DEBUGPRINT', '1'),
@@ -559,7 +563,9 @@ class BaseTest(object):
     def start_transaction(self):
         tl = self.tls[self.current_thread]
         assert not lib._stm_in_transaction(tl)
-        lib._stm_start_transaction(tl, ffi.cast("stm_jmpbuf_t *", -1))
+        res = lib.stm_start_transaction(tl)
+        assert res == 0
+        lib.clear_jmpbuf(tl)
         assert lib._stm_in_transaction(tl)
         #
         seen = set()

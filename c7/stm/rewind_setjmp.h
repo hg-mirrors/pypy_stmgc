@@ -50,6 +50,7 @@ typedef struct {
     char *moved_off_base;
     struct _rewind_jmp_moved_s *moved_off;
     void *jmpbuf[5];
+    long repeat_count;
 } rewind_jmp_thread;
 
 
@@ -65,8 +66,8 @@ typedef struct {
         _rewind_jmp_copy_stack_slice(rjthread);         \
 } while (0)
 
-int rewind_jmp_setjmp(rewind_jmp_thread *rjthread);
-void rewind_jmp_longjmp(rewind_jmp_thread *rjthread);
+long rewind_jmp_setjmp(rewind_jmp_thread *rjthread);
+void rewind_jmp_longjmp(rewind_jmp_thread *rjthread) __attribute__((noreturn));
 
 #define rewind_jmp_forget(rjthread)  do {                               \
     if ((rjthread)->moved_off) _rewind_jmp_free_stack_slices(rjthread); \

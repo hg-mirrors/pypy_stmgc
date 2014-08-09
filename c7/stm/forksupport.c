@@ -3,6 +3,9 @@
 #endif
 
 
+
+#if 0
+
 /* XXX this is currently not doing copy-on-write, but simply forces a
    copy of all pages as soon as fork() is called. */
 
@@ -298,4 +301,8 @@ static void setup_forksupport(void)
             stm_fatalerror("pthread_atfork() failed: %m");
         fork_support_ready = true;
     }
+}
+#endif
+static void setup_forksupport(void) {
+    if (0) _page_do_reshare(0, 0);
 }
