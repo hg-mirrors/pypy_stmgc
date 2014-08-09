@@ -36,7 +36,7 @@ static void copy_stack(rewind_jmp_thread *rjthread, char *base)
 }
 
 __attribute__((noinline))
-int rewind_jmp_setjmp(rewind_jmp_thread *rjthread)
+long rewind_jmp_setjmp(rewind_jmp_thread *rjthread)
 {
     if (rjthread->moved_off) {
         _rewind_jmp_free_stack_slices(rjthread);
@@ -51,13 +51,14 @@ int rewind_jmp_setjmp(rewind_jmp_thread *rjthread)
     else {
         rjthread = rjthread1;
         rjthread->head = rjthread->initial_head;
-        result = 1;
+        result = rjthread->repeat_count + 1;
     }
+    rjthread->repeat_count = result;
     copy_stack(rjthread, (char *)&rjthread1);
     return result;
 }
 
-__attribute__((noinline))
+__attribute__((noinline, noreturn))
 static void do_longjmp(rewind_jmp_thread *rjthread, char *stack_free)
 {
     assert(rjthread->moved_off_base != NULL);
@@ -78,6 +79,7 @@ static void do_longjmp(rewind_jmp_thread *rjthread, char *stack_free)
     __builtin_longjmp(rjthread->jmpbuf, 1);
 }
 
+__attribute__((noreturn))
 void rewind_jmp_longjmp(rewind_jmp_thread *rjthread)
 {
     char _rewind_jmp_marker;

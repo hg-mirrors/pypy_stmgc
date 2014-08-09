@@ -77,9 +77,10 @@ enum stm_time_e {
 #define _STM_MARKER_LEN  80
 
 typedef struct stm_thread_local_s {
-    rewind_jmp_thread rjthread;
     /* every thread should handle the shadow stack itself */
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
+    /* rewind_setjmp's interface */
+    rewind_jmp_thread rjthread;
     /* a generic optional thread-local object */
     object_t *thread_local_obj;
     /* in case this thread runs a transaction that aborts,
@@ -340,6 +341,7 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
    returned, starting at 0.  If it is > 0, then the transaction was
    aborted and restarted this number of times. */
 long stm_start_transaction(stm_thread_local_t *tl);
+void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
 
 /* Abort the currently running transaction.  This function never
@@ -350,7 +352,7 @@ void stm_abort_transaction(void) __attribute__((noreturn));
    The stm_become_inevitable() itself may still abort. */
 static inline void stm_become_inevitable(stm_thread_local_t *tl,
                                          const char* msg) {
-    abort();/* XXX
+    assert(0);/* XXX
     assert(STM_SEGMENT->running_thread == tl);
     if (STM_SEGMENT->jmpbuf_ptr != NULL)
         _stm_become_inevitable(msg);*/
