@@ -369,6 +369,7 @@ class TestBasic(BaseTest):
 
     def test_inevitable_transaction_has_priority(self):
         self.start_transaction()
+        assert lib.stm_is_inevitable() == 0
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'a')
         self.push_root(lp1)

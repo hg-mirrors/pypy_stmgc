@@ -1003,6 +1003,14 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
 #ifdef STM_NO_AUTOMATIC_SETJMP
 void _test_run_abort(stm_thread_local_t *tl) __attribute__((noreturn));
+int stm_is_inevitable(void)
+{
+    switch (STM_PSEGMENT->transaction_state) {
+    case TS_REGULAR: return 0;
+    case TS_INEVITABLE: return 1;
+    default: abort();
+    }
+}
 #endif
 
 static void abort_with_mutex(void)
