@@ -332,15 +332,15 @@ void setup_thread()
 void *demo_random(void *arg)
 {
     int status;
+    rewind_jmp_buf rjbuf;
     stm_register_thread_local(&stm_thread_local);
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
 
     setup_thread();
 
     objptr_t p;
-    stm_jmpbuf_t here;
-    volatile int call_fork = (arg != NULL);
 
-    STM_START_TRANSACTION(&stm_thread_local, here);
+    stm_start_transaction(&stm_thread_local);
     assert(td.num_roots >= td.num_roots_at_transaction_start);
     td.num_roots = td.num_roots_at_transaction_start;
     p = NULL;
@@ -358,11 +358,12 @@ void *demo_random(void *arg)
         if (p == (objptr_t)-1) {
             push_roots();
 
+            long call_fork = (arg != NULL && *(long *)arg);
             if (call_fork == 0) {   /* common case */
                 stm_commit_transaction();
                 td.num_roots_at_transaction_start = td.num_roots;
                 if (get_rand(100) < 98) {
-                    STM_START_TRANSACTION(&stm_thread_local, here);
+                    stm_start_transaction(&stm_thread_local);
                 } else {
                     stm_start_inevitable_transaction(&stm_thread_local);
                 }
@@ -374,7 +375,7 @@ void *demo_random(void *arg)
             else {
                 /* run a fork() inside the transaction */
                 printf("==========   FORK  =========\n");
-                call_fork = 0;
+                *(long*)arg = 0;
                 pid_t child = fork();
                 printf("=== in process %d thread %lx, fork() returned %d\n",
                        (int)getpid(), (long)pthread_self(), (int)child);
@@ -394,6 +395,7 @@ void *demo_random(void *arg)
     }
     stm_commit_transaction();
 
+    stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     stm_unregister_thread_local(&stm_thread_local);
 
     status = sem_post(&done); assert(status == 0);
@@ -442,6 +444,7 @@ void setup_globals()
 int main(void)
 {
     int i, status;
+    rewind_jmp_buf rjbuf;
 
     /* pick a random seed from the time in seconds.
        A bit pointless for now... because the interleaving of the
@@ -455,6 +458,7 @@ int main(void)
 
     stm_setup();
     stm_register_thread_local(&stm_thread_local);
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
 
     setup_globals();
 
@@ -472,7 +476,7 @@ int main(void)
             long forkbase = NUMTHREADS * THREAD_STARTS / (FORKS + 1);
             long _fork = (thread_starts % forkbase) == 0;
             thread_starts--;
-            newthread(demo_random, (void *)_fork);
+            newthread(demo_random, &_fork);
         }
     }
 
@@ -492,6 +496,7 @@ int main(void)
 
     printf("Test OK!\n");
 
+    stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     stm_unregister_thread_local(&stm_thread_local);
     stm_teardown();
 
