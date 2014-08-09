@@ -189,6 +189,7 @@ static void fork_abort_thread(long i)
 #endif
         pr->pub.running_thread->shadowstack = (
             pr->shadowstack_at_start_of_transaction);
+        strcpy(pr->marker_self, "fork");
         stm_abort_transaction();
     }
 }
