@@ -55,6 +55,10 @@ void test1(void)
     int expected[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
     CHECK(expected);
 
+    assert(rewind_jmp_armed(&gthread));
+    rewind_jmp_forget(&gthread);
+    assert(!rewind_jmp_armed(&gthread));
+
     rewind_jmp_leaveframe(&gthread, &buf);
 }
 
