@@ -190,6 +190,7 @@ static void fork_abort_thread(long i)
 #endif
         pr->pub.running_thread->shadowstack = (
             pr->shadowstack_at_start_of_transaction);
+        strcpy(pr->marker_self, "fork");
         stm_abort_transaction();
     }
     stm_rewind_jmp_leaveframe(tl, &rjbuf);
