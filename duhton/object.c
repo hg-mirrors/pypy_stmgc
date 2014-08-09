@@ -34,8 +34,19 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     if (trace)
         trace((struct DuObject_s *)obj, visit);
 }
-
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2])
+{
+    abort();
+}
+void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
+                       uintptr_t start, uintptr_t stop)
+{
+    abort();
+}
 void stmcb_commit_soon(void) { }
+
+
 
 
 DuObject *DuObject_New(DuType *tp)
