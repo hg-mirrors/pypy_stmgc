@@ -77,4 +77,6 @@ void rewind_jmp_longjmp(rewind_jmp_thread *rjthread) __attribute__((noreturn));
 void _rewind_jmp_copy_stack_slice(rewind_jmp_thread *);
 void _rewind_jmp_free_stack_slices(rewind_jmp_thread *);
 
+#define rewind_jmp_armed(rjthread)   ((rjthread)->moved_off_base != 0)
+
 #endif
