@@ -71,9 +71,8 @@ long check_sorted(void)
 {
     nodeptr_t r_n;
     long prev, sum;
-    stm_jmpbuf_t here;
 
-    STM_START_TRANSACTION(&stm_thread_local, here);
+    stm_start_transaction(&stm_thread_local);
 
     stm_read((objptr_t)global_chained_list);
     r_n = global_chained_list;
@@ -101,11 +100,9 @@ long check_sorted(void)
 
 nodeptr_t swap_nodes(nodeptr_t initial)
 {
-    stm_jmpbuf_t here;
-
     assert(initial != NULL);
 
-    STM_START_TRANSACTION(&stm_thread_local, here);
+    stm_start_transaction(&stm_thread_local);
 
     if (stm_thread_local.longest_marker_state != 0) {
         fprintf(stderr, "[%p] marker %d for %.6f seconds:\n",
@@ -202,7 +199,7 @@ void setup_list(void)
 
     stm_commit_transaction();
 
-    stm_start_inevitable_transaction(&stm_thread_local);
+    stm_start_transaction(&stm_thread_local);
     STM_POP_ROOT(stm_thread_local, global_chained_list);   /* update value */
     assert(global_chained_list->value == -1);
     STM_PUSH_ROOT(stm_thread_local, global_chained_list);  /* remains forever in the shadow stack */
@@ -224,7 +221,9 @@ void unregister_thread_local(void)
 void *demo2(void *arg)
 {
     int status;
+    rewind_jmp_buf rjbuf;
     stm_register_thread_local(&stm_thread_local);
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
     char *org = (char *)stm_thread_local.shadowstack;
 
     STM_PUSH_ROOT(stm_thread_local, global_chained_list);  /* remains forever in the shadow stack */
@@ -244,6 +243,7 @@ void *demo2(void *arg)
     STM_POP_ROOT(stm_thread_local, global_chained_list);
     OPT_ASSERT(org == (char *)stm_thread_local.shadowstack);
 
+    stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     unregister_thread_local();
     status = sem_post(&done); assert(status == 0);
     return NULL;
@@ -280,11 +280,13 @@ void newthread(void*(*func)(void*), void *arg)
 int main(void)
 {
     int status, i;
+    rewind_jmp_buf rjbuf;
 
     status = sem_init(&done, 0, 0); assert(status == 0);
 
     stm_setup();
     stm_register_thread_local(&stm_thread_local);
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
     stmcb_expand_marker = expand_marker;
 
 
@@ -302,6 +304,7 @@ int main(void)
     final_check();
 
 
+    stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     unregister_thread_local();
     //stm_teardown();
 

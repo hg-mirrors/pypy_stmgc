@@ -22,6 +22,7 @@ void rj_free(void *);
 
 static void copy_stack(rewind_jmp_thread *rjthread, char *base)
 {
+    assert(rjthread->head != NULL);
     char *stop = rjthread->head->frame_base;
     assert(stop > base);
     struct _rewind_jmp_moved_s *next = (struct _rewind_jmp_moved_s *)
