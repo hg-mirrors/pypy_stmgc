@@ -12,6 +12,7 @@ typedef ... stm_jmpbuf_t;
 #define STM_NB_SEGMENTS ...
 #define _STM_FAST_ALLOC ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
+#define _STM_CARD_SIZE ...
 #define STM_STACK_MARKER_NEW ...
 #define STM_STACK_MARKER_OLD ...
 
@@ -41,6 +42,9 @@ object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
+/*void stm_write_card(); use _checked_stm_write_card() instead */
+
+
 void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
@@ -49,8 +53,10 @@ object_t *stm_setup_prebuilt(object_t *);
 object_t *stm_setup_prebuilt_weakref(object_t *);
 
 bool _checked_stm_write(object_t *obj);
+bool _checked_stm_write_card(object_t *obj, uintptr_t index);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
+bool _stm_was_written_card(object_t *obj);
 char *_stm_real_address(object_t *obj);
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
@@ -92,8 +98,11 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
+long _stm_count_old_objects_with_cards(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
+object_t *_stm_enum_old_objects_with_cards(long index);
+
 
 void stm_collect(long level);
 uint64_t _stm_total_allocated(void);
@@ -179,6 +188,10 @@ int _stm_get_flags(object_t *obj) {
 
 bool _checked_stm_write(object_t *object) {
     CHECKED(stm_write(object));
+}
+
+bool _checked_stm_write_card(object_t *object, uintptr_t index) {
+    CHECKED(stm_write_card(object, index));
 }
 
 bool _check_stop_safe_point(void) {
@@ -287,6 +300,36 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     }
 }
 
+void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
+                       uintptr_t start, uintptr_t stop)
+{
+    int i;
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 421420) {
+        /* basic case: no references */
+        return;
+    }
+
+    for (i=start; (i < myobj->type_id - 421420) && (i < stop); i++) {
+        object_t **ref = ((object_t **)(myobj + 1)) + i;
+        visit(ref);
+    }
+}
+
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2])
+{
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 421420) {
+        offset_itemsize[0] = SIZEOF_MYOBJ;
+        offset_itemsize[1] = 1;
+    }
+    else {
+        offset_itemsize[0] = sizeof(struct myobj_s);
+        offset_itemsize[1] = sizeof(object_t *);
+    }
+}
+
 void stm_push_marker(stm_thread_local_t *tl, uintptr_t onum, object_t *ob)
 {
     STM_PUSH_MARKER(*tl, onum, ob);
@@ -323,6 +366,7 @@ WORD = 8
 HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
+CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
 FAST_ALLOC = lib._STM_FAST_ALLOC
 
@@ -371,22 +415,28 @@ def stm_allocate_refs(n):
     lib._set_type_id(o, tid)
     return o
 
-def stm_set_ref(obj, idx, ref):
-    stm_write(obj)
+def stm_set_ref(obj, idx, ref, use_cards=False):
+    if use_cards:
+        stm_write_card(obj, idx)
+    else:
+        stm_write(obj)
     lib._set_ptr(obj, idx, ref)
 
 def stm_get_ref(obj, idx):
     stm_read(obj)
     return lib._get_ptr(obj, idx)
 
-def stm_set_char(obj, c, offset=HDR):
-    stm_write(obj)
+def stm_set_char(obj, c, offset=HDR, use_cards=False):
     assert HDR <= offset < stm_get_obj_size(obj)
+    if use_cards:
+        stm_write_card(obj, offset - HDR)
+    else:
+        stm_write(obj)
     stm_get_real_address(obj)[offset] = c
 
 def stm_get_char(obj, offset=HDR):
-    stm_read(obj)
     assert HDR <= offset < stm_get_obj_size(obj)
+    stm_read(obj)
     return stm_get_real_address(obj)[offset]
 
 def stm_get_real_address(obj):
@@ -395,8 +445,13 @@ def stm_get_real_address(obj):
 def stm_read(o):
     lib.stm_read(o)
 
+
 def stm_write(o):
     if lib._checked_stm_write(o):
+        raise Conflict()
+
+def stm_write_card(o, index):
+    if lib._checked_stm_write_card(o, index):
         raise Conflict()
 
 def stm_was_read(o):
@@ -404,6 +459,9 @@ def stm_was_read(o):
 
 def stm_was_written(o):
     return lib._stm_was_written(o)
+
+def stm_was_written_card(o):
+    return lib._stm_was_written_card(o)
 
 
 def stm_start_safe_point():
@@ -444,6 +502,14 @@ def objects_pointing_to_nursery():
     if count < 0:
         return None
     return map(lib._stm_enum_objects_pointing_to_nursery, range(count))
+
+def old_objects_with_cards():
+    count = lib._stm_count_old_objects_with_cards()
+    if count < 0:
+        return None
+    return map(lib._stm_enum_old_objects_with_cards, range(count))
+
+
 
 
 SHADOWSTACK_LENGTH = 1000

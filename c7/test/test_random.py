@@ -36,17 +36,22 @@ def contention_management(our_trs, other_trs, wait=False, objs_in_conflict=None)
         # we win but cannot wait in tests...
         raise WriteWriteConflictNotTestable
 
-    if our_trs.inevitable:
-        other_trs.set_must_abort(objs_in_conflict)
-    elif other_trs.start_time < our_trs.start_time:
-        pass
-    elif not other_trs.inevitable:
-        other_trs.set_must_abort(objs_in_conflict)
+    if our_trs.start_time >= other_trs.start_time:
+        abort_other = False
+    else:
+        abort_other = True
 
-    if not other_trs.check_must_abort():
+    if other_trs.check_must_abort():
+        abort_other = True
+    elif our_trs.inevitable:
+        abort_other = True
+    elif other_trs.inevitable:
+        abort_other = False
+
+    if not abort_other:
         our_trs.set_must_abort(objs_in_conflict)
-    elif wait:
-        assert not our_trs.inevitable
+    else:
+        other_trs.set_must_abort(objs_in_conflict)
 
 
 class TransactionState(object):
@@ -375,7 +380,7 @@ def op_allocate(ex, global_state, thread_state):
     thread_state.register_root(r)
 
 def op_allocate_ref(ex, global_state, thread_state):
-    num = str(global_state.rnd.randrange(1, 100))
+    num = str(global_state.rnd.randrange(1, 1000))
     r = global_state.get_new_root_name(True, num)
     thread_state.push_roots(ex)
     ex.do('%s = stm_allocate_refs(%s)' % (r, num))
@@ -410,6 +415,7 @@ def op_write(ex, global_state, thread_state):
     r = thread_state.get_random_root()
     trs = thread_state.transaction_state
     is_ref = global_state.has_ref_type(r)
+    try_cards = global_state.rnd.randrange(1, 100) > 5# and False
     #
     # check for possible write-write conflict:
     was_written = False
@@ -438,13 +444,13 @@ def op_write(ex, global_state, thread_state):
         thread_state.abort_transaction()
     offset = global_state.get_root_size(r) + " - 1"
     if is_ref:
-        ex.do(raising_call(aborts, "stm_set_ref", r, offset, v))
+        ex.do(raising_call(aborts, "stm_set_ref", r, offset, v, try_cards))
         if not aborts:
-            ex.do(raising_call(False, "stm_set_ref", r, "0", v))
+            ex.do(raising_call(False, "stm_set_ref", r, "0", v, try_cards))
     else:
-        ex.do(raising_call(aborts, "stm_set_char", r, repr(chr(v)), offset))
+        ex.do(raising_call(aborts, "stm_set_char", r, repr(chr(v)), offset, try_cards))
         if not aborts:
-            ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR"))
+            ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR", try_cards))
 
 def op_read(ex, global_state, thread_state):
     r = thread_state.get_random_root()

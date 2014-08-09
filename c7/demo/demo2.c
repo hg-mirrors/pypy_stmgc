@@ -43,7 +43,16 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     n = (struct node_s*)obj;
     visit((object_t **)&n->next);
 }
-
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2])
+{
+    abort();
+}
+void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
+                       uintptr_t start, uintptr_t stop)
+{
+    abort();
+}
 void stmcb_commit_soon() {}
 
 static void expand_marker(char *base, uintptr_t odd_number,
@@ -294,7 +303,7 @@ int main(void)
 
 
     unregister_thread_local();
-    stm_teardown();
+    //stm_teardown();
 
     return 0;
 }
