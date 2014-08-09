@@ -892,7 +892,7 @@ reset_modified_from_other_segments(int segment_num)
                WRITE_BARRIER flag, unless they have been modified
                recently.  Ignore the old flag; after copying from the
                other segment, we should have the flag. */
-            assert(item->stm_flags & GCFLAG_WRITE_BARRIER);
+            assert(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
 
             /* write all changes to the object before we release the
                write lock below.  This is needed because we need to
