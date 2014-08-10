@@ -41,12 +41,20 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 
 void stmcb_commit_soon() {}
 
+void stmcb_trace_cards(struct object_s *obj, void cb(object_t **),
+                       uintptr_t start, uintptr_t stop) {
+    abort();
+}
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2]) {
+    abort();
+}
 
 
 static sem_t done;
 
 static __thread int tl_counter = 0;
-static int gl_counter = 0;
+//static int gl_counter = 0;
 
 void *demo2(void *arg)
 {

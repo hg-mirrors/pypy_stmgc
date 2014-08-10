@@ -36,3 +36,4 @@
 #include "stm/weakref.c"
 #include "stm/timing.c"
 #include "stm/marker.c"
+#include "stm/rewind_setjmp.c"
