@@ -168,6 +168,58 @@ void test5(void)
 
 /************************************************************/
 
+static int test6_x;
+
+__attribute__((noinline))
+void foo(int *x) { ++*x; }
+
+__attribute__((noinline))
+void f6(int a1, int a2, int a3, int a4, int a5, int a6, int a7,
+        int a8, int a9, int a10, int a11, int a12, int a13)
+{
+    rewind_jmp_buf buf;
+    rewind_jmp_enterframe(&gthread, &buf);
+
+    rewind_jmp_setjmp(&gthread);
+    gevent(a1); gevent(a2); gevent(a3); gevent(a4);
+    gevent(a5); gevent(a6); gevent(a7); gevent(a8);
+    gevent(a9); gevent(a10); gevent(a11); gevent(a12);
+    gevent(a13);
+    if (++test6_x < 4) {
+        foo(&a1);
+        foo(&a2);
+        foo(&a3);
+        foo(&a4);
+        foo(&a5);
+        foo(&a6);
+        foo(&a7);
+        foo(&a8);
+        foo(&a9);
+        foo(&a10);
+        foo(&a11);
+        foo(&a12);
+        foo(&a13);
+        rewind_jmp_longjmp(&gthread);
+    }
+    rewind_jmp_leaveframe(&gthread, &buf);
+}
+
+void test6(void)
+{
+    rewind_jmp_buf buf;
+    rewind_jmp_enterframe(&gthread, &buf);
+    test6_x = 0;
+    f6(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+    rewind_jmp_leaveframe(&gthread, &buf);
+    int expected[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+                      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+                      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+                      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+    CHECK(expected);
+}
+
+/************************************************************/
+
 int rj_malloc_count = 0;
 
 void *rj_malloc(size_t size)
@@ -195,6 +247,7 @@ int main(int argc, char *argv[])
     else if (!strcmp(argv[1], "3"))  test3();
     else if (!strcmp(argv[1], "4"))  test4();
     else if (!strcmp(argv[1], "5"))  test5();
+    else if (!strcmp(argv[1], "6"))  test6();
     else
         assert(!"bad argv[1]");
     assert(rj_malloc_count == 0);
