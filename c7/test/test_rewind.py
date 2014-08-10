@@ -6,7 +6,7 @@ def run_test(opt):
                     % (opt, opt))
     if err != 0:
         raise OSError("clang failed on test_rewind.c")
-    for testnum in [1, 2, 3, 4, 5]:
+    for testnum in [1, 2, 3, 4, 5, 6]:
         print '=== O%d: RUNNING TEST %d ===' % (opt, testnum)
         err = os.system("./test_rewind_O%d %d" % (opt, testnum))
         if err != 0:
