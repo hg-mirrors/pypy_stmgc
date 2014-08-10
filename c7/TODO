@@ -24,3 +24,6 @@
 
 - increase the memory limit, currently 2.5GB; this requires, apparently,
   more fighting against LLVM bugs
+
+- avoid __builtin_frame_address(0) in precisely the performance-critical
+  functions like the interpreter main loop
