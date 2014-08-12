@@ -105,19 +105,26 @@ void rewind_jmp_longjmp(rewind_jmp_thread *rjthread)
     do_longjmp(rjthread, &_rewind_jmp_marker);
 }
 
-char *rewind_jmp_restore_shadowstack(rewind_jmp_thread *rjthread)
+
+char *rewind_jmp_enum_shadowstack(rewind_jmp_thread *rjthread,
+                                  void *callback(void *, const void *, size_t))
 {
     struct _rewind_jmp_moved_s *p = rjthread->moved_off;
     char *sstarget = rjthread->moved_off_ssbase;
 
     while (p) {
         char *ssend = sstarget + p->shadowstack_size;
-        memcpy(sstarget, ((char *)p) + RJM_HEADER + p->stack_size,
-               p->shadowstack_size);
+        callback(sstarget, ((char *)p) + RJM_HEADER + p->stack_size,
+                 p->shadowstack_size);
         sstarget = ssend;
         p = p->next;
     }
     return sstarget;
+}
+
+char *rewind_jmp_restore_shadowstack(rewind_jmp_thread *rjthread)
+{
+    return rewind_jmp_enum_shadowstack(rjthread, memcpy);
 }
 
 __attribute__((noinline))
