@@ -135,14 +135,15 @@ long push_roots()
     return to_push;
 }
 
+void add_root(objptr_t r);
 void pop_roots(long to_pop)
 {
     int i;
     for (i = 0; i < to_pop; i++) {
-        STM_POP_ROOT(stm_thread_local, td.active_roots_set[i]);
+        objptr_t t;
+        STM_POP_ROOT(stm_thread_local, t);
+        add_root(t);
         td.roots_on_ss--;
-        td.active_roots_num++;
-        assert(td.active_roots_num < ACTIVE_ROOTS_SET_SIZE);
     }
 }
 
@@ -297,9 +298,9 @@ objptr_t do_step(objptr_t p)
         stm_commit_transaction();
         td.roots_on_ss_at_tr_start = td.roots_on_ss;
 
-        /* if (get_rand(100) < 98) { */
-        /*     stm_start_transaction(&stm_thread_local); */
-        /* } else  */{
+        if (get_rand(100) < 98) {
+            stm_start_transaction(&stm_thread_local);
+        } else{
             stm_start_inevitable_transaction(&stm_thread_local);
         }
         td.roots_on_ss = td.roots_on_ss_at_tr_start;
