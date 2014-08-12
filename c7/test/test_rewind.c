@@ -239,6 +239,7 @@ void testTL1(void)
         assert(ssarray[5] == a5);
         ssarray[4] = NULL;
         ssarray[5] = NULL;
+        rewind_jmp_restore_shadowstack(&gthread);
         rewind_jmp_longjmp(&gthread);
     }
     /* second path */
@@ -274,8 +275,10 @@ void testTL2(void)
     int result = gtl2();
     ssarray[4] = NULL;
 
-    if (result == 0)
+    if (result == 0) {
+        rewind_jmp_restore_shadowstack(&gthread);
         rewind_jmp_longjmp(&gthread);
+    }
 
     rewind_jmp_leaveframe(&gthread, &buf, ssarray+4);
 }

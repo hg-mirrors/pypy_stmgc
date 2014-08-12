@@ -93,13 +93,7 @@ static void do_longjmp(rewind_jmp_thread *rjthread, char *stack_free)
         }
         memcpy(target, ((char *)p) + RJM_HEADER, p->stack_size);
 
-        char *sstarget = rjthread->moved_off_ssbase;
-        char *ssend = sstarget + p->shadowstack_size;
-        memcpy(sstarget, ((char *)p) + RJM_HEADER + p->stack_size,
-               p->shadowstack_size);
-
         rjthread->moved_off_base = target;
-        rjthread->moved_off_ssbase = ssend;
         rjthread->moved_off = p->next;
         rj_free(p);
     }
@@ -111,6 +105,22 @@ void rewind_jmp_longjmp(rewind_jmp_thread *rjthread)
 {
     char _rewind_jmp_marker;
     do_longjmp(rjthread, &_rewind_jmp_marker);
+}
+
+char *rewind_jmp_restore_shadowstack(rewind_jmp_thread *rjthread)
+{
+    struct _rewind_jmp_moved_s *p = rjthread->moved_off;
+    char *sstarget = rjthread->moved_off_ssbase;
+
+    while (p) {
+        char *ssend = sstarget + p->shadowstack_size;
+        memcpy(sstarget, ((char *)p) + RJM_HEADER + p->stack_size,
+               p->shadowstack_size);
+        sstarget = ssend;
+        p = p->next;
+    }
+    rjthread->moved_off_ssbase = sstarget;
+    return sstarget;
 }
 
 __attribute__((noinline))
