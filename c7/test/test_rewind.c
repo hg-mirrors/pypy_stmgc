@@ -220,6 +220,49 @@ void test6(void)
 
 /************************************************************/
 
+typedef struct { char foo; } object_t;
+struct stm_shadowentry_s { object_t *ss; };
+typedef struct {
+    struct stm_shadowentry_s *shadowstack;
+    struct stm_shadowentry_s _inline[99];
+} stm_thread_local_t;
+#define STM_PUSH_ROOT(tl, p)   ((tl).shadowstack++->ss = (object_t *)(p))
+#define STM_POP_ROOT(tl, p)    ((p) = (typeof(p))((--(tl).shadowstack)->ss))
+void stm_register_thread_local(stm_thread_local_t *tl) {
+    tl->shadowstack = tl->_inline;
+}
+void stm_unregister_thread_local(stm_thread_local_t *tl) { }
+static stm_thread_local_t tl;
+
+
+void testTL1(void)
+{
+    object_t *a1, *a2;
+    stm_register_thread_local(&tl);
+
+    rewind_jmp_buf buf;
+    rewind_jmp_enterframe(&gthread, &buf);
+
+    a1 = a2 = (object_t *)123456;
+    STM_PUSH_ROOT(tl, a1);
+
+    if (rewind_jmp_setjmp(&gthread) == 0) {
+        /* first path */
+        STM_POP_ROOT(tl, a2);
+        assert(a1 == a2);
+        STM_PUSH_ROOT(tl, NULL);
+        rewind_jmp_longjmp(&gthread);
+    }
+    /* second path */
+    STM_POP_ROOT(tl, a2);
+    assert(a1 == a2);
+
+    rewind_jmp_leaveframe(&gthread, &buf);
+    stm_unregister_thread_local(&tl);
+}
+
+/************************************************************/
+
 int rj_malloc_count = 0;
 
 void *rj_malloc(size_t size)
@@ -248,6 +291,7 @@ int main(int argc, char *argv[])
     else if (!strcmp(argv[1], "4"))  test4();
     else if (!strcmp(argv[1], "5"))  test5();
     else if (!strcmp(argv[1], "6"))  test6();
+    else if (!strcmp(argv[1], "TL1")) testTL1();
     else
         assert(!"bad argv[1]");
     assert(rj_malloc_count == 0);
