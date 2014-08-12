@@ -340,9 +340,11 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
     rewind_jmp_longjmp(&(tl)->rjthread)
 #define stm_rewind_jmp_forget(tl)                  \
     rewind_jmp_forget(&(tl)->rjthread)
-#define stm_rewind_jmp_restore_shadowstack(tl)           \
-    ((tl)->shadowstack = (struct stm_shadowentry_s *)    \
-        rewind_jmp_restore_shadowstack(&(tl)->rjthread))
+#define stm_rewind_jmp_restore_shadowstack(tl)  do {     \
+    assert(rewind_jmp_armed(&(tl)->rjthread));           \
+    (tl)->shadowstack = (struct stm_shadowentry_s *)     \
+        rewind_jmp_restore_shadowstack(&(tl)->rjthread); \
+} while (0)
 
 /* Starting and ending transactions.  stm_read(), stm_write() and
    stm_allocate() should only be called from within a transaction.

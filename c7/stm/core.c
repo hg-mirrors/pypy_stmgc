@@ -994,6 +994,9 @@ static void abort_data_structures_from_segment_num(int segment_num)
     assert(tl->shadowstack >= pseg->shadowstack_at_start_of_transaction);
     tl->shadowstack = pseg->shadowstack_at_start_of_transaction;
 #else
+    /* NB. careful, this function might be called more than once to
+       abort a given segment.  Make sure that
+       stm_rewind_jmp_restore_shadowstack() is idempotent. */
     stm_rewind_jmp_restore_shadowstack(tl);
     assert(tl->shadowstack == pseg->shadowstack_at_start_of_transaction);
 #endif
