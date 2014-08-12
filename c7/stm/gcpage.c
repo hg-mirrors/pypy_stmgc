@@ -369,7 +369,8 @@ static void *mark_visit_objects_from_ss(void *_, const void *slice, size_t size)
     p = (const struct stm_shadowentry_s *)slice;
     end = (const struct stm_shadowentry_s *)(slice + size);
     for (; p < end; p++)
-        mark_visit_object(p->ss, stm_object_pages);
+        if ((((uintptr_t)p->ss) & 3) == 0)
+            mark_visit_object(p->ss, stm_object_pages);
     return NULL;
 }
 
