@@ -55,23 +55,26 @@ long rewind_jmp_setjmp(rewind_jmp_thread *rjthread, void *ss)
     if (rjthread->moved_off) {
         _rewind_jmp_free_stack_slices(rjthread);
     }
-    void *volatile ss1 = ss;
-    rewind_jmp_thread *volatile rjthread1 = rjthread;
+    /* all locals of this function that need to be saved and restored
+       across the setjmp() should be stored inside this structure */
+    struct { void *ss1; rewind_jmp_thread *rjthread1; } volatile saved =
+        { ss, rjthread };
+
     int result;
     if (__builtin_setjmp(rjthread->jmpbuf) == 0) {
-        rjthread = rjthread1;
+        rjthread = saved.rjthread1;
         rjthread->initial_head = rjthread->head;
         result = 0;
     }
     else {
-        rjthread = rjthread1;
+        rjthread = saved.rjthread1;
         rjthread->head = rjthread->initial_head;
         result = rjthread->repeat_count + 1;
         /* check that the shadowstack was correctly restored */
-        assert(rjthread->moved_off_ssbase == ss1);
+        assert(rjthread->moved_off_ssbase == saved.ss1);
     }
     rjthread->repeat_count = result;
-    copy_stack(rjthread, (char *)&rjthread1, ss1);
+    copy_stack(rjthread, (char *)&saved, saved.ss1);
     return result;
 }
 
