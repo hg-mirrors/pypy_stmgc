@@ -74,6 +74,7 @@ typedef struct {
 
 long rewind_jmp_setjmp(rewind_jmp_thread *rjthread, void *ss);
 void rewind_jmp_longjmp(rewind_jmp_thread *rjthread) __attribute__((noreturn));
+char *rewind_jmp_restore_shadowstack(rewind_jmp_thread *rjthread);
 
 #define rewind_jmp_forget(rjthread)  do {                               \
     if ((rjthread)->moved_off) _rewind_jmp_free_stack_slices(rjthread); \
