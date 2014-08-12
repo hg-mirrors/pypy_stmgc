@@ -393,6 +393,16 @@ void *demo_random(void *arg)
             }
         }
     }
+    push_roots();
+    stm_commit_transaction();
+
+    /* even out the shadow stack before leaveframe: */
+    stm_start_inevitable_transaction(&stm_thread_local);
+    while (td.num_roots > 0) {
+        td.num_roots--;
+        objptr_t t;
+        STM_POP_ROOT(stm_thread_local, t);
+    }
     stm_commit_transaction();
 
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
