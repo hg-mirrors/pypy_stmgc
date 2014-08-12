@@ -987,8 +987,16 @@ static void abort_data_structures_from_segment_num(int segment_num)
        value before the transaction start.  Also restore the content
        of the shadowstack here. */
     stm_thread_local_t *tl = pseg->pub.running_thread;
+#ifdef STM_NO_AUTOMATIC_SETJMP
+    /* In tests, we don't save and restore the shadowstack correctly.
+       Be sure to not change items below shadowstack_at_start_of_transaction.
+       There is no such restrictions in non-Python-based tests. */
+    assert(tl->shadowstack >= pseg->shadowstack_at_start_of_transaction);
+    tl->shadowstack = pseg->shadowstack_at_start_of_transaction;
+#else
     stm_rewind_jmp_restore_shadowstack(tl);
     assert(tl->shadowstack == pseg->shadowstack_at_start_of_transaction);
+#endif
     tl->thread_local_obj = pseg->threadlocal_at_start_of_transaction;
     tl->last_abort__bytes_in_nursery = bytes_in_nursery;
 

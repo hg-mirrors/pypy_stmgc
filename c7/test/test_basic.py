@@ -427,6 +427,19 @@ class TestBasic(BaseTest):
         self.abort_transaction()
         py.test.raises(EmptyStack, self.pop_root)
 
+    def test_abort_restores_shadowstack_inv(self):
+        py.test.skip("the logic to save/restore the shadowstack doesn't "
+                     "work in these tests")
+        self.push_root(ffi.cast("object_t *", 1234))
+        self.start_transaction()
+        p = self.pop_root()
+        assert p == ffi.cast("object_t *", 1234)
+        self.push_root(ffi.cast("object_t *", 5678))
+        self.pop_root()
+        self.abort_transaction()
+        p = self.pop_root()
+        assert p == ffi.cast("object_t *", 1234)
+
     def test_check_content_after_commit(self):
         self.start_transaction()
         lp1 = stm_allocate(16)
