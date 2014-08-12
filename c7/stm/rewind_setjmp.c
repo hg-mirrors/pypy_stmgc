@@ -7,7 +7,8 @@
 
 struct _rewind_jmp_moved_s {
     struct _rewind_jmp_moved_s *next;
-    size_t size;
+    size_t stack_size;
+    size_t shadowstack_size;
 };
 #define RJM_HEADER  sizeof(struct _rewind_jmp_moved_s)
 
@@ -20,28 +21,41 @@ void rj_free(void *);
 #endif
 
 
-static void copy_stack(rewind_jmp_thread *rjthread, char *base)
+static void copy_stack(rewind_jmp_thread *rjthread, char *base, void *ssbase)
 {
+    /* Copy away part of the stack and shadowstack.
+       The stack is copied between 'base' (lower limit, i.e. newest bytes)
+       and 'rjthread->head->frame_base' (upper limit, i.e. oldest bytes).
+       The shadowstack is copied between 'ssbase' (upper limit, newest)
+       and 'rjthread->head->shadowstack_base' (lower limit, oldest).
+    */
     assert(rjthread->head != NULL);
     char *stop = rjthread->head->frame_base;
-    assert(stop > base);
+    assert(stop >= base);
+    void *ssstop = rjthread->head->shadowstack_base;
+    assert(ssstop <= ssbase);
     struct _rewind_jmp_moved_s *next = (struct _rewind_jmp_moved_s *)
-        rj_malloc(RJM_HEADER + (stop - base));
+        rj_malloc(RJM_HEADER + (stop - base) + (ssbase - ssstop));
     assert(next != NULL);    /* XXX out of memory */
     next->next = rjthread->moved_off;
-    next->size = stop - base;
+    next->stack_size = stop - base;
+    next->shadowstack_size = ssbase - ssstop;
     memcpy(((char *)next) + RJM_HEADER, base, stop - base);
+    memcpy(((char *)next) + RJM_HEADER + (stop - base), ssstop,
+           ssbase - ssstop);
 
     rjthread->moved_off_base = stop;
+    rjthread->moved_off_ssbase = ssstop;
     rjthread->moved_off = next;
 }
 
 __attribute__((noinline))
-long rewind_jmp_setjmp(rewind_jmp_thread *rjthread)
+long rewind_jmp_setjmp(rewind_jmp_thread *rjthread, void *ss)
 {
     if (rjthread->moved_off) {
         _rewind_jmp_free_stack_slices(rjthread);
     }
+    void *volatile ss1 = ss;
     rewind_jmp_thread *volatile rjthread1 = rjthread;
     int result;
     if (__builtin_setjmp(rjthread->jmpbuf) == 0) {
@@ -55,7 +69,7 @@ long rewind_jmp_setjmp(rewind_jmp_thread *rjthread)
         result = rjthread->repeat_count + 1;
     }
     rjthread->repeat_count = result;
-    copy_stack(rjthread, (char *)&rjthread1);
+    copy_stack(rjthread, (char *)&rjthread1, ss1);
     return result;
 }
 
@@ -67,13 +81,20 @@ static void do_longjmp(rewind_jmp_thread *rjthread, char *stack_free)
     while (rjthread->moved_off) {
         struct _rewind_jmp_moved_s *p = rjthread->moved_off;
         char *target = rjthread->moved_off_base;
-        target -= p->size;
+        target -= p->stack_size;
         if (target < stack_free) {
             /* need more stack space! */
             do_longjmp(rjthread, alloca(stack_free - target));
         }
-        memcpy(target, ((char *)p) + RJM_HEADER, p->size);
+        memcpy(target, ((char *)p) + RJM_HEADER, p->stack_size);
+
+        char *sstarget = rjthread->moved_off_ssbase;
+        char *ssend = sstarget + p->shadowstack_size;
+        memcpy(sstarget, ((char *)p) + RJM_HEADER + p->stack_size,
+               p->shadowstack_size);
+
         rjthread->moved_off_base = target;
+        rjthread->moved_off_ssbase = ssend;
         rjthread->moved_off = p->next;
         rj_free(p);
     }
@@ -95,7 +116,7 @@ void _rewind_jmp_copy_stack_slice(rewind_jmp_thread *rjthread)
         return;
     }
     assert(rjthread->moved_off_base < (char *)rjthread->head);
-    copy_stack(rjthread, rjthread->moved_off_base);
+    copy_stack(rjthread, rjthread->moved_off_base, rjthread->moved_off_ssbase);
 }
 
 void _rewind_jmp_free_stack_slices(rewind_jmp_thread *rjthread)
