@@ -208,6 +208,11 @@ void setup_list(void)
     printf("setup ok\n");
 }
 
+void teardown_list(void)
+{
+    STM_POP_ROOT_RET(stm_thread_local);
+}
+
 
 static sem_t done;
 
@@ -303,6 +308,7 @@ int main(void)
 
     final_check();
 
+    teardown_list();
 
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     unregister_thread_local();
