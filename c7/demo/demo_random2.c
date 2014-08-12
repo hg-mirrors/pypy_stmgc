@@ -300,7 +300,7 @@ objptr_t do_step(objptr_t p)
 
         if (get_rand(100) < 98) {
             stm_start_transaction(&stm_thread_local);
-        } else{
+        } else {
             stm_start_inevitable_transaction(&stm_thread_local);
         }
         td.roots_on_ss = td.roots_on_ss_at_tr_start;
@@ -308,15 +308,11 @@ objptr_t do_step(objptr_t p)
         pop_roots(pushed);
         return NULL;
     } else if (get_rand(10) == 1) {
-        fprintf(stderr, "R");
-
         long pushed = push_roots();
         /* leaving our frame */
         frame_loop();
         /* back in our frame */
         pop_roots(pushed);
-
-        fprintf(stderr, "r");
         return NULL;
     } else if (get_rand(20) == 1) {
         long pushed = push_roots();
@@ -324,9 +320,9 @@ objptr_t do_step(objptr_t p)
         assert(stm_is_inevitable());
         pop_roots(pushed);
         return NULL;
-    } else if (get_rand(200) == 1) {
+    } else if (get_rand(20) == 1) {
         return (objptr_t)-1; // possibly fork
-    } else if (get_rand(240) == 1) {
+    } else if (get_rand(20) == 1) {
         long pushed = push_roots();
         stm_become_globally_unique_transaction(&stm_thread_local, "really");
         fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
@@ -355,26 +351,26 @@ void frame_loop()
         if (p == (objptr_t)-1) {
             p = NULL;
 
-            /* long call_fork = (thread_may_fork != NULL && *(long *)thread_may_fork); */
-            /* if (call_fork) {   /\* common case *\/ */
-            /*     push_roots(); */
-            /*     /\* run a fork() inside the transaction *\/ */
-            /*     printf("==========   FORK  =========\n"); */
-            /*     *(long*)thread_may_fork = 0; */
-            /*     pid_t child = fork(); */
-            /*     printf("=== in process %d thread %lx, fork() returned %d\n", */
-            /*            (int)getpid(), (long)pthread_self(), (int)child); */
-            /*     if (child == -1) { */
-            /*         fprintf(stderr, "fork() error: %m\n"); */
-            /*         abort(); */
-            /*     } */
-            /*     if (child != 0) */
-            /*         num_forked_children++; */
-            /*     else */
-            /*         num_forked_children = 0; */
+            long call_fork = (thread_may_fork != NULL && *(long *)thread_may_fork);
+            if (call_fork) {   /* common case */
+                long pushed = push_roots();
+                /* run a fork() inside the transaction */
+                printf("==========   FORK  =========\n");
+                *(long*)thread_may_fork = 0;
+                pid_t child = fork();
+                printf("=== in process %d thread %lx, fork() returned %d\n",
+                       (int)getpid(), (long)pthread_self(), (int)child);
+                if (child == -1) {
+                    fprintf(stderr, "fork() error: %m\n");
+                    abort();
+                }
+                if (child != 0)
+                    num_forked_children++;
+                else
+                    num_forked_children = 0;
 
-            /*     pop_roots(); */
-            /* } */
+                pop_roots(pushed);
+            }
         }
     }
     assert(roots_on_ss == td.roots_on_ss);
