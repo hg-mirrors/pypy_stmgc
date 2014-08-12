@@ -70,8 +70,6 @@ long rewind_jmp_setjmp(rewind_jmp_thread *rjthread, void *ss)
         rjthread = saved.rjthread1;
         rjthread->head = rjthread->initial_head;
         result = rjthread->repeat_count + 1;
-        /* check that the shadowstack was correctly restored */
-        assert(rjthread->moved_off_ssbase == saved.ss1);
     }
     rjthread->repeat_count = result;
     copy_stack(rjthread, (char *)&saved, saved.ss1);
@@ -119,7 +117,6 @@ char *rewind_jmp_restore_shadowstack(rewind_jmp_thread *rjthread)
         sstarget = ssend;
         p = p->next;
     }
-    rjthread->moved_off_ssbase = sstarget;
     return sstarget;
 }
 
