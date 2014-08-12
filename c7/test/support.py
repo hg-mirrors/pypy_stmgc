@@ -12,8 +12,6 @@ typedef ... object_t;
 #define _STM_FAST_ALLOC ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
 #define _STM_CARD_SIZE ...
-#define STM_STACK_MARKER_NEW ...
-#define STM_STACK_MARKER_OLD ...
 
 struct stm_shadowentry_s {
     object_t *ss;
@@ -622,7 +620,7 @@ class BaseTest(object):
 
     def push_root_no_gc(self):
         "Pushes an invalid object, to crash in case the GC is called"
-        self.push_root(ffi.cast("object_t *", -1))
+        self.push_root(ffi.cast("object_t *", 8))
 
     def check_char_everywhere(self, obj, expected_content, offset=HDR):
         for i in range(len(self.tls)):

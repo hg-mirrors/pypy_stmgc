@@ -234,7 +234,7 @@ class TestGCPage(BaseTest):
         p1 = stm_allocate(600)
         stm_set_char(p1, 'o')
         self.push_root(p1)
-        self.push_root(ffi.cast("object_t *", lib.STM_STACK_MARKER_NEW))
+        self.push_root(ffi.cast("object_t *", 123))
         p2 = stm_allocate(600)
         stm_set_char(p2, 't')
         self.push_root(p2)
@@ -243,7 +243,7 @@ class TestGCPage(BaseTest):
         #
         p2 = self.pop_root()
         m = self.pop_root()
-        assert m == ffi.cast("object_t *", lib.STM_STACK_MARKER_OLD)
+        assert m == ffi.cast("object_t *", 123)
         p1 = self.pop_root()
         assert stm_get_char(p1) == 'o'
         assert stm_get_char(p2) == 't'
