@@ -343,6 +343,8 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
     (tl)->shadowstack = (struct stm_shadowentry_s *)     \
         rewind_jmp_restore_shadowstack(&(tl)->rjthread); \
 } while (0)
+#define stm_rewind_jmp_enum_shadowstack(tl, callback)    \
+    rewind_jmp_enum_shadowstack(&(tl)->rjthread, callback)
 
 /* Starting and ending transactions.  stm_read(), stm_write() and
    stm_allocate() should only be called from within a transaction.

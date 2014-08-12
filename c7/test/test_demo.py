@@ -13,6 +13,8 @@ class TestDemo:
         self._do("make -C ../demo %s" % target)
         self._do("../demo/%s 2> /dev/null" % target)
 
+    def test_shadowstack(self):   self.make_and_run("debug-test_shadowstack")
+
     def test_demo2_debug(self):   self.make_and_run("debug-demo2")
     def test_demo2_build(self):   self.make_and_run("build-demo2")
     def test_demo2_release(self): self.make_and_run("release-demo2")
