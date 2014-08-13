@@ -16,7 +16,7 @@
 #define FORKS 3
 
 #define ACTIVE_ROOTS_SET_SIZE 100 // max num of roots created/alive in one transaction
-
+#define MAX_ROOTS_ON_SS 1000 // max on shadow stack
 
 // SUPPORT
 struct node_s;
@@ -127,12 +127,17 @@ long push_roots()
 {
     int i;
     long to_push = td.active_roots_num;
+    long not_pushed = 0;
     for (i = to_push - 1; i >= 0; i--) {
-        STM_PUSH_ROOT(stm_thread_local, td.active_roots_set[i]);
-        td.roots_on_ss++;
         td.active_roots_num--;
+        if (td.roots_on_ss < MAX_ROOTS_ON_SS) {
+            STM_PUSH_ROOT(stm_thread_local, td.active_roots_set[i]);
+            td.roots_on_ss++;
+        } else {
+            not_pushed++;
+        }
     }
-    return to_push;
+    return to_push - not_pushed;
 }
 
 void add_root(objptr_t r);
@@ -206,6 +211,7 @@ nodeptr_t get_next(objptr_t p)
 objptr_t simple_events(objptr_t p, objptr_t _r)
 {
     int k = get_rand(10);
+    long pushed;
 
     switch (k) {
     case 0: // remove a root
@@ -221,8 +227,7 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
             p = _r;
         break;
     case 3: // allocate fresh 'p'
-        ;
-        long pushed = push_roots();
+        pushed = push_roots();
         size_t sizes[4] = {sizeof(struct node_s),
                            sizeof(struct node_s) + (get_rand(100000) & ~15),
                            sizeof(struct node_s) + 4096,
@@ -281,7 +286,6 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
     return p;
 }
 
-
 void frame_loop();
 objptr_t do_step(objptr_t p)
 {
@@ -306,28 +310,28 @@ objptr_t do_step(objptr_t p)
         td.roots_on_ss = td.roots_on_ss_at_tr_start;
         td.active_roots_num = 0;
         pop_roots(pushed);
-        return NULL;
+        p = NULL;
     } else if (get_rand(10) == 1) {
         long pushed = push_roots();
         /* leaving our frame */
         frame_loop();
         /* back in our frame */
         pop_roots(pushed);
-        return NULL;
+        p = NULL;
     } else if (get_rand(20) == 1) {
         long pushed = push_roots();
         stm_become_inevitable(&stm_thread_local, "please");
         assert(stm_is_inevitable());
         pop_roots(pushed);
-        return NULL;
+        p= NULL;
     } else if (get_rand(20) == 1) {
-        return (objptr_t)-1; // possibly fork
+        p = (objptr_t)-1; // possibly fork
     } else if (get_rand(20) == 1) {
         long pushed = push_roots();
         stm_become_globally_unique_transaction(&stm_thread_local, "really");
         fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
         pop_roots(pushed);
-        return NULL;
+        p = NULL;
     }
     return p;
 }
@@ -338,7 +342,9 @@ void frame_loop()
     rewind_jmp_buf rjbuf;
 
     stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
-    volatile long roots_on_ss = td.roots_on_ss;
+    //fprintf(stderr,"%p F: %p\n", STM_SEGMENT->running_thread,  __builtin_frame_address(0));
+
+    long roots_on_ss = td.roots_on_ss;
     /* "interpreter main loop": this is one "application-frame" */
     while (td.steps_left-->0 && get_rand(10) != 0) {
         if (td.steps_left % 8 == 0)
@@ -347,6 +353,7 @@ void frame_loop()
         assert(p == NULL || ((nodeptr_t)p)->sig == SIGNATURE);
 
         p = do_step(p);
+
 
         if (p == (objptr_t)-1) {
             p = NULL;
