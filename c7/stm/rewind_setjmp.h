@@ -1,9 +1,20 @@
 #ifndef _REWIND_SETJMP_H_
 #define _REWIND_SETJMP_H_
 
+
 #include <stddef.h>
 
 /************************************************************
+There is a singly-linked list of frames in each thread
+rjthread->head->prev->prev->prev
+
+Another singly-linked list is the list of copied stack-slices.
+When doing a setjmp(), we copy the top-frame, free all old
+stack-slices, and link it to the top-frame->moved_off.
+When returning from the top-frame while moved_off still points
+to a slice, we also need to copy the top-frame->prev frame/slice
+and add it to this list (pointed to by moved_off).
+--------------------------------------------------------------
 
            :                   :       ^^^^^
            |-------------------|    older frames in the stack
@@ -58,6 +69,7 @@ typedef struct {
 } rewind_jmp_thread;
 
 
+/* remember the current stack and ss_stack positions */
 #define rewind_jmp_enterframe(rjthread, rjbuf, ss)   do {  \
     (rjbuf)->frame_base = __builtin_frame_address(0);      \
     (rjbuf)->shadowstack_base = (char *)(ss);              \
@@ -65,6 +77,8 @@ typedef struct {
     (rjthread)->head = (rjbuf);                            \
 } while (0)
 
+/* go up one frame. if there was a setjmp call in this frame,
+ */
 #define rewind_jmp_leaveframe(rjthread, rjbuf, ss)   do {    \
     assert((rjbuf)->shadowstack_base == (char *)(ss));       \
     (rjthread)->head = (rjbuf)->prev;                        \
