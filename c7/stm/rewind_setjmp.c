@@ -194,12 +194,12 @@ void _rewind_jmp_free_stack_slices(rewind_jmp_thread *rjthread)
     /* frees all saved stack copies */
     assert(_has_mutex());
     struct _rewind_jmp_moved_s *p = rjthread->moved_off;
-    struct _rewind_jmp_moved_s *pnext;
     while (p) {
-        pnext = p->next;
+        struct _rewind_jmp_moved_s *pnext = p->next;
         rj_free(p);
         p = pnext;
     }
     rjthread->moved_off = NULL;
     rjthread->moved_off_base = NULL;
+    rjthread->moved_off_ssbase = NULL;
 }

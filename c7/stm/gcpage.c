@@ -397,17 +397,20 @@ static void mark_visit_from_roots(void)
                 mark_visit_object(current->ss, segment_base);
         }
         mark_visit_object(tl->thread_local_obj, segment_base);
-        stm_rewind_jmp_enum_shadowstack(tl, mark_visit_objects_from_ss);
 
         tl = tl->next;
     } while (tl != stm_all_thread_locals);
 
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
-        if (get_priv_segment(i)->transaction_state != TS_NONE)
+        if (get_priv_segment(i)->transaction_state != TS_NONE) {
             mark_visit_object(
                 get_priv_segment(i)->threadlocal_at_start_of_transaction,
                 get_segment_base(i));
+            stm_rewind_jmp_enum_shadowstack(
+                get_segment(i)->running_thread,
+                mark_visit_objects_from_ss);
+        }
     }
 }
 
