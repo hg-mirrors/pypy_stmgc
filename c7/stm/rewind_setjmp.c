@@ -4,12 +4,6 @@
 #include <assert.h>
 #include <alloca.h>
 
-#ifndef _STM_CORE_H_
-long _has_mutex() {return 1;}
-void s_mutex_lock() {}
-void s_mutex_unlock() {}
-#endif
-
 
 struct _rewind_jmp_moved_s {
     struct _rewind_jmp_moved_s *next;
@@ -41,8 +35,6 @@ static void copy_stack(rewind_jmp_thread *rjthread, char *base, void *ssbase)
     char *stop;
     void *ssstop;
     size_t stack_size, ssstack_size;
-
-    assert(_has_mutex());
 
     assert(rjthread->head != NULL);
     stop = rjthread->head->frame_base;
@@ -98,11 +90,14 @@ long rewind_jmp_setjmp(rewind_jmp_thread *rjthread, void *ss)
     rjthread->repeat_count = result;
 
     /* snapshot of top frame: needed every time because longjmp() frees
-       the previous one. Need to have mutex locked otherwise a concurrent
-       GC may get garbage while saving shadow stack */
-    s_mutex_lock();
+       the previous one. Note that this function is called with the
+       mutex already acquired. Although it's not the job of this file,
+       we assert it is indeed acquired here. This is needed, otherwise a
+       concurrent GC may get garbage while saving shadow stack */
+#ifdef _STM_CORE_H_
+    assert(_has_mutex());
+#endif
     copy_stack(rjthread, (char *)&saved, saved.ss1);
-    s_mutex_unlock();
 
     return result;
 }
@@ -114,7 +109,6 @@ static void do_longjmp(rewind_jmp_thread *rjthread, char *stack_free)
        current stack, expanding it if necessary. The shadowstack should
        already be restored at this point (restore_shadowstack()) */
     assert(rjthread->moved_off_base != NULL);
-    s_mutex_lock();
 
     while (rjthread->moved_off) {
         struct _rewind_jmp_moved_s *p = rjthread->moved_off;
@@ -123,7 +117,6 @@ static void do_longjmp(rewind_jmp_thread *rjthread, char *stack_free)
         target -= p->stack_size;
         if (target < stack_free) {
             /* need more stack space! */
-            s_mutex_unlock();
             do_longjmp(rjthread, alloca(stack_free - target));
             abort();            /* unreachable */
         }
@@ -134,7 +127,12 @@ static void do_longjmp(rewind_jmp_thread *rjthread, char *stack_free)
         rj_free(p);
     }
 
-    s_mutex_unlock();
+#ifdef _STM_CORE_H_
+    /* This function must be called with the mutex held.  It will
+       remain held across the longjmp that follows and into the
+       target rewind_jmp_setjmp() function. */
+    assert(_has_mutex());
+#endif
     __builtin_longjmp(rjthread->jmpbuf, 1);
 }
 
@@ -153,7 +151,9 @@ char *rewind_jmp_enum_shadowstack(rewind_jmp_thread *rjthread,
     struct _rewind_jmp_moved_s *p = rjthread->moved_off;
     char *sstarget = rjthread->moved_off_ssbase;
 
+#ifdef _STM_CORE_H_
     assert(_has_mutex());
+#endif
 
     while (p) {
         if (p->shadowstack_size) {
@@ -178,21 +178,26 @@ void _rewind_jmp_copy_stack_slice(rewind_jmp_thread *rjthread)
 {
     /* called when leaving a frame. copies the now-current frame
        to the list of stack-slices */
-    s_mutex_lock();
+#ifdef _STM_CORE_H_
+    /* A transaction should be running now.  This means in particular
+       that it's not possible that a major GC runs concurrently with
+       this code (and tries to read the shadowstack slice). */
+    assert(_seems_to_be_running_transaction());
+#endif
     if (rjthread->head == NULL) {
         _rewind_jmp_free_stack_slices(rjthread);
-        s_mutex_unlock();
         return;
     }
     assert(rjthread->moved_off_base < (char *)rjthread->head);
     copy_stack(rjthread, rjthread->moved_off_base, rjthread->moved_off_ssbase);
-    s_mutex_unlock();
 }
 
 void _rewind_jmp_free_stack_slices(rewind_jmp_thread *rjthread)
 {
     /* frees all saved stack copies */
-    assert(_has_mutex());
+#ifdef _STM_CORE_H_
+    assert(_seems_to_be_running_transaction());  /* see previous function */
+#endif
     struct _rewind_jmp_moved_s *p = rjthread->moved_off;
     while (p) {
         struct _rewind_jmp_moved_s *pnext = p->next;
