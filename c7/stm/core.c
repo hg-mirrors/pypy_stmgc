@@ -328,8 +328,6 @@ static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
 {
     assert(!_stm_in_transaction(tl));
 
-    s_mutex_lock();
-
   retry:
     if (inevitable) {
         wait_for_end_of_inevitable_transaction(tl);
@@ -390,6 +388,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
 
 long stm_start_transaction(stm_thread_local_t *tl)
 {
+    s_mutex_lock();
 #ifdef STM_NO_AUTOMATIC_SETJMP
     long repeat_count = 0;    /* test/support.py */
 #else
@@ -401,6 +400,7 @@ long stm_start_transaction(stm_thread_local_t *tl)
 
 void stm_start_inevitable_transaction(stm_thread_local_t *tl)
 {
+    s_mutex_lock();
     _stm_start_transaction(tl, true);
 }
 
@@ -1077,6 +1077,7 @@ static void abort_with_mutex(void)
 #ifdef STM_NO_AUTOMATIC_SETJMP
     _test_run_abort(tl);
 #else
+    s_mutex_lock();
     stm_rewind_jmp_longjmp(tl);
 #endif
 }
