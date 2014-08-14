@@ -1027,7 +1027,7 @@ int stm_is_inevitable(void)
 }
 #endif
 
-static void abort_with_mutex(void)
+static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
 {
     assert(_has_mutex());
     dprintf(("~~~ ABORT\n"));
@@ -1060,6 +1060,12 @@ static void abort_with_mutex(void)
     /* Broadcast C_ABORTED to wake up contention.c */
     cond_broadcast(C_ABORTED);
 
+    return tl;
+}
+
+static void abort_with_mutex(void)
+{
+    stm_thread_local_t *tl = abort_with_mutex_no_longjmp();
     s_mutex_unlock();
 
     /* It seems to be a good idea, at least in some examples, to sleep
