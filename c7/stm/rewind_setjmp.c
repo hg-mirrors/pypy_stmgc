@@ -195,9 +195,6 @@ void _rewind_jmp_copy_stack_slice(rewind_jmp_thread *rjthread)
 void _rewind_jmp_free_stack_slices(rewind_jmp_thread *rjthread)
 {
     /* frees all saved stack copies */
-#ifdef _STM_CORE_H_
-    assert(_seems_to_be_running_transaction());  /* see previous function */
-#endif
     struct _rewind_jmp_moved_s *p = rjthread->moved_off;
     while (p) {
         struct _rewind_jmp_moved_s *pnext = p->next;
