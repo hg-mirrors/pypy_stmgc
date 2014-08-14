@@ -1000,7 +1000,8 @@ static void abort_data_structures_from_segment_num(int segment_num)
     /* we need to do this here and not directly in rewind_longjmp() because
        that is called when we already released everything (safe point)
        and a concurrent major GC could mess things up. */
-    stm_rewind_jmp_restore_shadowstack(tl);
+    if (tl->shadowstack != NULL)
+        stm_rewind_jmp_restore_shadowstack(tl);
     assert(tl->shadowstack == pseg->shadowstack_at_start_of_transaction);
 #endif
     tl->thread_local_obj = pseg->threadlocal_at_start_of_transaction;
