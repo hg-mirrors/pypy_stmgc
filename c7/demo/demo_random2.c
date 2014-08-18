@@ -110,7 +110,7 @@ objptr_t get_random_root()
         num = get_rand(ss_size);
         /* XXX: impl detail: there is already a "-1" on the SS -> +1 */
         objptr_t r = (objptr_t)stm_thread_local.shadowstack_base[num+1].ss;
-        assert((((uintptr_t)r) & 3) == 0);
+        OPT_ASSERT((((uintptr_t)r) & 3) == 0);
     }
 
     if (num == 1 && td.active_roots_num > 0) {
@@ -380,7 +380,7 @@ void frame_loop()
             }
         }
     }
-    assert(roots_on_ss == td.roots_on_ss);
+    OPT_ASSERT(roots_on_ss == td.roots_on_ss);
 
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
 }
