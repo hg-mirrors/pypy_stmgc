@@ -1,3 +1,3 @@
 
-static void clear_callbacks_on_abort(void);
-static void invoke_and_clear_callbacks_on_abort(void);
+static void invoke_and_clear_user_callbacks(long index);
+/* 0 = for commit, 1 = for abort */
