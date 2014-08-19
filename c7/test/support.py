@@ -111,6 +111,7 @@ void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
 
 int stm_can_move(object_t *);
 void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
+void stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
 #define STM_TIME_OUTSIDE_TRANSACTION ...
 #define STM_TIME_RUN_CURRENT ...
