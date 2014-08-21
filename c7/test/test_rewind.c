@@ -285,6 +285,48 @@ void testTL2(void)
 
 /************************************************************/
 
+__attribute__((noinline))
+int _7start_transaction()
+{
+    int result = rewind_jmp_setjmp(&gthread, NULL);
+    return result;
+}
+
+__attribute__((noinline))
+int _7enter_callback(rewind_jmp_buf *buf)
+{
+    rewind_jmp_enterprepframe(&gthread, buf, NULL);
+    return _7start_transaction();
+}
+
+__attribute__((noinline))
+int _7bootstrap()
+{
+    rewind_jmp_longjmp(&gthread);
+    return 0;
+}
+
+__attribute__((noinline))
+int _7leave_callback(rewind_jmp_buf *buf)
+{
+    rewind_jmp_leaveframe(&gthread, buf, NULL);
+    return 0;
+}
+
+void test7(void)
+{
+    rewind_jmp_buf buf;
+    register long bla = 3;
+    rewind_jmp_prepareframe(&buf);
+    if (_7enter_callback(&buf) == 0) {
+        _7bootstrap();
+    }
+    _7leave_callback(&buf);
+    assert(bla == 3);
+}
+
+/************************************************************/
+
 int rj_malloc_count = 0;
 
 void *rj_malloc(size_t size)
@@ -313,6 +355,7 @@ int main(int argc, char *argv[])
     else if (!strcmp(argv[1], "4"))  test4();
     else if (!strcmp(argv[1], "5"))  test5();
     else if (!strcmp(argv[1], "6"))  test6();
+    else if (!strcmp(argv[1], "7"))  test7();
     else if (!strcmp(argv[1], "TL1")) testTL1();
     else if (!strcmp(argv[1], "TL2")) testTL2();
     else
