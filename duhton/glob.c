@@ -144,24 +144,13 @@ DuObject *du_print(DuObject *cons, DuObject *locals)
 DuObject *du_xor(DuObject *cons, DuObject *locals)
 {
     int result = 0;
-    /* _du_read1(cons); IMMUTABLE */
-    DuObject *expr = _DuCons_CAR(cons);
-    DuObject *next = _DuCons_NEXT(cons);
-
-    _du_save2(next, locals);
-    DuObject *obj = Du_Eval(expr, locals);
-    result = DuInt_AsInt(obj);
-    _du_restore2(next, locals);
-
-    cons = next;
-
     while (cons != Du_None) {
         /* _du_read1(cons); IMMUTABLE */
-        expr = _DuCons_CAR(cons);
-        next = _DuCons_NEXT(cons);
+        DuObject *expr = _DuCons_CAR(cons);
+        DuObject *next = _DuCons_NEXT(cons);
 
         _du_save2(next, locals);
-        obj = Du_Eval(expr, locals);
+        DuObject *obj = Du_Eval(expr, locals);
         result ^= DuInt_AsInt(obj);
         _du_restore2(next, locals);
 
@@ -353,8 +342,6 @@ static DuObject *_du_intcmp(DuObject *cons, DuObject *locals, int mode)
     case 3: r = a != b; break;
     case 4: r = a > b; break;
     case 5: r = a >= b; break;
-    case 6: r = a && b; break;
-    case 7: r = a || b; break;
     }
     return DuInt_FromInt(r);
 }
@@ -371,11 +358,48 @@ DuObject *du_gt(DuObject *cons, DuObject *locals)
 { return _du_intcmp(cons, locals, 4); }
 DuObject *du_ge(DuObject *cons, DuObject *locals)
 { return _du_intcmp(cons, locals, 5); }
-DuObject *du_and(DuObject *cons, DuObject *locals)
-{ return _du_intcmp(cons, locals, 6); }
-DuObject *du_or(DuObject *cons, DuObject *locals)
-{ return _du_intcmp(cons, locals, 7); }
 
+DuObject *du_and(DuObject *cons, DuObject *locals)
+{
+    while (cons != Du_None) {
+        /* _du_read1(cons); IMMUTABLE */
+        DuObject *expr = _DuCons_CAR(cons);
+        DuObject *next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        DuObject *obj = Du_Eval(expr, locals);
+        int result = DuObject_IsTrue(obj);
+        _du_restore2(next, locals);
+
+        if (!result)
+            return DuInt_FromInt(0);
+
+        cons = next;
+    }
+
+    return DuInt_FromInt(1);
+}
+
+DuObject *du_or(DuObject *cons, DuObject *locals)
+{
+    while (cons != Du_None) {
+        /* _du_read1(cons); IMMUTABLE */
+        DuObject *expr = _DuCons_CAR(cons);
+        DuObject *next = _DuCons_NEXT(cons);
+
+        _du_save2(next, locals);
+        DuObject *obj = Du_Eval(expr, locals);
+        int result = DuObject_IsTrue(obj);
+        _du_restore2(next, locals);
+
+        if (result)
+            return DuInt_FromInt(1);
+
+        cons = next;
+    }
+
+    return DuInt_FromInt(0);
+}
 
 
 DuObject *du_type(DuObject *cons, DuObject *locals)
