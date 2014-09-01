@@ -43,6 +43,10 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     n = (struct node_s*)obj;
     visit((object_t **)&n->next);
 }
+long stmcb_obj_supports_cards(struct object_s *obj)
+{
+    return 0;
+}
 void stmcb_get_card_base_itemsize(struct object_s *obj,
                                   uintptr_t offset_itemsize[2])
 {

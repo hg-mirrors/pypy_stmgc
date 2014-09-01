@@ -18,6 +18,10 @@ ssize_t stmcb_size_rounded_up(struct object_s *ob)
 void stmcb_trace(struct object_s *obj, void visit(object_t **))
 {
 }
+long stmcb_obj_supports_cards(struct object_s *obj)
+{
+    return 0;
+}
 void stmcb_get_card_base_itemsize(struct object_s *obj,
                                   uintptr_t offset_itemsize[2])
 {

@@ -301,7 +301,10 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
         visit(ref);
     }
 }
-
+long stmcb_obj_supports_cards(struct object_s *obj)
+{
+    return 1;
+}
 void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
                        uintptr_t start, uintptr_t stop)
 {
