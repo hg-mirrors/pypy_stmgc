@@ -103,24 +103,25 @@ static void minor_trace_if_young(object_t **pobj)
         realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         size = stmcb_size_rounded_up((struct object_s *)realobj);
 
-        if (1 /*size >= GC_N_SMALL_REQUESTS*8*/) {
-
+        if (size > GC_LAST_SMALL_SIZE) {
             /* case 1: object is not small enough.
                Ask gcpage.c for an allocation via largemalloc. */
             char *allocated = allocate_outside_nursery_large(size);
             nobj = (object_t *)(allocated - stm_object_pages);
-
-            /* Copy the object */
-         copy_large_object:;
-            char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
-            memcpy(realnobj, realobj, size);
-
-            nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
         }
         else {
             /* case "small enough" */
-            abort();  //...
+            char *allocated = allocate_outside_nursery_small(size);
+            nobj = (object_t *)(allocated - stm_object_pages);
         }
+
+        /* Copy the object */
+     copy_large_object:;
+        char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
+        memcpy(realnobj, realobj, size);
+
+        xxx:also for smallobjs?
+        nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
 
         /* Done copying the object. */
         //dprintf(("\t\t\t\t\t%p -> %p\n", obj, nobj));
@@ -376,6 +377,7 @@ static void collect_oldrefs_to_nursery(void)
 {
     dprintf(("collect_oldrefs_to_nursery\n"));
     struct list_s *lst = STM_PSEGMENT->objects_pointing_to_nursery;
+    assert(STM_PSEGMENT->minor_collect_will_commit_now);
 
     while (!list_is_empty(lst)) {
         uintptr_t obj_sync_now = list_pop_item(lst);
@@ -393,7 +395,7 @@ static void collect_oldrefs_to_nursery(void)
             struct stm_priv_segment_info_s *pseg = get_priv_segment(STM_SEGMENT->segment_num);
             if (STM_PSEGMENT->minor_collect_will_commit_now) {
                 acquire_privatization_lock();
-                synchronize_object_now(obj, true); /* ignore cards! */
+                synchronize_object_enqueue(obj, true); /* ignore cards! */
                 release_privatization_lock();
             } else {
                 LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
@@ -404,6 +406,8 @@ static void collect_oldrefs_to_nursery(void)
         /* the list could have moved while appending */
         lst = STM_PSEGMENT->objects_pointing_to_nursery;
     }
+
+    synchronize_objects_flush();
 }
 
 static void collect_modified_old_objects(void)
@@ -546,6 +550,7 @@ static void _do_minor_collection(bool commit)
     else {
         collect_cardrefs_to_nursery();
         num_old = STM_PSEGMENT->modified_old_objects_markers_num_old;
+        abort();  // handle specially the objects_pointing_to_nursery already there
     }
 
     collect_roots_from_markers(num_old);

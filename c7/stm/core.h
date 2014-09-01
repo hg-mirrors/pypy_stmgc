@@ -43,18 +43,13 @@ enum /* stm_flags */ {
     */
     GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
 
-    /* This flag is set by gcpage.c for all objects living in
-       uniformly-sized pages of small objects.
-    */
-    GCFLAG_SMALL_UNIFORM = 0x02,
-
     /* The following flag is set on nursery objects of which we asked
        the id or the identityhash.  It means that a space of the size of
        the object has already been allocated in the nonmovable part.
        The same flag is abused to mark prebuilt objects whose hash has
        been taken during translation and is statically recorded just
        after the object. */
-    GCFLAG_HAS_SHADOW = 0x04,
+    GCFLAG_HAS_SHADOW = 0x02,
 
     /* Set on objects that are large enough (_STM_MIN_CARD_OBJ_SIZE)
        to have multiple cards (at least _STM_MIN_CARD_COUNT), and that
@@ -69,8 +64,10 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x10   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x8   /* must be last */
 };
+
+#define SYNC_QUEUE_SIZE    31
 
 
 /************************************************************/
@@ -196,6 +193,15 @@ struct stm_priv_segment_info_s {
     pthread_t running_pthread;
 #endif
 
+    /* This is for smallmalloc.c */
+    struct small_malloc_data_s small_malloc_data;
+
+    /* The sync queue is used to minimize the number of __sync_synchronize
+       calls needed. */
+    stm_char *sq_fragments[SYNC_QUEUE_SIZE];
+    int sq_fragsizes[SYNC_QUEUE_SIZE];
+    int sq_len;
+
     /* Temporarily stores the marker information */
     char marker_self[_STM_MARKER_LEN];
     char marker_other[_STM_MARKER_LEN];
@@ -218,7 +224,10 @@ enum /* transaction_state */ {
     TS_INEVITABLE,
 };
 
-static char *stm_object_pages;
+#ifndef STM_TESTS
+static
+#endif
+       char *stm_object_pages;
 static int stm_object_pages_fd;
 static stm_thread_local_t *stm_all_thread_locals = NULL;
 
@@ -295,7 +304,8 @@ static inline void _duck(void) {
 }
 
 static void copy_object_to_shared(object_t *obj, int source_segment_num);
-static void synchronize_object_now(object_t *obj, bool ignore_cards);
+static void synchronize_object_enqueue(object_t *obj);
+static void synchronize_objects_flush(void);
 
 static inline void acquire_privatization_lock(void)
 {

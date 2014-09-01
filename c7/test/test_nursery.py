@@ -198,6 +198,33 @@ class TestNursery(BaseTest):
         self.start_transaction()
         assert lib.stm_can_move(old) == 0
 
+    def test_synchronize_small_obj(self):
+        # make a shared page, and privatize it
+        self.start_transaction()
+        new = stm_allocate(16)
+        self.push_root(new)
+        self.commit_transaction()
+        new = self.pop_root()
+        self.push_root(new)
+
+        self.start_transaction()
+        stm_set_char(new, 'A')
+        self.commit_transaction()
+
+        # make a new object of the same size, which should end in the
+        # same page
+        self.start_transaction()
+        new2 = stm_allocate(16)
+        stm_set_char(new2, 'a')
+        self.push_root(new2)
+        self.commit_transaction()
+        new2 = self.pop_root()
+
+        # check that this new object was correctly sychronized
+        self.switch(1)
+        self.start_transaction()
+        assert stm_get_char(new2) == 'a'
+
     def test_marker_1(self):
         self.start_transaction()
         p1 = stm_allocate(600)

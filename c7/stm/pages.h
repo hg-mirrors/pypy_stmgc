@@ -55,6 +55,20 @@ static inline bool is_private_page(long segnum, uintptr_t pagenum)
     return (pages_privatized[pagenum - PAGE_FLAG_START].by_segment & bitmask);
 }
 
+static inline bool any_private_page(uintptr_t pagenum)
+{
+    assert(pagenum >= PAGE_FLAG_START);
+    return pages_privatized[pagenum - PAGE_FLAG_START].by_segment != 0;
+}
+
+static inline bool any_other_private_page(long exclsegnum, uintptr_t pagenum)
+{
+    assert(pagenum >= PAGE_FLAG_START);
+    uint64_t bitmask = 1UL << (exclsegnum - 1);
+    return ((pages_privatized[pagenum - PAGE_FLAG_START].by_segment & ~bitmask)
+            != 0);
+}
+
 static inline void page_check_and_reshare(uintptr_t pagenum)
 {
     if (pages_privatized[pagenum - PAGE_FLAG_START].by_segment != 0)
