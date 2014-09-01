@@ -120,7 +120,6 @@ static void minor_trace_if_young(object_t **pobj)
         char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
         memcpy(realnobj, realobj, size);
 
-        xxx:also for smallobjs?
         nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
 
         /* Done copying the object. */
@@ -377,7 +376,6 @@ static void collect_oldrefs_to_nursery(void)
 {
     dprintf(("collect_oldrefs_to_nursery\n"));
     struct list_s *lst = STM_PSEGMENT->objects_pointing_to_nursery;
-    assert(STM_PSEGMENT->minor_collect_will_commit_now);
 
     while (!list_is_empty(lst)) {
         uintptr_t obj_sync_now = list_pop_item(lst);
@@ -550,7 +548,6 @@ static void _do_minor_collection(bool commit)
     else {
         collect_cardrefs_to_nursery();
         num_old = STM_PSEGMENT->modified_old_objects_markers_num_old;
-        abort();  // handle specially the objects_pointing_to_nursery already there
     }
 
     collect_roots_from_markers(num_old);
