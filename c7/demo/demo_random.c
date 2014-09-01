@@ -80,7 +80,10 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 }
 
 void stmcb_commit_soon() {}
-
+long stmcb_obj_supports_cards(struct object_s *obj)
+{
+    return 0;
+}
 void stmcb_trace_cards(struct object_s *obj, void cb(object_t **),
                        uintptr_t start, uintptr_t stop) {
     abort();
