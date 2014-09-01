@@ -459,7 +459,6 @@ static bool detect_write_read_conflicts(void)
 
 static void copy_object_to_shared(object_t *obj, int source_segment_num)
 {
-    abort();
     /* Only used by major GC.  XXX There is a lot of code duplication
        with synchronize_object_now() but I don't completely see how to
        improve...
@@ -471,13 +470,16 @@ static void copy_object_to_shared(object_t *obj, int source_segment_num)
     uintptr_t first_page = start / 4096UL;
     struct object_s *realobj = (struct object_s *)
         REAL_ADDRESS(segment_base, obj);
+    ssize_t obj_size = stmcb_size_rounded_up(realobj);
+    assert(obj_size >= 16);
+
 
     if (is_small_uniform(obj)) {
-        abort();//XXX WRITE THE FAST CASE
+        char *src = REAL_ADDRESS(segment_base, start);
+        char *dst = REAL_ADDRESS(stm_object_pages, start);
+        memcpy(dst, src, obj_size);
     }
     else {
-        ssize_t obj_size = stmcb_size_rounded_up(realobj);
-        assert(obj_size >= 16);
         uintptr_t end = start + obj_size;
         uintptr_t last_page = (end - 1) / 4096UL;
 
@@ -532,10 +534,14 @@ static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
 
     char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, frag);
     char *dst = REAL_ADDRESS(stm_object_pages, frag);
-    if (is_private_page(STM_SEGMENT->segment_num, page))
-        memcpy(dst, src, frag_size);
-    else
+    if (is_private_page(STM_SEGMENT->segment_num, page)) {
+        if (frag_size == 4096)
+            pagecopy(dst, src);
+        else
+            memcpy(dst, src, frag_size);
+    } else {
         EVENTUALLY(memcmp(dst, src, frag_size) == 0);  /* same page */
+    }
 
     /* Then enqueue this object (or fragemnt of object) */
     if (STM_PSEGMENT->sq_len == SYNC_QUEUE_SIZE)
@@ -582,7 +588,7 @@ static void _card_wise_synchronize_object_now(object_t *obj, ssize_t obj_size)
     uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
     uintptr_t card_index = 1;
     uintptr_t last_card_index = get_index_to_card_index(real_idx_count - 1); /* max valid index */
-    long i, myself = STM_SEGMENT->segment_num;
+    long myself = STM_SEGMENT->segment_num;
 
     /* simple heuristic to check if probably the whole object is
        marked anyway so we should do page-wise synchronize */
@@ -674,14 +680,6 @@ static void _card_wise_synchronize_object_now(object_t *obj, ssize_t obj_size)
         return;
     }
 
-#ifndef NDEBUG
-    char *src = REAL_ADDRESS(stm_object_pages, (uintptr_t)obj);
-    char *dst;
-    for (i = 1; i <= NB_SEGMENTS; i++) {
-        dst = REAL_ADDRESS(get_segment_base(i), (uintptr_t)obj);
-        assert(memcmp(dst, src, obj_size) == 0);
-    }
-#endif
 }
 
 
