@@ -98,13 +98,14 @@ static void cm_pause_if_younger(struct contmgr_s *cm)
 /************************************************************/
 
 
-static void contention_management(uint8_t other_segment_num,
+static bool contention_management(uint8_t other_segment_num,
                                   enum contention_kind_e kind,
                                   object_t *obj)
 {
     assert(_has_mutex());
     assert(other_segment_num != STM_SEGMENT->segment_num);
 
+    bool others_may_have_run = false;
     if (must_abort())
         abort_with_mutex();
 
@@ -152,6 +153,7 @@ static void contention_management(uint8_t other_segment_num,
 
     if (contmgr.try_sleep && kind != WRITE_WRITE_CONTENTION &&
         contmgr.other_pseg->safe_point != SP_WAIT_FOR_C_TRANSACTION_DONE) {
+        others_may_have_run = true;
         /* Sleep.
 
            - Not for write-write contentions, because we're not at a
@@ -192,7 +194,7 @@ static void contention_management(uint8_t other_segment_num,
         /* tell the other to commit ASAP, since it causes aborts */
         signal_other_to_commit_soon(contmgr.other_pseg);
 
-        dprintf(("abort in contention\n"));
+        dprintf(("abort in contention: kind %d\n", kind));
         STM_SEGMENT->nursery_end = abort_category;
         marker_contention(kind, false, other_segment_num, obj);
         abort_with_mutex();
@@ -225,6 +227,7 @@ static void contention_management(uint8_t other_segment_num,
             if (must_abort())
                 abort_with_mutex();
 
+            others_may_have_run = true;
             dprintf(("contention: wait C_ABORTED...\n"));
             cond_wait(C_ABORTED);
             dprintf(("contention: done\n"));
@@ -278,6 +281,7 @@ static void contention_management(uint8_t other_segment_num,
             stmcb_commit_soon();
         }
     }
+    return others_may_have_run;
 }
 
 static void write_write_contention_management(uintptr_t lock_idx,
@@ -301,10 +305,10 @@ static void write_write_contention_management(uintptr_t lock_idx,
     s_mutex_unlock();
 }
 
-static void write_read_contention_management(uint8_t other_segment_num,
+static bool write_read_contention_management(uint8_t other_segment_num,
                                              object_t *obj)
 {
-    contention_management(other_segment_num, WRITE_READ_CONTENTION, obj);
+    return contention_management(other_segment_num, WRITE_READ_CONTENTION, obj);
 }
 
 static void inevitable_contention_management(uint8_t other_segment_num)

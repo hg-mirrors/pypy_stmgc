@@ -123,7 +123,7 @@ static struct list_s *mark_objects_to_trace;
 
 static inline uintptr_t mark_loc(object_t *obj)
 {
-    uintptr_t lock_idx = (((uintptr_t)obj) >> 4) - WRITELOCK_START;
+    uintptr_t lock_idx = get_write_lock_idx((uintptr_t)obj);
     assert(lock_idx < sizeof(write_locks));
     return lock_idx;
 }
@@ -320,6 +320,17 @@ static inline void mark_visit_object(object_t *obj, char *segment_base)
     mark_trace(obj, segment_base);
 }
 
+static void *mark_visit_objects_from_ss(void *_, const void *slice, size_t size)
+{
+    const struct stm_shadowentry_s *p, *end;
+    p = (const struct stm_shadowentry_s *)slice;
+    end = (const struct stm_shadowentry_s *)(slice + size);
+    for (; p < end; p++)
+        if ((((uintptr_t)p->ss) & 3) == 0)
+            mark_visit_object(p->ss, stm_object_pages);
+    return NULL;
+}
+
 static void mark_visit_from_roots(void)
 {
     if (testing_prebuilt_objs != NULL) {
@@ -349,10 +360,14 @@ static void mark_visit_from_roots(void)
 
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
-        if (get_priv_segment(i)->transaction_state != TS_NONE)
+        if (get_priv_segment(i)->transaction_state != TS_NONE) {
             mark_visit_object(
                 get_priv_segment(i)->threadlocal_at_start_of_transaction,
                 get_segment_base(i));
+            stm_rewind_jmp_enum_shadowstack(
+                get_segment(i)->running_thread,
+                mark_visit_objects_from_ss);
+        }
     }
 }
 
@@ -388,7 +403,7 @@ static void mark_visit_from_markers(void)
         for (i = list_count(lst); i > 0; i -= 2) {
             mark_visit_object((object_t *)list_item(lst, i - 1), base);
         }
-        if (get_priv_segment(j)->transaction_state == TS_INEVITABLE) {
+        if (get_priv_segment(j)->marker_inev[1]) {
             uintptr_t marker_inev_obj = get_priv_segment(j)->marker_inev[1];
             mark_visit_object((object_t *)marker_inev_obj, base);
         }
@@ -397,6 +412,11 @@ static void mark_visit_from_markers(void)
 
 static void clean_up_segment_lists(void)
 {
+#pragma push_macro("STM_PSEGMENT")
+#pragma push_macro("STM_SEGMENT")
+#undef STM_PSEGMENT
+#undef STM_SEGMENT
+
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
@@ -407,20 +427,53 @@ static void clean_up_segment_lists(void)
            written to but don't actually point to the nursery.  Clear
            it up and set GCFLAG_WRITE_BARRIER again on the objects.
            This is the case for transactions where
-               MINOR_NOTHING_TO_DO() == false
+               MINOR_NOTHING_TO_DO() == true
            but they still did write-barriers on objects
         */
         lst = pseg->objects_pointing_to_nursery;
         if (lst != NULL) {
-            LIST_FOREACH_R(lst, uintptr_t /*item*/,
+            LIST_FOREACH_R(lst, object_t* /*item*/,
                 ({
                     struct object_s *realobj = (struct object_s *)
-                        REAL_ADDRESS(pseg->pub.segment_base, item);
+                        REAL_ADDRESS(pseg->pub.segment_base, (uintptr_t)item);
+
                     assert(!(realobj->stm_flags & GCFLAG_WRITE_BARRIER));
+                    OPT_ASSERT(!(realobj->stm_flags & GCFLAG_CARDS_SET));
+
                     realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
+
+                    if (realobj->stm_flags & GCFLAG_CARDS_SET) {
+                        /* we called a normal WB on this object, so all cards
+                           need to be marked OLD */
+                        if (!IS_OVERFLOW_OBJ(pseg, realobj)) {
+                            _reset_object_cards(pseg, item, CARD_MARKED_OLD, true); /* mark all */
+                        } else {
+                            /* simply clear overflow */
+                            _reset_object_cards(pseg, item, CARD_CLEAR, false);
+                        }
+                    }
                 }));
             list_clear(lst);
+        } else {
+            /* if here MINOR_NOTHING_TO_DO() was true before, it's like
+               we "didn't do a collection" at all. So nothing to do on
+               modified_old_objs. */
         }
+
+        lst = pseg->old_objects_with_cards;
+        LIST_FOREACH_R(lst, object_t* /*item*/,
+            ({
+                struct object_s *realobj = (struct object_s *)
+                    REAL_ADDRESS(pseg->pub.segment_base, item);
+                OPT_ASSERT(realobj->stm_flags & GCFLAG_CARDS_SET);
+                OPT_ASSERT(realobj->stm_flags & GCFLAG_WRITE_BARRIER);
+
+                /* clear cards if overflow, or mark marked cards as old otherwise */
+                uint8_t mark_value = IS_OVERFLOW_OBJ(pseg, realobj) ?
+                    CARD_CLEAR : CARD_MARKED_OLD;
+                _reset_object_cards(pseg, item, mark_value, false);
+            }));
+        list_clear(lst);
 
         /* Remove from 'large_overflow_objects' all objects that die */
         lst = pseg->large_overflow_objects;
@@ -434,17 +487,46 @@ static void clean_up_segment_lists(void)
             }
         }
     }
+#pragma pop_macro("STM_SEGMENT")
+#pragma pop_macro("STM_PSEGMENT")
 }
 
 static inline bool largemalloc_keep_object_at(char *data)
 {
     /* this is called by _stm_largemalloc_sweep() */
-    return mark_visited_test_and_clear((object_t *)(data - stm_object_pages));
+    object_t *obj = (object_t *)(data - stm_object_pages);
+    if (!mark_visited_test_and_clear(obj)) {
+        /* This is actually needed in order to avoid random write-read
+           conflicts with objects read and freed long in the past.
+           It is probably rare enough, but still, we want to avoid any
+           false conflict. (test_random hits it sometimes) */
+        long i;
+        for (i = 1; i <= NB_SEGMENTS; i++) {
+            ((struct stm_read_marker_s *)
+             (get_segment_base(i) + (((uintptr_t)obj) >> 4)))->rm = 0;
+        }
+        return false;
+    }
+    return true;
 }
 
 static void sweep_large_objects(void)
 {
     _stm_largemalloc_sweep();
+}
+
+static void assert_cleared_locks(size_t n)
+{
+#ifndef NDEBUG
+    size_t i;
+    uint8_t *s = write_locks;
+# ifndef STM_TESTS
+    if (n > 5000) n = 5000;
+# endif
+    for (i = 0; i < n; i++)
+        assert(s[i] == CARD_CLEAR || s[i] == CARD_MARKED
+               || s[i] == CARD_MARKED_OLD);
+#endif
 }
 
 static void clean_write_locks(void)
@@ -456,7 +538,7 @@ static void clean_write_locks(void)
     object_t *loc2 = (object_t *)(uninitialized_page_stop - stm_object_pages);
     uintptr_t lock2_idx = mark_loc(loc2 - 1) + 1;
 
-    assert_memset_zero(write_locks, lock2_idx);
+    assert_cleared_locks(lock2_idx);
     memset(write_locks + lock2_idx, 0, sizeof(write_locks) - lock2_idx);
 }
 

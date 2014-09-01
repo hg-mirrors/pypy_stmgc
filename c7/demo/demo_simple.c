@@ -10,7 +10,7 @@
 #  include "stmgc.h"
 #endif
 
-#define ITERS 1000000
+#define ITERS 100000
 #define NTHREADS    2
 
 
@@ -38,27 +38,40 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     n = (struct node_s*)obj;
     visit((object_t **)&n->next);
 }
-
+long stmcb_obj_supports_cards(struct object_s *obj)
+{
+    return 0;
+}
 void stmcb_commit_soon() {}
 
+void stmcb_trace_cards(struct object_s *obj, void cb(object_t **),
+                       uintptr_t start, uintptr_t stop) {
+    abort();
+}
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2]) {
+    abort();
+}
 
 
 static sem_t done;
 
 static __thread int tl_counter = 0;
-static int gl_counter = 0;
+//static int gl_counter = 0;
 
 void *demo2(void *arg)
 {
     int status;
+    rewind_jmp_buf rjbuf;
     stm_register_thread_local(&stm_thread_local);
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
     char *org = (char *)stm_thread_local.shadowstack;
     tl_counter = 0;
 
     object_t *tmp;
     int i = 0;
     while (i < ITERS) {
-        stm_start_inevitable_transaction(&stm_thread_local);
+        stm_start_transaction(&stm_thread_local);
         tl_counter++;
         if (i % 500 < 250)
             STM_PUSH_ROOT(stm_thread_local, stm_allocate(16));//gl_counter++;
@@ -68,8 +81,9 @@ void *demo2(void *arg)
         i++;
     }
 
-    assert(org == (char *)stm_thread_local.shadowstack);
+    OPT_ASSERT(org == (char *)stm_thread_local.shadowstack);
 
+    stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     stm_unregister_thread_local(&stm_thread_local);
     status = sem_post(&done); assert(status == 0);
     return NULL;

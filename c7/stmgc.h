@@ -13,6 +13,8 @@
 #include <limits.h>
 #include <unistd.h>
 
+#include "stm/rewind_setjmp.h"
+
 #if LONG_MAX == 2147483647
 # error "Requires a 64-bit environment"
 #endif
@@ -25,7 +27,6 @@ typedef TLPREFIX struct stm_segment_info_s stm_segment_info_t;
 typedef TLPREFIX struct stm_read_marker_s stm_read_marker_t;
 typedef TLPREFIX struct stm_creation_marker_s stm_creation_marker_t;
 typedef TLPREFIX char stm_char;
-typedef void* stm_jmpbuf_t[5];  /* for use with __builtin_setjmp() */
 
 struct stm_read_marker_s {
     /* In every segment, every object has a corresponding read marker.
@@ -44,7 +45,6 @@ struct stm_segment_info_s {
     stm_char *nursery_current;
     uintptr_t nursery_end;
     struct stm_thread_local_s *running_thread;
-    stm_jmpbuf_t *jmpbuf_ptr;
 };
 #define STM_SEGMENT           ((stm_segment_info_t *)4352)
 
@@ -79,6 +79,8 @@ enum stm_time_e {
 typedef struct stm_thread_local_s {
     /* every thread should handle the shadow stack itself */
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
+    /* rewind_setjmp's interface */
+    rewind_jmp_thread rjthread;
     /* a generic optional thread-local object */
     object_t *thread_local_obj;
     /* in case this thread runs a transaction that aborts,
@@ -107,10 +109,13 @@ typedef struct stm_thread_local_s {
 /* this should use llvm's coldcc calling convention,
    but it's not exposed to C code so far */
 void _stm_write_slowpath(object_t *);
+void _stm_write_slowpath_card(object_t *, uintptr_t);
+char _stm_write_slowpath_card_extra(object_t *);
+long _stm_write_slowpath_card_extra_base(void);
+#define _STM_CARD_MARKED 100
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
-void _stm_start_transaction(stm_thread_local_t *, stm_jmpbuf_t *);
 void _stm_collectable_safe_point(void);
 
 /* for tests, but also used in duhton: */
@@ -120,6 +125,7 @@ char *_stm_real_address(object_t *o);
 #include <stdbool.h>
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
+bool _stm_was_written_card(object_t *obj);
 uintptr_t _stm_get_private_page(uintptr_t pagenum);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 char *_stm_get_segment_base(long index);
@@ -140,13 +146,19 @@ void _stm_stop_safe_point(void);
 void _stm_set_nursery_free_count(uint64_t free_count);
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
+long _stm_count_old_objects_with_cards(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
+object_t *_stm_enum_old_objects_with_cards(long index);
 uint64_t _stm_total_allocated(void);
 char *stm_object_pages;
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
+#define _STM_GCFLAG_CARDS_SET          0x04
+#define _STM_CARD_SIZE                 32     /* must be >= 32 */
+#define _STM_MIN_CARD_COUNT            17
+#define _STM_MIN_CARD_OBJ_SIZE         (_STM_CARD_SIZE * _STM_MIN_CARD_COUNT)
 #define _STM_NSE_SIGNAL_MAX     _STM_TIME_N
 #define _STM_FAST_ALLOC           (66*1024)
 
@@ -217,6 +229,20 @@ static inline void stm_write(object_t *obj)
         _stm_write_slowpath(obj);
 }
 
+/* The following is a GC-optimized barrier that works on the granularity
+   of CARD_SIZE.  It can be used on any array object, but it is only
+   useful with those that were internally marked with GCFLAG_HAS_CARDS.
+   It has the same purpose as stm_write() for TM.
+   'index' is the array-item-based position within the object, which
+   is measured in units returned by stmcb_get_card_base_itemsize().
+*/
+__attribute__((always_inline))
+static inline void stm_write_card(object_t *obj, uintptr_t index)
+{
+    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
+        _stm_write_slowpath_card(obj, index);
+}
+
 /* Must be provided by the user of this library.
    The "size rounded up" must be a multiple of 8 and at least 16.
    "Tracing" an object means enumerating all GC references in it,
@@ -227,6 +253,19 @@ static inline void stm_write(object_t *obj)
 */
 extern ssize_t stmcb_size_rounded_up(struct object_s *);
 extern void stmcb_trace(struct object_s *, void (object_t **));
+/* a special trace-callback that is only called for the marked
+   ranges of indices (using stm_write_card(o, index)) */
+extern void stmcb_trace_cards(struct object_s *, void (object_t **),
+                              uintptr_t start, uintptr_t stop);
+/* this function will be called on objects that support cards.
+   It returns the base_offset (in bytes) inside the object from
+   where the indices start, and item_size (in bytes) for the size of
+   one item */
+extern void stmcb_get_card_base_itemsize(struct object_s *,
+                                         uintptr_t offset_itemsize[2]);
+/* returns whether this object supports cards. we will only call
+   stmcb_get_card_base_itemsize on objs that do so. */
+extern long stmcb_obj_supports_cards(struct object_s *);
 extern void stmcb_commit_soon(void);
 
 
@@ -251,6 +290,7 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
 
     return (object_t *)p;
 }
+
 
 /* Allocate a weakref object. Weakref objects have a
    reference to an object at the byte-offset
@@ -280,8 +320,6 @@ void stm_teardown(void);
 #define STM_PUSH_ROOT(tl, p)   ((tl).shadowstack++->ss = (object_t *)(p))
 #define STM_POP_ROOT(tl, p)    ((p) = (typeof(p))((--(tl).shadowstack)->ss))
 #define STM_POP_ROOT_RET(tl)   ((--(tl).shadowstack)->ss)
-#define STM_STACK_MARKER_NEW  (-41)
-#define STM_STACK_MARKER_OLD  (-43)
 
 
 /* Every thread needs to have a corresponding stm_thread_local_t
@@ -294,39 +332,56 @@ void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
 
+/* At some key places, like the entry point of the thread and in the
+   function with the interpreter's dispatch loop, you need to declare
+   a local variable of type 'rewind_jmp_buf' and call these macros. */
+#define stm_rewind_jmp_enterprepframe(tl, rjbuf)   \
+    rewind_jmp_enterprepframe(&(tl)->rjthread, rjbuf, (tl)->shadowstack)
+#define stm_rewind_jmp_enterframe(tl, rjbuf)       \
+    rewind_jmp_enterframe(&(tl)->rjthread, rjbuf, (tl)->shadowstack)
+#define stm_rewind_jmp_leaveframe(tl, rjbuf)       \
+    rewind_jmp_leaveframe(&(tl)->rjthread, rjbuf, (tl)->shadowstack)
+#define stm_rewind_jmp_setjmp(tl)                  \
+    rewind_jmp_setjmp(&(tl)->rjthread, (tl)->shadowstack)
+#define stm_rewind_jmp_longjmp(tl)                 \
+    rewind_jmp_longjmp(&(tl)->rjthread)
+#define stm_rewind_jmp_forget(tl)                  \
+    rewind_jmp_forget(&(tl)->rjthread)
+#define stm_rewind_jmp_restore_shadowstack(tl)  do {     \
+    assert(rewind_jmp_armed(&(tl)->rjthread));           \
+    (tl)->shadowstack = (struct stm_shadowentry_s *)     \
+        rewind_jmp_restore_shadowstack(&(tl)->rjthread); \
+} while (0)
+#define stm_rewind_jmp_enum_shadowstack(tl, callback)    \
+    rewind_jmp_enum_shadowstack(&(tl)->rjthread, callback)
+
 /* Starting and ending transactions.  stm_read(), stm_write() and
    stm_allocate() should only be called from within a transaction.
-   Use the macro STM_START_TRANSACTION() to start a transaction that
-   can be restarted using the 'jmpbuf' (a local variable of type
-   stm_jmpbuf_t). */
-#define STM_START_TRANSACTION(tl, jmpbuf)  ({                   \
-    while (__builtin_setjmp(jmpbuf) == 1) { /*redo setjmp*/ }   \
-    _stm_start_transaction(tl, &jmpbuf);                        \
-})
-
-/* Start an inevitable transaction, if it's going to return from the
-   current function immediately. */
-static inline void stm_start_inevitable_transaction(stm_thread_local_t *tl) {
-    _stm_start_transaction(tl, NULL);
-}
-
-/* Commit a transaction. */
+   The stm_start_transaction() call returns the number of times it
+   returned, starting at 0.  If it is > 0, then the transaction was
+   aborted and restarted this number of times. */
+long stm_start_transaction(stm_thread_local_t *tl);
+void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
 
-/* Abort the currently running transaction. */
+/* Abort the currently running transaction.  This function never
+   returns: it jumps back to the stm_start_transaction(). */
 void stm_abort_transaction(void) __attribute__((noreturn));
 
-/* Turn the current transaction inevitable.  The 'jmpbuf' passed to
-   STM_START_TRANSACTION() is not going to be used any more after
-   this call (but the stm_become_inevitable() itself may still abort). */
+/* Turn the current transaction inevitable.
+   The stm_become_inevitable() itself may still abort. */
+#ifdef STM_NO_AUTOMATIC_SETJMP
+int stm_is_inevitable(void);
+#else
+static inline int stm_is_inevitable(void) {
+    return !rewind_jmp_armed(&STM_SEGMENT->running_thread->rjthread);
+}
+#endif
 static inline void stm_become_inevitable(stm_thread_local_t *tl,
                                          const char* msg) {
     assert(STM_SEGMENT->running_thread == tl);
-    if (STM_SEGMENT->jmpbuf_ptr != NULL)
+    if (!stm_is_inevitable())
         _stm_become_inevitable(msg);
-}
-static inline int stm_is_inevitable(void) {
-    return (STM_SEGMENT->jmpbuf_ptr == NULL);
 }
 
 /* Forces a safe-point if needed.  Normally not needed: this is
@@ -366,9 +421,16 @@ long stm_can_move(object_t *);
 /* If the current transaction aborts later, invoke 'callback(key)'.  If
    the current transaction commits, then the callback is forgotten.  You
    can only register one callback per key.  You can call
-   'stm_call_on_abort(key, NULL)' to cancel an existing callback.
+   'stm_call_on_abort(key, NULL)' to cancel an existing callback
+   (returns 0 if there was no existing callback to cancel).
    Note: 'key' must be aligned to a multiple of 8 bytes. */
-void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
+long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
+
+/* If the current transaction commits later, invoke 'callback(key)'.  If
+   the current transaction aborts, then the callback is forgotten.  Same
+   restrictions as stm_call_on_abort().  If the transaction is or becomes
+   inevitable, 'callback(key)' is called immediately. */
+long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
 
 /* Similar to stm_become_inevitable(), but additionally suspend all

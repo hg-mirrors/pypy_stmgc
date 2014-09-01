@@ -32,6 +32,7 @@ class TestExtra(BaseTest):
         p1 = ffi_new_aligned("hello")
         p2 = ffi_new_aligned("removed")
         p3 = ffi_new_aligned("world")
+        p4 = ffi_new_aligned("00")
         #
         @ffi.callback("void(void *)")
         def clear_me(p):
@@ -39,17 +40,26 @@ class TestExtra(BaseTest):
             p[0] = chr(ord(p[0]) + 1)
         #
         self.start_transaction()
-        lib.stm_call_on_abort(self.get_stm_thread_local(), p0, clear_me)
+        x = lib.stm_call_on_abort(self.get_stm_thread_local(), p0, clear_me)
+        assert x != 0
         # the registered callbacks are removed on
         # successful commit
         self.commit_transaction()
         assert ffi.string(p0) == "aaa"
         #
         self.start_transaction()
-        lib.stm_call_on_abort(self.get_stm_thread_local(), p1, clear_me)
-        lib.stm_call_on_abort(self.get_stm_thread_local(), p2, clear_me)
-        lib.stm_call_on_abort(self.get_stm_thread_local(), p3, clear_me)
-        lib.stm_call_on_abort(self.get_stm_thread_local(), p2, ffi.NULL)
+        x = lib.stm_call_on_abort(self.get_stm_thread_local(), p1, clear_me)
+        assert x != 0
+        x = lib.stm_call_on_abort(self.get_stm_thread_local(), p2, clear_me)
+        assert x != 0
+        x = lib.stm_call_on_abort(self.get_stm_thread_local(), p3, clear_me)
+        assert x != 0
+        x = lib.stm_call_on_abort(self.get_stm_thread_local(), p2, ffi.NULL)
+        assert x != 0
+        x = lib.stm_call_on_abort(self.get_stm_thread_local(), p2, ffi.NULL)
+        assert x == 0
+        x = lib.stm_call_on_abort(self.get_stm_thread_local(), p4, ffi.NULL)
+        assert x == 0
         assert ffi.string(p0) == "aaa"
         assert ffi.string(p1) == "hello"
         assert ffi.string(p2) == "removed"
@@ -68,6 +78,7 @@ class TestExtra(BaseTest):
         assert ffi.string(p1) == "iello"
         assert ffi.string(p2) == "removed"
         assert ffi.string(p3) == "xorld"
+        assert ffi.string(p4) == "00"
 
     def test_ignores_if_outside_transaction(self):
         @ffi.callback("void(void *)")
@@ -76,10 +87,101 @@ class TestExtra(BaseTest):
         #
         seen = []
         p0 = ffi_new_aligned("aaa")
-        lib.stm_call_on_abort(self.get_stm_thread_local(), p0, dont_see_me)
+        x = lib.stm_call_on_abort(self.get_stm_thread_local(), p0, dont_see_me)
+        assert x != 0
         self.start_transaction()
         self.abort_transaction()
         assert seen == []
+
+    def test_call_on_commit(self):
+        p0 = ffi_new_aligned("aaa")
+        p1 = ffi_new_aligned("hello")
+        p2 = ffi_new_aligned("removed")
+        p3 = ffi_new_aligned("world")
+        p4 = ffi_new_aligned("00")
+        #
+        @ffi.callback("void(void *)")
+        def clear_me(p):
+            p = ffi.cast("char *", p)
+            p[0] = chr(ord(p[0]) + 1)
+        #
+        self.start_transaction()
+        x = lib.stm_call_on_commit(self.get_stm_thread_local(), p0, clear_me)
+        assert x != 0
+        # the registered callbacks are not called on abort
+        self.abort_transaction()
+        assert ffi.string(p0) == "aaa"
+        #
+        self.start_transaction()
+        x = lib.stm_call_on_commit(self.get_stm_thread_local(), p1, clear_me)
+        assert x != 0
+        x = lib.stm_call_on_commit(self.get_stm_thread_local(), p2, clear_me)
+        assert x != 0
+        x = lib.stm_call_on_commit(self.get_stm_thread_local(), p3, clear_me)
+        assert x != 0
+        x = lib.stm_call_on_commit(self.get_stm_thread_local(), p2, ffi.NULL)
+        assert x != 0
+        x = lib.stm_call_on_commit(self.get_stm_thread_local(), p2, ffi.NULL)
+        assert x == 0
+        x = lib.stm_call_on_commit(self.get_stm_thread_local(), p4, ffi.NULL)
+        assert x == 0
+        assert ffi.string(p0) == "aaa"
+        assert ffi.string(p1) == "hello"
+        assert ffi.string(p2) == "removed"
+        assert ffi.string(p3) == "world"
+        self.commit_transaction()
+        #
+        assert ffi.string(p0) == "aaa"
+        assert ffi.string(p1) == "iello"
+        assert ffi.string(p2) == "removed"
+        assert ffi.string(p3) == "xorld"
+        assert ffi.string(p4) == "00"
+
+    def test_call_on_commit_immediately_if_inevitable(self):
+        p0 = ffi_new_aligned("aaa")
+        self.start_transaction()
+        self.become_inevitable()
+        #
+        @ffi.callback("void(void *)")
+        def clear_me(p):
+            p = ffi.cast("char *", p)
+            p[0] = chr(ord(p[0]) + 1)
+        #
+        lib.stm_call_on_commit(self.get_stm_thread_local(), p0, clear_me)
+        assert ffi.string(p0) == "baa"
+        self.commit_transaction()
+        assert ffi.string(p0) == "baa"
+
+    def test_call_on_commit_as_soon_as_inevitable(self):
+        p0 = ffi_new_aligned("aaa")
+        self.start_transaction()
+        #
+        @ffi.callback("void(void *)")
+        def clear_me(p):
+            p = ffi.cast("char *", p)
+            p[0] = chr(ord(p[0]) + 1)
+        #
+        lib.stm_call_on_commit(self.get_stm_thread_local(), p0, clear_me)
+        assert ffi.string(p0) == "aaa"
+        self.become_inevitable()
+        assert ffi.string(p0) == "baa"
+        self.commit_transaction()
+        assert ffi.string(p0) == "baa"
+
+    def test_call_on_commit_immediately_if_outside_transaction(self):
+        p0 = ffi_new_aligned("aaa")
+        #
+        @ffi.callback("void(void *)")
+        def clear_me(p):
+            p = ffi.cast("char *", p)
+            p[0] = chr(ord(p[0]) + 1)
+        #
+        lib.stm_call_on_commit(self.get_stm_thread_local(), p0, clear_me)
+        assert ffi.string(p0) == "baa"
+        self.start_transaction()
+        assert ffi.string(p0) == "baa"
+        self.commit_transaction()
+        assert ffi.string(p0) == "baa"
 
     def test_stm_become_globally_unique_transaction(self):
         self.start_transaction()

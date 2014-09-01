@@ -13,8 +13,10 @@
 #define STEPS_PER_THREAD 500
 #define THREAD_STARTS 1000 // how many restarts of threads
 #define PREBUILT_ROOTS 3
-#define MAXROOTS 1000
 #define FORKS 3
+
+#define ACTIVE_ROOTS_SET_SIZE 100 // max num of roots created/alive in one transaction
+#define MAX_ROOTS_ON_SS 1000 // max on shadow stack
 
 // SUPPORT
 struct node_s;
@@ -37,6 +39,7 @@ struct node_s {
 
 static sem_t done;
 __thread stm_thread_local_t stm_thread_local;
+__thread void *thread_may_fork;
 
 // global and per-thread-data
 time_t default_seed;
@@ -44,10 +47,11 @@ objptr_t prebuilt_roots[PREBUILT_ROOTS];
 
 struct thread_data {
     unsigned int thread_seed;
-    objptr_t roots[MAXROOTS];
-    int num_roots;
-    int num_roots_at_transaction_start;
     int steps_left;
+    objptr_t active_roots_set[ACTIVE_ROOTS_SET_SIZE];
+    int active_roots_num;
+    long roots_on_ss;
+    long roots_on_ss_at_tr_start;
 };
 __thread struct thread_data td;
 
@@ -80,6 +84,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 }
 
 void stmcb_commit_soon() {}
+
 long stmcb_obj_supports_cards(struct object_s *obj)
 {
     return 0;
@@ -102,64 +107,68 @@ int get_rand(int max)
 
 objptr_t get_random_root()
 {
-    int num = get_rand(2);
-    if (num == 0 && td.num_roots > 0) {
-        num = get_rand(td.num_roots);
-        return td.roots[num];
+    /* get some root from shadowstack or active_root_set or prebuilt_roots */
+    int num = get_rand(3);
+    intptr_t ss_size = td.roots_on_ss;
+    if (num == 0 && ss_size > 0) {
+        num = get_rand(ss_size);
+        /* XXX: impl detail: there is already a "-1" on the SS -> +1 */
+        objptr_t r = (objptr_t)stm_thread_local.shadowstack_base[num+1].ss;
+        OPT_ASSERT((((uintptr_t)r) & 3) == 0);
     }
-    else {
+
+    if (num == 1 && td.active_roots_num > 0) {
+        num = get_rand(td.active_roots_num);
+        return td.active_roots_set[num];
+    } else {
         num = get_rand(PREBUILT_ROOTS);
         return prebuilt_roots[num];
     }
 }
 
-void reload_roots()
+
+long push_roots()
 {
     int i;
-    assert(td.num_roots == td.num_roots_at_transaction_start);
-    for (i = td.num_roots_at_transaction_start - 1; i >= 0; i--) {
-        if (td.roots[i])
-            STM_POP_ROOT(stm_thread_local, td.roots[i]);
+    long to_push = td.active_roots_num;
+    long not_pushed = 0;
+    for (i = to_push - 1; i >= 0; i--) {
+        td.active_roots_num--;
+        if (td.roots_on_ss < MAX_ROOTS_ON_SS) {
+            STM_PUSH_ROOT(stm_thread_local, td.active_roots_set[i]);
+            td.roots_on_ss++;
+        } else {
+            not_pushed++;
+        }
     }
-
-    for (i = 0; i < td.num_roots_at_transaction_start; i++) {
-        if (td.roots[i])
-            STM_PUSH_ROOT(stm_thread_local, td.roots[i]);
-    }
+    return to_push - not_pushed;
 }
 
-void push_roots()
+void add_root(objptr_t r);
+void pop_roots(long to_pop)
 {
     int i;
-    for (i = td.num_roots_at_transaction_start; i < td.num_roots; i++) {
-        if (td.roots[i])
-            STM_PUSH_ROOT(stm_thread_local, td.roots[i]);
-    }
-}
-
-void pop_roots()
-{
-    int i;
-    for (i = td.num_roots - 1; i >= td.num_roots_at_transaction_start; i--) {
-        if (td.roots[i])
-            STM_POP_ROOT(stm_thread_local, td.roots[i]);
+    for (i = 0; i < to_pop; i++) {
+        objptr_t t;
+        STM_POP_ROOT(stm_thread_local, t);
+        add_root(t);
+        td.roots_on_ss--;
     }
 }
 
 void del_root(int idx)
 {
     int i;
-    assert(idx >= td.num_roots_at_transaction_start);
 
-    for (i = idx; i < td.num_roots - 1; i++)
-        td.roots[i] = td.roots[i + 1];
-    td.num_roots--;
+    for (i = idx; i < td.active_roots_num - 1; i++)
+        td.active_roots_set[i] = td.active_roots_set[i + 1];
+    td.active_roots_num--;
 }
 
 void add_root(objptr_t r)
 {
-    if (r && td.num_roots < MAXROOTS) {
-        td.roots[td.num_roots++] = r;
+    if (r && td.active_roots_num < ACTIVE_ROOTS_SET_SIZE) {
+        td.active_roots_set[td.active_roots_num++] = r;
     }
 }
 
@@ -206,14 +215,12 @@ nodeptr_t get_next(objptr_t p)
 objptr_t simple_events(objptr_t p, objptr_t _r)
 {
     int k = get_rand(10);
-    int num;
+    long pushed;
 
     switch (k) {
     case 0: // remove a root
-        if (td.num_roots > td.num_roots_at_transaction_start) {
-            num = td.num_roots_at_transaction_start
-                + get_rand(td.num_roots - td.num_roots_at_transaction_start);
-            del_root(num);
+        if (td.active_roots_num) {
+            del_root(get_rand(td.active_roots_num));
         }
         break;
     case 1: // add 'p' to roots
@@ -224,7 +231,7 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
             p = _r;
         break;
     case 3: // allocate fresh 'p'
-        push_roots();
+        pushed = push_roots();
         size_t sizes[4] = {sizeof(struct node_s),
                            sizeof(struct node_s) + (get_rand(100000) & ~15),
                            sizeof(struct node_s) + 4096,
@@ -235,8 +242,7 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
         ((nodeptr_t)p)->my_size = size;
         ((nodeptr_t)p)->my_id = 0;
         ((nodeptr_t)p)->my_hash = 0;
-        pop_roots();
-        /* reload_roots not necessary, all are old after start_transaction */
+        pop_roots(pushed);
         break;
     case 4:  // read and validate 'p'
         read_barrier(p);
@@ -284,7 +290,7 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
     return p;
 }
 
-
+void frame_loop();
 objptr_t do_step(objptr_t p)
 {
     objptr_t _r;
@@ -296,20 +302,91 @@ objptr_t do_step(objptr_t p)
     if (k < 10) {
         p = simple_events(p, _r);
     } else if (get_rand(20) == 1) {
-        return (objptr_t)-1; // break current
+        long pushed = push_roots();
+        stm_commit_transaction();
+        td.roots_on_ss_at_tr_start = td.roots_on_ss;
+
+        if (get_rand(100) < 98) {
+            stm_start_transaction(&stm_thread_local);
+        } else {
+            stm_start_inevitable_transaction(&stm_thread_local);
+        }
+        td.roots_on_ss = td.roots_on_ss_at_tr_start;
+        td.active_roots_num = 0;
+        pop_roots(pushed);
+        p = NULL;
+    } else if (get_rand(10) == 1) {
+        long pushed = push_roots();
+        /* leaving our frame */
+        frame_loop();
+        /* back in our frame */
+        pop_roots(pushed);
+        p = NULL;
     } else if (get_rand(20) == 1) {
-        push_roots();
+        long pushed = push_roots();
         stm_become_inevitable(&stm_thread_local, "please");
-        pop_roots();
-        return NULL;
-    } else if (get_rand(240) == 1) {
-        push_roots();
+        assert(stm_is_inevitable());
+        pop_roots(pushed);
+        p= NULL;
+    } else if (get_rand(20) == 1) {
+        p = (objptr_t)-1; // possibly fork
+    } else if (get_rand(20) == 1) {
+        long pushed = push_roots();
         stm_become_globally_unique_transaction(&stm_thread_local, "really");
         fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
-        pop_roots();
-        return NULL;
+        pop_roots(pushed);
+        p = NULL;
     }
     return p;
+}
+
+void frame_loop()
+{
+    objptr_t p = NULL;
+    rewind_jmp_buf rjbuf;
+
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
+    //fprintf(stderr,"%p F: %p\n", STM_SEGMENT->running_thread,  __builtin_frame_address(0));
+
+    long roots_on_ss = td.roots_on_ss;
+    /* "interpreter main loop": this is one "application-frame" */
+    while (td.steps_left-->0 && get_rand(10) != 0) {
+        if (td.steps_left % 8 == 0)
+            fprintf(stdout, "#");
+
+        assert(p == NULL || ((nodeptr_t)p)->sig == SIGNATURE);
+
+        p = do_step(p);
+
+
+        if (p == (objptr_t)-1) {
+            p = NULL;
+
+            long call_fork = (thread_may_fork != NULL && *(long *)thread_may_fork);
+            if (call_fork) {   /* common case */
+                long pushed = push_roots();
+                /* run a fork() inside the transaction */
+                printf("==========   FORK  =========\n");
+                *(long*)thread_may_fork = 0;
+                pid_t child = fork();
+                printf("=== in process %d thread %lx, fork() returned %d\n",
+                       (int)getpid(), (long)pthread_self(), (int)child);
+                if (child == -1) {
+                    fprintf(stderr, "fork() error: %m\n");
+                    abort();
+                }
+                if (child != 0)
+                    num_forked_children++;
+                else
+                    num_forked_children = 0;
+
+                pop_roots(pushed);
+            }
+        }
+    }
+    OPT_ASSERT(roots_on_ss == td.roots_on_ss);
+
+    stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
 }
 
 
@@ -321,13 +398,14 @@ void setup_thread()
     /* stupid check because gdb shows garbage
        in td.roots: */
     int i;
-    for (i = 0; i < MAXROOTS; i++)
-        assert(td.roots[i] == NULL);
+    for (i = 0; i < ACTIVE_ROOTS_SET_SIZE; i++)
+        assert(td.active_roots_set[i] == NULL);
 
     td.thread_seed = default_seed++;
     td.steps_left = STEPS_PER_THREAD;
-    td.num_roots = 0;
-    td.num_roots_at_transaction_start = 0;
+    td.active_roots_num = 0;
+    td.roots_on_ss = 0;
+    td.roots_on_ss_at_tr_start = 0;
 }
 
 
@@ -341,71 +419,16 @@ void *demo_random(void *arg)
 
     setup_thread();
 
-    objptr_t p;
-
+    td.roots_on_ss_at_tr_start = 0;
     stm_start_transaction(&stm_thread_local);
-    assert(td.num_roots >= td.num_roots_at_transaction_start);
-    td.num_roots = td.num_roots_at_transaction_start;
-    p = NULL;
-    pop_roots();                /* does nothing.. */
-    reload_roots();
+    td.roots_on_ss = td.roots_on_ss_at_tr_start;
+    td.active_roots_num = 0;
 
+    thread_may_fork = arg;
     while (td.steps_left-->0) {
-        if (td.steps_left % 8 == 0)
-            fprintf(stdout, "#");
-
-        assert(p == NULL || ((nodeptr_t)p)->sig == SIGNATURE);
-
-        p = do_step(p);
-
-        if (p == (objptr_t)-1) {
-            push_roots();
-
-            long call_fork = (arg != NULL && *(long *)arg);
-            if (call_fork == 0) {   /* common case */
-                stm_commit_transaction();
-                td.num_roots_at_transaction_start = td.num_roots;
-                if (get_rand(100) < 98) {
-                    stm_start_transaction(&stm_thread_local);
-                } else {
-                    stm_start_inevitable_transaction(&stm_thread_local);
-                }
-                td.num_roots = td.num_roots_at_transaction_start;
-                p = NULL;
-                pop_roots();
-                reload_roots();
-            }
-            else {
-                /* run a fork() inside the transaction */
-                printf("==========   FORK  =========\n");
-                *(long*)arg = 0;
-                pid_t child = fork();
-                printf("=== in process %d thread %lx, fork() returned %d\n",
-                       (int)getpid(), (long)pthread_self(), (int)child);
-                if (child == -1) {
-                    fprintf(stderr, "fork() error: %m\n");
-                    abort();
-                }
-                if (child != 0)
-                    num_forked_children++;
-                else
-                    num_forked_children = 0;
-
-                pop_roots();
-                p = NULL;
-            }
-        }
+        frame_loop();
     }
-    push_roots();
-    stm_commit_transaction();
 
-    /* even out the shadow stack before leaveframe: */
-    stm_start_inevitable_transaction(&stm_thread_local);
-    while (td.num_roots > 0) {
-        td.num_roots--;
-        objptr_t t;
-        STM_POP_ROOT(stm_thread_local, t);
-    }
     stm_commit_transaction();
 
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);

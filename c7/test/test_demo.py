@@ -13,6 +13,21 @@ class TestDemo:
         self._do("make -C ../demo %s" % target)
         self._do("../demo/%s 2> /dev/null" % target)
 
-    def test_demo2_debug(self):   self.make_and_run("debug-demo2")
+    def test_shadowstack(self):   self.make_and_run("debug-test_shadowstack")
+
+    def test_demo_simple_build(self):   self.make_and_run("build-demo_simple")
+    def test_demo_largemalloc_build(self):   self.make_and_run("build-demo_largemalloc")
+
+
+
+    # def test_demo2_debug(self):   self.make_and_run("debug-demo2")
     def test_demo2_build(self):   self.make_and_run("build-demo2")
     def test_demo2_release(self): self.make_and_run("release-demo2")
+
+    # def test_demo_random_debug(self):   self.make_and_run("debug-demo_random")
+    def test_demo_random_build(self):   self.make_and_run("build-demo_random")
+    def test_demo_random_release(self): self.make_and_run("release-demo_random")
+
+    # def test_demo_random2_debug(self):   self.make_and_run("debug-demo_random2")
+    def test_demo_random2_build(self):   self.make_and_run("build-demo_random2")
+    def test_demo_random2_release(self): self.make_and_run("release-demo_random2")

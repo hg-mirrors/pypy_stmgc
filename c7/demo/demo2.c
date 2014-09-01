@@ -43,7 +43,20 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     n = (struct node_s*)obj;
     visit((object_t **)&n->next);
 }
-
+long stmcb_obj_supports_cards(struct object_s *obj)
+{
+    return 0;
+}
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2])
+{
+    abort();
+}
+void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
+                       uintptr_t start, uintptr_t stop)
+{
+    abort();
+}
 void stmcb_commit_soon() {}
 
 static void expand_marker(char *base, uintptr_t odd_number,
@@ -62,9 +75,8 @@ long check_sorted(void)
 {
     nodeptr_t r_n;
     long prev, sum;
-    stm_jmpbuf_t here;
 
-    STM_START_TRANSACTION(&stm_thread_local, here);
+    stm_start_transaction(&stm_thread_local);
 
     stm_read((objptr_t)global_chained_list);
     r_n = global_chained_list;
@@ -92,11 +104,9 @@ long check_sorted(void)
 
 nodeptr_t swap_nodes(nodeptr_t initial)
 {
-    stm_jmpbuf_t here;
-
     assert(initial != NULL);
 
-    STM_START_TRANSACTION(&stm_thread_local, here);
+    stm_start_transaction(&stm_thread_local);
 
     if (stm_thread_local.longest_marker_state != 0) {
         fprintf(stderr, "[%p] marker %d for %.6f seconds:\n",
@@ -193,13 +203,18 @@ void setup_list(void)
 
     stm_commit_transaction();
 
-    stm_start_inevitable_transaction(&stm_thread_local);
+    stm_start_transaction(&stm_thread_local);
     STM_POP_ROOT(stm_thread_local, global_chained_list);   /* update value */
     assert(global_chained_list->value == -1);
     STM_PUSH_ROOT(stm_thread_local, global_chained_list);  /* remains forever in the shadow stack */
     stm_commit_transaction();
 
     printf("setup ok\n");
+}
+
+void teardown_list(void)
+{
+    STM_POP_ROOT_RET(stm_thread_local);
 }
 
 
@@ -215,7 +230,9 @@ void unregister_thread_local(void)
 void *demo2(void *arg)
 {
     int status;
+    rewind_jmp_buf rjbuf;
     stm_register_thread_local(&stm_thread_local);
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
     char *org = (char *)stm_thread_local.shadowstack;
 
     STM_PUSH_ROOT(stm_thread_local, global_chained_list);  /* remains forever in the shadow stack */
@@ -235,6 +252,7 @@ void *demo2(void *arg)
     STM_POP_ROOT(stm_thread_local, global_chained_list);
     OPT_ASSERT(org == (char *)stm_thread_local.shadowstack);
 
+    stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     unregister_thread_local();
     status = sem_post(&done); assert(status == 0);
     return NULL;
@@ -271,11 +289,13 @@ void newthread(void*(*func)(void*), void *arg)
 int main(void)
 {
     int status, i;
+    rewind_jmp_buf rjbuf;
 
     status = sem_init(&done, 0, 0); assert(status == 0);
 
     stm_setup();
     stm_register_thread_local(&stm_thread_local);
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
     stmcb_expand_marker = expand_marker;
 
 
@@ -292,9 +312,11 @@ int main(void)
 
     final_check();
 
+    teardown_list();
 
+    stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     unregister_thread_local();
-    stm_teardown();
+    //stm_teardown();
 
     return 0;
 }

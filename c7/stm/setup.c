@@ -83,6 +83,7 @@ void stm_setup(void)
 {
     /* Check that some values are acceptable */
     assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
+    assert(CARD_SIZE >= 32 && CARD_SIZE % 16 == 0);
     assert(4096 <= ((uintptr_t)STM_SEGMENT));
     assert((uintptr_t)STM_SEGMENT == (uintptr_t)STM_PSEGMENT);
     assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= 8192);
@@ -117,6 +118,7 @@ void stm_setup(void)
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
         pr->objects_pointing_to_nursery = NULL;
+        pr->old_objects_with_cards = list_create();
         pr->large_overflow_objects = NULL;
         pr->modified_old_objects = list_create();
         pr->modified_old_objects_markers = list_create();
@@ -124,7 +126,8 @@ void stm_setup(void)
         pr->old_weakrefs = list_create();
         pr->young_outside_nursery = tree_create();
         pr->nursery_objects_shadows = tree_create();
-        pr->callbacks_on_abort = tree_create();
+        pr->callbacks_on_commit_and_abort[0] = tree_create();
+        pr->callbacks_on_commit_and_abort[1] = tree_create();
         pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * i;
         highest_overflow_number = pr->overflow_number;
         pr->pub.transaction_read_version = 0xff;
@@ -156,6 +159,7 @@ void stm_teardown(void)
     for (i = 1; i <= NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
         assert(pr->objects_pointing_to_nursery == NULL);
+        list_free(pr->old_objects_with_cards);
         assert(pr->large_overflow_objects == NULL);
         list_free(pr->modified_old_objects);
         list_free(pr->modified_old_objects_markers);
@@ -163,7 +167,8 @@ void stm_teardown(void)
         list_free(pr->old_weakrefs);
         tree_free(pr->young_outside_nursery);
         tree_free(pr->nursery_objects_shadows);
-        tree_free(pr->callbacks_on_abort);
+        tree_free(pr->callbacks_on_commit_and_abort[0]);
+        tree_free(pr->callbacks_on_commit_and_abort[1]);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);
@@ -199,13 +204,13 @@ static void _init_shadow_stack(stm_thread_local_t *tl)
     struct stm_shadowentry_s *s = (struct stm_shadowentry_s *)start;
     tl->shadowstack = s;
     tl->shadowstack_base = s;
-    STM_PUSH_ROOT(*tl, STM_STACK_MARKER_OLD);
+    STM_PUSH_ROOT(*tl, -1);
 }
 
 static void _done_shadow_stack(stm_thread_local_t *tl)
 {
     assert(tl->shadowstack > tl->shadowstack_base);
-    assert(tl->shadowstack_base->ss == (object_t *)STM_STACK_MARKER_OLD);
+    assert(tl->shadowstack_base->ss == (object_t *)-1);
 
     char *start = (char *)tl->shadowstack_base;
     _shadowstack_trap_page(start, PROT_READ | PROT_WRITE);

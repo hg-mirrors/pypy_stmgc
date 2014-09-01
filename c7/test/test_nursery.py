@@ -230,7 +230,7 @@ class TestNursery(BaseTest):
         p1 = stm_allocate(600)
         stm_set_char(p1, 'o')
         self.push_root(p1)
-        self.push_root(ffi.cast("object_t *", lib.STM_STACK_MARKER_NEW))
+        self.push_root(ffi.cast("object_t *", 123))
         p2 = stm_allocate(600)
         stm_set_char(p2, 't')
         self.push_root(p2)
@@ -239,12 +239,13 @@ class TestNursery(BaseTest):
         #
         p2 = self.pop_root()
         m = self.pop_root()
-        assert m == ffi.cast("object_t *", lib.STM_STACK_MARKER_OLD)
+        assert m == ffi.cast("object_t *", 123)
         p1 = self.pop_root()
         assert stm_get_char(p1) == 'o'
         assert stm_get_char(p2) == 't'
 
     def test_marker_2(self):
+        py.test.skip("testing this requires working shadowstack saving logic")
         self.start_transaction()
         p1 = stm_allocate(600)
         stm_set_char(p1, 'o')
@@ -263,3 +264,14 @@ class TestNursery(BaseTest):
         # the 'p1' reference is invalid now, don't try to read it.
         # we check that it's invalid because _stm_total_allocated()
         # only records one of the two objects.
+
+    def test_clear_read_marker_for_external_young(self):
+        self.start_transaction()
+        big = stm_allocate(FAST_ALLOC + 1000) # young outside nursery
+        stm_read(big)
+        assert stm_was_read(big)
+        stm_minor_collect() # free young outside
+        assert not stm_was_read(big)
+        # if the read marker is not cleared, we get false conflicts
+        # with later transactions using the same large-malloced slot
+        # as our outside-nursery-obj

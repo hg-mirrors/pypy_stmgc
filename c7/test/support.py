@@ -7,13 +7,11 @@ from common import parent_dir, source_files
 ffi = cffi.FFI()
 ffi.cdef("""
 typedef ... object_t;
-typedef ... stm_jmpbuf_t;
 #define SIZEOF_MYOBJ ...
 #define STM_NB_SEGMENTS ...
 #define _STM_FAST_ALLOC ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
-#define STM_STACK_MARKER_NEW ...
-#define STM_STACK_MARKER_OLD ...
+#define _STM_CARD_SIZE ...
 
 struct stm_shadowentry_s {
     object_t *ss;
@@ -43,6 +41,9 @@ object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
+/*void stm_write_card(); use _checked_stm_write_card() instead */
+
+
 void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
@@ -51,8 +52,10 @@ object_t *stm_setup_prebuilt(object_t *);
 object_t *stm_setup_prebuilt_weakref(object_t *);
 
 bool _checked_stm_write(object_t *obj);
+bool _checked_stm_write_card(object_t *obj, uintptr_t index);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
+bool _stm_was_written_card(object_t *obj);
 char *_stm_real_address(object_t *obj);
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
@@ -60,7 +63,8 @@ void _stm_test_switch(stm_thread_local_t *tl);
 uintptr_t _stm_get_private_page(uintptr_t pagenum);
 int _stm_get_flags(object_t *obj);
 
-void _stm_start_transaction(stm_thread_local_t *tl, stm_jmpbuf_t *jmpbuf);
+void clear_jmpbuf(stm_thread_local_t *tl);
+long stm_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
@@ -97,8 +101,11 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
+long _stm_count_old_objects_with_cards(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
+object_t *_stm_enum_old_objects_with_cards(long index);
+
 
 void stm_collect(long level);
 uint64_t _stm_total_allocated(void);
@@ -107,8 +114,9 @@ long stm_identityhash(object_t *obj);
 long stm_id(object_t *obj);
 void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
 
-int stm_can_move(object_t *);
-void stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
+long stm_can_move(object_t *);
+long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
+long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
 #define STM_TIME_OUTSIDE_TRANSACTION ...
 #define STM_TIME_RUN_CURRENT ...
@@ -144,7 +152,7 @@ char *_stm_expand_marker(void);
 GC_N_SMALL_REQUESTS = 36      # from gcpage.c
 LARGE_MALLOC_OVERHEAD = 16    # from largemalloc.h
 
-lib = ffi.verify('''
+lib = ffi.verify(r'''
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -163,27 +171,34 @@ int _stm_get_flags(object_t *obj) {
     return obj->stm_flags;
 }
 
+void clear_jmpbuf(stm_thread_local_t *tl) {
+    memset(&tl->rjthread, 0, sizeof(rewind_jmp_thread));
+}
+
+__attribute__((noreturn))
+void _test_run_abort(stm_thread_local_t *tl) {
+    void **jmpbuf = tl->rjthread.jmpbuf;
+    fprintf(stderr, "~~~~~ ABORT ~~~~~\n");
+    __builtin_longjmp(jmpbuf, 1);
+}
+
 #define CHECKED(CALL)                                           \
-    stm_jmpbuf_t here;                                          \
-    stm_segment_info_t *segment = STM_SEGMENT;                  \
-    if (__builtin_setjmp(here) == 0) { /* returned directly */  \
-        if (segment->jmpbuf_ptr != NULL) {                      \
-            assert(segment->jmpbuf_ptr == (stm_jmpbuf_t *)-1);  \
-            segment->jmpbuf_ptr = &here;                        \
-        }                                                       \
+    stm_thread_local_t *_tl = STM_SEGMENT->running_thread;      \
+    void **jmpbuf = _tl->rjthread.jmpbuf;                       \
+    if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
         CALL;                                                   \
-        if (segment->jmpbuf_ptr != NULL) {                      \
-            segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;           \
-        }                                                       \
+        clear_jmpbuf(_tl);                                      \
         return 0;                                               \
     }                                                           \
-    if (segment->jmpbuf_ptr != NULL) {                          \
-        segment->jmpbuf_ptr = (stm_jmpbuf_t *)-1;               \
-    }                                                           \
+    clear_jmpbuf(_tl);                                          \
     return 1
 
 bool _checked_stm_write(object_t *object) {
     CHECKED(stm_write(object));
+}
+
+bool _checked_stm_write_card(object_t *object, uintptr_t index) {
+    CHECKED(stm_write_card(object, index));
 }
 
 bool _check_stop_safe_point(void) {
@@ -291,6 +306,39 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
         visit(ref);
     }
 }
+long stmcb_obj_supports_cards(struct object_s *obj)
+{
+    return 1;
+}
+void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
+                       uintptr_t start, uintptr_t stop)
+{
+    int i;
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 421420) {
+        /* basic case: no references */
+        return;
+    }
+
+    for (i=start; (i < myobj->type_id - 421420) && (i < stop); i++) {
+        object_t **ref = ((object_t **)(myobj + 1)) + i;
+        visit(ref);
+    }
+}
+
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2])
+{
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 421420) {
+        offset_itemsize[0] = SIZEOF_MYOBJ;
+        offset_itemsize[1] = 1;
+    }
+    else {
+        offset_itemsize[0] = sizeof(struct myobj_s);
+        offset_itemsize[1] = sizeof(object_t *);
+    }
+}
 
 void stm_push_marker(stm_thread_local_t *tl, uintptr_t onum, object_t *ob)
 {
@@ -312,6 +360,7 @@ void stmcb_commit_soon()
 }
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
+                    ('STM_NO_AUTOMATIC_SETJMP', '1'),
                     ('STM_LARGEMALLOC_TEST', '1'),
                     ('STM_NO_COND_WAIT', '1'),
                     ('STM_DEBUGPRINT', '1'),
@@ -328,7 +377,9 @@ WORD = 8
 HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
+CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
+FAST_ALLOC = lib._STM_FAST_ALLOC
 GC_N_SMALL_REQUESTS = 36
 GC_LAST_SMALL_SIZE = 8 * (GC_N_SMALL_REQUESTS - 1)
 
@@ -384,22 +435,28 @@ def stm_allocate_refs(n):
     lib._set_type_id(o, tid)
     return o
 
-def stm_set_ref(obj, idx, ref):
-    stm_write(obj)
+def stm_set_ref(obj, idx, ref, use_cards=False):
+    if use_cards:
+        stm_write_card(obj, idx)
+    else:
+        stm_write(obj)
     lib._set_ptr(obj, idx, ref)
 
 def stm_get_ref(obj, idx):
     stm_read(obj)
     return lib._get_ptr(obj, idx)
 
-def stm_set_char(obj, c, offset=HDR):
-    stm_write(obj)
+def stm_set_char(obj, c, offset=HDR, use_cards=False):
     assert HDR <= offset < stm_get_obj_size(obj)
+    if use_cards:
+        stm_write_card(obj, offset - HDR)
+    else:
+        stm_write(obj)
     stm_get_real_address(obj)[offset] = c
 
 def stm_get_char(obj, offset=HDR):
-    stm_read(obj)
     assert HDR <= offset < stm_get_obj_size(obj)
+    stm_read(obj)
     return stm_get_real_address(obj)[offset]
 
 def stm_get_real_address(obj):
@@ -408,8 +465,13 @@ def stm_get_real_address(obj):
 def stm_read(o):
     lib.stm_read(o)
 
+
 def stm_write(o):
     if lib._checked_stm_write(o):
+        raise Conflict()
+
+def stm_write_card(o, index):
+    if lib._checked_stm_write_card(o, index):
         raise Conflict()
 
 def stm_was_read(o):
@@ -417,6 +479,9 @@ def stm_was_read(o):
 
 def stm_was_written(o):
     return lib._stm_was_written(o)
+
+def stm_was_written_card(o):
+    return lib._stm_was_written_card(o)
 
 
 def stm_start_safe_point():
@@ -457,6 +522,14 @@ def objects_pointing_to_nursery():
     if count < 0:
         return None
     return map(lib._stm_enum_objects_pointing_to_nursery, range(count))
+
+def old_objects_with_cards():
+    count = lib._stm_count_old_objects_with_cards()
+    if count < 0:
+        return None
+    return map(lib._stm_enum_old_objects_with_cards, range(count))
+
+
 
 
 SHADOWSTACK_LENGTH = 1000
@@ -506,7 +579,9 @@ class BaseTest(object):
     def start_transaction(self):
         tl = self.tls[self.current_thread]
         assert not lib._stm_in_transaction(tl)
-        lib._stm_start_transaction(tl, ffi.cast("stm_jmpbuf_t *", -1))
+        res = lib.stm_start_transaction(tl)
+        assert res == 0
+        lib.clear_jmpbuf(tl)
         assert lib._stm_in_transaction(tl)
         #
         seen = set()
@@ -563,7 +638,7 @@ class BaseTest(object):
 
     def push_root_no_gc(self):
         "Pushes an invalid object, to crash in case the GC is called"
-        self.push_root(ffi.cast("object_t *", -1))
+        self.push_root(ffi.cast("object_t *", 8))
 
     def check_char_everywhere(self, obj, expected_content, offset=HDR):
         for i in range(len(self.tls)):

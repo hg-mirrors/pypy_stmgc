@@ -14,7 +14,7 @@
 #endif
 
 
-#define NB_PAGES            (1500*256)    // 1500MB
+#define NB_PAGES            (2500*256)    // 2500MB
 #define NB_SEGMENTS         STM_NB_SEGMENTS
 #define NB_SEGMENTS_MAX     240    /* don't increase NB_SEGMENTS past this */
 #define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
@@ -35,6 +35,8 @@
 #define WRITELOCK_START       ((END_NURSERY_PAGE * 4096UL) >> 4)
 #define WRITELOCK_END         READMARKER_END
 
+#define CARD_SIZE   _STM_CARD_SIZE
+
 enum /* stm_flags */ {
     /* This flag is set on non-nursery objects.  It forces stm_write()
        to call _stm_write_slowpath().
@@ -47,7 +49,13 @@ enum /* stm_flags */ {
        The same flag is abused to mark prebuilt objects whose hash has
        been taken during translation and is statically recorded just
        after the object. */
-    GCFLAG_HAS_SHADOW = 0x2,
+    GCFLAG_HAS_SHADOW = 0x02,
+
+    /* Set on objects that are large enough (_STM_MIN_CARD_OBJ_SIZE)
+       to have multiple cards (at least _STM_MIN_CARD_COUNT), and that
+       have at least one card marked.  This flag implies
+       GCFLAG_WRITE_BARRIER. */
+    GCFLAG_CARDS_SET = _STM_GCFLAG_CARDS_SET,
 
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by
        the "overflow number".  This is a number that identifies the
@@ -56,7 +64,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x4   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x8   /* must be last */
 };
 
 #define SYNC_QUEUE_SIZE    31
@@ -75,9 +83,7 @@ struct stm_priv_segment_info_s {
     /* List of old objects (older than the current transaction) that the
        current transaction attempts to modify.  This is used to track
        the STM status: they are old objects that where written to and
-       that need to be copied to other segments upon commit.  Note that
-       every object takes three list items: the object, and two words for
-       the location marker. */
+       that need to be copied to other segments upon commit. */
     struct list_s *modified_old_objects;
 
     /* For each entry in 'modified_old_objects', we have two entries
@@ -95,6 +101,10 @@ struct stm_priv_segment_info_s {
        understood as meaning implicitly "this is the same as
        'modified_old_objects'". */
     struct list_s *objects_pointing_to_nursery;
+    /* Like objects_pointing_to_nursery it holds the old objects that
+       we did a stm_write_card() on. Objects can be in both lists.
+       It is NULL iff objects_pointing_to_nursery is NULL. */
+    struct list_s *old_objects_with_cards;
 
     /* List of all large, overflowed objects.  Only non-NULL after the
        current transaction spanned a minor collection. */
@@ -119,8 +129,9 @@ struct stm_priv_segment_info_s {
        weakrefs never point to young objects and never contain NULL. */
     struct list_s *old_weakrefs;
 
-    /* Tree of 'key->callback' associations from stm_call_on_abort() */
-    struct tree_s *callbacks_on_abort;
+    /* Tree of 'key->callback' associations from stm_call_on_commit()
+       and stm_call_on_abort() (respectively, array items 0 and 1) */
+    struct tree_s *callbacks_on_commit_and_abort[2];
 
     /* Start time: to know approximately for how long a transaction has
        been running, in contention management */
@@ -173,7 +184,6 @@ struct stm_priv_segment_info_s {
        'thread_local_obj' field. */
     struct stm_shadowentry_s *shadowstack_at_start_of_transaction;
     object_t *threadlocal_at_start_of_transaction;
-    struct stm_shadowentry_s *shadowstack_at_abort;
 
     /* Already signalled to commit soon: */
     bool signalled_to_commit_soon;
@@ -223,8 +233,33 @@ static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 static uint8_t write_locks[WRITELOCK_END - WRITELOCK_START];
 
+enum /* card values for write_locks */ {
+    CARD_CLEAR = 0,                 /* card not used at all */
+    CARD_MARKED = _STM_CARD_MARKED, /* card marked for tracing in the next gc */
+    CARD_MARKED_OLD = 101,          /* card was marked before, but cleared
+                                       in a GC */
+};
+
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
+
+#define IS_OVERFLOW_OBJ(pseg, obj) (((obj)->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) \
+                                    == (pseg)->overflow_number)
+
+static inline uintptr_t get_index_to_card_index(uintptr_t index) {
+    return (index / CARD_SIZE) + 1;
+}
+
+static inline uintptr_t get_card_index_to_index(uintptr_t card_index) {
+    return (card_index - 1) * CARD_SIZE;
+}
+
+
+static inline uintptr_t get_write_lock_idx(uintptr_t obj) {
+    uintptr_t res = (obj >> 4) - WRITELOCK_START;
+    assert(res < sizeof(write_locks));
+    return res;
+}
 
 static inline char *get_segment_base(long segment_num) {
     return stm_object_pages + segment_num * (NB_PAGES * 4096UL);
@@ -247,6 +282,7 @@ static bool _seems_to_be_running_transaction(void);
 
 static void teardown_core(void);
 static void abort_with_mutex(void) __attribute__((noreturn));
+static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
 static inline bool was_read_remote(char *base, object_t *obj,

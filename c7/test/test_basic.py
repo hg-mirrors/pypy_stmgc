@@ -369,6 +369,7 @@ class TestBasic(BaseTest):
 
     def test_inevitable_transaction_has_priority(self):
         self.start_transaction()
+        assert lib.stm_is_inevitable() == 0
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'a')
         self.push_root(lp1)
@@ -425,6 +426,19 @@ class TestBasic(BaseTest):
         self.push_root(ffi.cast("object_t *", 0))
         self.abort_transaction()
         py.test.raises(EmptyStack, self.pop_root)
+
+    def test_abort_restores_shadowstack_inv(self):
+        py.test.skip("the logic to save/restore the shadowstack doesn't "
+                     "work in these tests")
+        self.push_root(ffi.cast("object_t *", 1234))
+        self.start_transaction()
+        p = self.pop_root()
+        assert p == ffi.cast("object_t *", 1234)
+        self.push_root(ffi.cast("object_t *", 5678))
+        self.pop_root()
+        self.abort_transaction()
+        p = self.pop_root()
+        assert p == ffi.cast("object_t *", 1234)
 
     def test_check_content_after_commit(self):
         self.start_transaction()

@@ -162,8 +162,9 @@ void run_transaction(DuObject *cell)
 
 void *run_thread(void *thread_id)
 {
-    stm_jmpbuf_t here;
+    rewind_jmp_buf rjbuf;
     stm_register_thread_local(&stm_thread_local);
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
 
     TLOBJ = NULL;
 
@@ -176,7 +177,7 @@ void *run_thread(void *thread_id)
 
         TLOBJ = cell;
         stm_commit_transaction(); /* inevitable */
-        STM_START_TRANSACTION(&stm_thread_local, here);
+        stm_start_transaction(&stm_thread_local);
         cell = TLOBJ;
         TLOBJ = NULL;
 
@@ -187,6 +188,7 @@ void *run_thread(void *thread_id)
     }
 
     stm_flush_timing(&stm_thread_local, 1);
+    stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     stm_unregister_thread_local(&stm_thread_local);
 
     return NULL;
