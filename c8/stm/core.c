@@ -9,11 +9,14 @@
 
 void _signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
+    /* make PROT_READWRITE again and validate */
 
-    if (siginfo->si_addr == NULL) {
+    if (siginfo->si_addr == NULL) { /* actual segfault */
         /* send to GDB */
         kill(getpid(), SIGINT);
     }
+    /* didn't know what to do with it: send to GDB */
+    kill(getpid(), SIGINT);
 }
 
 /* ############# commit log ############# */
@@ -103,6 +106,11 @@ void _stm_write_slowpath(object_t *obj)
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
     stm_read(obj);
+
+    /* XXX: misses synchronisation with other write_barriers
+       on same page */
+    /* XXX: make backup copy */
+    /* XXX: privatize pages if necessary */
 
     /* make other segments trap if accessing this object */
     uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
@@ -214,6 +222,8 @@ void stm_commit_transaction(void)
     minor_collection(1);
 
     _validate_and_add_to_commit_log();
+
+    /* XXX:discard backup copies */
 
     s_mutex_lock();
 
