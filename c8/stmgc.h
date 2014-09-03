@@ -72,6 +72,7 @@ bool _stm_was_written(object_t *obj);
 
 long stm_can_move(object_t *obj);
 void _stm_test_switch(stm_thread_local_t *tl);
+void _push_obj_to_other_segments(object_t *obj);
 
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
