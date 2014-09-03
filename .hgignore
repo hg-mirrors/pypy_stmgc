@@ -8,3 +8,4 @@ syntax: glob
 */__pycache__
 *.out.*
 */\#*\#
+*/.\#*
