@@ -46,6 +46,7 @@ void _stm_test_switch(stm_thread_local_t *tl);
 void clear_jmpbuf(stm_thread_local_t *tl);
 long stm_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
+bool _check_abort_transaction(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
@@ -111,6 +112,10 @@ bool _checked_stm_write(object_t *object) {
 
 bool _check_commit_transaction(void) {
     CHECKED(stm_commit_transaction());
+}
+
+bool _check_abort_transaction(void) {
+    CHECKED(stm_abort_transaction());
 }
 
 #undef CHECKED
@@ -353,11 +358,12 @@ class BaseTest(object):
     def teardown_method(self, meth):
         lib.stmcb_expand_marker = ffi.NULL
         lib.stmcb_debug_print = ffi.NULL
-        tl = self.tls[self.current_thread]
-        assert not lib._stm_in_transaction(tl)
         #
         for n, tl in enumerate(self.tls):
-            assert not lib._stm_in_transaction(tl)
+            if lib._stm_in_transaction(tl):
+                if self.current_thread != n:
+                    self.switch(n)
+                self.abort_transaction()
         #
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
