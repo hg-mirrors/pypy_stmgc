@@ -52,11 +52,21 @@ struct stm_priv_segment_info_s {
     struct list_s *objects_pointing_to_nursery;
     uint8_t privatization_lock;
 
+    struct stm_commit_log_entry_s *last_commit_log_entry;
+
     /* For debugging */
 #ifndef NDEBUG
     pthread_t running_pthread;
 #endif
 };
+
+/* Commit Log things */
+struct stm_commit_log_entry_s {
+    struct stm_commit_log_entry_s *next;
+    int segment_num;
+    object_t *written[];        /* terminated with a NULL ptr */
+};
+static struct stm_commit_log_entry_s commit_log_root = {NULL, -1};
 
 
 static char *stm_object_pages;

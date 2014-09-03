@@ -31,6 +31,8 @@ void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
+void stm_validate(void *free_if_abort);
+bool _check_stm_validate();
 
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
@@ -122,6 +124,10 @@ bool _check_commit_transaction(void) {
 
 bool _check_abort_transaction(void) {
     CHECKED(stm_abort_transaction());
+}
+
+bool _check_stm_validate(void) {
+    CHECKED(stm_validate(NULL));
 }
 
 #undef CHECKED
@@ -314,6 +320,9 @@ def stm_was_written(o):
 def stm_was_written_card(o):
     return lib._stm_was_written_card(o)
 
+def stm_validate():
+    if lib._check_stm_validate():
+        raise Conflict()
 
 def stm_start_safe_point():
     lib._stm_start_safe_point()
@@ -433,6 +442,7 @@ class BaseTest(object):
         #
         if lib._stm_in_transaction(tl2):
             lib._stm_test_switch(tl2)
+            stm_validate() # can raise
 
     def push_root(self, o):
         assert 0

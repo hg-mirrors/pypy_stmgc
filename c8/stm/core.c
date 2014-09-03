@@ -3,6 +3,85 @@
 #endif
 
 
+/* ############# commit log ############# */
+
+void _dbg_print_commit_log()
+{
+    struct stm_commit_log_entry_s *cl = &commit_log_root;
+
+    fprintf(stderr, "root (%p, %d)\n", cl->next, cl->segment_num);
+    while ((cl = cl->next)) {
+        size_t i = 0;
+        fprintf(stderr, "elem (%p, %d)\n", cl->next, cl->segment_num);
+        object_t *obj;
+        do {
+            obj = cl->written[i];
+            fprintf(stderr, "-> %p\n", obj);
+            i++;
+        } while ((obj = cl->written[i]));
+    }
+}
+
+void stm_validate(void *free_if_abort)
+{
+    struct stm_commit_log_entry_s *cl = STM_PSEGMENT->last_commit_log_entry;
+
+    /* Don't check 'cl'. This entry is already checked */
+    while ((cl = cl->next)) {
+        size_t i = 0;
+        OPT_ASSERT(cl->segment_num >= 0 && cl->segment_num < NB_SEGMENTS);
+
+        object_t *obj;
+        while ((obj = cl->written[i])) {
+            /* XXX: update our copies */
+
+            if (_stm_was_read(obj)) {
+                free(free_if_abort);
+                stm_abort_transaction();
+            }
+
+            i++;
+        };
+
+        /* last fully validated entry */
+        STM_PSEGMENT->last_commit_log_entry = cl;
+    }
+}
+
+static struct stm_commit_log_entry_s *_create_commit_log_entry()
+{
+    struct list_s *lst = STM_PSEGMENT->modified_old_objects;
+    size_t count = list_count(lst);
+    size_t byte_len = sizeof(struct stm_commit_log_entry_s) + (count + 1) * sizeof(object_t*);
+    struct stm_commit_log_entry_s *result = malloc(byte_len);
+    int i;
+
+    result->next = NULL;
+    result->segment_num = STM_SEGMENT->segment_num;
+    for (i = 0; i < count; i++) {
+        result->written[i] = (object_t*)list_item(lst, i);
+    }
+    result->written[count] = NULL;
+
+    return result;
+}
+
+static void _validate_and_add_to_commit_log()
+{
+    struct stm_commit_log_entry_s *new;
+    void* *to;
+
+    new = _create_commit_log_entry();
+    fprintf(stderr,"%p\n", new);
+    do {
+        stm_validate(new);
+
+        to = (void **)&(STM_PSEGMENT->last_commit_log_entry->next);
+    } while (!__sync_bool_compare_and_swap((void**)to, (void**)NULL, (void**)new));
+}
+
+/* ############# STM ############# */
+
 void _stm_write_slowpath(object_t *obj)
 {
     assert(_seems_to_be_running_transaction());
@@ -158,6 +237,8 @@ void stm_commit_transaction(void)
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
     minor_collection(1);
+
+    _validate_and_add_to_commit_log();
 
     s_mutex_lock();
 

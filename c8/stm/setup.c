@@ -107,6 +107,7 @@ void stm_setup(void)
         pr->pub.segment_base = segment_base;
         pr->modified_old_objects = list_create();
         pr->objects_pointing_to_nursery = list_create();
+        pr->last_commit_log_entry = &commit_log_root;
         pr->pub.transaction_read_version = 0xff;
     }
 
