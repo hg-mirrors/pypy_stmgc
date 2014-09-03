@@ -30,6 +30,11 @@ static inline bool _is_in_nursery(object_t *obj)
     return (uintptr_t)obj < NURSERY_END;
 }
 
+static inline bool _is_young(object_t *obj)
+{
+    return _is_in_nursery(obj); /* XXX: young_outside_nursery */
+}
+
 long stm_can_move(object_t *obj)
 {
     /* 'long' return value to avoid using 'bool' in the public interface */
@@ -38,6 +43,83 @@ long stm_can_move(object_t *obj)
 
 
 /************************************************************/
+#define GCWORD_MOVED  ((object_t *) -1)
+
+static void minor_trace_if_young(object_t **pobj)
+{
+    /* takes a normal pointer to a thread-local pointer to an object */
+    object_t *obj = *pobj;
+    object_t *nobj;
+    char *realobj;
+    size_t size;
+
+    if (obj == NULL)
+        return;
+    assert((uintptr_t)obj < NB_PAGES * 4096UL);
+
+    if (_is_in_nursery(obj)) {
+        /* If the object was already seen here, its first word was set
+           to GCWORD_MOVED.  In that case, the forwarding location, i.e.
+           where the object moved to, is stored in the second word in 'obj'. */
+        object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
+
+        realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+        size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+        /* XXX: small objs */
+        char *allocated = allocate_outside_nursery_large(size);
+        nobj = (object_t *)(allocated - stm_object_pages);
+
+        char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
+        memcpy(realnobj, realobj, size);
+
+        pforwarded_array[0] = GCWORD_MOVED;
+        pforwarded_array[1] = nobj;
+        *pobj = nobj;
+    }
+    else {
+        /* XXX: young_outside_nursery */
+        return;
+    }
+
+    /* Must trace the object later */
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, (uintptr_t)nobj);
+}
+
+
+static inline void _collect_now(object_t *obj)
+{
+    assert(!_is_young(obj));
+
+    dprintf(("_collect_now: %p\n", obj));
+
+    assert(!(obj->stm_flags & GCFLAG_WRITE_BARRIER));
+
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+
+    obj->stm_flags |= GCFLAG_WRITE_BARRIER;
+}
+
+
+static void collect_oldrefs_to_nursery(void)
+{
+    dprintf(("collect_oldrefs_to_nursery\n"));
+    struct list_s *lst = STM_PSEGMENT->objects_pointing_to_nursery;
+
+    while (!list_is_empty(lst)) {
+        object_t *obj = (object_t *)list_pop_item(lst);;
+
+        _collect_now(obj);
+
+        /* XXX: only if commit now and only for big objs */
+        _push_obj_to_other_segments(obj);
+
+        /* the list could have moved while appending */
+        lst = STM_PSEGMENT->objects_pointing_to_nursery;
+    }
+}
+
 
 static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 {
@@ -76,6 +158,8 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 static void _do_minor_collection(bool commit)
 {
     dprintf(("minor_collection commit=%d\n", (int)commit));
+
+    collect_oldrefs_to_nursery();
 
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
 

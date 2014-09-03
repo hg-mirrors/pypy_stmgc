@@ -109,6 +109,7 @@ struct object_s {
 };
 
 extern ssize_t stmcb_size_rounded_up(struct object_s *);
+void stmcb_trace(struct object_s *obj, void visit(object_t **));
 
 __attribute__((always_inline))
 static inline void stm_read(object_t *obj)
