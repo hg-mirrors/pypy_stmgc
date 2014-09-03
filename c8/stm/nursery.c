@@ -30,6 +30,12 @@ static inline bool _is_in_nursery(object_t *obj)
     return (uintptr_t)obj < NURSERY_END;
 }
 
+long stm_can_move(object_t *obj)
+{
+    /* 'long' return value to avoid using 'bool' in the public interface */
+    return _is_in_nursery(obj);
+}
+
 
 /************************************************************/
 
