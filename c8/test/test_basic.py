@@ -51,7 +51,7 @@ class TestBasic(BaseTest):
         stm_write(lp1)
         assert stm_was_written(lp1)
         assert modified_old_objects() == []             # object not old
-        assert objects_pointing_to_nursery() == None    # short transaction
+        assert objects_pointing_to_nursery() == []    # short transaction
         self.commit_transaction()
 
     def test_allocate_old(self):
@@ -214,7 +214,7 @@ class TestBasic(BaseTest):
         self.commit_transaction()
 
 
-        
+
     def test_start_transaction_updates(self):
         self.start_transaction()
         lp1 = stm_allocate(16)
@@ -233,7 +233,7 @@ class TestBasic(BaseTest):
         self.switch(0)
         self.start_transaction()
         assert stm_get_char(lp1) == 'b'
-        
+
 
     def test_resolve_no_conflict_empty(self):
         self.start_transaction()
@@ -254,11 +254,11 @@ class TestBasic(BaseTest):
         self.commit_transaction()
         lp1 = self.pop_root()
         # 'a' in SHARED_PAGE
-        
+
         self.start_transaction()
-        
+
         self.switch(1)
-        
+
         self.start_transaction()
         stm_write(lp1) # privatize page
         p1 = stm_get_real_address(lp1)
@@ -307,7 +307,7 @@ class TestBasic(BaseTest):
         self.push_root(lp1)
         self.commit_transaction()
         lp1 = self.pop_root()
-        
+
         self.start_transaction()
         stm_read(lp1)
         #
@@ -325,7 +325,7 @@ class TestBasic(BaseTest):
         self.push_root(lp1)
         self.commit_transaction()
         lp1 = self.pop_root()
-        
+
         self.start_transaction()
         #
         self.switch(1)
@@ -344,7 +344,7 @@ class TestBasic(BaseTest):
         self.push_root(lp1)
         self.commit_transaction()
         lp1 = self.pop_root()
-        
+
         self.start_transaction()
         stm_write(lp1) # acquire lock
         #

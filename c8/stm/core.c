@@ -5,7 +5,16 @@
 
 void _stm_write_slowpath(object_t *obj)
 {
+    assert(_seems_to_be_running_transaction());
+    assert(!_is_in_nursery(obj));
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
+    stm_read(obj);
+
+    LIST_APPEND(STM_PSEGMENT->modified_old_objects, obj);
+
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
 }
 
 static void reset_transaction_read_version(void)
@@ -54,6 +63,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
     }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
+    assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     check_nursery_at_transaction_start();
 }
 
@@ -75,6 +85,9 @@ long stm_start_transaction(stm_thread_local_t *tl)
 static void _finish_transaction()
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+
+    list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
+
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 }

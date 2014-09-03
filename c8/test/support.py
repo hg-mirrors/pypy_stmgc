@@ -54,7 +54,9 @@ void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
 
 long _stm_count_modified_old_objects(void);
+long _stm_count_objects_pointing_to_nursery(void);
 object_t *_stm_enum_modified_old_objects(long index);
+object_t *_stm_enum_objects_pointing_to_nursery(long index);
 
 void *memset(void *s, int c, size_t n);
 

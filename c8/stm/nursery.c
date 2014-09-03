@@ -77,6 +77,8 @@ static void _do_minor_collection(bool commit)
 {
     dprintf(("minor_collection commit=%d\n", (int)commit));
 
+    assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
+
     throw_away_nursery(get_priv_segment(STM_SEGMENT->segment_num));
 }
 

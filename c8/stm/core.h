@@ -51,6 +51,7 @@ struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
 
     struct list_s *modified_old_objects;
+    struct list_s *objects_pointing_to_nursery;
 
     /* For debugging */
 #ifndef NDEBUG
