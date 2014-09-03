@@ -15,7 +15,7 @@ static void teardown_gcpage(void)
 
 static void setup_N_pages(char *pages_addr, uint64_t num)
 {
-    pages_initialize_private((pages_addr - stm_object_pages) / 4096UL, num);
+    pages_initialize_shared((pages_addr - stm_object_pages) / 4096UL, num);
 }
 
 

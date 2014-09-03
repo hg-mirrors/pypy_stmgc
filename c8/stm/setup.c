@@ -2,6 +2,7 @@
 # error "must be compiled via stmgc.c"
 #endif
 
+#include <signal.h>
 
 #ifdef USE_REMAP_FILE_PAGES
 static char *setup_mmap(char *reason, int *ignored)
@@ -67,7 +68,30 @@ static void setup_protection_settings(void)
             mprotect(segment_base + 8192,
                      (FIRST_READMARKER_PAGE - 2) * 4096UL,
                      PROT_NONE);
+
+        if (i != 0) {
+            /* let's give all pages to segment 0 at first and make them
+               write-inaccessible everywhere else */
+            mprotect(segment_base + END_NURSERY_PAGE * 4096,
+                     (NB_PAGES - END_NURSERY_PAGE) * 4096,
+                     PROT_READ);
+        }
     }
+}
+
+static void setup_signal_handler(void)
+{
+    struct sigaction act;
+    memset(&act, 0, sizeof(act));
+
+	act.sa_sigaction = &_signal_handler;
+	/* The SA_SIGINFO flag tells sigaction() to use the sa_sigaction field, not sa_handler. */
+	act.sa_flags = SA_SIGINFO;
+
+	if (sigaction(SIGSEGV, &act, NULL) < 0) {
+		perror ("sigaction");
+		abort();
+	}
 }
 
 void stm_setup(void)
@@ -89,6 +113,7 @@ void stm_setup(void)
     stm_object_pages = setup_mmap("initial stm_object_pages mmap()",
                                   &stm_object_pages_fd);
     setup_protection_settings();
+    setup_signal_handler();
 
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
