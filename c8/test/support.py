@@ -38,6 +38,7 @@ bool _stm_was_written(object_t *obj);
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 int _stm_get_flags(object_t *obj);
+void _push_obj_to_other_segments(object_t *obj);
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 long stm_can_move(object_t *obj);
@@ -215,12 +216,14 @@ def stm_allocate_old(size):
     o = lib._stm_allocate_old(size)
     tid = 42 + size
     lib._set_type_id(o, tid)
+    lib._push_obj_to_other_segments(o)
     return o
 
 def stm_allocate_old_refs(n):
     o = lib._stm_allocate_old(HDR + n * WORD)
     tid = 421420 + n
     lib._set_type_id(o, tid)
+    lib._push_obj_to_other_segments(o)
     return o
 
 def stm_allocate(size):
