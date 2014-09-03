@@ -2,8 +2,22 @@
 # error "must be compiled via stmgc.c"
 #endif
 
+#include <signal.h>
+
+
+/* ############# signal handler ############# */
+
+void _signal_handler(int sig, siginfo_t *siginfo, void *context)
+{
+
+    if (siginfo->si_addr == NULL) {
+        /* send to GDB */
+        kill(getpid(), SIGINT);
+    }
+}
 
 /* ############# commit log ############# */
+
 
 void _dbg_print_commit_log()
 {
@@ -90,6 +104,26 @@ void _stm_write_slowpath(object_t *obj)
 
     stm_read(obj);
 
+    /* make other segments trap if accessing this object */
+    uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
+    char *realobj;
+    size_t obj_size;
+    uintptr_t i, end_page;
+
+    realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
+    end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
+
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        if (i == STM_SEGMENT->segment_num)
+            continue;
+
+        char *segment_base = get_segment_base(i);
+        mprotect(segment_base + first_page * 4096,
+                 (end_page - first_page + 1) * 4096, PROT_NONE);
+        dprintf(("prot %lu, len=%lu in seg %d\n", first_page, (end_page - first_page + 1), i));
+    }
+
     LIST_APPEND(STM_PSEGMENT->modified_old_objects, obj);
 
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
@@ -161,66 +195,6 @@ long stm_start_transaction(stm_thread_local_t *tl)
 
 
 /************************************************************/
-
-static void _page_wise_synchronize_object_now(object_t *obj)
-{
-    uintptr_t start = (uintptr_t)obj;
-    uintptr_t first_page = start / 4096UL;
-
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    ssize_t obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
-    assert(obj_size >= 16);
-    uintptr_t end = start + obj_size;
-    uintptr_t last_page = (end - 1) / 4096UL;
-    long i, myself = STM_SEGMENT->segment_num;
-
-    for (; first_page <= last_page; first_page++) {
-
-        uintptr_t copy_size;
-        if (first_page == last_page) {
-            /* this is the final fragment */
-            copy_size = end - start;
-        }
-        else {
-            /* this is a non-final fragment, going up to the
-               page's end */
-            copy_size = 4096 - (start & 4095);
-        }
-        /* double-check that the result fits in one page */
-        assert(copy_size > 0);
-        assert(copy_size + (start & 4095) <= 4096);
-
-        char *dst, *src;
-        src = REAL_ADDRESS(STM_SEGMENT->segment_base, start);
-        for (i = 0; i < NB_SEGMENTS; i++) {
-            if (i == myself)
-                continue;
-
-            dst = REAL_ADDRESS(get_segment_base(i), start);
-            if (is_private_page(i, first_page)) {
-                /* The page is a private page.  We need to diffuse this
-                   fragment of object from the shared page to this private
-                   page. */
-                if (copy_size == 4096)
-                    pagecopy(dst, src);
-                else
-                    memcpy(dst, src, copy_size);
-            }
-            else {
-                assert(!memcmp(dst, src, copy_size));  /* same page */
-            }
-        }
-
-        start = (start + 4096) & ~4095;
-    }
-}
-
-void _push_obj_to_other_segments(object_t *obj)
-{
-    acquire_privatization_lock();
-    _page_wise_synchronize_object_now(obj);
-    release_privatization_lock();
-}
 
 static void _finish_transaction()
 {

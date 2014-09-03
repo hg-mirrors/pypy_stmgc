@@ -139,9 +139,6 @@ static void collect_oldrefs_to_nursery(void)
 
         _collect_now(obj);
 
-        /* XXX: only if commit now and only for big objs */
-        _push_obj_to_other_segments(obj);
-
         /* the list could have moved while appending */
         lst = STM_PSEGMENT->objects_pointing_to_nursery;
     }
