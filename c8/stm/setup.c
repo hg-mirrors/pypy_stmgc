@@ -149,6 +149,45 @@ void stm_teardown(void)
     teardown_pages();
 }
 
+static void _shadowstack_trap_page(char *start, int prot)
+{
+    size_t bsize = STM_SHADOW_STACK_DEPTH * sizeof(struct stm_shadowentry_s);
+    char *end = start + bsize + 4095;
+    end -= (((uintptr_t)end) & 4095);
+    mprotect(end, 4096, prot);
+}
+
+static void _init_shadow_stack(stm_thread_local_t *tl)
+{
+    size_t bsize = STM_SHADOW_STACK_DEPTH * sizeof(struct stm_shadowentry_s);
+    char *start = malloc(bsize + 8192);  /* for the trap page, plus rounding */
+    if (!start)
+        stm_fatalerror("can't allocate shadow stack");
+
+    /* set up a trap page: if the shadowstack overflows, it will
+       crash in a clean segfault */
+    _shadowstack_trap_page(start, PROT_NONE);
+
+    struct stm_shadowentry_s *s = (struct stm_shadowentry_s *)start;
+    tl->shadowstack = s;
+    tl->shadowstack_base = s;
+    STM_PUSH_ROOT(*tl, -1);
+}
+
+static void _done_shadow_stack(stm_thread_local_t *tl)
+{
+    assert(tl->shadowstack > tl->shadowstack_base);
+    assert(tl->shadowstack_base->ss == (object_t *)-1);
+
+    char *start = (char *)tl->shadowstack_base;
+    _shadowstack_trap_page(start, PROT_READ | PROT_WRITE);
+
+    free(tl->shadowstack_base);
+    tl->shadowstack = NULL;
+    tl->shadowstack_base = NULL;
+}
+
+
 static pthread_t *_get_cpth(stm_thread_local_t *tl)
 {
     assert(sizeof(pthread_t) <= sizeof(tl->creating_pthread));
@@ -177,6 +216,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
     num = (num + 1) % NB_SEGMENTS;
     tl->associated_segment_num = num;
     *_get_cpth(tl) = pthread_self();
+    _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num));
     s_mutex_unlock();
 }
@@ -186,7 +226,7 @@ void stm_unregister_thread_local(stm_thread_local_t *tl)
     s_mutex_lock();
     assert(tl->prev != NULL);
     assert(tl->next != NULL);
-
+    _done_shadow_stack(tl);
     if (tl == stm_all_thread_locals) {
         stm_all_thread_locals = stm_all_thread_locals->next;
         if (tl == stm_all_thread_locals) {

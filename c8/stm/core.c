@@ -130,6 +130,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
 #ifndef NDEBUG
     STM_PSEGMENT->running_pthread = pthread_self();
 #endif
+    STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
 
     dprintf(("start_transaction\n"));
 
@@ -260,11 +261,30 @@ static void abort_data_structures_from_segment_num(int segment_num)
 #pragma push_macro("STM_SEGMENT")
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
-    /* struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num); */
+    struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
 
-    /* throw_away_nursery(pseg); */
+    throw_away_nursery(pseg);
 
-    /* reset_modified_from_other_segments(segment_num); */
+    /* XXX: reset_modified_from_other_segments(segment_num); */
+
+    stm_thread_local_t *tl = pseg->pub.running_thread;
+#ifdef STM_NO_AUTOMATIC_SETJMP
+    /* In tests, we don't save and restore the shadowstack correctly.
+       Be sure to not change items below shadowstack_at_start_of_transaction.
+       There is no such restrictions in non-Python-based tests. */
+    assert(tl->shadowstack >= pseg->shadowstack_at_start_of_transaction);
+    tl->shadowstack = pseg->shadowstack_at_start_of_transaction;
+#else
+    /* NB. careful, this function might be called more than once to
+       abort a given segment.  Make sure that
+       stm_rewind_jmp_restore_shadowstack() is idempotent. */
+    /* we need to do this here and not directly in rewind_longjmp() because
+       that is called when we already released everything (safe point)
+       and a concurrent major GC could mess things up. */
+    if (tl->shadowstack != NULL)
+        stm_rewind_jmp_restore_shadowstack(tl);
+    assert(tl->shadowstack == pseg->shadowstack_at_start_of_transaction);
+#endif
 
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")

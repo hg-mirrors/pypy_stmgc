@@ -87,6 +87,33 @@ static void minor_trace_if_young(object_t **pobj)
 }
 
 
+static void collect_roots_in_nursery(void)
+{
+    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+    struct stm_shadowentry_s *current = tl->shadowstack;
+    struct stm_shadowentry_s *finalbase = tl->shadowstack_base;
+    struct stm_shadowentry_s *ssbase;
+    ssbase = (struct stm_shadowentry_s *)tl->rjthread.moved_off_ssbase;
+    if (ssbase == NULL)
+        ssbase = finalbase;
+    else
+        assert(finalbase <= ssbase && ssbase <= current);
+
+    while (current > ssbase) {
+        --current;
+        uintptr_t x = (uintptr_t)current->ss;
+
+        if ((x & 3) == 0) {
+            /* the stack entry is a regular pointer (possibly NULL) */
+            minor_trace_if_young(&current->ss);
+        }
+        else {
+            /* it is an odd-valued marker, ignore */
+        }
+    }
+}
+
+
 static inline void _collect_now(object_t *obj)
 {
     assert(!_is_young(obj));
@@ -158,6 +185,8 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 static void _do_minor_collection(bool commit)
 {
     dprintf(("minor_collection commit=%d\n", (int)commit));
+
+    collect_roots_in_nursery();
 
     collect_oldrefs_to_nursery();
 

@@ -15,8 +15,14 @@ typedef struct {
 ...;
 } rewind_jmp_thread;
 
+struct stm_shadowentry_s {
+    object_t *ss;
+};
+
+
 typedef struct {
     rewind_jmp_thread rjthread;
+    struct stm_shadowentry_s *shadowstack, *shadowstack_base;
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
@@ -372,10 +378,15 @@ def old_objects_with_cards():
 
 
 
+SHADOWSTACK_LENGTH = 1000
 _keepalive = weakref.WeakKeyDictionary()
 
 def _allocate_thread_local():
     tl = ffi.new("stm_thread_local_t *")
+    ss = ffi.new("struct stm_shadowentry_s[]", SHADOWSTACK_LENGTH)
+    _keepalive[tl] = ss
+    tl.shadowstack = ss
+    tl.shadowstack_base = ss
     lib.stm_register_thread_local(tl)
     return tl
 
@@ -445,10 +456,22 @@ class BaseTest(object):
             stm_validate() # can raise
 
     def push_root(self, o):
-        assert 0
+        assert ffi.typeof(o) == ffi.typeof("object_t *")
+        tl = self.tls[self.current_thread]
+        curlength = tl.shadowstack - tl.shadowstack_base
+        assert 0 <= curlength < SHADOWSTACK_LENGTH
+        tl.shadowstack[0].ss = ffi.cast("object_t *", o)
+        tl.shadowstack += 1
 
     def pop_root(self):
-        assert 0
+        tl = self.tls[self.current_thread]
+        curlength = tl.shadowstack - tl.shadowstack_base
+        assert curlength >= 1
+        if curlength == 1:
+            raise EmptyStack
+        assert 0 < curlength <= SHADOWSTACK_LENGTH
+        tl.shadowstack -= 1
+        return ffi.cast("object_t *", tl.shadowstack[0].ss)
 
     def push_root_no_gc(self):
         "Pushes an invalid object, to crash in case the GC is called"
