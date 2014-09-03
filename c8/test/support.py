@@ -39,6 +39,7 @@ char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 int _stm_get_flags(object_t *obj);
 
+object_t *_stm_allocate_old(ssize_t size_rounded_up);
 long stm_can_move(object_t *obj);
 char *_stm_real_address(object_t *o);
 void _stm_test_switch(stm_thread_local_t *tl);

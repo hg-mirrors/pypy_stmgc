@@ -62,13 +62,15 @@ typedef struct stm_thread_local_s {
 
 void _stm_write_slowpath(object_t *);
 object_t *_stm_allocate_slowpath(ssize_t);
+
+object_t *_stm_allocate_old(ssize_t size_rounded_up);
+char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
 #include <stdbool.h>
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 
 long stm_can_move(object_t *obj);
-char *_stm_real_address(object_t *o);
 void _stm_test_switch(stm_thread_local_t *tl);
 
 char *_stm_get_segment_base(long index);

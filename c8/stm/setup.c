@@ -54,14 +54,8 @@ static void close_fd_mmap(int map_fd)
 
 static void setup_protection_settings(void)
 {
-    /* The segment 0 is not used to run transactions, but contains the
-       shared copy of the pages.  We mprotect all pages before so that
-       accesses fail, up to and including the pages corresponding to the
-       nurseries of the other segments. */
-    mprotect(stm_object_pages, END_NURSERY_PAGE * 4096UL, PROT_NONE);
-
     long i;
-    for (i = 1; i <= NB_SEGMENTS; i++) {
+    for (i = 0; i < NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
 
         /* In each segment, the first page is where TLPREFIX'ed
@@ -97,7 +91,7 @@ void stm_setup(void)
     setup_protection_settings();
 
     long i;
-    for (i = 1; i <= NB_SEGMENTS; i++) {
+    for (i = 0; i < NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
 
         /* Fill the TLS page (page 1) with 0xDC, for debugging */
@@ -108,7 +102,7 @@ void stm_setup(void)
 
         /* Initialize STM_PSEGMENT */
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
-        assert(1 <= i && i < 255);   /* 255 is WL_VISITED in gcpage.c */
+        assert(0 <= i && i < 255);   /* 255 is WL_VISITED in gcpage.c */
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
         pr->modified_old_objects = list_create();
@@ -127,6 +121,8 @@ void stm_setup(void)
 
     setup_sync();
     setup_nursery();
+    setup_gcpage();
+    setup_pages();
 }
 
 void stm_teardown(void)
@@ -136,7 +132,7 @@ void stm_teardown(void)
     assert(!_has_mutex());
 
     long i;
-    for (i = 1; i <= NB_SEGMENTS; i++) {
+    for (i = 0; i < NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
         assert(list_is_empty(pr->objects_pointing_to_nursery));
         list_free(pr->objects_pointing_to_nursery);
@@ -148,6 +144,8 @@ void stm_teardown(void)
     close_fd_mmap(stm_object_pages_fd);
 
     teardown_sync();
+    teardown_gcpage();
+    teardown_pages();
 }
 
 static pthread_t *_get_cpth(stm_thread_local_t *tl)
@@ -175,7 +173,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
     /* assign numbers consecutively, but that's for tests; we could also
        assign the same number to all of them and they would get their own
        numbers automatically. */
-    num = (num % NB_SEGMENTS) + 1;
+    num = (num + 1) % NB_SEGMENTS;
     tl->associated_segment_num = num;
     *_get_cpth(tl) = pthread_self();
     set_gs_register(get_segment_base(num));
