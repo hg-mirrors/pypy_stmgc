@@ -33,8 +33,6 @@
 #define NB_READMARKER_PAGES   (FIRST_OBJECT_PAGE - FIRST_READMARKER_PAGE)
 
 
-#define USE_REMAP_FILE_PAGES 1
-
 enum /* stm_flags */ {
     GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
 };
@@ -52,6 +50,7 @@ struct stm_priv_segment_info_s {
 
     struct list_s *modified_old_objects;
     struct list_s *objects_pointing_to_nursery;
+    uint8_t privatization_lock;
 
     /* For debugging */
 #ifndef NDEBUG
@@ -95,4 +94,18 @@ static inline void _duck(void) {
        This is not needed any more after applying the patch
        llvmfix/no-memset-creation-with-addrspace.diff. */
     asm("/* workaround for llvm bug */");
+}
+
+static inline void acquire_privatization_lock(void)
+{
+    uint8_t *lock = (uint8_t *)REAL_ADDRESS(STM_SEGMENT->segment_base,
+                                            &STM_PSEGMENT->privatization_lock);
+    spinlock_acquire(*lock);
+}
+
+static inline void release_privatization_lock(void)
+{
+    uint8_t *lock = (uint8_t *)REAL_ADDRESS(STM_SEGMENT->segment_base,
+                                            &STM_PSEGMENT->privatization_lock);
+    spinlock_release(*lock);
 }

@@ -73,7 +73,7 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
     assert(_is_tl_registered(tl));
 
     int num = tl->associated_segment_num;
-    if (sync_ctl.in_use1[num - 1] == 0) {
+    if (sync_ctl.in_use1[num] == 0) {
         /* fast-path: we can get the same segment number than the one
            we had before.  The value stored in GS is still valid. */
 #ifdef STM_TESTS
@@ -88,8 +88,8 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
        the condition variable. */
     int retries;
     for (retries = 0; retries < NB_SEGMENTS; retries++) {
-        num = (num % NB_SEGMENTS) + 1;
-        if (sync_ctl.in_use1[num - 1] == 0) {
+        num = num % NB_SEGMENTS;
+        if (sync_ctl.in_use1[num] == 0) {
             /* we're getting 'num', a different number. */
             dprintf(("acquired different segment: %d->%d\n", tl->associated_segment_num, num));
             tl->associated_segment_num = num;
@@ -105,7 +105,7 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
     return false;
 
  got_num:
-    sync_ctl.in_use1[num - 1] = 1;
+    sync_ctl.in_use1[num] = 1;
     assert(STM_SEGMENT->segment_num == num);
     assert(STM_SEGMENT->running_thread == NULL);
     STM_SEGMENT->running_thread = tl;
@@ -119,8 +119,8 @@ static void release_thread_segment(stm_thread_local_t *tl)
     assert(STM_SEGMENT->running_thread == tl);
     STM_SEGMENT->running_thread = NULL;
 
-    assert(sync_ctl.in_use1[tl->associated_segment_num - 1] == 1);
-    sync_ctl.in_use1[tl->associated_segment_num - 1] = 0;
+    assert(sync_ctl.in_use1[tl->associated_segment_num] == 1);
+    sync_ctl.in_use1[tl->associated_segment_num] = 0;
 }
 
 __attribute__((unused))
@@ -132,7 +132,7 @@ static bool _seems_to_be_running_transaction(void)
 bool _stm_in_transaction(stm_thread_local_t *tl)
 {
     int num = tl->associated_segment_num;
-    assert(1 <= num && num <= NB_SEGMENTS);
+    assert(0 <= num && num < NB_SEGMENTS);
     return get_segment(num)->running_thread == tl;
 }
 
