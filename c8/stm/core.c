@@ -85,7 +85,6 @@ void stm_commit_transaction(void)
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
     minor_collection(1);
-    abort();
 
     s_mutex_lock();
 
