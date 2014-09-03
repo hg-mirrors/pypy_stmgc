@@ -182,6 +182,22 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj)
     }
 }
 
+
+void stmcb_trace(struct object_s *obj, void visit(object_t **))
+{
+    int i;
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 421420) {
+        /* basic case: no references */
+        return;
+    }
+    for (i=0; i < myobj->type_id - 421420; i++) {
+        object_t **ref = ((object_t **)(myobj + 1)) + i;
+        visit(ref);
+    }
+}
+
+
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
                     ('STM_NO_AUTOMATIC_SETJMP', '1'),

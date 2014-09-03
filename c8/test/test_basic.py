@@ -62,6 +62,7 @@ class TestBasic(BaseTest):
 
     def test_write_on_old(self):
         lp1 = stm_allocate_old(16)
+
         self.start_transaction()
         assert stm_get_char(lp1) == '\0'
         stm_write(lp1)
@@ -80,6 +81,8 @@ class TestBasic(BaseTest):
     def test_read_write_1(self):
         lp1 = stm_allocate_old(16)
         stm_get_real_address(lp1)[HDR] = 'a' #setchar
+        lib._push_obj_to_other_segments(lp1)
+        #
         self.start_transaction()
         self.commit_transaction()
         #
@@ -88,7 +91,7 @@ class TestBasic(BaseTest):
         assert modified_old_objects() == []
         stm_write(lp1)
         assert modified_old_objects() == [lp1]
-        assert objects_pointing_to_nursery() == None
+        assert objects_pointing_to_nursery() == [lp1]
         assert stm_get_char(lp1) == 'a'
         stm_set_char(lp1, 'b')
         #
