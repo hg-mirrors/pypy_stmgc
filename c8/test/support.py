@@ -39,6 +39,10 @@ char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 int _stm_get_flags(object_t *obj);
 
+long stm_can_move(object_t *obj);
+char *_stm_real_address(object_t *o);
+void _stm_test_switch(stm_thread_local_t *tl);
+
 void clear_jmpbuf(stm_thread_local_t *tl);
 long stm_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
@@ -330,15 +334,10 @@ def old_objects_with_cards():
 
 
 
-SHADOWSTACK_LENGTH = 1000
 _keepalive = weakref.WeakKeyDictionary()
 
 def _allocate_thread_local():
     tl = ffi.new("stm_thread_local_t *")
-    ss = ffi.new("struct stm_shadowentry_s[]", SHADOWSTACK_LENGTH)
-    _keepalive[tl] = ss
-    tl.shadowstack = ss
-    tl.shadowstack_base = ss
     lib.stm_register_thread_local(tl)
     return tl
 
@@ -355,17 +354,10 @@ class BaseTest(object):
         lib.stmcb_expand_marker = ffi.NULL
         lib.stmcb_debug_print = ffi.NULL
         tl = self.tls[self.current_thread]
-        if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
-            self.commit_transaction()      # must succeed!
+        assert not lib._stm_in_transaction(tl)
         #
         for n, tl in enumerate(self.tls):
-            if lib._stm_in_transaction(tl):
-                if self.current_thread != n:
-                    self.switch(n)
-                if lib.stm_is_inevitable():
-                    self.commit_transaction()   # must succeed!
-                else:
-                    self.abort_transaction()
+            assert not lib._stm_in_transaction(tl)
         #
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
@@ -405,34 +397,18 @@ class BaseTest(object):
 
     def switch(self, thread_num):
         assert thread_num != self.current_thread
-        tl = self.tls[self.current_thread]
-        if lib._stm_in_transaction(tl):
-            stm_start_safe_point()
         #
         self.current_thread = thread_num
         tl2 = self.tls[thread_num]
         #
         if lib._stm_in_transaction(tl2):
             lib._stm_test_switch(tl2)
-            stm_stop_safe_point() # can raise Conflict
 
     def push_root(self, o):
-        assert ffi.typeof(o) == ffi.typeof("object_t *")
-        tl = self.tls[self.current_thread]
-        curlength = tl.shadowstack - tl.shadowstack_base
-        assert 0 <= curlength < SHADOWSTACK_LENGTH
-        tl.shadowstack[0].ss = ffi.cast("object_t *", o)
-        tl.shadowstack += 1
+        assert 0
 
     def pop_root(self):
-        tl = self.tls[self.current_thread]
-        curlength = tl.shadowstack - tl.shadowstack_base
-        assert curlength >= 1
-        if curlength == 1:
-            raise EmptyStack
-        assert 0 < curlength <= SHADOWSTACK_LENGTH
-        tl.shadowstack -= 1
-        return ffi.cast("object_t *", tl.shadowstack[0].ss)
+        assert 0
 
     def push_root_no_gc(self):
         "Pushes an invalid object, to crash in case the GC is called"
@@ -451,13 +427,3 @@ class BaseTest(object):
     def set_thread_local_obj(self, newobj):
         tl = self.tls[self.current_thread]
         tl.thread_local_obj = newobj
-
-    def become_inevitable(self):
-        tl = self.tls[self.current_thread]
-        if lib._check_become_inevitable(tl):
-            raise Conflict()
-
-    def become_globally_unique_transaction(self):
-        tl = self.tls[self.current_thread]
-        if lib._check_become_globally_unique_transaction(tl):
-            raise Conflict()
