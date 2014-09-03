@@ -159,6 +159,7 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
 
 long stm_start_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
+void stm_abort_transaction(void) __attribute__((noreturn));
 
 
 /* ==================== END ==================== */

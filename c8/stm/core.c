@@ -99,3 +99,57 @@ void stm_commit_transaction(void)
 
     s_mutex_unlock();
 }
+
+
+static void abort_data_structures_from_segment_num(int segment_num)
+{
+#pragma push_macro("STM_PSEGMENT")
+#pragma push_macro("STM_SEGMENT")
+#undef STM_PSEGMENT
+#undef STM_SEGMENT
+    /* struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num); */
+
+    /* throw_away_nursery(pseg); */
+
+    /* reset_modified_from_other_segments(segment_num); */
+
+#pragma pop_macro("STM_SEGMENT")
+#pragma pop_macro("STM_PSEGMENT")
+}
+
+
+static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
+{
+    assert(_has_mutex());
+    dprintf(("~~~ ABORT\n"));
+
+    assert(STM_PSEGMENT->running_pthread == pthread_self());
+
+    abort_data_structures_from_segment_num(STM_SEGMENT->segment_num);
+
+    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+
+    _finish_transaction();
+    /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
+
+    return tl;
+}
+
+
+#ifdef STM_NO_AUTOMATIC_SETJMP
+void _test_run_abort(stm_thread_local_t *tl) __attribute__((noreturn));
+#endif
+
+void stm_abort_transaction(void)
+{
+    s_mutex_lock();
+    stm_thread_local_t *tl = abort_with_mutex_no_longjmp();
+    s_mutex_unlock();
+
+#ifdef STM_NO_AUTOMATIC_SETJMP
+    _test_run_abort(tl);
+#else
+    s_mutex_lock();
+    stm_rewind_jmp_longjmp(tl);
+#endif
+}
