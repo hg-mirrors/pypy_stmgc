@@ -48,9 +48,16 @@ struct stm_segment_info_s {
 #define STM_SEGMENT           ((stm_segment_info_t *)4352)
 
 
+struct stm_shadowentry_s {
+    /* Like stm_read_marker_s, this is a struct to enable better
+       aliasing analysis in the C code. */
+    object_t *ss;
+};
+
 typedef struct stm_thread_local_s {
     /* rewind_setjmp's interface */
     rewind_jmp_thread rjthread;
+    struct stm_shadowentry_s *shadowstack, *shadowstack_base;
     /* the next fields are handled internally by the library */
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
@@ -146,6 +153,10 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
 void stm_setup(void);
 void stm_teardown(void);
 
+#define STM_SHADOW_STACK_DEPTH   163840
+#define STM_PUSH_ROOT(tl, p)   ((tl).shadowstack++->ss = (object_t *)(p))
+#define STM_POP_ROOT(tl, p)    ((p) = (typeof(p))((--(tl).shadowstack)->ss))
+#define STM_POP_ROOT_RET(tl)   ((--(tl).shadowstack)->ss)
 
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
@@ -162,6 +173,13 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
     rewind_jmp_longjmp(&(tl)->rjthread)
 #define stm_rewind_jmp_forget(tl)                  \
     rewind_jmp_forget(&(tl)->rjthread)
+#define stm_rewind_jmp_restore_shadowstack(tl)  do {     \
+    assert(rewind_jmp_armed(&(tl)->rjthread));           \
+    (tl)->shadowstack = (struct stm_shadowentry_s *)     \
+        rewind_jmp_restore_shadowstack(&(tl)->rjthread); \
+} while (0)
+#define stm_rewind_jmp_enum_shadowstack(tl, callback)    \
+    rewind_jmp_enum_shadowstack(&(tl)->rjthread, callback)
 
 
 long stm_start_transaction(stm_thread_local_t *tl);
