@@ -15,6 +15,8 @@ void _signal_handler(int sig, siginfo_t *siginfo, void *context)
         /* send to GDB */
         kill(getpid(), SIGINT);
     }
+    /* XXX: should we save 'errno'? */
+
     /* make PROT_READWRITE again and validate */
     int segnum = get_segment_of_linear_address(addr);
     OPT_ASSERT(segnum == STM_SEGMENT->segment_num);
@@ -25,6 +27,8 @@ void _signal_handler(int sig, siginfo_t *siginfo, void *context)
     /* XXX: missing synchronisation: we may change protection, then
        another thread changes it back, then we try to privatize that
        calls page_copy() and traps */
+    /* XXX: mprotect is not reentrant and interruptible by signals,
+       so it needs additional synchronisation.*/
     mprotect(seg_base + pagenum * 4096UL, 4096, PROT_READ|PROT_WRITE);
     page_privatize(pagenum);
 
