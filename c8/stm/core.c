@@ -45,7 +45,8 @@ void _signal_handler(int sig, siginfo_t *siginfo, void *context)
 
 void _dbg_print_commit_log()
 {
-    struct stm_commit_log_entry_s *cl = &commit_log_root;
+    volatile struct stm_commit_log_entry_s *cl = (volatile struct stm_commit_log_entry_s *)
+        &commit_log_root;
 
     fprintf(stderr, "root (%p, %d)\n", cl->next, cl->segment_num);
     while ((cl = cl->next)) {
@@ -70,7 +71,8 @@ static void _update_obj_from(int from_seg, object_t *obj)
 
 void stm_validate(void *free_if_abort)
 {
-    struct stm_commit_log_entry_s *cl = STM_PSEGMENT->last_commit_log_entry;
+    volatile struct stm_commit_log_entry_s *cl = (volatile struct stm_commit_log_entry_s *)
+        STM_PSEGMENT->last_commit_log_entry;
 
     /* Don't check 'cl'. This entry is already checked */
     while ((cl = cl->next)) {
@@ -79,10 +81,6 @@ void stm_validate(void *free_if_abort)
 
         object_t *obj;
         while ((obj = cl->written[i])) {
-            /* in case this entry's transaction has not yet discarded
-               the backup copies, wait. */
-            while (cl->committing)
-                spin_loop();
 
             _update_obj_from(cl->segment_num, obj);
 
@@ -95,33 +93,37 @@ void stm_validate(void *free_if_abort)
         };
 
         /* last fully validated entry */
-        STM_PSEGMENT->last_commit_log_entry = cl;
+        STM_PSEGMENT->last_commit_log_entry = (struct stm_commit_log_entry_s *)cl;
     }
 }
 
 static struct stm_commit_log_entry_s *_create_commit_log_entry()
 {
-    struct list_s *lst = STM_PSEGMENT->modified_old_objects;
-    size_t count = list_count(lst);
+    struct tree_s *tree = STM_PSEGMENT->modified_old_objects;
+    size_t count = tree_count(tree);
     size_t byte_len = sizeof(struct stm_commit_log_entry_s) + (count + 1) * sizeof(object_t*);
     struct stm_commit_log_entry_s *result = malloc(byte_len);
-    int i;
 
     result->next = NULL;
     result->segment_num = STM_SEGMENT->segment_num;
-    for (i = 0; i < count; i++) {
-        result->written[i] = (object_t*)list_item(lst, i);
-    }
+
+    int i = 0;
+    wlog_t *item;
+    TREE_LOOP_FORWARD(tree, item);
+    result->written[i] = (object_t*)item->addr;
+    i++;
+    TREE_LOOP_END;
+
+    OPT_ASSERT(count == i);
     result->written[count] = NULL;
-    result->committing = false;
-    spinlock_acquire(result->committing); /* =true */
 
     return result;
 }
 
 static struct stm_commit_log_entry_s *_validate_and_add_to_commit_log()
 {
-    struct stm_commit_log_entry_s *new, **to;
+    struct stm_commit_log_entry_s *new;
+    volatile struct stm_commit_log_entry_s **to;
 
     new = _create_commit_log_entry();
     fprintf(stderr,"%p\n", new);
@@ -169,7 +171,7 @@ void _stm_write_slowpath(object_t *obj)
         dprintf(("prot %lu, len=%lu in seg %lu\n", first_page, (end_page - first_page + 1), i));
     }
 
-    LIST_APPEND(STM_PSEGMENT->modified_old_objects, obj);
+    tree_insert(STM_PSEGMENT->modified_old_objects, (uintptr_t)obj, 0);
 
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
@@ -221,7 +223,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
         reset_transaction_read_version();
     }
 
-    assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
+    assert(tree_count(STM_PSEGMENT->modified_old_objects) == 0);
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     check_nursery_at_transaction_start();
 }
@@ -260,7 +262,6 @@ void stm_commit_transaction(void)
 
     struct stm_commit_log_entry_s* entry = _validate_and_add_to_commit_log();
     /* XXX:discard backup copies */
-    spinlock_release(entry->committing);
 
     s_mutex_lock();
 

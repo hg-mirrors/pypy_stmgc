@@ -48,7 +48,7 @@ long _stm_count_modified_old_objects(void)
 {
     if (STM_PSEGMENT->modified_old_objects == NULL)
         return -1;
-    return list_count(STM_PSEGMENT->modified_old_objects);
+    return tree_count(STM_PSEGMENT->modified_old_objects);
 }
 
 long _stm_count_objects_pointing_to_nursery(void)
@@ -60,8 +60,8 @@ long _stm_count_objects_pointing_to_nursery(void)
 
 object_t *_stm_enum_modified_old_objects(long index)
 {
-    return (object_t *)list_item(
-        STM_PSEGMENT->modified_old_objects, index);
+    wlog_t* entry = tree_item(STM_PSEGMENT->modified_old_objects, index);
+    return (object_t*)entry->addr;
 }
 
 object_t *_stm_enum_objects_pointing_to_nursery(long index)
