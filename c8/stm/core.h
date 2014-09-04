@@ -48,6 +48,7 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
 
+    uint8_t modified_objs_lock;
     struct tree_s *modified_old_objects;
     struct list_s *objects_pointing_to_nursery;
     uint8_t privatization_lock;
@@ -125,5 +126,19 @@ static inline void release_privatization_lock(void)
 {
     uint8_t *lock = (uint8_t *)REAL_ADDRESS(STM_SEGMENT->segment_base,
                                             &STM_PSEGMENT->privatization_lock);
+    spinlock_release(*lock);
+}
+
+static inline void acquire_modified_objs_lock(int segnum)
+{
+    uint8_t *lock = (uint8_t *)REAL_ADDRESS(get_segment_base(segnum),
+                                            &STM_PSEGMENT->modified_objs_lock);
+    spinlock_acquire(*lock);
+}
+
+static inline void release_modified_objs_lock(int segnum)
+{
+    uint8_t *lock = (uint8_t *)REAL_ADDRESS(get_segment_base(segnum),
+                                            &STM_PSEGMENT->modified_objs_lock);
     spinlock_release(*lock);
 }

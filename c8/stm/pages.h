@@ -19,14 +19,23 @@ struct page_shared_s {
 };
 
 static struct page_shared_s pages_privatized[PAGE_FLAG_END - PAGE_FLAG_START];
+static struct page_shared_s pages_readable[PAGE_FLAG_END - PAGE_FLAG_START];
 
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
 static void page_privatize(uintptr_t pagenum);
-
+static void pages_set_protection(int segnum, uintptr_t pagenum,
+                                 uintptr_t count, int prot);
 
 static inline bool is_private_page(long segnum, uintptr_t pagenum)
 {
     assert(pagenum >= PAGE_FLAG_START);
     uint64_t bitmask = 1UL << segnum;
     return (pages_privatized[pagenum - PAGE_FLAG_START].by_segment & bitmask);
+}
+
+static inline bool is_readable_page(long segnum, uintptr_t pagenum)
+{
+    assert(pagenum >= PAGE_FLAG_START);
+    uint64_t bitmask = 1UL << segnum;
+    return (pages_readable[pagenum - PAGE_FLAG_START].by_segment & bitmask);
 }

@@ -1,7 +1,7 @@
 #ifndef _STM_CORE_H_
 # error "must be compiled via stmgc.c"
 #endif
-
+#include <signal.h>
 
 /************************************************************/
 
@@ -67,12 +67,28 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
         d_remap_file_pages(segment_base + pagenum * 4096UL,
                            count * 4096UL, pagenum);
     }
+
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        uint64_t bitmask = 1UL << i;
+        uintptr_t amount = count;
+        while (amount-->0) {
+            volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
+                &pages_readable[pagenum + amount - PAGE_FLAG_START];
+            if (i == 0) {
+                /* readable */
+                ps->by_segment |= bitmask;
+            } else {
+                /* not readable (ensured in setup.c) */
+                ps->by_segment &= ~bitmask;
+            }
+        }
+    }
 }
 
 static void page_privatize(uintptr_t pagenum)
 {
     /* check this thread's 'pages_privatized' bit */
-    uint64_t bitmask = 1UL << (STM_SEGMENT->segment_num - 1);
+    uint64_t bitmask = 1UL << STM_SEGMENT->segment_num;
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_privatized[pagenum - PAGE_FLAG_START];
     if (ps->by_segment & bitmask) {
@@ -101,5 +117,29 @@ static void page_privatize(uintptr_t pagenum)
 
     for (i = NB_SEGMENTS-1; i >= 0; i--) {
         spinlock_release(get_priv_segment(i)->privatization_lock);
+    }
+}
+
+static void pages_set_protection(int segnum, uintptr_t pagenum,
+                                 uintptr_t count, int prot)
+{
+    char *addr = get_segment_base(segnum) + pagenum * 4096UL;
+    mprotect(addr, count * 4096UL, prot);
+
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        uint64_t bitmask = 1UL << i;
+        uintptr_t amount = count;
+        while (amount-->0) {
+            volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
+                &pages_readable[pagenum + amount - PAGE_FLAG_START];
+            if (prot == PROT_NONE) {
+                /* not readable */
+                ps->by_segment &= ~bitmask;
+            } else {
+                assert(prot == (PROT_READ|PROT_WRITE));
+                ps->by_segment |= bitmask;
+            }
+        }
     }
 }
