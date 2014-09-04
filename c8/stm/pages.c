@@ -74,12 +74,17 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
         while (amount-->0) {
             volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
                 &pages_readable[pagenum + amount - PAGE_FLAG_START];
+            volatile struct page_shared_s *ps2 = (volatile struct page_shared_s *)
+                &pages_privatized[pagenum + amount - PAGE_FLAG_START];
+
             if (i == 0) {
-                /* readable */
+                /* readable & private */
                 ps->by_segment |= bitmask;
+                ps2->by_segment |= bitmask;
             } else {
-                /* not readable (ensured in setup.c) */
+                /* not readable (ensured in setup.c), not private */
                 ps->by_segment &= ~bitmask;
+                ps2->by_segment &= ~bitmask;
             }
         }
     }
@@ -87,6 +92,9 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
 
 static void page_privatize(uintptr_t pagenum)
 {
+    /* hopefully holding the lock */
+    assert(STM_PSEGMENT->privatization_lock);
+
     /* check this thread's 'pages_privatized' bit */
     uint64_t bitmask = 1UL << STM_SEGMENT->segment_num;
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
@@ -94,11 +102,6 @@ static void page_privatize(uintptr_t pagenum)
     if (ps->by_segment & bitmask) {
         /* the page is already privatized; nothing to do */
         return;
-    }
-
-    long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        spinlock_acquire(get_priv_segment(i)->privatization_lock);
     }
 
     /* add this thread's 'pages_privatized' bit */
@@ -111,18 +114,14 @@ static void page_privatize(uintptr_t pagenum)
     uintptr_t pagenum_in_file = NB_PAGES * STM_SEGMENT->segment_num + pagenum;
     char *new_page = stm_object_pages + pagenum_in_file * 4096UL;
     d_remap_file_pages(new_page, 4096, pagenum_in_file);
-
-    /* copy the content from the shared (segment 0) source */
-    pagecopy(new_page, stm_object_pages + pagenum * 4096UL);
-
-    for (i = NB_SEGMENTS-1; i >= 0; i--) {
-        spinlock_release(get_priv_segment(i)->privatization_lock);
-    }
 }
 
 static void pages_set_protection(int segnum, uintptr_t pagenum,
                                  uintptr_t count, int prot)
 {
+    /* we hopefully hold the privatization lock: */
+    assert(get_priv_segment(segnum)->privatization_lock);
+
     char *addr = get_segment_base(segnum) + pagenum * 4096UL;
     mprotect(addr, count * 4096UL, prot);
 
