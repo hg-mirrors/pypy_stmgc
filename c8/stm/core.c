@@ -29,7 +29,8 @@ void _signal_handler(int sig, siginfo_t *siginfo, void *context)
        calls page_copy() and traps */
     /* XXX: mprotect is not reentrant and interruptible by signals,
        so it needs additional synchronisation.*/
-    mprotect(seg_base + pagenum * 4096UL, 4096, PROT_READ|PROT_WRITE);
+    pages_set_protection(segnum, pagenum, 1, PROT_READ|PROT_WRITE);
+
     page_privatize(pagenum);
 
     /* XXX: ... what can go wrong when we abort from inside
@@ -74,6 +75,7 @@ void stm_validate(void *free_if_abort)
     volatile struct stm_commit_log_entry_s *cl = (volatile struct stm_commit_log_entry_s *)
         STM_PSEGMENT->last_commit_log_entry;
 
+    bool needs_abort = false;
     /* Don't check 'cl'. This entry is already checked */
     while ((cl = cl->next)) {
         size_t i = 0;
@@ -81,12 +83,10 @@ void stm_validate(void *free_if_abort)
 
         object_t *obj;
         while ((obj = cl->written[i])) {
-
             _update_obj_from(cl->segment_num, obj);
 
-            if (_stm_was_read(obj)) {
-                free(free_if_abort);
-                stm_abort_transaction();
+            if (!needs_abort &&_stm_was_read(obj)) {
+                needs_abort = true;
             }
 
             i++;
@@ -94,6 +94,11 @@ void stm_validate(void *free_if_abort)
 
         /* last fully validated entry */
         STM_PSEGMENT->last_commit_log_entry = (struct stm_commit_log_entry_s *)cl;
+    }
+
+    if (needs_abort) {
+        free(free_if_abort);
+        stm_abort_transaction();
     }
 }
 
@@ -156,22 +161,27 @@ void _stm_write_slowpath(object_t *obj)
     char *realobj;
     size_t obj_size;
     uintptr_t i, end_page;
+    int my_segnum = STM_SEGMENT->segment_num;
 
     realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
     end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
 
     for (i = 0; i < NB_SEGMENTS; i++) {
-        if (i == STM_SEGMENT->segment_num)
+        if (i == my_segnum)
+            continue;
+        if (!is_readable_page(i, first_page))
             continue;
         /* XXX: only do it if not already PROT_NONE */
         char *segment_base = get_segment_base(i);
-        mprotect(segment_base + first_page * 4096,
-                 (end_page - first_page + 1) * 4096, PROT_NONE);
+        pages_set_protection(i, first_page, end_page - first_page + 1,
+                             PROT_NONE);
         dprintf(("prot %lu, len=%lu in seg %lu\n", first_page, (end_page - first_page + 1), i));
     }
 
+    acquire_modified_objs_lock(my_segnum);
     tree_insert(STM_PSEGMENT->modified_old_objects, (uintptr_t)obj, 0);
+    release_modified_objs_lock(my_segnum);
 
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
@@ -261,7 +271,9 @@ void stm_commit_transaction(void)
     minor_collection(1);
 
     struct stm_commit_log_entry_s* entry = _validate_and_add_to_commit_log();
+    acquire_modified_objs_lock(STM_SEGMENT->segment_num);
     /* XXX:discard backup copies */
+    release_modified_objs_lock(STM_SEGMENT->segment_num);
 
     s_mutex_lock();
 

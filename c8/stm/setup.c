@@ -75,6 +75,8 @@ static void setup_protection_settings(void)
             mprotect(segment_base + END_NURSERY_PAGE * 4096,
                      (NB_PAGES - END_NURSERY_PAGE) * 4096,
                      PROT_NONE);
+            /* pages_initialize_shared() makes sure pages_readable
+               is initialized correctly */
         }
     }
 }
