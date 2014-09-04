@@ -1,3 +1,22 @@
+/*
+  We have logical pages: one %gs relative pointer can point in some
+      logical page
+  We have virtual pages: one virtual address can point in some
+      virtual page. We have NB_SEGMENTS virtual pages per logical page.
+  We have file pages: they correspond mostly to physical memory pages
+      used for mmap/remap_file_pages
+
+  A logical page is SHARED iff all NB_SEGMENTS virtual pages point to
+  one file page, and thus to the same logical page.
+
+  A logical page becomes PRIVATE if one virtual page still maps to the
+  original file page, and all others turn read protected.
+   -> only one can modify it.
+
+  A logical page can also be "PRIVATE IN A SEGMENT", referring to
+  the virtual page of the segment having its own file page backing.
+  It also implies the logical page is not read protected.
+*/
 
 #define PAGE_FLAG_START   END_NURSERY_PAGE
 #define PAGE_FLAG_END     NB_PAGES
