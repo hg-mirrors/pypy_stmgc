@@ -113,6 +113,7 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry()
         result->written[i] = (object_t*)list_item(lst, i);
     }
     result->written[count] = NULL;
+    result->committing = false;
     spinlock_acquire(result->committing); /* =true */
 
     return result;
