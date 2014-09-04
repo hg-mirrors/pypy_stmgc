@@ -60,6 +60,14 @@ void _dbg_print_commit_log()
     }
 }
 
+static void _update_obj_from(int from_seg, object_t *obj)
+{
+    /* check if its pages are private, only then we need
+       to update them. If they are also still read-protected,
+       we may trigger the signal handler. This would cause
+       it to also enter stm_validate()..... */
+}
+
 void stm_validate(void *free_if_abort)
 {
     struct stm_commit_log_entry_s *cl = STM_PSEGMENT->last_commit_log_entry;
@@ -71,7 +79,12 @@ void stm_validate(void *free_if_abort)
 
         object_t *obj;
         while ((obj = cl->written[i])) {
-            /* XXX: update our copies */
+            /* in case this entry's transaction has not yet discarded
+               the backup copies, wait. */
+            while (cl->committing)
+                spin_loop();
+
+            _update_obj_from(cl->segment_num, obj);
 
             if (_stm_was_read(obj)) {
                 free(free_if_abort);
@@ -100,11 +113,12 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry()
         result->written[i] = (object_t*)list_item(lst, i);
     }
     result->written[count] = NULL;
+    spinlock_acquire(result->committing); /* =true */
 
     return result;
 }
 
-static void _validate_and_add_to_commit_log()
+static struct stm_commit_log_entry_s *_validate_and_add_to_commit_log()
 {
     struct stm_commit_log_entry_s *new;
     void* *to;
@@ -116,6 +130,8 @@ static void _validate_and_add_to_commit_log()
 
         to = (void **)&(STM_PSEGMENT->last_commit_log_entry->next);
     } while (!__sync_bool_compare_and_swap((void**)to, (void**)NULL, (void**)new));
+
+    return new;
 }
 
 /* ############# STM ############# */
@@ -242,9 +258,9 @@ void stm_commit_transaction(void)
 
     minor_collection(1);
 
-    _validate_and_add_to_commit_log();
-
+    struct stm_commit_log_entry_s* entry = _validate_and_add_to_commit_log();
     /* XXX:discard backup copies */
+    spinlock_release(entry->committing);
 
     s_mutex_lock();
 
