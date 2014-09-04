@@ -56,7 +56,7 @@ class TestBasic(BaseTest):
 
     def test_allocate_old(self):
         lp1 = stm_allocate_old(16)
-        self.switch(1)
+        self.switch(1) # actually has not much of an effect...
         lp2 = stm_allocate_old(16)
         assert lp1 != lp2
 

@@ -70,11 +70,11 @@ static void setup_protection_settings(void)
                      PROT_NONE);
 
         if (i != 0) {
-            /* let's give all pages to segment 0 at first and make them
-               write-inaccessible everywhere else */
+            /* let's give all pages to segment 0 at first, all others
+               need to trap and look for the backup copy */
             mprotect(segment_base + END_NURSERY_PAGE * 4096,
                      (NB_PAGES - END_NURSERY_PAGE) * 4096,
-                     PROT_READ);
+                     PROT_NONE);
         }
     }
 }
@@ -232,13 +232,12 @@ void stm_register_thread_local(stm_thread_local_t *tl)
         tl->prev = stm_all_thread_locals->prev;
         stm_all_thread_locals->prev->next = tl;
         stm_all_thread_locals->prev = tl;
-        num = tl->prev->associated_segment_num;
+        num = (tl->prev->associated_segment_num + 1) % NB_SEGMENTS;
     }
 
     /* assign numbers consecutively, but that's for tests; we could also
        assign the same number to all of them and they would get their own
        numbers automatically. */
-    num = (num + 1) % NB_SEGMENTS;
     tl->associated_segment_num = num;
     *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);

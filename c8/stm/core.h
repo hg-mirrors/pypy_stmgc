@@ -95,6 +95,12 @@ struct stm_priv_segment_info_s *get_priv_segment(long segment_num) {
         get_segment_base(segment_num), STM_PSEGMENT);
 }
 
+static inline int get_segment_of_linear_address(char *addr) {
+    assert(addr > stm_object_pages && addr < stm_object_pages + TOTAL_MEMORY);
+    return (addr - stm_object_pages) / (NB_PAGES * 4096UL);
+}
+
+
 static bool _is_tl_registered(stm_thread_local_t *tl);
 static bool _seems_to_be_running_transaction(void);
 

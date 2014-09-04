@@ -51,5 +51,7 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
     object_t *o = (object_t *)(p - stm_object_pages);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
 
+    dprintf(("allocate_old(%lu): %p, seg=%d\n", size_rounded_up, p,
+             get_segment_of_linear_address(p)));
     return o;
 }
