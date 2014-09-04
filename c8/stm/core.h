@@ -48,7 +48,7 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
 
-    struct list_s *modified_old_objects;
+    struct tree_s *modified_old_objects;
     struct list_s *objects_pointing_to_nursery;
     uint8_t privatization_lock;
 
@@ -64,8 +64,7 @@ struct stm_priv_segment_info_s {
 
 /* Commit Log things */
 struct stm_commit_log_entry_s {
-    struct stm_commit_log_entry_s *next;
-    bool committing;            /* true while not yet removed backup copies */
+    volatile struct stm_commit_log_entry_s *next;
     int segment_num;
     object_t *written[];        /* terminated with a NULL ptr */
 };

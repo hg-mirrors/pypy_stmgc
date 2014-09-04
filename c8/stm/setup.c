@@ -130,7 +130,7 @@ void stm_setup(void)
         assert(0 <= i && i < 255);   /* 255 is WL_VISITED in gcpage.c */
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
-        pr->modified_old_objects = list_create();
+        pr->modified_old_objects = tree_create();
         pr->objects_pointing_to_nursery = list_create();
         pr->last_commit_log_entry = &commit_log_root;
         pr->pub.transaction_read_version = 0xff;
@@ -162,7 +162,7 @@ void stm_teardown(void)
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
         assert(list_is_empty(pr->objects_pointing_to_nursery));
         list_free(pr->objects_pointing_to_nursery);
-        list_free(pr->modified_old_objects);
+        tree_free(pr->modified_old_objects);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);

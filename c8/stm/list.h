@@ -125,6 +125,7 @@ typedef struct {
 
 struct tree_s {
     char *raw_start, *raw_current, *raw_end;
+    uintptr_t count;
     wlog_node_t toplevel;
 };
 
@@ -137,12 +138,16 @@ static inline bool tree_is_cleared(struct tree_s *tree) {
     return tree->raw_current == tree->raw_start;
 }
 
+static inline uintptr_t tree_count(struct tree_s *tree) {
+    return tree->count;
+}
+
 #define _TREE_LOOP(tree, item, INITIAL, _PLUS_)                         \
 {                                                                       \
   struct { char **next; char **end; } _stack[TREE_DEPTH_MAX], *_stackp; \
   char **_next, **_end, *_entry;                                        \
   long _deleted_factor = 0;                                             \
-  struct tree_s *_tree = &(tree);                                       \
+  struct tree_s *_tree = (tree);                                       \
   /* initialization */                                                  \
   _stackp = _stack;      /* empty stack */                              \
   _next = _tree->toplevel.items + INITIAL;                              \
@@ -189,12 +194,12 @@ static inline bool tree_is_cleared(struct tree_s *tree) {
 #define TREE_LOOP_END     } }
 #define TREE_LOOP_END_AND_COMPRESS                                       \
                          } if (_deleted_factor > 9) _tree_compress(_tree); }
-#define TREE_LOOP_DELETE(item)  { (item)->addr = NULL; _deleted_factor += 6; }
+#define TREE_LOOP_DELETE(tree, item)  { (tree)->count--; (item)->addr = NULL; _deleted_factor += 6; }
 
 #define TREE_FIND(tree, addr1, result, goto_not_found)          \
 {                                                               \
   uintptr_t _key = TREE_HASH(addr1);                            \
-  char *_p = (char *)((tree).toplevel.items);                   \
+  char *_p = (char *)((tree)->toplevel.items);                   \
   char *_entry = *(char **)(_p + (_key & TREE_MASK));           \
   if (_entry == NULL)                                           \
     goto_not_found;    /* common case, hopefully */             \
@@ -208,10 +213,11 @@ static void _tree_compress(struct tree_s *tree) __attribute__((unused));
 static void tree_insert(struct tree_s *tree, uintptr_t addr, uintptr_t val);
 static bool tree_delete_item(struct tree_s *tree, uintptr_t addr)
      __attribute__((unused));
+static wlog_t *tree_item(struct tree_s *tree, int index); /* SLOW */
 
 static inline bool tree_contains(struct tree_s *tree, uintptr_t addr)
 {
     wlog_t *result;
-    TREE_FIND(*tree, addr, result, return false);
+    TREE_FIND(tree, addr, result, return false);
     return true;
 }
