@@ -65,6 +65,7 @@ struct stm_priv_segment_info_s {
 /* Commit Log things */
 struct stm_commit_log_entry_s {
     struct stm_commit_log_entry_s *next;
+    bool committing;            /* true while not yet removed backup copies */
     int segment_num;
     object_t *written[];        /* terminated with a NULL ptr */
 };
