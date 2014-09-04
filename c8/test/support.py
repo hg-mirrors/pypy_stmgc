@@ -51,6 +51,7 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up);
 long stm_can_move(object_t *obj);
 char *_stm_real_address(object_t *o);
 void _stm_test_switch(stm_thread_local_t *tl);
+void _stm_test_switch_segment(int segnum);
 
 void clear_jmpbuf(stm_thread_local_t *tl);
 long stm_start_transaction(stm_thread_local_t *tl);
@@ -395,6 +396,9 @@ class BaseTest(object):
         lib.stm_setup()
         self.tls = [_allocate_thread_local() for i in range(self.NB_THREADS)]
         self.current_thread = 0
+        # force-switch back to segment 0 so that when we do something
+        # outside of transactions before the test, it happens in seg0
+        self.switch_to_segment(0)
 
     def teardown_method(self, meth):
         lib.stmcb_expand_marker = ffi.NULL
@@ -451,6 +455,9 @@ class BaseTest(object):
         if lib._stm_in_transaction(tl2):
             lib._stm_test_switch(tl2)
             stm_validate() # can raise
+
+    def switch_to_segment(self, seg_num):
+        lib._stm_test_switch_segment(seg_num)
 
     def push_root(self, o):
         assert ffi.typeof(o) == ffi.typeof("object_t *")

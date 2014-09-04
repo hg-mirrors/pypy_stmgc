@@ -9,14 +9,31 @@
 
 void _signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
-    /* make PROT_READWRITE again and validate */
-
-    if (siginfo->si_addr == NULL) { /* actual segfault */
+    char *addr = siginfo->si_addr;
+    dprintf(("si_addr: %p\n", addr));
+    if (addr == NULL) { /* actual segfault */
         /* send to GDB */
         kill(getpid(), SIGINT);
     }
-    /* didn't know what to do with it: send to GDB */
-    kill(getpid(), SIGINT);
+    /* make PROT_READWRITE again and validate */
+    int segnum = get_segment_of_linear_address(addr);
+    OPT_ASSERT(segnum == STM_SEGMENT->segment_num);
+    dprintf(("-> segment: %d\n", segnum));
+    char *seg_base = STM_SEGMENT->segment_base;
+    uintptr_t pagenum = ((char*)addr - seg_base) / 4096UL;
+
+    /* XXX: missing synchronisation: we may change protection, then
+       another thread changes it back, then we try to privatize that
+       calls page_copy() and traps */
+    mprotect(seg_base + pagenum * 4096UL, 4096, PROT_READ|PROT_WRITE);
+    page_privatize(pagenum);
+
+    /* XXX: ... what can go wrong when we abort from inside
+       the signal handler? */
+
+    /* make sure we are up to date in this (and all other) pages */
+    stm_validate(NULL);
+    return;
 }
 
 /* ############# commit log ############# */
@@ -125,11 +142,11 @@ void _stm_write_slowpath(object_t *obj)
     for (i = 0; i < NB_SEGMENTS; i++) {
         if (i == STM_SEGMENT->segment_num)
             continue;
-
+        /* XXX: only do it if not already PROT_NONE */
         char *segment_base = get_segment_base(i);
         mprotect(segment_base + first_page * 4096,
                  (end_page - first_page + 1) * 4096, PROT_NONE);
-        dprintf(("prot %lu, len=%lu in seg %d\n", first_page, (end_page - first_page + 1), i));
+        dprintf(("prot %lu, len=%lu in seg %lu\n", first_page, (end_page - first_page + 1), i));
     }
 
     LIST_APPEND(STM_PSEGMENT->modified_old_objects, obj);
