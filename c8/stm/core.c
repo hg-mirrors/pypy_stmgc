@@ -7,6 +7,28 @@
 
 /* ############# signal handler ############# */
 
+static void bring_page_up_to_date(uintptr_t pagenum)
+{
+    /* pagecopy from somewhere readable, then update
+       all written objs from that segment */
+    long i;
+    int my_segnum = STM_SEGMENT->segment_num;
+
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        if (i == my_segnum)
+            continue;
+        if (!is_readable_page(i, first_page))
+            continue;
+
+        acquire_privatization_lock(i);
+
+        /* copy the content from there to our segment */
+        pagecopy(new_page, get_segment_base(from_segnum) + pagenum * 4096UL);
+
+        release_privatization_lock(i);
+    }
+}
+
 void _signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
     char *addr = siginfo->si_addr;
@@ -31,7 +53,7 @@ void _signal_handler(int sig, siginfo_t *siginfo, void *context)
        so it needs additional synchronisation.*/
     pages_set_protection(segnum, pagenum, 1, PROT_READ|PROT_WRITE);
 
-    page_privatize(pagenum);
+    bring_page_up_to_date(pagenum);
 
     /* XXX: ... what can go wrong when we abort from inside
        the signal handler? */
@@ -143,20 +165,11 @@ static struct stm_commit_log_entry_s *_validate_and_add_to_commit_log()
 
 /* ############# STM ############# */
 
-void _stm_write_slowpath(object_t *obj)
+void _privatize_and_protect_other_segments(object_t *obj)
 {
-    assert(_seems_to_be_running_transaction());
-    assert(!_is_in_nursery(obj));
-    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    assert(STM_PSEGMENT->privatization_lock); /* we hold it */
+    assert(obj_size < 4096); /* too lazy right now (part of the code is ready) */
 
-    stm_read(obj);
-
-    /* XXX: misses synchronisation with other write_barriers
-       on same page */
-    /* XXX: make backup copy */
-    /* XXX: privatize pages if necessary */
-
-    /* make other segments trap if accessing this object */
     uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
     char *realobj;
     size_t obj_size;
@@ -167,24 +180,85 @@ void _stm_write_slowpath(object_t *obj)
     obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
     end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
 
+    /* privatize pages: */
+    /* get the last page containing data from the object */
+    end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
+    for (i = first_page; i <= end_page; i++) {
+        if (is_private_page(my_segnum, i))
+            continue;
+        page_privatize(i);
+        bring_page_up_to_date(i);
+    }
+
+    /* then PROT_NONE everyone else that doesn't have a private
+       page already */
     for (i = 0; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
-        if (!is_readable_page(i, first_page))
+        if (!is_readable_page(i, first_page) || is_private_page(i, first_page))
             continue;
-        /* XXX: only do it if not already PROT_NONE */
-        char *segment_base = get_segment_base(i);
+
+        acquire_privatization_lock(i);
         pages_set_protection(i, first_page, end_page - first_page + 1,
                              PROT_NONE);
+        release_privatization_lock(i);
+
         dprintf(("prot %lu, len=%lu in seg %lu\n", first_page, (end_page - first_page + 1), i));
     }
+}
 
+void _stm_write_slowpath(object_t *obj)
+{
+    assert(_seems_to_be_running_transaction());
+    assert(!_is_in_nursery(obj));
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+
+    int my_segnum = STM_SEGMENT->segment_num;
+    uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
+    char *realobj;
+    size_t obj_size;
+
+    realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+    /* add to read set: */
+    stm_read(obj);
+
+    /* create backup copy: */
+    struct object_s *bk_obj = malloc(obj_size);
+    memcpy(bk_obj, realobj, obj_size);
+
+    assert(obj_size < 4096); /* too lazy right now (part of the code is ready) */
+
+ retry:
+    acquire_privatization_lock(my_segnum);
+    if (!is_readable_page(my_segnum, first_page)) {
+        release_privatization_lock(my_segnum);
+
+        bring_page_up_to_date(first_page);
+
+        spin_loop();
+        goto retry;
+    }
+    /* page is not PROT_NONE for us, we can PROT_NONE all others */
+    _privatize_and_protect_other_segments(obj);
+
+    /* remove the WRITE_BARRIER flag (could be done later, but I
+       think we find more bugs this way) */
+    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+
+    /* done fiddling with protection and privatization */
+    release_privatization_lock(my_segnum);
+
+    /* phew, now add the obj to the write-set and register the
+       backup copy. */
     acquire_modified_objs_lock(my_segnum);
-    tree_insert(STM_PSEGMENT->modified_old_objects, (uintptr_t)obj, 0);
+    tree_insert(STM_PSEGMENT->modified_old_objects,
+                (uintptr_t)obj, (uintptr_t)bk_obj);
     release_modified_objs_lock(my_segnum);
 
+    /* also add it to the GC list for minor collections */
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
-    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
 }
 
 static void reset_transaction_read_version(void)

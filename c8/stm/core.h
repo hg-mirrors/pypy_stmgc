@@ -115,30 +115,22 @@ static inline void _duck(void) {
     asm("/* workaround for llvm bug */");
 }
 
-static inline void acquire_privatization_lock(void)
+static inline void acquire_privatization_lock(int segnum)
 {
-    uint8_t *lock = (uint8_t *)REAL_ADDRESS(STM_SEGMENT->segment_base,
-                                            &STM_PSEGMENT->privatization_lock);
-    spinlock_acquire(*lock);
+    spinlock_acquire(get_priv_segment(segnum)->privatization_lock);
 }
 
-static inline void release_privatization_lock(void)
+static inline void release_privatization_lock(int segnum)
 {
-    uint8_t *lock = (uint8_t *)REAL_ADDRESS(STM_SEGMENT->segment_base,
-                                            &STM_PSEGMENT->privatization_lock);
-    spinlock_release(*lock);
+    spinlock_release(get_priv_segment(segnum)->privatization_lock);
 }
 
 static inline void acquire_modified_objs_lock(int segnum)
 {
-    uint8_t *lock = (uint8_t *)REAL_ADDRESS(get_segment_base(segnum),
-                                            &STM_PSEGMENT->modified_objs_lock);
-    spinlock_acquire(*lock);
+    spinlock_acquire(get_priv_segment(segnum)->modified_objs_lock);
 }
 
 static inline void release_modified_objs_lock(int segnum)
 {
-    uint8_t *lock = (uint8_t *)REAL_ADDRESS(get_segment_base(segnum),
-                                            &STM_PSEGMENT->modified_objs_lock);
-    spinlock_release(*lock);
+    spinlock_release(get_priv_segment(segnum)->modified_objs_lock);
 }
