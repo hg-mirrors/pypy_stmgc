@@ -120,16 +120,15 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry()
 
 static struct stm_commit_log_entry_s *_validate_and_add_to_commit_log()
 {
-    struct stm_commit_log_entry_s *new;
-    void* *to;
+    struct stm_commit_log_entry_s *new, **to;
 
     new = _create_commit_log_entry();
     fprintf(stderr,"%p\n", new);
     do {
         stm_validate(new);
 
-        to = (void **)&(STM_PSEGMENT->last_commit_log_entry->next);
-    } while (!__sync_bool_compare_and_swap((void**)to, (void**)NULL, (void**)new));
+        to = &(STM_PSEGMENT->last_commit_log_entry->next);
+    } while (!__sync_bool_compare_and_swap(to, NULL, new));
 
     return new;
 }
