@@ -45,6 +45,7 @@ static void tree_clear(struct tree_s *tree)
         tree->raw_current = tree->raw_start;
         tree->count = 0;
     }
+    assert(tree->count == 0);
 }
 
 static struct tree_s *tree_create(void)
@@ -99,6 +100,7 @@ static void _tree_grow(struct tree_s *tree, long extra)
     newtree.raw_start = newitems;
     newtree.raw_current = newitems;
     newtree.raw_end = newitems + newalloc;
+    newtree.count = 0;
     _tree_clear_node(&newtree.toplevel);
     TREE_LOOP_FORWARD(tree, item)
     {
@@ -146,7 +148,7 @@ static void tree_insert(struct tree_s *tree, uintptr_t addr, uintptr_t val)
                 /* reuse the deleted entry and that's it */
                 wlog1->addr = addr;
                 wlog1->val = val;
-                tree->count++;
+                (tree->count)++;
                 return;
             }
             /* the key must not already be present */
@@ -168,7 +170,7 @@ static void tree_insert(struct tree_s *tree, uintptr_t addr, uintptr_t val)
     wlog->addr = addr;
     wlog->val = val;
     *(char **)p = (char *)wlog;
-    tree->count++;
+    (tree->count)++;
 }
 
 static bool tree_delete_item(struct tree_s *tree, uintptr_t addr)

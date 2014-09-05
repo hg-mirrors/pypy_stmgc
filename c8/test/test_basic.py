@@ -81,7 +81,6 @@ class TestBasic(BaseTest):
     def test_read_write_1(self):
         lp1 = stm_allocate_old(16)
         stm_get_real_address(lp1)[HDR] = 'a' #setchar
-        lib._push_obj_to_other_segments(lp1)
         #
         self.start_transaction()
         self.commit_transaction()

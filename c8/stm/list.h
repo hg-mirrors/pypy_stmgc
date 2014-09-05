@@ -124,8 +124,8 @@ typedef struct {
 } wlog_node_t;
 
 struct tree_s {
-    char *raw_start, *raw_current, *raw_end;
     uintptr_t count;
+    char *raw_start, *raw_current, *raw_end;
     wlog_node_t toplevel;
 };
 
@@ -135,10 +135,12 @@ static void tree_clear(struct tree_s *tree) __attribute__((unused));
 //static inline void tree_delete_not_used_any_more(struct tree_s *tree)...
 
 static inline bool tree_is_cleared(struct tree_s *tree) {
+    assert((tree->raw_current == tree->raw_start) == (tree->count == 0));
     return tree->raw_current == tree->raw_start;
 }
 
 static inline uintptr_t tree_count(struct tree_s *tree) {
+    assert(tree->count >= 0);
     return tree->count;
 }
 

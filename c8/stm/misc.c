@@ -46,8 +46,8 @@ bool _stm_was_written(object_t *obj)
 #ifdef STM_TESTS
 long _stm_count_modified_old_objects(void)
 {
-    if (STM_PSEGMENT->modified_old_objects == NULL)
-        return -1;
+    assert(STM_PSEGMENT->modified_old_objects);
+    assert(tree_count(STM_PSEGMENT->modified_old_objects) < 10000);
     return tree_count(STM_PSEGMENT->modified_old_objects);
 }
 
