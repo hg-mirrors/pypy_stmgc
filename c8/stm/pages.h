@@ -45,14 +45,28 @@ static void page_privatize(uintptr_t pagenum);
 static void pages_set_protection(int segnum, uintptr_t pagenum,
                                  uintptr_t count, int prot);
 
-static inline bool is_private_page(long segnum, uintptr_t pagenum)
+
+static inline uintptr_t get_virt_page_of(long segnum, uintptr_t pagenum)
+{
+    /* logical page -> virtual page */
+    return (uintptr_t)get_segment_base(segnum) / 4096UL + pagenum;
+}
+
+static inline bool is_shared_log_page(uintptr_t pagenum)
+{
+    assert(pagenum >= PAGE_FLAG_START);
+    return pages_privatized[pagenum - PAGE_FLAG_START].by_segment == 0;
+}
+
+
+static inline bool is_private_log_page_in(long segnum, uintptr_t pagenum)
 {
     assert(pagenum >= PAGE_FLAG_START);
     uint64_t bitmask = 1UL << segnum;
     return (pages_privatized[pagenum - PAGE_FLAG_START].by_segment & bitmask);
 }
 
-static inline bool is_readable_page(long segnum, uintptr_t pagenum)
+static inline bool is_readable_log_page_in(long segnum, uintptr_t pagenum)
 {
     assert(pagenum >= PAGE_FLAG_START);
     uint64_t bitmask = 1UL << segnum;
