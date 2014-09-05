@@ -108,11 +108,10 @@ void _dbg_print_commit_log()
         size_t i = 0;
         fprintf(stderr, "elem (%p, %d)\n", cl->next, cl->segment_num);
         object_t *obj;
-        do {
-            obj = cl->written[i];
+        while ((obj = cl->written[i])) {
             fprintf(stderr, "-> %p\n", obj);
             i++;
-        } while ((obj = cl->written[i]));
+        };
     }
 }
 
@@ -122,8 +121,11 @@ static void _update_obj_from(int from_seg, object_t *obj)
     size_t obj_size;
 
     uintptr_t pagenum = (uintptr_t)obj / 4096UL;
-    if (!is_private_log_page_in(STM_SEGMENT->segment_num, pagenum))
+    if (!is_private_log_page_in(STM_SEGMENT->segment_num, pagenum)) {
+        assert(!is_shared_log_page(pagenum));
+        assert(!is_readable_log_page_in(STM_SEGMENT->segment_num, pagenum));
         return;                 /* only do in sighandler */
+    }
 
     /* should be readable & private (XXX: maybe not after major GCs) */
     assert(is_readable_log_page_in(from_seg, pagenum));

@@ -159,6 +159,8 @@ void stm_teardown(void)
 
     munmap(stm_object_pages, TOTAL_MEMORY);
     stm_object_pages = NULL;
+    commit_log_root.next = NULL; /* xxx:free them */
+    commit_log_root.segment_num = -1;
     close_fd_mmap(stm_object_pages_fd);
 
     teardown_sync();
