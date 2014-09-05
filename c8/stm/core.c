@@ -9,23 +9,29 @@
 
 static void bring_page_up_to_date(uintptr_t pagenum)
 {
-    /* pagecopy from somewhere readable, then update
+    /* Assuming pagenum is not yet private in this segment and
+       currently read-protected:
+
+       pagecopy from somewhere readable, then update
        all written objs from that segment */
+
+    assert(!is_shared_log_page(pagenum));
+
+    /* XXX: this may not even be necessary: */
+    assert(STM_PSEGMENT->privatization_lock);
+
     long i;
     int my_segnum = STM_SEGMENT->segment_num;
 
     assert(!is_readable_log_page_in(my_segnum, pagenum));
     assert(!is_private_log_page_in(my_segnum, pagenum));
 
-    /* make readable */
-    assert(STM_PSEGMENT->privatization_lock); /* we hold it, nobody
-                                                 will privatize a page,
-                                                 necessary? */
+    /* privatize and make readable */
     pages_set_protection(my_segnum, pagenum, 1, PROT_READ|PROT_WRITE);
     page_privatize(pagenum);
 
-    assert(!is_shared_log_page(pagenum));
-
+    /* look for a segment where the page is readable (and
+       therefore private): */
     for (i = 0; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
@@ -33,7 +39,9 @@ static void bring_page_up_to_date(uintptr_t pagenum)
             continue;
 
         acquire_privatization_lock(i);
-        assert(is_readable_log_page_in(i, pagenum)); /* still... */
+        /* nobody should be able to change this because we have
+           our own privatization lock: */
+        assert(is_readable_log_page_in(i, pagenum));
 
         /* copy the content from there to our segment */
         dprintf(("pagecopy pagenum:%lu, src: %lu, dst:%d\n", pagenum, i, my_segnum));
@@ -45,23 +53,25 @@ static void bring_page_up_to_date(uintptr_t pagenum)
         acquire_modified_objs_lock(i);
         struct tree_s *tree = get_priv_segment(i)->modified_old_objects;
         wlog_t *item;
-        TREE_LOOP_FORWARD(tree, item);
-        if (item->addr >= pagenum * 4096UL && item->addr < (pagenum + 1) * 4096UL) {
-            object_t *obj = (object_t*)item->addr;
-            struct object_s* bk_obj = (struct object_s *)item->val;
-            size_t obj_size;
+        TREE_LOOP_FORWARD(tree, item); {
+            if (item->addr >= pagenum * 4096UL && item->addr < (pagenum + 1) * 4096UL) {
+                /* obj is in range. XXX: no page overlapping objs allowed yet */
 
-            obj_size = stmcb_size_rounded_up(bk_obj);
-            assert(obj_size < 4096); /* XXX */
+                object_t *obj = (object_t*)item->addr;
+                struct object_s* bk_obj = (struct object_s *)item->val;
+                size_t obj_size;
 
-            memcpy(REAL_ADDRESS(STM_SEGMENT->segment_base, obj),
-                   bk_obj, obj_size);
-            assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* not written */
-        }
-        TREE_LOOP_END;
+                obj_size = stmcb_size_rounded_up(bk_obj);
+                assert(obj_size < 4096); /* XXX */
+
+                memcpy(REAL_ADDRESS(STM_SEGMENT->segment_base, obj),
+                       bk_obj, obj_size);
+
+                assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* bk_obj never written */
+            }
+        } TREE_LOOP_END;
 
         release_modified_objs_lock(i);
-
         release_privatization_lock(i);
 
         return;
@@ -76,7 +86,7 @@ void _signal_handler(int sig, siginfo_t *siginfo, void *context)
     dprintf(("si_addr: %p\n", addr));
     if (addr == NULL || addr < stm_object_pages || addr > stm_object_pages+TOTAL_MEMORY) {
         /* actual segfault */
-        /* send to GDB */
+        /* send to GDB (XXX) */
         kill(getpid(), SIGINT);
     }
     /* XXX: should we save 'errno'? */
@@ -117,20 +127,26 @@ void _dbg_print_commit_log()
 
 static void _update_obj_from(int from_seg, object_t *obj)
 {
+    /* during validation this looks up the obj in the
+       from_seg (backup or normal) and copies the version
+       over the current segment's one */
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     size_t obj_size;
 
     uintptr_t pagenum = (uintptr_t)obj / 4096UL;
     if (!is_private_log_page_in(STM_SEGMENT->segment_num, pagenum)) {
+        /* done in signal handler on first access anyway */
         assert(!is_shared_log_page(pagenum));
         assert(!is_readable_log_page_in(STM_SEGMENT->segment_num, pagenum));
-        return;                 /* only do in sighandler */
+        return;
     }
 
     /* should be readable & private (XXX: maybe not after major GCs) */
     assert(is_readable_log_page_in(from_seg, pagenum));
     assert(is_private_log_page_in(from_seg, pagenum));
 
+    /* look the obj up in the other segment's modified_old_objects to
+       get its backup copy: */
     acquire_modified_objs_lock(from_seg);
 
     struct tree_s *tree = get_priv_segment(from_seg)->modified_old_objects;
@@ -144,7 +160,7 @@ static void _update_obj_from(int from_seg, object_t *obj)
     return;
 
  not_found:
-    /* copy from page */
+    /* copy from page directly (obj is unmodified) */
     obj_size = stmcb_size_rounded_up(
         (struct object_s*)REAL_ADDRESS(get_segment_base(from_seg), obj));
     memcpy(realobj,
@@ -156,6 +172,10 @@ static void _update_obj_from(int from_seg, object_t *obj)
 
 void stm_validate(void *free_if_abort)
 {
+    /* go from last known entry in commit log to the
+       most current one and apply all changes done
+       by other transactions. Abort if we read one of
+       the committed objs. */
     volatile struct stm_commit_log_entry_s *cl = (volatile struct stm_commit_log_entry_s *)
         STM_PSEGMENT->last_commit_log_entry;
 
@@ -163,11 +183,10 @@ void stm_validate(void *free_if_abort)
     bool needs_abort = false;
     /* Don't check 'cl'. This entry is already checked */
     while ((cl = cl->next)) {
-        size_t i = 0;
         OPT_ASSERT(cl->segment_num >= 0 && cl->segment_num < NB_SEGMENTS);
 
         object_t *obj;
-
+        size_t i = 0;
         while ((obj = cl->written[i])) {
             _update_obj_from(cl->segment_num, obj);
 
@@ -181,8 +200,8 @@ void stm_validate(void *free_if_abort)
         /* last fully validated entry */
         STM_PSEGMENT->last_commit_log_entry = (struct stm_commit_log_entry_s *)cl;
     }
-
     release_privatization_lock(STM_SEGMENT->segment_num);
+
     if (needs_abort) {
         free(free_if_abort);
         stm_abort_transaction();
@@ -191,6 +210,10 @@ void stm_validate(void *free_if_abort)
 
 static struct stm_commit_log_entry_s *_create_commit_log_entry()
 {
+    /* puts all modified_old_objects in a new commit log entry */
+
+    // we don't need the privatization lock, as we are only
+    // reading from modified_old_objs and nobody but us can change it
     struct tree_s *tree = STM_PSEGMENT->modified_old_objects;
     size_t count = tree_count(tree);
     size_t byte_len = sizeof(struct stm_commit_log_entry_s) + (count + 1) * sizeof(object_t*);
@@ -201,10 +224,10 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry()
 
     int i = 0;
     wlog_t *item;
-    TREE_LOOP_FORWARD(tree, item);
-    result->written[i] = (object_t*)item->addr;
-    i++;
-    TREE_LOOP_END;
+    TREE_LOOP_FORWARD(tree, item); {
+        result->written[i] = (object_t*)item->addr;
+        i++;
+    } TREE_LOOP_END;
 
     OPT_ASSERT(count == i);
     result->written[count] = NULL;
@@ -212,26 +235,26 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry()
     return result;
 }
 
-static struct stm_commit_log_entry_s *_validate_and_add_to_commit_log()
+static void _validate_and_add_to_commit_log()
 {
     struct stm_commit_log_entry_s *new;
     volatile struct stm_commit_log_entry_s **to;
 
     new = _create_commit_log_entry();
-    fprintf(stderr,"%p\n", new);
     do {
         stm_validate(new);
 
+        /* try attaching to commit log: */
         to = &(STM_PSEGMENT->last_commit_log_entry->next);
     } while (!__sync_bool_compare_and_swap(to, NULL, new));
-
-    return new;
 }
 
 /* ############# STM ############# */
 
 void _privatize_and_protect_other_segments(object_t *obj)
 {
+    /* privatize pages of obj for our segment iff previously
+       the pages were fully shared. */
 #ifndef NDEBUG
     long l;
     for (l = 0; l < NB_SEGMENTS; l++) {
@@ -249,7 +272,8 @@ void _privatize_and_protect_other_segments(object_t *obj)
     obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
     assert(obj_size < 4096); /* XXX */
 
-    /* privatize pages: */
+    /* privatize pages by read-protecting them in other
+       segments and giving us a private copy: */
     assert(is_shared_log_page(first_page));
     /* XXX: change this logic:
        right now, privatization means private in seg0 and private
@@ -423,20 +447,22 @@ void stm_commit_transaction(void)
 
     _validate_and_add_to_commit_log();
 
+    /* clear WRITE_BARRIER flags, free all backup copies,
+       and clear the tree: */
     acquire_modified_objs_lock(STM_SEGMENT->segment_num);
 
     struct tree_s *tree = STM_PSEGMENT->modified_old_objects;
     wlog_t *item;
-    TREE_LOOP_FORWARD(tree, item);
-    object_t *obj = (object_t*)item->addr;
-    struct object_s* bk_obj = (struct object_s *)item->val;
-    free(bk_obj);
-    obj->stm_flags |= GCFLAG_WRITE_BARRIER;
-    TREE_LOOP_END;
-
+    TREE_LOOP_FORWARD(tree, item); {
+        object_t *obj = (object_t*)item->addr;
+        struct object_s* bk_obj = (struct object_s *)item->val;
+        free(bk_obj);
+        obj->stm_flags |= GCFLAG_WRITE_BARRIER;
+    } TREE_LOOP_END;
     tree_clear(tree);
 
     release_modified_objs_lock(STM_SEGMENT->segment_num);
+
 
     s_mutex_lock();
 
