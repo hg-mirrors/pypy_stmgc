@@ -145,7 +145,8 @@ static void _update_obj_from(int from_seg, object_t *obj)
 
  not_found:
     /* copy from page */
-    obj_size = stmcb_size_rounded_up(REAL_ADDRESS(get_segment_base(from_seg), obj));
+    obj_size = stmcb_size_rounded_up(
+        (struct object_s*)REAL_ADDRESS(get_segment_base(from_seg), obj));
     memcpy(realobj,
            REAL_ADDRESS(get_segment_base(from_seg), obj),
            obj_size);
@@ -450,6 +451,39 @@ void stm_commit_transaction(void)
     s_mutex_unlock();
 }
 
+void reset_modified_from_backup_copies(int segment_num)
+{
+#pragma push_macro("STM_PSEGMENT")
+#pragma push_macro("STM_SEGMENT")
+#undef STM_PSEGMENT
+#undef STM_SEGMENT
+    acquire_modified_objs_lock(segment_num);
+
+    struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
+    struct tree_s *tree = pseg->modified_old_objects;
+    wlog_t *item;
+    TREE_LOOP_FORWARD(tree, item); {
+        object_t *obj = (object_t*)item->addr;
+        struct object_s* bk_obj = (struct object_s *)item->val;
+        size_t obj_size;
+
+        obj_size = stmcb_size_rounded_up(bk_obj);
+        assert(obj_size < 4096); /* XXX */
+
+        memcpy(REAL_ADDRESS(pseg->pub.segment_base, obj),
+               bk_obj, obj_size);
+        assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* not written */
+
+        free(bk_obj);
+    } TREE_LOOP_END;
+
+    tree_clear(tree);
+
+    release_modified_objs_lock(segment_num);
+
+#pragma pop_macro("STM_SEGMENT")
+#pragma pop_macro("STM_PSEGMENT")
+}
 
 static void abort_data_structures_from_segment_num(int segment_num)
 {
@@ -461,7 +495,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     throw_away_nursery(pseg);
 
-    /* XXX: reset_modified_from_other_segments(segment_num); */
+    reset_modified_from_backup_copies(segment_num);
 
     stm_thread_local_t *tl = pseg->pub.running_thread;
 #ifdef STM_NO_AUTOMATIC_SETJMP
