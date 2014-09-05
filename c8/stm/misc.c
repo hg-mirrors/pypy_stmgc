@@ -69,4 +69,25 @@ object_t *_stm_enum_objects_pointing_to_nursery(long index)
     return (object_t *)list_item(
         STM_PSEGMENT->objects_pointing_to_nursery, index);
 }
+
+static volatile struct stm_commit_log_entry_s *_last_cl_entry;
+static long _last_cl_entry_index;
+void _stm_start_enum_last_cl_entry()
+{
+    _last_cl_entry = &commit_log_root;
+    volatile struct stm_commit_log_entry_s *cl = (volatile struct stm_commit_log_entry_s *)
+        &commit_log_root;
+
+    while ((cl = cl->next)) {
+        _last_cl_entry = cl;
+    }
+    _last_cl_entry_index = 0;
+}
+
+object_t *_stm_next_last_cl_entry()
+{
+    if (_last_cl_entry != &commit_log_root)
+        return _last_cl_entry->written[_last_cl_entry_index++];
+    return NULL;
+}
 #endif
