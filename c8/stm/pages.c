@@ -117,11 +117,16 @@ static void pages_set_protection(int segnum, uintptr_t pagenum,
     /* we hopefully hold the privatization lock: */
     assert(get_priv_segment(segnum)->privatization_lock);
 
-    char *addr = get_virt_page_of(segnum, pagenum);
+    if ((prot == PROT_NONE && !is_readable_log_page_in(segnum, pagenum))
+        || (prot == (PROT_READ|PROT_WRITE) && is_readable_log_page_in(segnum, pagenum)))
+        return;
+
+    char *addr = (char*)(get_virt_page_of(segnum, pagenum) * 4096UL);
     mprotect(addr, count * 4096UL, prot);
 
-    dprintf(("pages_set_protection(%d, %lu, %lu, %d)\n",
-             segnum, pagenum, count, prot));
+    dprintf(("pages_set_protection(%d, %lu, %lu, %d), virtpage:%lu\n",
+             segnum, pagenum, count, prot,
+             get_virt_page_of(segnum, pagenum)));
 
     uint64_t bitmask = 1UL << segnum;
     uintptr_t amount = count;

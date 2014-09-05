@@ -36,7 +36,7 @@ static void bring_page_up_to_date(uintptr_t pagenum)
         assert(is_readable_log_page_in(i, pagenum)); /* still... */
 
         /* copy the content from there to our segment */
-        dprintf(("pagecopy pagenum:%lu, src: %lu, dst:%lu\n", pagenum, i, my_segnum));
+        dprintf(("pagecopy pagenum:%lu, src: %lu, dst:%d\n", pagenum, i, my_segnum));
         pagecopy((char*)(get_virt_page_of(my_segnum, pagenum) * 4096UL),
                  (char*)(get_virt_page_of(i, pagenum) * 4096UL));
 
@@ -54,10 +54,9 @@ static void bring_page_up_to_date(uintptr_t pagenum)
             obj_size = stmcb_size_rounded_up(bk_obj);
             assert(obj_size < 4096); /* XXX */
 
-            assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* not written here */
             memcpy(REAL_ADDRESS(STM_SEGMENT->segment_base, obj),
                    bk_obj, obj_size);
-            assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* still not written */
+            assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* not written */
         }
         TREE_LOOP_END;
 
@@ -75,7 +74,8 @@ void _signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
     char *addr = siginfo->si_addr;
     dprintf(("si_addr: %p\n", addr));
-    if (addr == NULL) { /* actual segfault */
+    if (addr == NULL || addr < stm_object_pages || addr > stm_object_pages+TOTAL_MEMORY) {
+        /* actual segfault */
         /* send to GDB */
         kill(getpid(), SIGINT);
     }
@@ -350,7 +350,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
         reset_transaction_read_version();
     }
 
-    assert(tree_count(STM_PSEGMENT->modified_old_objects) == 0);
+    assert(tree_is_cleared(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     check_nursery_at_transaction_start();
 }
@@ -387,9 +387,21 @@ void stm_commit_transaction(void)
 
     minor_collection(1);
 
-    struct stm_commit_log_entry_s* entry = _validate_and_add_to_commit_log();
+    _validate_and_add_to_commit_log();
+
     acquire_modified_objs_lock(STM_SEGMENT->segment_num);
-    /* XXX:discard backup copies */
+
+    struct tree_s *tree = STM_PSEGMENT->modified_old_objects;
+    wlog_t *item;
+    TREE_LOOP_FORWARD(tree, item);
+    object_t *obj = (object_t*)item->addr;
+    struct object_s* bk_obj = (struct object_s *)item->val;
+    free(bk_obj);
+    obj->stm_flags |= GCFLAG_WRITE_BARRIER;
+    TREE_LOOP_END;
+
+    tree_clear(tree);
+
     release_modified_objs_lock(STM_SEGMENT->segment_num);
 
     s_mutex_lock();
