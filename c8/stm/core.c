@@ -15,12 +15,14 @@ static void bring_page_up_to_date(uintptr_t pagenum)
     int my_segnum = STM_SEGMENT->segment_num;
 
     assert(!is_readable_log_page_in(my_segnum, pagenum));
+    assert(!is_private_log_page_in(my_segnum, pagenum));
 
     /* make readable */
     assert(STM_PSEGMENT->privatization_lock); /* we hold it, nobody
                                                  will privatize a page,
                                                  necessary? */
     pages_set_protection(my_segnum, pagenum, 1, PROT_READ|PROT_WRITE);
+    page_privatize(pagenum);
 
     assert(!is_shared_log_page(pagenum));
 
@@ -34,12 +36,30 @@ static void bring_page_up_to_date(uintptr_t pagenum)
         assert(is_readable_log_page_in(i, pagenum)); /* still... */
 
         /* copy the content from there to our segment */
+        dprintf(("pagecopy pagenum:%lu, src: %lu, dst:%lu\n", pagenum, i, my_segnum));
         pagecopy((char*)(get_virt_page_of(my_segnum, pagenum) * 4096UL),
                  (char*)(get_virt_page_of(i, pagenum) * 4096UL));
 
         /* get valid state from backup copies of written objs in
            the range of this page: */
         acquire_modified_objs_lock(i);
+        struct tree_s *tree = get_priv_segment(i)->modified_old_objects;
+        wlog_t *item;
+        TREE_LOOP_FORWARD(tree, item);
+        if (item->addr >= pagenum * 4096UL && item->addr < (pagenum + 1) * 4096UL) {
+            object_t *obj = (object_t*)item->addr;
+            struct object_s* bk_obj = (struct object_s *)item->val;
+            size_t obj_size;
+
+            obj_size = stmcb_size_rounded_up(bk_obj);
+            assert(obj_size < 4096); /* XXX */
+
+            assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* not written here */
+            memcpy(REAL_ADDRESS(STM_SEGMENT->segment_base, obj),
+                   bk_obj, obj_size);
+            assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* still not written */
+        }
+        TREE_LOOP_END;
 
         release_modified_objs_lock(i);
 
@@ -206,14 +226,21 @@ void _privatize_and_protect_other_segments(object_t *obj)
 
         if (i != my_segnum && i != 0)
             pages_set_protection(i, first_page, 1, PROT_NONE);
+        else                    /* both, seg0 and my_segnum: */
+            pages_set_protection(i, first_page, 1, PROT_READ|PROT_WRITE);
     }
 
     /* remap pages for my_segnum and copy the contents */
-    if (i != 0) {
+    set_page_private_in(0, first_page);
+    /* seg0 already up-to-date */
+    if (my_segnum != 0) {
         page_privatize(first_page);
         pagecopy((char*)(get_virt_page_of(my_segnum, first_page) * 4096UL),
                  (char*)(get_virt_page_of(0, first_page) * 4096UL));
     }
+
+    assert(is_private_log_page_in(my_segnum, first_page));
+    assert(is_readable_log_page_in(my_segnum, first_page));
 }
 
 void _stm_write_slowpath(object_t *obj)
