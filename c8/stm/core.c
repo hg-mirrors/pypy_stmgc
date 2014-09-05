@@ -353,6 +353,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
     assert(tree_is_cleared(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     check_nursery_at_transaction_start();
+    stm_validate(NULL);
 }
 
 long stm_start_transaction(stm_thread_local_t *tl)
