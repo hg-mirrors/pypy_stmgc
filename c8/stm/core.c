@@ -118,10 +118,37 @@ void _dbg_print_commit_log()
 
 static void _update_obj_from(int from_seg, object_t *obj)
 {
-    /* check if its pages are private, only then we need
-       to update them. If they are also still read-protected,
-       we may trigger the signal handler. This would cause
-       it to also enter stm_validate()..... */
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t obj_size;
+
+    uintptr_t pagenum = (uintptr_t)obj / 4096UL;
+    if (!is_private_log_page_in(STM_SEGMENT->segment_num, pagenum))
+        return;                 /* only do in sighandler */
+
+    /* should be readable & private (XXX: maybe not after major GCs) */
+    assert(is_readable_log_page_in(from_seg, pagenum));
+    assert(is_private_log_page_in(from_seg, pagenum));
+
+    acquire_modified_objs_lock(from_seg);
+
+    struct tree_s *tree = get_priv_segment(from_seg)->modified_old_objects;
+    wlog_t *item;
+    TREE_FIND(tree, (uintptr_t)obj, item, goto not_found);
+
+    obj_size = stmcb_size_rounded_up((struct object_s*)item->val);
+    memcpy(realobj, (char*)item->val, obj_size);
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    release_modified_objs_lock(from_seg);
+    return;
+
+ not_found:
+    /* copy from page */
+    obj_size = stmcb_size_rounded_up(REAL_ADDRESS(get_segment_base(from_seg), obj));
+    memcpy(realobj,
+           REAL_ADDRESS(get_segment_base(from_seg), obj),
+           obj_size);
+    obj->stm_flags |= GCFLAG_WRITE_BARRIER; /* may already be gone */
+    release_modified_objs_lock(from_seg);
 }
 
 void stm_validate(void *free_if_abort)
@@ -129,6 +156,7 @@ void stm_validate(void *free_if_abort)
     volatile struct stm_commit_log_entry_s *cl = (volatile struct stm_commit_log_entry_s *)
         STM_PSEGMENT->last_commit_log_entry;
 
+    acquire_privatization_lock(STM_SEGMENT->segment_num);
     bool needs_abort = false;
     /* Don't check 'cl'. This entry is already checked */
     while ((cl = cl->next)) {
@@ -136,10 +164,11 @@ void stm_validate(void *free_if_abort)
         OPT_ASSERT(cl->segment_num >= 0 && cl->segment_num < NB_SEGMENTS);
 
         object_t *obj;
+
         while ((obj = cl->written[i])) {
             _update_obj_from(cl->segment_num, obj);
 
-            if (!needs_abort &&_stm_was_read(obj)) {
+            if (!needs_abort && _stm_was_read(obj)) {
                 needs_abort = true;
             }
 
@@ -150,6 +179,7 @@ void stm_validate(void *free_if_abort)
         STM_PSEGMENT->last_commit_log_entry = (struct stm_commit_log_entry_s *)cl;
     }
 
+    release_privatization_lock(STM_SEGMENT->segment_num);
     if (needs_abort) {
         free(free_if_abort);
         stm_abort_transaction();
