@@ -68,16 +68,6 @@ static void setup_protection_settings(void)
             mprotect(segment_base + 8192,
                      (FIRST_READMARKER_PAGE - 2) * 4096UL,
                      PROT_NONE);
-
-        if (i != 0) {
-            /* let's give all pages to segment 0 at first, all others
-               need to trap and look for the backup copy */
-            mprotect(segment_base + END_NURSERY_PAGE * 4096,
-                     (NB_PAGES - END_NURSERY_PAGE) * 4096,
-                     PROT_NONE);
-            /* pages_initialize_shared() makes sure pages_readable
-               is initialized correctly */
-        }
     }
 }
 

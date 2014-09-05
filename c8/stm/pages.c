@@ -77,15 +77,8 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
             volatile struct page_shared_s *ps2 = (volatile struct page_shared_s *)
                 &pages_privatized[pagenum + amount - PAGE_FLAG_START];
 
-            if (i == 0) {
-                /* readable & private */
-                ps->by_segment |= bitmask;
-                ps2->by_segment |= bitmask;
-            } else {
-                /* not readable (ensured in setup.c), not private */
-                ps->by_segment &= ~bitmask;
-                ps2->by_segment &= ~bitmask;
-            }
+            ps->by_segment |= bitmask; /* readable */
+            ps2->by_segment = 0; /* not private */
         }
     }
 }
@@ -103,6 +96,8 @@ static void page_privatize(uintptr_t pagenum)
         /* the page is already privatized; nothing to do */
         return;
     }
+
+    dprintf(("page_privatize(%lu) in seg:%d\n", pagenum, STM_SEGMENT->segment_num));
 
     /* add this thread's 'pages_privatized' bit */
     ps->by_segment |= bitmask;
@@ -122,23 +117,23 @@ static void pages_set_protection(int segnum, uintptr_t pagenum,
     /* we hopefully hold the privatization lock: */
     assert(get_priv_segment(segnum)->privatization_lock);
 
-    char *addr = get_segment_base(segnum) + pagenum * 4096UL;
+    char *addr = get_virt_page_of(segnum, pagenum);
     mprotect(addr, count * 4096UL, prot);
 
-    long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        uint64_t bitmask = 1UL << i;
-        uintptr_t amount = count;
-        while (amount-->0) {
-            volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
-                &pages_readable[pagenum + amount - PAGE_FLAG_START];
-            if (prot == PROT_NONE) {
-                /* not readable */
-                ps->by_segment &= ~bitmask;
-            } else {
-                assert(prot == (PROT_READ|PROT_WRITE));
-                ps->by_segment |= bitmask;
-            }
+    dprintf(("pages_set_protection(%d, %lu, %lu, %d)\n",
+             segnum, pagenum, count, prot));
+
+    uint64_t bitmask = 1UL << segnum;
+    uintptr_t amount = count;
+    while (amount-->0) {
+        volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
+            &pages_readable[pagenum + amount - PAGE_FLAG_START];
+        if (prot == PROT_NONE) {
+            /* not readable */
+            ps->by_segment &= ~bitmask;
+        } else {
+            assert(prot == (PROT_READ|PROT_WRITE));
+            ps->by_segment |= bitmask;
         }
     }
 }

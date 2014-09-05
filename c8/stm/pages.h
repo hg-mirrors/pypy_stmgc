@@ -58,6 +58,14 @@ static inline bool is_shared_log_page(uintptr_t pagenum)
     return pages_privatized[pagenum - PAGE_FLAG_START].by_segment == 0;
 }
 
+static inline void set_page_private_in(long segnum, uintptr_t pagenum)
+{
+    uint64_t bitmask = 1UL << segnum;
+    volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
+        &pages_privatized[pagenum - PAGE_FLAG_START];
+    assert(!(ps->by_segment & bitmask));
+    ps->by_segment |= bitmask;
+}
 
 static inline bool is_private_log_page_in(long segnum, uintptr_t pagenum)
 {
