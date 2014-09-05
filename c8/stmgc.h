@@ -90,6 +90,8 @@ long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
+object_t *_stm_next_last_cl_entry();
+void _stm_start_enum_last_cl_entry();
 #endif
 
 /* ==================== HELPERS ==================== */

@@ -33,9 +33,12 @@ class TestBasic(BaseTest):
         self.switch(1)
         self.start_transaction()
         self.commit_transaction()
+        assert last_commit_log_entries() == []
+
         self.switch(0)
 
         self.commit_transaction()
+        assert last_commit_log_entries() == []
 
     def test_simple_read(self):
         self.start_transaction()
@@ -43,6 +46,7 @@ class TestBasic(BaseTest):
         stm_read(lp1)
         assert stm_was_read(lp1)
         self.commit_transaction()
+        assert last_commit_log_entries() == []
 
     def test_simple_write(self):
         self.start_transaction()
@@ -53,6 +57,7 @@ class TestBasic(BaseTest):
         assert modified_old_objects() == []             # object not old
         assert objects_pointing_to_nursery() == []    # short transaction
         self.commit_transaction()
+        assert last_commit_log_entries() == []
 
     def test_allocate_old(self):
         lp1 = stm_allocate_old(16)
@@ -101,6 +106,7 @@ class TestBasic(BaseTest):
         #
         self.switch(1)
         self.commit_transaction()
+        assert last_commit_log_entries() == [lp1]
         #
         py.test.raises(Conflict, self.switch, 0) # detects rw conflict
 
@@ -123,6 +129,7 @@ class TestBasic(BaseTest):
         assert (p2 - p1) % 4096 == 0
         assert stm_get_char(lp) == 'u'
         self.commit_transaction()
+        assert last_commit_log_entries() == [lp]
 
     def test_commit_fresh_objects2(self):
         self.switch(1)
