@@ -317,8 +317,9 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_write(lp1)
         stm_set_char(lp1, 'b')
-        # transaction from thread 1 is newer than from thread 0
-        py.test.raises(Conflict, self.commit_transaction)
+        self.commit_transaction()
+
+        py.test.raises(Conflict, self.switch, 0) # fails validation
 
     def test_resolve_write_read_conflict(self):
         self.start_transaction()
@@ -352,7 +353,11 @@ class TestBasic(BaseTest):
         #
         self.switch(1)
         self.start_transaction()
-        py.test.raises(Conflict, stm_write, lp1) # write-write conflict
+        stm_write(lp1)
+        self.switch(0)
+        self.commit_transaction()
+
+        py.test.raises(Conflict, self.switch, 1) # write-write conflict
 
     def test_abort_cleanup(self):
         self.start_transaction()
