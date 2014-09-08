@@ -65,6 +65,9 @@ uint32_t _get_type_id(object_t *obj);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
 
+
+void _stm_set_nursery_free_count(uint64_t free_count);
+
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
 object_t *_stm_enum_modified_old_objects(long index);
@@ -406,7 +409,7 @@ def _allocate_thread_local():
 
 
 class BaseTest(object):
-    NB_THREADS = 2
+    NB_THREADS = 4
 
     def setup_method(self, meth):
         lib.stm_setup()
