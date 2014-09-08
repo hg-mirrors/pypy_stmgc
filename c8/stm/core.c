@@ -5,7 +5,6 @@
 #include <signal.h>
 
 
-/* ############# signal handler ############# */
 
 static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
 {
@@ -33,83 +32,7 @@ static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
     release_modified_objs_lock(from_segnum);
 }
 
-static void bring_page_up_to_date(uintptr_t pagenum)
-{
-    /* Assuming pagenum is not yet private in this segment and
-       currently read-protected:
 
-       pagecopy from somewhere readable, then update
-       all written objs from that segment */
-
-    assert(!is_shared_log_page(pagenum));
-
-    /* XXX: this may not even be necessary: */
-    assert(STM_PSEGMENT->privatization_lock);
-
-    long i;
-    int my_segnum = STM_SEGMENT->segment_num;
-
-    assert(!is_readable_log_page_in(my_segnum, pagenum));
-    assert(!is_private_log_page_in(my_segnum, pagenum));
-
-    /* privatize and make readable */
-    pages_set_protection(my_segnum, pagenum, 1, PROT_READ|PROT_WRITE);
-    page_privatize(pagenum);
-
-    /* look for a segment where the page is readable (and
-       therefore private): */
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        if (i == my_segnum)
-            continue;
-        if (!is_readable_log_page_in(i, pagenum))
-            continue;
-
-        acquire_privatization_lock(i);
-        /* nobody should be able to change this because we have
-           our own privatization lock: */
-        assert(is_readable_log_page_in(i, pagenum));
-
-        /* copy the content from there to our segment */
-        dprintf(("pagecopy pagenum:%lu, src: %lu, dst:%d\n", pagenum, i, my_segnum));
-        pagecopy((char*)(get_virt_page_of(my_segnum, pagenum) * 4096UL),
-                 (char*)(get_virt_page_of(i, pagenum) * 4096UL));
-
-        /* get valid state from backup copies of written objs in
-           the range of this page: */
-        copy_bk_objs_from(i, pagenum);
-
-        release_privatization_lock(i);
-
-        return;
-    }
-
-    abort();                    /* didn't find a page to copy from?? */
-}
-
-void _signal_handler(int sig, siginfo_t *siginfo, void *context)
-{
-    char *addr = siginfo->si_addr;
-    dprintf(("si_addr: %p\n", addr));
-    if (addr == NULL || addr < stm_object_pages || addr > stm_object_pages+TOTAL_MEMORY) {
-        /* actual segfault */
-        /* send to GDB (XXX) */
-        kill(getpid(), SIGINT);
-    }
-    /* XXX: should we save 'errno'? */
-
-
-    int segnum = get_segment_of_linear_address(addr);
-    OPT_ASSERT(segnum == STM_SEGMENT->segment_num);
-    dprintf(("-> segment: %d\n", segnum));
-    char *seg_base = STM_SEGMENT->segment_base;
-    uintptr_t pagenum = ((char*)addr - seg_base) / 4096UL;
-
-    acquire_privatization_lock(segnum);
-    bring_page_up_to_date(pagenum);
-    release_privatization_lock(segnum);
-
-    return;
-}
 
 /* ############# commit log ############# */
 
@@ -144,15 +67,9 @@ static void _update_obj_from(int from_seg, object_t *obj)
     size_t obj_size;
 
     uintptr_t pagenum = (uintptr_t)obj / 4096UL;
-    if (!is_private_log_page_in(STM_SEGMENT->segment_num, pagenum)) {
-        /* done in signal handler on first access anyway */
-        assert(!is_shared_log_page(pagenum));
-        assert(!is_readable_log_page_in(STM_SEGMENT->segment_num, pagenum));
-        return;
-    }
+    assert(is_private_log_page_in(STM_SEGMENT->segment_num, pagenum));
+    assert(!is_shared_log_page(pagenum));
 
-    /* should be readable & private (XXX: maybe not after major GCs) */
-    assert(is_readable_log_page_in(from_seg, pagenum));
     assert(is_private_log_page_in(from_seg, pagenum));
 
     /* look the obj up in the other segment's modified_old_objects to
@@ -292,7 +209,7 @@ static void _validate_and_turn_inevitable()
 
 /* ############# STM ############# */
 
-void _privatize_and_protect_other_segments(object_t *obj)
+void _privatize_shared_page(uintptr_t pagenum)
 {
     /* privatize pages of obj for our segment iff previously
        the pages were fully shared. */
@@ -303,42 +220,22 @@ void _privatize_and_protect_other_segments(object_t *obj)
     }
 #endif
 
-    uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
-    char *realobj;
-    size_t obj_size;
     uintptr_t i;
     int my_segnum = STM_SEGMENT->segment_num;
 
-    realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
-    assert(obj_size < 4096); /* XXX */
+    assert(is_shared_log_page(pagenum));
+    char *src = (char*)(get_virt_page_of(0, pagenum) * 4096UL);
 
-    /* privatize pages by read-protecting them in other
-       segments and giving us a private copy: */
-    assert(is_shared_log_page(first_page));
-    /* XXX: change this logic:
-       right now, privatization means private in seg0 and private
-       in my_segnum */
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        assert(!is_private_log_page_in(i, first_page));
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        assert(!is_private_log_page_in(i, pagenum));
 
-        if (i != my_segnum && i != 0)
-            pages_set_protection(i, first_page, 1, PROT_NONE);
-        else                    /* both, seg0 and my_segnum: */
-            pages_set_protection(i, first_page, 1, PROT_READ|PROT_WRITE);
+        page_privatize_in(i, pagenum);
+        pagecopy((char*)(get_virt_page_of(i, pagenum) * 4096UL), src);
     }
+    set_page_private_in(0, pagenum);
 
-    /* remap pages for my_segnum and copy the contents */
-    set_page_private_in(0, first_page);
-    /* seg0 already up-to-date */
-    if (my_segnum != 0) {
-        page_privatize(first_page);
-        pagecopy((char*)(get_virt_page_of(my_segnum, first_page) * 4096UL),
-                 (char*)(get_virt_page_of(0, first_page) * 4096UL));
-    }
-
-    assert(is_private_log_page_in(my_segnum, first_page));
-    assert(is_readable_log_page_in(my_segnum, first_page));
+    assert(is_private_log_page_in(my_segnum, pagenum));
+    assert(!is_shared_log_page(pagenum));
 }
 
 void _stm_write_slowpath(object_t *obj)
@@ -372,7 +269,7 @@ void _stm_write_slowpath(object_t *obj)
             acquire_privatization_lock(i);
         }
         if (is_shared_log_page(first_page))
-            _privatize_and_protect_other_segments(obj);
+            _privatize_shared_page(first_page);
         for (i = NB_SEGMENTS-1; i >= 0; i--) {
             release_privatization_lock(i);
         }
@@ -381,9 +278,7 @@ void _stm_write_slowpath(object_t *obj)
        only a read protected page ourselves: */
 
     acquire_privatization_lock(my_segnum);
-    if (!is_readable_log_page_in(my_segnum, first_page))
-        bring_page_up_to_date(first_page);
-    /* page is not PROT_NONE for us */
+    OPT_ASSERT(is_private_log_page_in(my_segnum, first_page));
 
     /* remove the WRITE_BARRIER flag */
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;

@@ -72,24 +72,21 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
         uint64_t bitmask = 1UL << i;
         uintptr_t amount = count;
         while (amount-->0) {
-            volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
-                &pages_readable[pagenum + amount - PAGE_FLAG_START];
             volatile struct page_shared_s *ps2 = (volatile struct page_shared_s *)
                 &pages_privatized[pagenum + amount - PAGE_FLAG_START];
 
-            ps->by_segment |= bitmask; /* readable */
             ps2->by_segment = 0; /* not private */
         }
     }
 }
 
-static void page_privatize(uintptr_t pagenum)
+static void page_privatize_in(int segnum, uintptr_t pagenum)
 {
     /* hopefully holding the lock */
-    assert(STM_PSEGMENT->privatization_lock);
+    assert(get_priv_segment(segnum)->privatization_lock);
 
     /* check this thread's 'pages_privatized' bit */
-    uint64_t bitmask = 1UL << STM_SEGMENT->segment_num;
+    uint64_t bitmask = 1UL << segnum;
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_privatized[pagenum - PAGE_FLAG_START];
     if (ps->by_segment & bitmask) {
@@ -97,7 +94,7 @@ static void page_privatize(uintptr_t pagenum)
         return;
     }
 
-    dprintf(("page_privatize(%lu) in seg:%d\n", pagenum, STM_SEGMENT->segment_num));
+    dprintf(("page_privatize(%lu) in seg:%d\n", pagenum, segnum));
 
     /* add this thread's 'pages_privatized' bit */
     ps->by_segment |= bitmask;
@@ -106,39 +103,7 @@ static void page_privatize(uintptr_t pagenum)
        again to its underlying file offset (XXX later we should again
        attempt to group together many calls to d_remap_file_pages() in
        succession) */
-    uintptr_t pagenum_in_file = NB_PAGES * STM_SEGMENT->segment_num + pagenum;
+    uintptr_t pagenum_in_file = NB_PAGES * segnum + pagenum;
     char *new_page = stm_object_pages + pagenum_in_file * 4096UL;
     d_remap_file_pages(new_page, 4096, pagenum_in_file);
-}
-
-static void pages_set_protection(int segnum, uintptr_t pagenum,
-                                 uintptr_t count, int prot)
-{
-    /* we hopefully hold the privatization lock: */
-    assert(get_priv_segment(segnum)->privatization_lock);
-
-    if ((prot == PROT_NONE && !is_readable_log_page_in(segnum, pagenum))
-        || (prot == (PROT_READ|PROT_WRITE) && is_readable_log_page_in(segnum, pagenum)))
-        return;
-
-    char *addr = (char*)(get_virt_page_of(segnum, pagenum) * 4096UL);
-    mprotect(addr, count * 4096UL, prot);
-
-    dprintf(("pages_set_protection(%d, %lu, %lu, %d), virtpage:%lu\n",
-             segnum, pagenum, count, prot,
-             get_virt_page_of(segnum, pagenum)));
-
-    uint64_t bitmask = 1UL << segnum;
-    uintptr_t amount = count;
-    while (amount-->0) {
-        volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
-            &pages_readable[pagenum + amount - PAGE_FLAG_START];
-        if (prot == PROT_NONE) {
-            /* not readable */
-            ps->by_segment &= ~bitmask;
-        } else {
-            assert(prot == (PROT_READ|PROT_WRITE));
-            ps->by_segment |= bitmask;
-        }
-    }
 }
