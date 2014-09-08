@@ -53,6 +53,8 @@ struct stm_priv_segment_info_s {
     struct list_s *objects_pointing_to_nursery;
     uint8_t privatization_lock;
 
+    uint8_t transaction_state;
+
     struct stm_commit_log_entry_s *last_commit_log_entry;
 
     struct stm_shadowentry_s *shadowstack_at_start_of_transaction;
@@ -61,6 +63,12 @@ struct stm_priv_segment_info_s {
 #ifndef NDEBUG
     pthread_t running_pthread;
 #endif
+};
+
+enum /* transaction_state */ {
+    TS_NONE=0,
+    TS_REGULAR,
+    TS_INEVITABLE,
 };
 
 /* Commit Log things */

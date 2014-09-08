@@ -110,13 +110,17 @@ void _signal_handler(int sig, siginfo_t *siginfo, void *context)
 
 void _dbg_print_commit_log()
 {
-    volatile struct stm_commit_log_entry_s *cl = (volatile struct stm_commit_log_entry_s *)
-        &commit_log_root;
+    volatile struct stm_commit_log_entry_s *cl;
+    cl = (volatile struct stm_commit_log_entry_s *)&commit_log_root;
 
     fprintf(stderr, "root (%p, %d)\n", cl->next, cl->segment_num);
     while ((cl = cl->next)) {
+        if ((uintptr_t)cl == -1) {
+            fprintf(stderr, "INEVITABLE\n");
+            return;
+        }
         size_t i = 0;
-        fprintf(stderr, "elem (%p, %d)\n", cl->next, cl->segment_num);
+        fprintf(stderr, "  elem (%p, %d)\n", cl->next, cl->segment_num);
         object_t *obj;
         while ((obj = cl->written[i])) {
             fprintf(stderr, "-> %p\n", obj);
@@ -176,13 +180,21 @@ void stm_validate(void *free_if_abort)
        most current one and apply all changes done
        by other transactions. Abort if we read one of
        the committed objs. */
-    volatile struct stm_commit_log_entry_s *cl = (volatile struct stm_commit_log_entry_s *)
+    volatile struct stm_commit_log_entry_s *cl, *prev_cl;
+    cl = prev_cl = (volatile struct stm_commit_log_entry_s *)
         STM_PSEGMENT->last_commit_log_entry;
 
-    acquire_privatization_lock(STM_SEGMENT->segment_num);
     bool needs_abort = false;
     /* Don't check 'cl'. This entry is already checked */
     while ((cl = cl->next)) {
+        if ((uintptr_t)cl == -1) {
+            /* there is an inevitable transaction running */
+            cl = prev_cl;
+            usleep(1);          /* XXX */
+            continue;
+        }
+        prev_cl = cl;
+
         OPT_ASSERT(cl->segment_num >= 0 && cl->segment_num < NB_SEGMENTS);
 
         object_t *obj;
@@ -200,7 +212,6 @@ void stm_validate(void *free_if_abort)
         /* last fully validated entry */
         STM_PSEGMENT->last_commit_log_entry = (struct stm_commit_log_entry_s *)cl;
     }
-    release_privatization_lock(STM_SEGMENT->segment_num);
 
     if (needs_abort) {
         free(free_if_abort);
@@ -241,8 +252,32 @@ static void _validate_and_add_to_commit_log()
     volatile struct stm_commit_log_entry_s **to;
 
     new = _create_commit_log_entry();
+    if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+        OPT_ASSERT((uintptr_t)STM_PSEGMENT->last_commit_log_entry->next == -1);
+
+        to = &(STM_PSEGMENT->last_commit_log_entry->next);
+        bool yes = __sync_bool_compare_and_swap(to, -1, new);
+        OPT_ASSERT(yes);
+        return;
+    }
+
+    /* regular transaction: */
     do {
         stm_validate(new);
+
+        /* try attaching to commit log: */
+        to = &(STM_PSEGMENT->last_commit_log_entry->next);
+    } while (!__sync_bool_compare_and_swap(to, NULL, new));
+}
+
+static void _validate_and_turn_inevitable()
+{
+    struct stm_commit_log_entry_s *new;
+    volatile struct stm_commit_log_entry_s **to;
+
+    new = (struct stm_commit_log_entry_s*)-1;
+    do {
+        stm_validate(NULL);
 
         /* try attaching to commit log: */
         to = &(STM_PSEGMENT->last_commit_log_entry->next);
@@ -382,7 +417,7 @@ static void reset_transaction_read_version(void)
 }
 
 
-static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
+static void _stm_start_transaction(stm_thread_local_t *tl)
 {
     assert(!_stm_in_transaction(tl));
 
@@ -392,6 +427,8 @@ static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
         goto retry;
     /* GS invalid before this point! */
 
+    assert(STM_PSEGMENT->transaction_state == TS_NONE);
+    STM_PSEGMENT->transaction_state = TS_REGULAR;
 #ifndef NDEBUG
     STM_PSEGMENT->running_pthread = pthread_self();
 #endif
@@ -421,10 +458,28 @@ long stm_start_transaction(stm_thread_local_t *tl)
 #else
     long repeat_count = stm_rewind_jmp_setjmp(tl);
 #endif
-    _stm_start_transaction(tl, false);
+    _stm_start_transaction(tl);
     return repeat_count;
 }
 
+void stm_start_inevitable_transaction(stm_thread_local_t *tl)
+{
+    s_mutex_lock();
+    _stm_start_transaction(tl);
+    _stm_become_inevitable("stm_start_inevitable_transaction");
+}
+
+#ifdef STM_NO_AUTOMATIC_SETJMP
+void _test_run_abort(stm_thread_local_t *tl) __attribute__((noreturn));
+int stm_is_inevitable(void)
+{
+    switch (STM_PSEGMENT->transaction_state) {
+    case TS_REGULAR: return 0;
+    case TS_INEVITABLE: return 1;
+    default: abort();
+    }
+}
+#endif
 
 /************************************************************/
 
@@ -432,6 +487,7 @@ static void _finish_transaction()
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
 
+    STM_PSEGMENT->transaction_state = TS_NONE;
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
 
     release_thread_segment(tl);
@@ -443,6 +499,7 @@ void stm_commit_transaction(void)
     assert(!_has_mutex());
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
+    dprintf(("stm_commit_transaction()\n"));
     minor_collection(1);
 
     _validate_and_add_to_commit_log();
@@ -468,7 +525,6 @@ void stm_commit_transaction(void)
 
     assert(STM_SEGMENT->nursery_end == NURSERY_END);
     stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
-
 
     /* done */
     _finish_transaction();
@@ -518,6 +574,16 @@ static void abort_data_structures_from_segment_num(int segment_num)
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
+
+    switch (pseg->transaction_state) {
+    case TS_REGULAR:
+        break;
+    case TS_INEVITABLE:
+        stm_fatalerror("abort: transaction_state == TS_INEVITABLE");
+    default:
+        stm_fatalerror("abort: bad transaction_state == %d",
+                       (int)pseg->transaction_state);
+    }
 
     throw_away_nursery(pseg);
 
@@ -581,4 +647,23 @@ void stm_abort_transaction(void)
     s_mutex_lock();
     stm_rewind_jmp_longjmp(tl);
 #endif
+}
+
+
+void _stm_become_inevitable(const char *msg)
+{
+    s_mutex_lock();
+
+    if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
+        dprintf(("become_inevitable: %s\n", msg));
+
+        _validate_and_turn_inevitable();
+        STM_PSEGMENT->transaction_state = TS_INEVITABLE;
+        stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+    }
+    else {
+        assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE);
+    }
+
+    s_mutex_unlock();
 }

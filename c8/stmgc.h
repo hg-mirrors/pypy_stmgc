@@ -69,6 +69,7 @@ typedef struct stm_thread_local_s {
 
 void _stm_write_slowpath(object_t *);
 object_t *_stm_allocate_slowpath(ssize_t);
+void _stm_become_inevitable(const char*);
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
@@ -186,8 +187,25 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
 
 
 long stm_start_transaction(stm_thread_local_t *tl);
+void stm_start_inevitable_transaction(stm_thread_local_t *tl);
+
 void stm_commit_transaction(void);
 void stm_abort_transaction(void) __attribute__((noreturn));
+
+
+#ifdef STM_NO_AUTOMATIC_SETJMP
+int stm_is_inevitable(void);
+#else
+static inline int stm_is_inevitable(void) {
+    return !rewind_jmp_armed(&STM_SEGMENT->running_thread->rjthread);
+}
+#endif
+static inline void stm_become_inevitable(stm_thread_local_t *tl,
+                                         const char* msg) {
+    assert(STM_SEGMENT->running_thread == tl);
+    if (!stm_is_inevitable())
+        _stm_become_inevitable(msg);
+}
 
 
 /* ==================== END ==================== */
