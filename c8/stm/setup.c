@@ -78,7 +78,7 @@ static void setup_signal_handler(void)
 
 	act.sa_sigaction = &_signal_handler;
 	/* The SA_SIGINFO flag tells sigaction() to use the sa_sigaction field, not sa_handler. */
-	act.sa_flags = SA_SIGINFO;
+	act.sa_flags = SA_SIGINFO | SA_NODEFER;
 
 	if (sigaction(SIGSEGV, &act, NULL) < 0) {
 		perror ("sigaction");
