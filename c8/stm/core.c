@@ -35,21 +35,20 @@ static void _update_obj_from(int from_seg, object_t *obj)
     /* during validation this looks up the obj in the
        from_seg (backup or normal) and copies the version
        over the current segment's one */
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     size_t obj_size;
-
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     uintptr_t pagenum = (uintptr_t)obj / 4096UL;
-    assert(is_private_log_page_in(STM_SEGMENT->segment_num, pagenum));
-    assert(!is_shared_log_page(pagenum));
 
+    assert(!is_shared_log_page(pagenum));
+    assert(is_private_log_page_in(STM_SEGMENT->segment_num, pagenum));
     assert(is_private_log_page_in(from_seg, pagenum));
 
     /* look the obj up in the other segment's modified_old_objects to
        get its backup copy: */
     acquire_modified_objs_lock(from_seg);
 
-    struct tree_s *tree = get_priv_segment(from_seg)->modified_old_objects;
     wlog_t *item;
+    struct tree_s *tree = get_priv_segment(from_seg)->modified_old_objects;
     TREE_FIND(tree, (uintptr_t)obj, item, goto not_found);
 
     obj_size = stmcb_size_rounded_up((struct object_s*)item->val);
@@ -217,12 +216,14 @@ void _stm_write_slowpath(object_t *obj)
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
     int my_segnum = STM_SEGMENT->segment_num;
-    uintptr_t first_page = ((uintptr_t)obj) / 4096UL;
+    uintptr_t end_page, first_page = ((uintptr_t)obj) / 4096UL;
     char *realobj;
     size_t obj_size;
 
     realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
+    /* get the last page containing data from the object */
+    end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
 
     /* add to read set: */
     stm_read(obj);
@@ -231,17 +232,18 @@ void _stm_write_slowpath(object_t *obj)
     struct object_s *bk_obj = malloc(obj_size);
     memcpy(bk_obj, realobj, obj_size);
 
-    assert(obj_size < 4096); /* too lazy right now (part of the code is ready) */
-
     if (is_shared_log_page(first_page)) {
         /* acquire all privatization locks, make private and
            read protect others */
         long i;
+        uintptr_t page;
         for (i = 0; i < NB_SEGMENTS; i++) {
             acquire_privatization_lock(i);
         }
-        if (is_shared_log_page(first_page))
-            _privatize_shared_page(first_page);
+        for (page = first_page; page <= end_page; page++) {
+            if (is_shared_log_page(page))
+                _privatize_shared_page(page);
+        }
         for (i = NB_SEGMENTS-1; i >= 0; i--) {
             release_privatization_lock(i);
         }
