@@ -57,6 +57,8 @@ void clear_jmpbuf(stm_thread_local_t *tl);
 long stm_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
+bool _check_become_inevitable(stm_thread_local_t *tl);
+int stm_is_inevitable(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
@@ -132,6 +134,10 @@ bool _check_commit_transaction(void) {
 
 bool _check_abort_transaction(void) {
     CHECKED(stm_abort_transaction());
+}
+
+bool _check_become_inevitable(stm_thread_local_t *tl) {
+    CHECKED(stm_become_inevitable(tl, "TEST"));
 }
 
 bool _check_stm_validate(void) {
@@ -413,12 +419,18 @@ class BaseTest(object):
     def teardown_method(self, meth):
         lib.stmcb_expand_marker = ffi.NULL
         lib.stmcb_debug_print = ffi.NULL
+        tl = self.tls[self.current_thread]
+        if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
+            self.commit_transaction()      # must succeed!
         #
         for n, tl in enumerate(self.tls):
             if lib._stm_in_transaction(tl):
                 if self.current_thread != n:
                     self.switch(n)
-                self.abort_transaction()
+                if lib.stm_is_inevitable():
+                    self.commit_transaction()   # must succeed!
+                else:
+                    self.abort_transaction()
         #
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
@@ -504,3 +516,8 @@ class BaseTest(object):
     def set_thread_local_obj(self, newobj):
         tl = self.tls[self.current_thread]
         tl.thread_local_obj = newobj
+
+    def become_inevitable(self):
+        tl = self.tls[self.current_thread]
+        if lib._check_become_inevitable(tl):
+            raise Conflict()
