@@ -7,6 +7,32 @@
 
 /* ############# signal handler ############# */
 
+static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
+{
+    acquire_modified_objs_lock(from_segnum);
+    struct tree_s *tree = get_priv_segment(from_segnum)->modified_old_objects;
+    wlog_t *item;
+    TREE_LOOP_FORWARD(tree, item); {
+        if (item->addr >= pagenum * 4096UL && item->addr < (pagenum + 1) * 4096UL) {
+            /* obj is in range. XXX: no page overlapping objs allowed yet */
+
+            object_t *obj = (object_t*)item->addr;
+            struct object_s* bk_obj = (struct object_s *)item->val;
+            size_t obj_size;
+
+            obj_size = stmcb_size_rounded_up(bk_obj);
+            assert(obj_size < 4096); /* XXX */
+
+            memcpy(REAL_ADDRESS(STM_SEGMENT->segment_base, obj),
+                   bk_obj, obj_size);
+
+            assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* bk_obj never written */
+        }
+    } TREE_LOOP_END;
+
+    release_modified_objs_lock(from_segnum);
+}
+
 static void bring_page_up_to_date(uintptr_t pagenum)
 {
     /* Assuming pagenum is not yet private in this segment and
@@ -50,28 +76,8 @@ static void bring_page_up_to_date(uintptr_t pagenum)
 
         /* get valid state from backup copies of written objs in
            the range of this page: */
-        acquire_modified_objs_lock(i);
-        struct tree_s *tree = get_priv_segment(i)->modified_old_objects;
-        wlog_t *item;
-        TREE_LOOP_FORWARD(tree, item); {
-            if (item->addr >= pagenum * 4096UL && item->addr < (pagenum + 1) * 4096UL) {
-                /* obj is in range. XXX: no page overlapping objs allowed yet */
+        copy_bk_objs_from(i, pagenum);
 
-                object_t *obj = (object_t*)item->addr;
-                struct object_s* bk_obj = (struct object_s *)item->val;
-                size_t obj_size;
-
-                obj_size = stmcb_size_rounded_up(bk_obj);
-                assert(obj_size < 4096); /* XXX */
-
-                memcpy(REAL_ADDRESS(STM_SEGMENT->segment_base, obj),
-                       bk_obj, obj_size);
-
-                assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* bk_obj never written */
-            }
-        } TREE_LOOP_END;
-
-        release_modified_objs_lock(i);
         release_privatization_lock(i);
 
         return;
