@@ -262,7 +262,7 @@ static void _validate_and_add_to_commit_log()
         OPT_ASSERT((uintptr_t)STM_PSEGMENT->last_commit_log_entry->next == -1);
 
         to = &(STM_PSEGMENT->last_commit_log_entry->next);
-        bool yes = __sync_bool_compare_and_swap(to, -1, new);
+        bool yes = __sync_bool_compare_and_swap(to, (void*)-1, new);
         OPT_ASSERT(yes);
         return;
     }
