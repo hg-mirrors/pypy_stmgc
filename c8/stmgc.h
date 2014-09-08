@@ -24,18 +24,7 @@
 
 typedef TLPREFIX struct object_s object_t;
 typedef TLPREFIX struct stm_segment_info_s stm_segment_info_t;
-typedef TLPREFIX struct stm_read_marker_s stm_read_marker_t;
 typedef TLPREFIX char stm_char;
-
-struct stm_read_marker_s {
-    /* In every segment, every object has a corresponding read marker.
-       We assume that objects are at least 16 bytes long, and use
-       their address divided by 16.  The read marker is equal to
-       'STM_SEGMENT->transaction_read_version' if and only if the
-       object was read in the current transaction.  The nurseries
-       also have corresponding read markers, but they are never used. */
-    uint8_t rm;
-};
 
 struct stm_segment_info_s {
     uint8_t transaction_read_version;
@@ -126,8 +115,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **));
 __attribute__((always_inline))
 static inline void stm_read(object_t *obj)
 {
-    ((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm =
-        STM_SEGMENT->transaction_read_version;
+    *((stm_char *)(((uintptr_t)obj) >> 4)) = STM_SEGMENT->transaction_read_version;
 }
 
 __attribute__((always_inline))
