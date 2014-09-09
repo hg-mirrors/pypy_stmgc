@@ -63,6 +63,11 @@ static void minor_trace_if_young(object_t **pobj)
            where the object moved to, is stored in the second word in 'obj'. */
         object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
 
+        if (LIKELY(pforwarded_array[0] == GCWORD_MOVED)) {
+            *pobj = pforwarded_array[1];    /* already moved */
+            return;
+        }
+
         realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         size = stmcb_size_rounded_up((struct object_s *)realobj);
 
@@ -199,6 +204,16 @@ static void minor_collection(bool commit)
     _do_minor_collection(commit);
 }
 
+void stm_collect(long level)
+{
+    if (level > 0)
+        abort();
+
+    minor_collection(/*commit=*/ false);
+    /* XXX: major_collection_if_requested(); */
+}
+
+
 
 /************************************************************/
 
@@ -220,7 +235,7 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
         return (object_t *)p;
     }
 
-    abort();//stm_collect(0);
+    stm_collect(0);
     goto restart;
 }
 

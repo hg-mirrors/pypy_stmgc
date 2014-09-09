@@ -181,6 +181,8 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
 void stm_abort_transaction(void) __attribute__((noreturn));
 
+void stm_collect(long level);
+
 
 #ifdef STM_NO_AUTOMATIC_SETJMP
 int stm_is_inevitable(void);

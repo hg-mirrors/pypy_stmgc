@@ -38,6 +38,10 @@ static char *allocate_outside_nursery_large(uint64_t size)
             stm_fatalerror("uninitialized_page_start changed?");
         }
     }
+    dprintf(("allocate_outside_nursery_large(%lu): %p, seg=%d, page=%lu\n",
+             size, addr, get_segment_of_linear_address(addr),
+             (addr - STM_SEGMENT->segment_base) / 4096UL));
+
 
     return addr;
 }
