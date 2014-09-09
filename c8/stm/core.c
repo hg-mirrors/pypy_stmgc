@@ -460,7 +460,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
                        (int)pseg->transaction_state);
     }
 
-    throw_away_nursery(pseg);
+    long bytes_in_nursery = throw_away_nursery(pseg);
 
     reset_modified_from_backup_copies(segment_num);
 
@@ -482,6 +482,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
         stm_rewind_jmp_restore_shadowstack(tl);
     assert(tl->shadowstack == pseg->shadowstack_at_start_of_transaction);
 #endif
+tl->last_abort__bytes_in_nursery = bytes_in_nursery;
 
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
