@@ -24,6 +24,8 @@ struct stm_shadowentry_s {
 typedef struct {
     rewind_jmp_thread rjthread;
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
+    char *mem_clear_on_abort;
+    size_t mem_bytes_to_clear_on_abort;
     long last_abort__bytes_in_nursery;
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
@@ -77,6 +79,10 @@ void _stm_set_nursery_free_count(uint64_t free_count);
 long stm_identityhash(object_t *obj);
 long stm_id(object_t *obj);
 void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
+
+
+long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
+long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
 
 long _stm_count_modified_old_objects(void);
