@@ -10,6 +10,7 @@ typedef ... object_t;
 #define SIZEOF_MYOBJ ...
 #define STM_NB_SEGMENTS ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
+#define _STM_FAST_ALLOC ...
 
 typedef struct {
 ...;
@@ -66,6 +67,7 @@ uint32_t _get_type_id(object_t *obj);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
 
+void stm_collect(long level);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
 
@@ -242,6 +244,7 @@ HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
+FAST_ALLOC = lib._STM_FAST_ALLOC
 
 class Conflict(Exception):
     pass

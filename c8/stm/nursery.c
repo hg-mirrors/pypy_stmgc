@@ -15,6 +15,7 @@ static uintptr_t _stm_nursery_start;
 
 static void setup_nursery(void)
 {
+    assert(_STM_FAST_ALLOC <= NURSERY_SIZE);
     _stm_nursery_start = NURSERY_START;
 
     long i;
@@ -32,7 +33,8 @@ static inline bool _is_in_nursery(object_t *obj)
 
 static inline bool _is_young(object_t *obj)
 {
-    return _is_in_nursery(obj); /* XXX: young_outside_nursery */
+    return (_is_in_nursery(obj) ||
+        tree_contains(STM_PSEGMENT->young_outside_nursery, (uintptr_t)obj));
 }
 
 long stm_can_move(object_t *obj)
@@ -83,8 +85,14 @@ static void minor_trace_if_young(object_t **pobj)
         *pobj = nobj;
     }
     else {
-        /* XXX: young_outside_nursery */
-        return;
+        /* The object was not in the nursery at all */
+        if (LIKELY(!tree_contains(STM_PSEGMENT->young_outside_nursery,
+                                  (uintptr_t)obj)))
+            return;   /* common case: it was an old object, nothing to do */
+
+        /* a young object outside the nursery */
+        nobj = obj;
+        tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)nobj);
     }
 
     /* Must trace the object later */
@@ -177,11 +185,36 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 
     pseg->pub.nursery_current = (stm_char *)_stm_nursery_start;
 
+    /* free any object left from 'young_outside_nursery' */
+    if (!tree_is_cleared(pseg->young_outside_nursery)) {
+        wlog_t *item;
+
+        if (!tree_is_empty(pseg->young_outside_nursery)) {
+            /* tree may still be empty even if not cleared */
+            TREE_LOOP_FORWARD(pseg->young_outside_nursery, item) {
+                object_t *obj = (object_t*)item->addr;
+                assert(!_is_in_nursery(obj));
+
+                /* mark slot as unread (it can only have the read marker
+                   in this segment) */
+                *((char *)(pseg->pub.segment_base + (((uintptr_t)obj) >> 4))) = 0;
+
+                /* XXX: _stm_large_free(stm_object_pages + item->addr); */
+            } TREE_LOOP_END;
+        }
+
+        tree_clear(pseg->young_outside_nursery);
+    }
+
 
     return nursery_used;
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
+
+#define MINOR_NOTHING_TO_DO(pseg)                                       \
+    ((pseg)->pub.nursery_current == (stm_char *)_stm_nursery_start &&   \
+     tree_is_cleared((pseg)->young_outside_nursery))
 
 
 static void _do_minor_collection(bool commit)
@@ -195,6 +228,8 @@ static void _do_minor_collection(bool commit)
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
 
     throw_away_nursery(get_priv_segment(STM_SEGMENT->segment_num));
+
+    assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
 }
 
 static void minor_collection(bool commit)
@@ -227,6 +262,7 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 
     OPT_ASSERT(size_rounded_up >= 16);
     OPT_ASSERT((size_rounded_up & 7) == 0);
+    OPT_ASSERT(size_rounded_up < _STM_FAST_ALLOC);
 
     stm_char *p = STM_SEGMENT->nursery_current;
     stm_char *end = p + size_rounded_up;
@@ -238,6 +274,26 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
     stm_collect(0);
     goto restart;
 }
+
+object_t *_stm_allocate_external(ssize_t size_rounded_up)
+{
+    /* /\* first, force a collection if needed *\/ */
+    /* if (is_major_collection_requested()) { */
+    /*     /\* use stm_collect() with level 0: if another thread does a major GC */
+    /*        in-between, is_major_collection_requested() will become false */
+    /*        again, and we'll avoid doing yet another one afterwards. *\/ */
+    /*     stm_collect(0); */
+    /* } */
+
+    char *result = allocate_outside_nursery_large(size_rounded_up);
+    object_t *o = (object_t *)(result - stm_object_pages);
+
+    tree_insert(STM_PSEGMENT->young_outside_nursery, (uintptr_t)o, 0);
+
+    memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
+    return o;
+}
+
 
 #ifdef STM_TESTS
 void _stm_set_nursery_free_count(uint64_t free_count)

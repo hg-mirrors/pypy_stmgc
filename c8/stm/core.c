@@ -257,18 +257,22 @@ void _stm_write_slowpath(object_t *obj)
     /* remove the WRITE_BARRIER flag */
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
 
+    /* also add it to the GC list for minor collections */
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+
     /* done fiddling with protection and privatization */
     release_privatization_lock(my_segnum);
 
     /* phew, now add the obj to the write-set and register the
        backup copy. */
-    acquire_modified_objs_lock(my_segnum);
-    tree_insert(STM_PSEGMENT->modified_old_objects,
-                (uintptr_t)obj, (uintptr_t)bk_obj);
-    release_modified_objs_lock(my_segnum);
+    /* XXX: possibly slow check; try overflow objs again? */
+    if (!tree_contains(STM_PSEGMENT->modified_old_objects, (uintptr_t)obj)) {
+        acquire_modified_objs_lock(my_segnum);
+        tree_insert(STM_PSEGMENT->modified_old_objects,
+                    (uintptr_t)obj, (uintptr_t)bk_obj);
+        release_modified_objs_lock(my_segnum);
+    }
 
-    /* also add it to the GC list for minor collections */
-    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
 }
 
 static void reset_transaction_read_version(void)
@@ -321,7 +325,10 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
 
     assert(tree_is_cleared(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
+    assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
+
     check_nursery_at_transaction_start();
+
     stm_validate(NULL);
 }
 
