@@ -327,6 +327,8 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
     assert(tree_is_cleared(STM_PSEGMENT->nursery_objects_shadows));
+    assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[0]));
+    assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[1]));
 
     check_nursery_at_transaction_start();
 
@@ -403,6 +405,7 @@ void stm_commit_transaction(void)
 
     release_modified_objs_lock(STM_SEGMENT->segment_num);
 
+    invoke_and_clear_user_callbacks(0);   /* for commit */
 
     s_mutex_lock();
 
@@ -508,6 +511,11 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
 
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
 
+    if (tl->mem_clear_on_abort)
+        memset(tl->mem_clear_on_abort, 0, tl->mem_bytes_to_clear_on_abort);
+
+    invoke_and_clear_user_callbacks(1);   /* for abort */
+
     _finish_transaction();
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
@@ -544,6 +552,7 @@ void _stm_become_inevitable(const char *msg)
         _validate_and_turn_inevitable();
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
         stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+        invoke_and_clear_user_callbacks(0);   /* for commit */
     }
     else {
         assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE);

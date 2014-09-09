@@ -47,6 +47,9 @@ typedef struct stm_thread_local_s {
     /* rewind_setjmp's interface */
     rewind_jmp_thread rjthread;
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
+
+    char *mem_clear_on_abort;
+    size_t mem_bytes_to_clear_on_abort;
     long last_abort__bytes_in_nursery;
     /* the next fields are handled internally by the library */
     int associated_segment_num;
@@ -192,6 +195,11 @@ long stm_id(object_t *obj);
 void stm_set_prebuilt_identityhash(object_t *obj, long hash);
 
 object_t *stm_setup_prebuilt(object_t *);
+
+
+long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
+long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
+
 
 
 #ifdef STM_NO_AUTOMATIC_SETJMP

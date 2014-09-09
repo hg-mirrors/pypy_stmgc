@@ -11,6 +11,7 @@
 #include "stm/setup.h"
 #include "stm/fprintcolor.h"
 #include "stm/rewind_setjmp.h"
+#include "stm/extra.h"
 
 #include "stm/list.c"
 #include "stm/pagecopy.c"
@@ -25,3 +26,4 @@
 #include "stm/hash_id.c"
 #include "stm/prebuilt.c"
 #include "stm/misc.c"
+#include "stm/extra.c"

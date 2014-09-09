@@ -59,6 +59,8 @@ struct stm_priv_segment_info_s {
 
     uint8_t transaction_state;
 
+    struct tree_s *callbacks_on_commit_and_abort[2];
+
     struct stm_commit_log_entry_s *last_commit_log_entry;
 
     struct stm_shadowentry_s *shadowstack_at_start_of_transaction;
