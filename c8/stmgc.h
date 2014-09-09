@@ -59,11 +59,13 @@ typedef struct stm_thread_local_s {
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
 #define _STM_FAST_ALLOC           (66*1024)
+#define _STM_NSE_SIGNAL_MAX               1
 
 void _stm_write_slowpath(object_t *);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
+void _stm_collectable_safe_point();
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
@@ -77,6 +79,9 @@ long stm_can_move(object_t *obj);
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
 void _push_obj_to_other_segments(object_t *obj);
+
+void _stm_start_safe_point(void);
+void _stm_stop_safe_point(void);
 
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
@@ -200,6 +205,10 @@ object_t *stm_setup_prebuilt(object_t *);
 long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
+static inline void stm_safe_point(void) {
+    if (STM_SEGMENT->nursery_end <= _STM_NSE_SIGNAL_MAX)
+        _stm_collectable_safe_point();
+}
 
 
 #ifdef STM_NO_AUTOMATIC_SETJMP
@@ -216,6 +225,7 @@ static inline void stm_become_inevitable(stm_thread_local_t *tl,
         _stm_become_inevitable(msg);
 }
 
+void stm_become_globally_unique_transaction(stm_thread_local_t *tl, const char *msg);
 
 /* ==================== END ==================== */
 

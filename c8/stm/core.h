@@ -57,6 +57,7 @@ struct stm_priv_segment_info_s {
 
     uint8_t privatization_lock;
 
+    uint8_t safe_point;
     uint8_t transaction_state;
 
     struct tree_s *callbacks_on_commit_and_abort[2];
@@ -68,6 +69,16 @@ struct stm_priv_segment_info_s {
     /* For debugging */
 #ifndef NDEBUG
     pthread_t running_pthread;
+#endif
+};
+
+enum /* safe_point */ {
+    SP_NO_TRANSACTION=0,
+    SP_RUNNING,
+    SP_WAIT_FOR_C_REQUEST_REMOVED,
+    SP_WAIT_FOR_C_AT_SAFE_POINT,
+#ifdef STM_TESTS
+    SP_WAIT_FOR_OTHER_THREAD,
 #endif
 };
 
@@ -118,6 +129,12 @@ static inline int get_segment_of_linear_address(char *addr) {
 
 static bool _is_tl_registered(stm_thread_local_t *tl);
 static bool _seems_to_be_running_transaction(void);
+
+static void teardown_core(void);
+static void abort_with_mutex(void) __attribute__((noreturn));
+static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
+static void abort_data_structures_from_segment_num(int segment_num);
+
 
 
 static inline void _duck(void) {

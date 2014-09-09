@@ -45,6 +45,8 @@ void stm_validate(void *free_if_abort);
 bool _check_stm_validate();
 
 object_t *stm_setup_prebuilt(object_t *);
+void _stm_start_safe_point(void);
+bool _check_stop_safe_point(void);
 
 
 bool _checked_stm_write(object_t *obj);
@@ -65,6 +67,7 @@ long stm_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
+bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 int stm_is_inevitable(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
@@ -152,12 +155,20 @@ bool _check_commit_transaction(void) {
     CHECKED(stm_commit_transaction());
 }
 
+bool _check_stop_safe_point(void) {
+    CHECKED(_stm_stop_safe_point());
+}
+
 bool _check_abort_transaction(void) {
     CHECKED(stm_abort_transaction());
 }
 
 bool _check_become_inevitable(stm_thread_local_t *tl) {
     CHECKED(stm_become_inevitable(tl, "TEST"));
+}
+
+bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
+    CHECKED(stm_become_globally_unique_transaction(tl, "TESTGUT"));
 }
 
 bool _check_stm_validate(void) {
@@ -491,13 +502,17 @@ class BaseTest(object):
 
     def switch(self, thread_num):
         assert thread_num != self.current_thread
+        tl = self.tls[self.current_thread]
+        if lib._stm_in_transaction(tl):
+            stm_start_safe_point()
         #
         self.current_thread = thread_num
         tl2 = self.tls[thread_num]
         #
         if lib._stm_in_transaction(tl2):
             lib._stm_test_switch(tl2)
-            stm_validate() # can raise
+            stm_stop_safe_point() # can raise Conflict
+            stm_validate() # can raise Conflict
 
     def switch_to_segment(self, seg_num):
         lib._stm_test_switch_segment(seg_num)
@@ -541,4 +556,9 @@ class BaseTest(object):
     def become_inevitable(self):
         tl = self.tls[self.current_thread]
         if lib._check_become_inevitable(tl):
+            raise Conflict()
+
+    def become_globally_unique_transaction(self):
+        tl = self.tls[self.current_thread]
+        if lib._check_become_globally_unique_transaction(tl):
             raise Conflict()
