@@ -47,6 +47,7 @@ typedef struct stm_thread_local_s {
     /* rewind_setjmp's interface */
     rewind_jmp_thread rjthread;
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
+    long last_abort__bytes_in_nursery;
     /* the next fields are handled internally by the library */
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;

@@ -23,6 +23,7 @@ struct stm_shadowentry_s {
 typedef struct {
     rewind_jmp_thread rjthread;
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
+    long last_abort__bytes_in_nursery;
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
