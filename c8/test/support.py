@@ -42,6 +42,9 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
 void stm_validate(void *free_if_abort);
 bool _check_stm_validate();
 
+object_t *stm_setup_prebuilt(object_t *);
+
+
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);

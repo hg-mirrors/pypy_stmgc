@@ -187,6 +187,12 @@ void stm_abort_transaction(void) __attribute__((noreturn));
 
 void stm_collect(long level);
 
+long stm_identityhash(object_t *obj);
+long stm_id(object_t *obj);
+void stm_set_prebuilt_identityhash(object_t *obj, long hash);
+
+object_t *stm_setup_prebuilt(object_t *);
+
 
 #ifdef STM_NO_AUTOMATIC_SETJMP
 int stm_is_inevitable(void);
