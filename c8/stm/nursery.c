@@ -253,6 +253,8 @@ static void minor_collection(bool commit)
 {
     assert(!_has_mutex());
 
+    stm_safe_point();
+
     _do_minor_collection(commit);
 }
 
@@ -276,6 +278,7 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
     STM_SEGMENT->nursery_current -= size_rounded_up;  /* restore correct val */
 
  restart:
+    stm_safe_point();
 
     OPT_ASSERT(size_rounded_up >= 16);
     OPT_ASSERT((size_rounded_up & 7) == 0);

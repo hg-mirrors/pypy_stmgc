@@ -74,6 +74,11 @@ void stm_validate(void *free_if_abort)
        most current one and apply all changes done
        by other transactions. Abort if we read one of
        the committed objs. */
+    if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+        assert((uintptr_t)STM_PSEGMENT->last_commit_log_entry->next == -1);
+        return;
+    }
+
     volatile struct stm_commit_log_entry_s *cl, *prev_cl;
     cl = prev_cl = (volatile struct stm_commit_log_entry_s *)
         STM_PSEGMENT->last_commit_log_entry;
@@ -83,6 +88,9 @@ void stm_validate(void *free_if_abort)
     while ((cl = cl->next)) {
         if ((uintptr_t)cl == -1) {
             /* there is an inevitable transaction running */
+#if STM_TESTS
+            stm_abort_transaction();
+#endif
             cl = prev_cl;
             usleep(1);          /* XXX */
             continue;
@@ -306,13 +314,16 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
         goto retry;
     /* GS invalid before this point! */
 
+    assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
     STM_PSEGMENT->transaction_state = TS_REGULAR;
+    STM_PSEGMENT->safe_point = SP_RUNNING;
 #ifndef NDEBUG
     STM_PSEGMENT->running_pthread = pthread_self();
 #endif
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
 
+    enter_safe_point_if_requested();
     dprintf(("start_transaction\n"));
 
     s_mutex_unlock();
@@ -372,6 +383,7 @@ static void _finish_transaction()
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
 
+    STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
 
@@ -382,6 +394,7 @@ static void _finish_transaction()
 void stm_commit_transaction(void)
 {
     assert(!_has_mutex());
+    assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
     dprintf(("stm_commit_transaction()\n"));
@@ -411,6 +424,10 @@ void stm_commit_transaction(void)
 
     assert(STM_SEGMENT->nursery_end == NURSERY_END);
     stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+
+    if (globally_unique_transaction && STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+        committed_globally_unique_transaction();
+    }
 
     /* done */
     _finish_transaction();
@@ -516,22 +533,24 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
 
     invoke_and_clear_user_callbacks(1);   /* for abort */
 
+    if (is_abort(STM_SEGMENT->nursery_end)) {
+        /* done aborting */
+        STM_SEGMENT->nursery_end = pause_signalled ? NSE_SIGPAUSE
+                                                   : NURSERY_END;
+    }
+
     _finish_transaction();
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     return tl;
 }
 
-
-#ifdef STM_NO_AUTOMATIC_SETJMP
-void _test_run_abort(stm_thread_local_t *tl) __attribute__((noreturn));
-#endif
-
-void stm_abort_transaction(void)
+static void abort_with_mutex(void)
 {
-    s_mutex_lock();
     stm_thread_local_t *tl = abort_with_mutex_no_longjmp();
     s_mutex_unlock();
+
+    usleep(1);
 
 #ifdef STM_NO_AUTOMATIC_SETJMP
     _test_run_abort(tl);
@@ -542,9 +561,22 @@ void stm_abort_transaction(void)
 }
 
 
+
+#ifdef STM_NO_AUTOMATIC_SETJMP
+void _test_run_abort(stm_thread_local_t *tl) __attribute__((noreturn));
+#endif
+
+void stm_abort_transaction(void)
+{
+    s_mutex_lock();
+    abort_with_mutex();
+}
+
+
 void _stm_become_inevitable(const char *msg)
 {
     s_mutex_lock();
+    enter_safe_point_if_requested();
 
     if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
         dprintf(("become_inevitable: %s\n", msg));
@@ -558,5 +590,15 @@ void _stm_become_inevitable(const char *msg)
         assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE);
     }
 
+    s_mutex_unlock();
+}
+
+void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
+                                            const char *msg)
+{
+    stm_become_inevitable(tl, msg);   /* may still abort */
+
+    s_mutex_lock();
+    synchronize_all_threads(STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE);
     s_mutex_unlock();
 }
