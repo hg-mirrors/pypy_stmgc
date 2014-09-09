@@ -218,7 +218,7 @@ static void _tree_compress(struct tree_s *tree) __attribute__((unused));
 static void tree_insert(struct tree_s *tree, uintptr_t addr, uintptr_t val);
 static bool tree_delete_item(struct tree_s *tree, uintptr_t addr)
      __attribute__((unused));
-static wlog_t *tree_item(struct tree_s *tree, int index); /* SLOW */
+static wlog_t *tree_item(struct tree_s *tree, int index) __attribute__((unused)); /* SLOW */
 
 static inline bool tree_contains(struct tree_s *tree, uintptr_t addr)
 {
