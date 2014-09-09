@@ -51,6 +51,8 @@ struct stm_priv_segment_info_s {
     uint8_t modified_objs_lock;
     struct tree_s *modified_old_objects;
     struct list_s *objects_pointing_to_nursery;
+    struct tree_s *young_outside_nursery;
+
     uint8_t privatization_lock;
 
     uint8_t transaction_state;

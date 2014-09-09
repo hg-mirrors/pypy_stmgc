@@ -135,8 +135,11 @@ static void tree_clear(struct tree_s *tree) __attribute__((unused));
 //static inline void tree_delete_not_used_any_more(struct tree_s *tree)...
 
 static inline bool tree_is_cleared(struct tree_s *tree) {
-    assert((tree->raw_current == tree->raw_start) == (tree->count == 0));
     return tree->raw_current == tree->raw_start;
+}
+
+static inline bool tree_is_empty(struct tree_s *tree) {
+    return tree->count == 0;
 }
 
 static inline uintptr_t tree_count(struct tree_s *tree) {

@@ -55,10 +55,11 @@ typedef struct stm_thread_local_s {
 } stm_thread_local_t;
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
-
+#define _STM_FAST_ALLOC           (66*1024)
 
 void _stm_write_slowpath(object_t *);
 object_t *_stm_allocate_slowpath(ssize_t);
+object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
@@ -132,6 +133,9 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
 {
     OPT_ASSERT(size_rounded_up >= 16);
     OPT_ASSERT((size_rounded_up & 7) == 0);
+
+    if (UNLIKELY(size_rounded_up >= _STM_FAST_ALLOC))
+        return _stm_allocate_external(size_rounded_up);
 
     stm_char *p = STM_SEGMENT->nursery_current;
     stm_char *end = p + size_rounded_up;

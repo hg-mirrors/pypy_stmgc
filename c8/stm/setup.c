@@ -87,6 +87,7 @@ void stm_setup(void)
     assert((NB_PAGES * 4096UL) >> 8 <= (FIRST_OBJECT_PAGE * 4096UL) >> 4);
     assert((END_NURSERY_PAGE * 4096UL) >> 8 <=
            (FIRST_READMARKER_PAGE * 4096UL));
+    assert(_STM_FAST_ALLOC <= NB_NURSERY_PAGES * 4096);
 
     stm_object_pages = setup_mmap("initial stm_object_pages mmap()",
                                   &stm_object_pages_fd);
@@ -109,6 +110,7 @@ void stm_setup(void)
         pr->pub.segment_base = segment_base;
         pr->modified_old_objects = tree_create();
         pr->objects_pointing_to_nursery = list_create();
+        pr->young_outside_nursery = tree_create();
         pr->last_commit_log_entry = &commit_log_root;
         pr->pub.transaction_read_version = 0xff;
     }
@@ -140,6 +142,7 @@ void stm_teardown(void)
         assert(list_is_empty(pr->objects_pointing_to_nursery));
         list_free(pr->objects_pointing_to_nursery);
         tree_free(pr->modified_old_objects);
+        tree_free(pr->young_outside_nursery);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);
