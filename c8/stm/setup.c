@@ -111,6 +111,7 @@ void stm_setup(void)
         pr->modified_old_objects = tree_create();
         pr->objects_pointing_to_nursery = list_create();
         pr->young_outside_nursery = tree_create();
+        pr->nursery_objects_shadows = tree_create();
         pr->last_commit_log_entry = &commit_log_root;
         pr->pub.transaction_read_version = 0xff;
     }
@@ -143,6 +144,7 @@ void stm_teardown(void)
         list_free(pr->objects_pointing_to_nursery);
         tree_free(pr->modified_old_objects);
         tree_free(pr->young_outside_nursery);
+        tree_free(pr->nursery_objects_shadows);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);

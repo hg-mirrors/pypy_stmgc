@@ -71,6 +71,11 @@ void stm_collect(long level);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
 
+long stm_identityhash(object_t *obj);
+long stm_id(object_t *obj);
+void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
+
+
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
 object_t *_stm_enum_modified_old_objects(long index);
