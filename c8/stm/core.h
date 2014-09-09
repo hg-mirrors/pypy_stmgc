@@ -35,6 +35,7 @@
 
 enum /* stm_flags */ {
     GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
+    GCFLAG_HAS_SHADOW = 0x02,
 };
 
 
@@ -52,6 +53,7 @@ struct stm_priv_segment_info_s {
     struct tree_s *modified_old_objects;
     struct list_s *objects_pointing_to_nursery;
     struct tree_s *young_outside_nursery;
+    struct tree_s *nursery_objects_shadows;
 
     uint8_t privatization_lock;
 

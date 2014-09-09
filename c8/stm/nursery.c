@@ -45,6 +45,7 @@ long stm_can_move(object_t *obj)
 
 
 /************************************************************/
+static object_t *find_existing_shadow(object_t *obj);
 #define GCWORD_MOVED  ((object_t *) -1)
 
 static void minor_trace_if_young(object_t **pobj)
@@ -65,9 +66,23 @@ static void minor_trace_if_young(object_t **pobj)
            where the object moved to, is stored in the second word in 'obj'. */
         object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
 
-        if (LIKELY(pforwarded_array[0] == GCWORD_MOVED)) {
-            *pobj = pforwarded_array[1];    /* already moved */
-            return;
+        if (obj->stm_flags & GCFLAG_HAS_SHADOW) {
+            /* ^^ the single check above detects both already-moved objects
+               and objects with HAS_SHADOW.  This is because GCWORD_MOVED
+               overrides completely the stm_flags field with 1's bits. */
+
+            if (LIKELY(pforwarded_array[0] == GCWORD_MOVED)) {
+                *pobj = pforwarded_array[1];    /* already moved */
+                return;
+            }
+            else {
+                /* really has a shadow */
+                nobj = find_existing_shadow(obj);
+                obj->stm_flags &= ~GCFLAG_HAS_SHADOW;
+                realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+                size = stmcb_size_rounded_up((struct object_s *)realobj);
+                goto copy_large_object;
+            }
         }
 
         realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
@@ -77,6 +92,7 @@ static void minor_trace_if_young(object_t **pobj)
         char *allocated = allocate_outside_nursery_large(size);
         nobj = (object_t *)(allocated - stm_object_pages);
 
+    copy_large_object:;
         char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
         memcpy(realnobj, realobj, size);
 
@@ -206,6 +222,7 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
         tree_clear(pseg->young_outside_nursery);
     }
 
+    tree_clear(pseg->nursery_objects_shadows);
 
     return nursery_used;
 #pragma pop_macro("STM_SEGMENT")
@@ -329,4 +346,63 @@ static void check_nursery_at_transaction_start(void)
     assert_memset_zero(REAL_ADDRESS(STM_SEGMENT->segment_base,
                                     STM_SEGMENT->nursery_current),
                        NURSERY_END - _stm_nursery_start);
+}
+
+
+static object_t *allocate_shadow(object_t *obj)
+{
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+    /* always gets outside as a large object for now */
+    char *allocated = allocate_outside_nursery_large(size);
+    object_t *nobj = (object_t *)(allocated - stm_object_pages);
+
+    /* Initialize the shadow enough to be considered a valid gc object.
+       If the original object stays alive at the next minor collection,
+       it will anyway be copied over the shadow and overwrite the
+       following fields.  But if the object dies, then the shadow will
+       stay around and only be freed at the next major collection, at
+       which point we want it to look valid (but ready to be freed).
+
+       Here, in the general case, it requires copying the whole object.
+       It could be more optimized in special cases like in PyPy, by
+       copying only the typeid and (for var-sized objects) the length
+       field.  It's probably overkill to add a special stmcb_xxx
+       interface just for that.
+    */
+    char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
+    memcpy(realnobj, realobj, size);
+
+    obj->stm_flags |= GCFLAG_HAS_SHADOW;
+
+    tree_insert(STM_PSEGMENT->nursery_objects_shadows,
+                (uintptr_t)obj, (uintptr_t)nobj);
+    return nobj;
+}
+
+static object_t *find_existing_shadow(object_t *obj)
+{
+    wlog_t *item;
+
+    TREE_FIND(STM_PSEGMENT->nursery_objects_shadows,
+              (uintptr_t)obj, item, goto not_found);
+
+    /* The answer is the address of the shadow. */
+    return (object_t *)item->val;
+
+ not_found:
+    stm_fatalerror("GCFLAG_HAS_SHADOW but no shadow found");
+}
+
+static object_t *find_shadow(object_t *obj)
+{
+    /* The object 'obj' is still in the nursery.  Find or allocate a
+        "shadow" object, which is where the object will be moved by the
+        next minor collection
+    */
+    if (obj->stm_flags & GCFLAG_HAS_SHADOW)
+        return find_existing_shadow(obj);
+    else
+        return allocate_shadow(obj);
 }

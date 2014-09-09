@@ -22,4 +22,5 @@
 #include "stm/setup.c"
 #include "stm/fprintcolor.c"
 #include "stm/rewind_setjmp.c"
+#include "stm/hash_id.c"
 #include "stm/misc.c"

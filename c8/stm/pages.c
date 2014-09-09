@@ -69,7 +69,6 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
     }
 
     for (i = 0; i < NB_SEGMENTS; i++) {
-        uint64_t bitmask = 1UL << i;
         uintptr_t amount = count;
         while (amount-->0) {
             volatile struct page_shared_s *ps2 = (volatile struct page_shared_s *)
