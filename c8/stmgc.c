@@ -23,4 +23,5 @@
 #include "stm/fprintcolor.c"
 #include "stm/rewind_setjmp.c"
 #include "stm/hash_id.c"
+#include "stm/prebuilt.c"
 #include "stm/misc.c"
