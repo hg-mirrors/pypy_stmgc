@@ -2,27 +2,11 @@
 # error "must be compiled via stmgc.c"
 #endif
 
-#include <signal.h>
 
-#ifdef USE_REMAP_FILE_PAGES
-static char *setup_mmap(char *reason, int *ignored)
-{
-    char *result = mmap(NULL, TOTAL_MEMORY,
-                        PROT_READ | PROT_WRITE,
-                        MAP_PAGES_FLAGS, -1, 0);
-    if (result == MAP_FAILED)
-        stm_fatalerror("%s failed: %m", reason);
-
-    return result;
-}
-static void close_fd_mmap(int ignored)
-{
-}
-#else
 #include <fcntl.h>           /* For O_* constants */
 static char *setup_mmap(char *reason, int *map_fd)
 {
-    char name[128];
+    char name[128] = "/__stmgc_c8__";
 
     /* Create the big shared memory object, and immediately unlink it.
        There is a small window where if this process is killed the
@@ -51,7 +35,6 @@ static void close_fd_mmap(int map_fd)
 {
     close(map_fd);
 }
-#endif
 
 static void setup_protection_settings(void)
 {
@@ -63,19 +46,13 @@ static void setup_protection_settings(void)
            NULL accesses land.  We mprotect it so that accesses fail. */
         mprotect(segment_base, 4096, PROT_NONE);
 
-        /* TMP_COPY_PAGE is used for atomic privatization */
-        mprotect(segment_base + TMP_COPY_PAGE * 4096UL,
-                 4096UL, PROT_READ|PROT_WRITE);
-
         /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
-        if (FIRST_READMARKER_PAGE > TMP_COPY_PAGE + 1)
-            mprotect(segment_base + (TMP_COPY_PAGE + 1) * 4096,
-                     (FIRST_READMARKER_PAGE - TMP_COPY_PAGE - 1) * 4096UL,
+        if (FIRST_READMARKER_PAGE > 2)
+            mprotect(segment_base + 2 * 4096,
+                     (FIRST_READMARKER_PAGE - 2) * 4096UL,
                      PROT_NONE);
 
-        /* STM_SEGMENT */
-        mprotect(segment_base + ((uintptr_t)STM_SEGMENT / 4096UL) * 4096UL,
-                 4096UL, PROT_READ|PROT_WRITE);
+        /* STM_SEGMENT is in page 1 */
     }
 }
 
@@ -83,13 +60,11 @@ static void setup_protection_settings(void)
 void stm_setup(void)
 {
     /* Check that some values are acceptable */
-    assert(TMP_COPY_PAGE > 0 && TMP_COPY_PAGE <= 1);
-    assert(TMP_COPY_PAGE * 4096 + 4096 <= ((uintptr_t)STM_SEGMENT));
+    assert(4096 <= ((uintptr_t)STM_SEGMENT));
     assert((uintptr_t)STM_SEGMENT == (uintptr_t)STM_PSEGMENT);
     assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= FIRST_READMARKER_PAGE*4096);
 
     assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
-    assert(TMP_COPY_PAGE < FIRST_READMARKER_PAGE);
     assert(FIRST_READMARKER_PAGE * 4096UL <= READMARKER_START);
     assert(READMARKER_START < READMARKER_END);
     assert(READMARKER_END <= 4096UL * FIRST_OBJECT_PAGE);
