@@ -200,6 +200,8 @@ static inline uintptr_t tree_count(struct tree_s *tree) {
 #define TREE_LOOP_END_AND_COMPRESS                                       \
                          } if (_deleted_factor > 9) _tree_compress(_tree); }
 #define TREE_LOOP_DELETE(tree, item)  { (tree)->count--; (item)->addr = NULL; _deleted_factor += 6; }
+#define TREE_FIND_DELETE(tree, item)  { (tree)->count--; (item)->addr = NULL; }
+
 
 #define TREE_FIND(tree, addr1, result, goto_not_found)          \
 {                                                               \
