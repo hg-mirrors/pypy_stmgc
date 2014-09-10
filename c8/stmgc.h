@@ -34,7 +34,7 @@ struct stm_segment_info_s {
     uintptr_t nursery_end;
     struct stm_thread_local_s *running_thread;
 };
-#define STM_SEGMENT           ((stm_segment_info_t *)8192)
+#define STM_SEGMENT           ((stm_segment_info_t *)4352)
 
 
 struct stm_shadowentry_s {
