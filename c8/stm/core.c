@@ -224,8 +224,7 @@ void _privatize_shared_page(uintptr_t pagenum)
     for (i = 1; i < NB_SEGMENTS; i++) {
         assert(!is_private_log_page_in(i, pagenum));
 
-        page_privatize_in(i, pagenum);
-        pagecopy((char*)(get_virt_page_of(i, pagenum) * 4096UL), src);
+        page_privatize_in(i, pagenum, src);
     }
     set_page_private_in(0, pagenum);
 
@@ -256,23 +255,23 @@ void _stm_write_slowpath(object_t *obj)
     struct object_s *bk_obj = malloc(obj_size);
     memcpy(bk_obj, realobj, obj_size);
 
-    if (is_shared_log_page(first_page)) {
-        /* acquire all privatization locks, make private and
-           read protect others */
-        long i;
-        uintptr_t page;
-        for (i = 0; i < NB_SEGMENTS; i++) {
-            acquire_privatization_lock(i);
-        }
-        for (page = first_page; page <= end_page; page++) {
+    /* if there are shared pages, privatize them */
+
+    uintptr_t page;
+    for (page = first_page; page <= end_page; page++) {
+        if (is_shared_log_page(page)) {
+            long i;
+            for (i = 0; i < NB_SEGMENTS; i++) {
+                acquire_privatization_lock(i);
+            }
             if (is_shared_log_page(page))
                 _privatize_shared_page(page);
-        }
-        for (i = NB_SEGMENTS-1; i >= 0; i--) {
-            release_privatization_lock(i);
+            for (i = NB_SEGMENTS-1; i >= 0; i--) {
+                release_privatization_lock(i);
+            }
         }
     }
-    /* page not shared anymore. but we still may have
+    /* pages not shared anymore. but we still may have
        only a read protected page ourselves: */
 
     acquire_privatization_lock(my_segnum);
