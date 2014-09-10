@@ -63,7 +63,7 @@ void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
 
 void clear_jmpbuf(stm_thread_local_t *tl);
-long stm_start_transaction(stm_thread_local_t *tl);
+long _check_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
@@ -153,6 +153,17 @@ bool _checked_stm_write(object_t *object) {
 
 bool _check_commit_transaction(void) {
     CHECKED(stm_commit_transaction());
+}
+
+long _check_start_transaction(stm_thread_local_t *tl) {
+   void **jmpbuf = tl->rjthread.jmpbuf;                         \
+    if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
+        stm_start_transaction(tl);                              \
+        clear_jmpbuf(tl);                                       \
+        return 0;                                               \
+    }                                                           \
+    clear_jmpbuf(tl);                                           \
+    return 1;
 }
 
 bool _check_stop_safe_point(void) {
@@ -474,8 +485,8 @@ class BaseTest(object):
     def start_transaction(self):
         tl = self.tls[self.current_thread]
         assert not lib._stm_in_transaction(tl)
-        res = lib.stm_start_transaction(tl)
-        assert res == 0
+        if lib._check_start_transaction(tl):
+            raise Conflict()
         lib.clear_jmpbuf(tl)
         assert lib._stm_in_transaction(tl)
         #

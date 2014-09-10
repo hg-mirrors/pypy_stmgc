@@ -89,10 +89,11 @@ void stm_validate(void *free_if_abort)
         if ((uintptr_t)cl == -1) {
             /* there is an inevitable transaction running */
 #if STM_TESTS
+            free(free_if_abort);
             stm_abort_transaction();
 #endif
             cl = prev_cl;
-            usleep(1);          /* XXX */
+            _stm_collectable_safe_point();
             continue;
         }
         prev_cl = cl;
@@ -104,8 +105,23 @@ void stm_validate(void *free_if_abort)
         while ((obj = cl->written[i])) {
             _update_obj_from(cl->segment_num, obj);
 
-            if (!needs_abort && _stm_was_read(obj)) {
+            if (_stm_was_read(obj)) {
                 needs_abort = true;
+
+                /* if we wrote this obj, we need to free its backup and
+                   remove it from modified_old_objects because
+                   we would otherwise overwrite the updated obj on abort */
+                acquire_modified_objs_lock(STM_SEGMENT->segment_num);
+                wlog_t *item;
+                struct tree_s *tree = STM_PSEGMENT->modified_old_objects;
+                TREE_FIND(tree, (uintptr_t)obj, item, goto not_found);
+
+                free((void*)item->val);
+                TREE_FIND_DELETE(tree, item);
+
+            not_found:
+                /* nothing todo */
+                release_modified_objs_lock(STM_SEGMENT->segment_num);
             }
 
             i++;
@@ -453,7 +469,6 @@ void reset_modified_from_backup_copies(int segment_num)
         size_t obj_size;
 
         obj_size = stmcb_size_rounded_up(bk_obj);
-        assert(obj_size < 4096); /* XXX */
 
         memcpy(REAL_ADDRESS(pseg->pub.segment_base, obj),
                bk_obj, obj_size);
