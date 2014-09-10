@@ -137,11 +137,10 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
     }
     /* No segment available.  Wait until release_thread_segment()
        signals that one segment has been freed. */
-    abort();                    /* XXX */
+    cond_wait(C_SEGMENT_FREE);
 
     /* Return false to the caller, which will call us again */
     return false;
-
  got_num:
     sync_ctl.in_use1[num] = 1;
     assert(STM_SEGMENT->segment_num == num);
@@ -153,6 +152,8 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
 static void release_thread_segment(stm_thread_local_t *tl)
 {
     assert(_has_mutex());
+
+    cond_signal(C_SEGMENT_FREE);
 
     assert(STM_SEGMENT->running_thread == tl);
     STM_SEGMENT->running_thread = NULL;
@@ -218,7 +219,7 @@ static void signal_everybody_to_pause_running(void)
     assert(_has_mutex());
 
     long i;
-    for (i = 1; i <= NB_SEGMENTS; i++) {
+    for (i = 0; i < NB_SEGMENTS; i++) {
         if (get_segment(i)->nursery_end == NURSERY_END)
             get_segment(i)->nursery_end = NSE_SIGPAUSE;
     }
@@ -234,7 +235,7 @@ static inline long count_other_threads_sp_running(void)
     long result = 0;
     int my_num = STM_SEGMENT->segment_num;
 
-    for (i = 1; i <= NB_SEGMENTS; i++) {
+    for (i = 0; i < NB_SEGMENTS; i++) {
         if (i != my_num && get_priv_segment(i)->safe_point == SP_RUNNING) {
             assert(get_segment(i)->nursery_end <= _STM_NSE_SIGNAL_MAX);
             result++;
@@ -251,7 +252,7 @@ static void remove_requests_for_safe_point(void)
     assert((_safe_points_requested = false, 1));
 
     long i;
-    for (i = 1; i <= NB_SEGMENTS; i++) {
+    for (i = 0; i < NB_SEGMENTS; i++) {
         assert(get_segment(i)->nursery_end != NURSERY_END);
         if (get_segment(i)->nursery_end == NSE_SIGPAUSE)
             get_segment(i)->nursery_end = NURSERY_END;

@@ -39,7 +39,7 @@ static void _update_obj_from(int from_seg, object_t *obj)
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     uintptr_t pagenum = (uintptr_t)obj / 4096UL;
 
-    assert(!is_shared_log_page(pagenum));
+    OPT_ASSERT(!is_shared_log_page(pagenum));
     assert(is_private_log_page_in(STM_SEGMENT->segment_num, pagenum));
     assert(is_private_log_page_in(from_seg, pagenum));
 
@@ -229,7 +229,7 @@ void _privatize_shared_page(uintptr_t pagenum)
     }
     set_page_private_in(0, pagenum);
 
-    assert(is_private_log_page_in(my_segnum, pagenum));
+    OPT_ASSERT(is_private_log_page_in(my_segnum, pagenum));
     assert(!is_shared_log_page(pagenum));
 }
 
@@ -437,8 +437,9 @@ void stm_commit_transaction(void)
     invoke_and_clear_user_callbacks(0);   /* for commit */
 
     s_mutex_lock();
-
+    enter_safe_point_if_requested();
     assert(STM_SEGMENT->nursery_end == NURSERY_END);
+
     stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
 
     if (globally_unique_transaction && STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
@@ -590,11 +591,9 @@ void stm_abort_transaction(void)
 
 void _stm_become_inevitable(const char *msg)
 {
-    s_mutex_lock();
-    enter_safe_point_if_requested();
-
     if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
         dprintf(("become_inevitable: %s\n", msg));
+        _stm_collectable_safe_point();
 
         _validate_and_turn_inevitable();
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
@@ -604,8 +603,6 @@ void _stm_become_inevitable(const char *msg)
     else {
         assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE);
     }
-
-    s_mutex_unlock();
 }
 
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
