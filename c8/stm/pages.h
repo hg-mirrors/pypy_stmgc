@@ -40,7 +40,7 @@ struct page_shared_s {
 static struct page_shared_s pages_privatized[PAGE_FLAG_END - PAGE_FLAG_START];
 
 static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count);
-static void page_privatize_in(int segnum, uintptr_t pagenum);
+static void page_privatize_in(int segnum, uintptr_t pagenum, char *initialize_from);
 
 static inline uintptr_t get_virt_page_of(long segnum, uintptr_t pagenum)
 {

@@ -63,11 +63,19 @@ static void setup_protection_settings(void)
            NULL accesses land.  We mprotect it so that accesses fail. */
         mprotect(segment_base, 4096, PROT_NONE);
 
+        /* TMP_COPY_PAGE is used for atomic privatization */
+        mprotect(segment_base + TMP_COPY_PAGE * 4096UL,
+                 4096UL, PROT_READ|PROT_WRITE);
+
         /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
-        if (FIRST_READMARKER_PAGE > 2)
-            mprotect(segment_base + 8192,
-                     (FIRST_READMARKER_PAGE - 2) * 4096UL,
+        if (FIRST_READMARKER_PAGE > TMP_COPY_PAGE + 1)
+            mprotect(segment_base + (TMP_COPY_PAGE + 1) * 4096,
+                     (FIRST_READMARKER_PAGE - TMP_COPY_PAGE - 1) * 4096UL,
                      PROT_NONE);
+
+        /* STM_SEGMENT */
+        mprotect(segment_base + ((uintptr_t)STM_SEGMENT / 4096UL) * 4096UL,
+                 4096UL, PROT_READ|PROT_WRITE);
     }
 }
 
@@ -75,11 +83,13 @@ static void setup_protection_settings(void)
 void stm_setup(void)
 {
     /* Check that some values are acceptable */
-    assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
-    assert(4096 <= ((uintptr_t)STM_SEGMENT));
+    assert(TMP_COPY_PAGE > 0 && TMP_COPY_PAGE <= 1);
+    assert(TMP_COPY_PAGE * 4096 + 4096 <= ((uintptr_t)STM_SEGMENT));
     assert((uintptr_t)STM_SEGMENT == (uintptr_t)STM_PSEGMENT);
-    assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= 8192);
-    assert(2 <= FIRST_READMARKER_PAGE);
+    assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= FIRST_READMARKER_PAGE*4096);
+
+    assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
+    assert(TMP_COPY_PAGE < FIRST_READMARKER_PAGE);
     assert(FIRST_READMARKER_PAGE * 4096UL <= READMARKER_START);
     assert(READMARKER_START < READMARKER_END);
     assert(READMARKER_END <= 4096UL * FIRST_OBJECT_PAGE);
@@ -98,7 +108,7 @@ void stm_setup(void)
         char *segment_base = get_segment_base(i);
 
         /* Fill the TLS page (page 1) with 0xDC, for debugging */
-        memset(REAL_ADDRESS(segment_base, 4096), 0xDC, 4096);
+        memset(REAL_ADDRESS(segment_base, ((uintptr_t)STM_PSEGMENT/4096) * 4096), 0xDC, 4096);
         /* Make a "hole" at STM_PSEGMENT (which includes STM_SEGMENT) */
         memset(REAL_ADDRESS(segment_base, STM_PSEGMENT), 0,
                sizeof(*STM_PSEGMENT));

@@ -15,7 +15,14 @@ static void teardown_gcpage(void)
 
 static void setup_N_pages(char *pages_addr, uint64_t num)
 {
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        acquire_privatization_lock(i);
+    }
     pages_initialize_shared((pages_addr - stm_object_pages) / 4096UL, num);
+    for (i = NB_SEGMENTS-1; i >= 0; i--) {
+        release_privatization_lock(i);
+    }
 }
 
 
@@ -43,7 +50,7 @@ static char *allocate_outside_nursery_large(uint64_t size)
     }
     dprintf(("allocate_outside_nursery_large(%lu): %p, seg=%d, page=%lu\n",
              size, addr, get_segment_of_linear_address(addr),
-             (addr - STM_SEGMENT->segment_base) / 4096UL));
+             (addr - get_segment_base(get_segment_of_linear_address(addr))) / 4096UL));
 
     spinlock_release(lock_growth_large);
     return addr;

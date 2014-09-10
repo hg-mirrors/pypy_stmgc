@@ -34,7 +34,8 @@ static void d_remap_file_pages(char *addr, size_t size, ssize_t pgoff)
 
     /* assert remappings follow the rule that page N in one segment
        can only be remapped to page N in another segment */
-    assert(((addr - stm_object_pages) / 4096UL - pgoff) % NB_PAGES == 0);
+    assert(IMPLY(((addr - stm_object_pages) / 4096UL) != TMP_COPY_PAGE,
+                 ((addr - stm_object_pages) / 4096UL - pgoff) % NB_PAGES == 0));
 
 #ifdef USE_REMAP_FILE_PAGES
     int res = remap_file_pages(addr, size, 0, pgoff, 0);
@@ -58,6 +59,12 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
        segment 0. */
     dprintf(("pages_initialize_shared: 0x%ld - 0x%ld\n", pagenum,
              pagenum + count));
+#ifndef NDEBUG
+    long l;
+    for (l = 0; l < NB_SEGMENTS; l++) {
+        assert(get_priv_segment(l)->privatization_lock);
+    }
+#endif
     assert(pagenum < NB_PAGES);
     if (count == 0)
         return;
@@ -79,10 +86,15 @@ static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
     }
 }
 
-static void page_privatize_in(int segnum, uintptr_t pagenum)
+
+static void page_privatize_in(int segnum, uintptr_t pagenum, char *initialize_from)
 {
-    /* hopefully holding the lock */
-    assert(get_priv_segment(segnum)->privatization_lock);
+#ifndef NDEBUG
+    long l;
+    for (l = 0; l < NB_SEGMENTS; l++) {
+        assert(get_priv_segment(l)->privatization_lock);
+    }
+#endif
 
     /* check this thread's 'pages_privatized' bit */
     uint64_t bitmask = 1UL << segnum;
@@ -103,6 +115,14 @@ static void page_privatize_in(int segnum, uintptr_t pagenum)
        attempt to group together many calls to d_remap_file_pages() in
        succession) */
     uintptr_t pagenum_in_file = NB_PAGES * segnum + pagenum;
+    char *tmp_page = stm_object_pages + TMP_COPY_PAGE * 4096UL;
+    /* first remap to TMP_PAGE, then copy stuff there (to the underlying
+       file page), then remap this file-page hopefully atomically to the
+       segnum's virtual page */
+    d_remap_file_pages(tmp_page, 4096, pagenum_in_file);
+    pagecopy(tmp_page, initialize_from);
+    write_fence();
+
     char *new_page = stm_object_pages + pagenum_in_file * 4096UL;
     d_remap_file_pages(new_page, 4096, pagenum_in_file);
 }
