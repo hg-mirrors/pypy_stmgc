@@ -19,9 +19,12 @@ static void setup_N_pages(char *pages_addr, uint64_t num)
 }
 
 
+static int lock_growth_large = 0;
+
 static char *allocate_outside_nursery_large(uint64_t size)
 {
     /* XXX: real allocation */
+    spinlock_acquire(lock_growth_large);
     char *addr = uninitialized_page_start;
 
     char *start = uninitialized_page_start;
@@ -42,7 +45,7 @@ static char *allocate_outside_nursery_large(uint64_t size)
              size, addr, get_segment_of_linear_address(addr),
              (addr - STM_SEGMENT->segment_base) / 4096UL));
 
-
+    spinlock_release(lock_growth_large);
     return addr;
 }
 

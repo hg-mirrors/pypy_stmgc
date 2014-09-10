@@ -4,6 +4,7 @@ static void teardown_sync(void);
 enum cond_type_e {
     C_AT_SAFE_POINT,
     C_REQUEST_REMOVED,
+    C_SEGMENT_FREE,
     _C_TOTAL
 };
 
