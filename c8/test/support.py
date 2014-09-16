@@ -33,6 +33,8 @@ typedef struct {
     ...;
 } stm_thread_local_t;
 
+char *stm_object_pages;
+
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
@@ -99,6 +101,10 @@ void *memset(void *s, int c, size_t n);
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
+
+object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
+bool (*_stm_smallmalloc_keep)(char *data);
+void _stm_smallmalloc_sweep(void);
 
 """)
 
@@ -300,6 +306,12 @@ def stm_allocate_old(size):
 def stm_allocate_old_refs(n):
     o = lib._stm_allocate_old(HDR + n * WORD)
     tid = 421420 + n
+    lib._set_type_id(o, tid)
+    return o
+
+def stm_allocate_old_small(size):
+    o = lib._stm_allocate_old_small(size)
+    tid = 42 + size
     lib._set_type_id(o, tid)
     return o
 
