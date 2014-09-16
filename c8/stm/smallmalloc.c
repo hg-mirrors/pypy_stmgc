@@ -61,9 +61,10 @@ static void grab_more_free_pages_for_small_allocations(void)
         uninitialized_page_stop -= decrease_by;
         first_small_uniform_loc = uninitialized_page_stop - stm_object_pages;
 
-        char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL;
-        if (!_stm_largemalloc_resize_arena(uninitialized_page_stop - base))
-            goto out_of_memory;
+        /* XXX: */
+        /* char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL; */
+        /* if (!_stm_largemalloc_resize_arena(uninitialized_page_stop - base)) */
+        /*     goto out_of_memory; */
 
         setup_N_pages(uninitialized_page_stop, GCPAGE_NUM_PAGES);
 
@@ -267,7 +268,7 @@ void _stm_smallmalloc_sweep(void)
         small_page_lists[szword] = NULL;
 
         /* process the pages that the various segments are busy filling */
-        for (i = 1; i <= NB_SEGMENTS; i++) {
+        for (i = 0; i < NB_SEGMENTS; i++) {
             struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
             struct small_free_loc_s **fl =
                     &pseg->small_malloc_data.loc_free[szword];

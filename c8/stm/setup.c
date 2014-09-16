@@ -145,6 +145,7 @@ void stm_teardown(void)
 
     teardown_sync();
     teardown_gcpage();
+    teardown_smallmalloc();
     teardown_pages();
 }
 

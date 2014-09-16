@@ -69,6 +69,9 @@ struct stm_priv_segment_info_s {
 #ifndef NDEBUG
     pthread_t running_pthread;
 #endif
+
+    /* This is for smallmalloc.c */
+    struct small_malloc_data_s small_malloc_data;
 };
 
 enum /* safe_point */ {
@@ -95,8 +98,10 @@ struct stm_commit_log_entry_s {
 };
 static struct stm_commit_log_entry_s commit_log_root = {NULL, -1};
 
-
-static char *stm_object_pages;
+#ifndef STM_TESTS
+static
+#endif
+       char *stm_object_pages;
 static int stm_object_pages_fd;
 static stm_thread_local_t *stm_all_thread_locals = NULL;
 

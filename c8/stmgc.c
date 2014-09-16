@@ -2,6 +2,7 @@
 #include "stmgc.h"
 #include "stm/atomic.h"
 #include "stm/list.h"
+#include "stm/smallmalloc.h"
 #include "stm/core.h"
 #include "stm/pagecopy.h"
 #include "stm/pages.h"
@@ -15,6 +16,7 @@
 
 #include "stm/misc.c"
 #include "stm/list.c"
+#include "stm/smallmalloc.c"
 #include "stm/pagecopy.c"
 #include "stm/pages.c"
 #include "stm/prebuilt.c"
