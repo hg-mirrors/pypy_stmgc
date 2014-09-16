@@ -246,7 +246,11 @@ void _stm_write_slowpath(object_t *obj)
     realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
     /* get the last page containing data from the object */
-    end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
+    if (LIKELY(is_small_uniform(obj))) {
+        end_page = first_page;
+    } else {
+        end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
+    }
 
     /* add to read set: */
     stm_read(obj);
@@ -256,10 +260,9 @@ void _stm_write_slowpath(object_t *obj)
     memcpy(bk_obj, realobj, obj_size);
 
     /* if there are shared pages, privatize them */
-
-    uintptr_t page;
+    uintptr_t page = first_page;
     for (page = first_page; page <= end_page; page++) {
-        if (is_shared_log_page(page)) {
+        if (UNLIKELY(is_shared_log_page(page))) {
             long i;
             for (i = 0; i < NB_SEGMENTS; i++) {
                 acquire_privatization_lock(i);

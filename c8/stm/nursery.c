@@ -88,10 +88,20 @@ static void minor_trace_if_young(object_t **pobj)
         realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         size = stmcb_size_rounded_up((struct object_s *)realobj);
 
-        /* XXX: small objs */
-        char *allocated = allocate_outside_nursery_large(size);
-        nobj = (object_t *)(allocated - stm_object_pages);
+        if (size > GC_LAST_SMALL_SIZE) {
+            /* case 1: object is not small enough.
+               Ask gcpage.c for an allocation via largemalloc. */
+            char *allocated = allocate_outside_nursery_large(size);
+            nobj = (object_t *)(allocated - stm_object_pages);
+        }
+        else {
+            /* case "small enough" */
+            char *allocated = allocate_outside_nursery_small(size);
+            dprintf(("outside small %p or %p, sz=%lu\n", allocated, allocated - stm_object_pages, size));
+            nobj = (object_t *)(allocated - stm_object_pages);
+        }
 
+        /* copy the object */
     copy_large_object:;
         char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
         memcpy(realnobj, realobj, size);
