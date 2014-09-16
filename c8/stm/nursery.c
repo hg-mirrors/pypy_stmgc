@@ -47,11 +47,14 @@ long stm_can_move(object_t *obj)
 /************************************************************/
 static object_t *find_existing_shadow(object_t *obj);
 #define GCWORD_MOVED  ((object_t *) -1)
+#define FLAG_SYNC_LARGE       0x01
+
 
 static void minor_trace_if_young(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
     object_t *obj = *pobj;
+    uintptr_t nobj_sync_now;
     object_t *nobj;
     char *realobj;
     size_t size;
@@ -97,7 +100,6 @@ static void minor_trace_if_young(object_t **pobj)
         else {
             /* case "small enough" */
             char *allocated = allocate_outside_nursery_small(size);
-            dprintf(("outside small %p or %p, sz=%lu\n", allocated, allocated - stm_object_pages, size));
             nobj = (object_t *)(allocated - stm_object_pages);
         }
 
@@ -105,6 +107,8 @@ static void minor_trace_if_young(object_t **pobj)
     copy_large_object:;
         char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
         memcpy(realnobj, realobj, size);
+
+        nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
 
         pforwarded_array[0] = GCWORD_MOVED;
         pforwarded_array[1] = nobj;
@@ -119,10 +123,12 @@ static void minor_trace_if_young(object_t **pobj)
         /* a young object outside the nursery */
         nobj = obj;
         tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)nobj);
+
+        nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
     }
 
     /* Must trace the object later */
-    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, (uintptr_t)nobj);
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
 }
 
 
@@ -174,13 +180,24 @@ static void collect_oldrefs_to_nursery(void)
     struct list_s *lst = STM_PSEGMENT->objects_pointing_to_nursery;
 
     while (!list_is_empty(lst)) {
-        object_t *obj = (object_t *)list_pop_item(lst);;
+        uintptr_t obj_sync_now = list_pop_item(lst);
+        object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE);
 
         _collect_now(obj);
+
+        if (obj_sync_now & FLAG_SYNC_LARGE) {
+            /* this is a newly allocated object. We must synchronize it
+               to other segments (after we added WRITE_BARRIER). */
+            acquire_privatization_lock(STM_SEGMENT->segment_num);
+            synchronize_object_enqueue(obj);
+            release_privatization_lock(STM_SEGMENT->segment_num);
+        }
 
         /* the list could have moved while appending */
         lst = STM_PSEGMENT->objects_pointing_to_nursery;
     }
+
+    synchronize_objects_flush();
 }
 
 

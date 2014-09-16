@@ -361,7 +361,7 @@ def op_become_inevitable(ex, global_state, thread_state):
 
 def op_allocate(ex, global_state, thread_state):
     size = global_state.rnd.choice([
-        "16",
+        "16", "48", "288",
         str(4096+16),
         str(80*1024+16),
         #"SOME_MEDIUM_SIZE+16",
