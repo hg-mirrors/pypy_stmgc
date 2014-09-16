@@ -1,8 +1,8 @@
 #ifndef _STM_CORE_H_
 # error "must be compiled via stmgc.c"
 #endif
+#include <signal.h>
 
-#include <unistd.h>
 /************************************************************/
 
 static void setup_pages(void)
@@ -34,14 +34,21 @@ static void d_remap_file_pages(char *addr, size_t size, ssize_t pgoff)
 
     /* assert remappings follow the rule that page N in one segment
        can only be remapped to page N in another segment */
-    assert(((addr - stm_object_pages) / 4096UL - pgoff) % NB_PAGES == 0);
+    assert(IMPLY(((addr - stm_object_pages) / 4096UL) != TMP_COPY_PAGE,
+                 ((addr - stm_object_pages) / 4096UL - pgoff) % NB_PAGES == 0));
 
+#ifdef USE_REMAP_FILE_PAGES
+    int res = remap_file_pages(addr, size, 0, pgoff, 0);
+    if (UNLIKELY(res < 0))
+        stm_fatalerror("remap_file_pages: %m");
+#else
     char *res = mmap(addr, size,
                      PROT_READ | PROT_WRITE,
                      (MAP_PAGES_FLAGS & ~MAP_ANONYMOUS) | MAP_FIXED,
                      stm_object_pages_fd, pgoff * 4096UL);
     if (UNLIKELY(res != addr))
         stm_fatalerror("mmap (remapping page): %m");
+#endif
 }
 
 
@@ -108,15 +115,14 @@ static void page_privatize_in(int segnum, uintptr_t pagenum, char *initialize_fr
        attempt to group together many calls to d_remap_file_pages() in
        succession) */
     uintptr_t pagenum_in_file = NB_PAGES * segnum + pagenum;
-    char *new_page = stm_object_pages + pagenum_in_file * 4096UL;
-
-    /* first write to the file page directly: */
-    ssize_t written = pwrite(stm_object_pages_fd, initialize_from, 4096UL,
-                             pagenum_in_file * 4096UL);
-    if (written != 4096)
-        stm_fatalerror("pwrite didn't write the whole page: %zd", written);
-
-    /* now remap virtual page in segment to the new file page */
+    char *tmp_page = stm_object_pages + TMP_COPY_PAGE * 4096UL;
+    /* first remap to TMP_PAGE, then copy stuff there (to the underlying
+       file page), then remap this file-page hopefully atomically to the
+       segnum's virtual page */
+    d_remap_file_pages(tmp_page, 4096, pagenum_in_file);
+    pagecopy(tmp_page, initialize_from);
     write_fence();
+
+    char *new_page = stm_object_pages + pagenum_in_file * 4096UL;
     d_remap_file_pages(new_page, 4096, pagenum_in_file);
 }
