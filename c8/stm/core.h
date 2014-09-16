@@ -38,6 +38,10 @@ enum /* stm_flags */ {
 };
 
 
+
+#define SYNC_QUEUE_SIZE    31
+
+
 /************************************************************/
 
 
@@ -72,7 +76,14 @@ struct stm_priv_segment_info_s {
 
     /* This is for smallmalloc.c */
     struct small_malloc_data_s small_malloc_data;
+
+    /* The sync queue used to synchronize newly allocated objs to
+       other segments */
+    stm_char *sq_fragments[SYNC_QUEUE_SIZE];
+    int sq_fragsizes[SYNC_QUEUE_SIZE];
+    int sq_len;
 };
+
 
 enum /* safe_point */ {
     SP_NO_TRANSACTION=0,
@@ -138,6 +149,8 @@ static void abort_with_mutex(void) __attribute__((noreturn));
 static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
+static void synchronize_object_enqueue(object_t *obj);
+static void synchronize_objects_flush(void);
 
 
 static inline void _duck(void) {

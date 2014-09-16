@@ -274,7 +274,6 @@ class TestNursery(BaseTest):
         self.push_root(new2)
         self.commit_transaction()
         new2 = self.pop_root()
-        print "new2", new2
 
         # check that this new object was correctly sychronized
         self.switch(1)

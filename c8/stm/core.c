@@ -5,6 +5,19 @@
 #include <signal.h>
 
 
+#ifdef NDEBUG
+#define EVENTUALLY(condition)    {/* nothing */}
+#else
+#define EVENTUALLY(condition)                                   \
+    {                                                           \
+        if (!(condition)) {                                     \
+            acquire_privatization_lock(STM_SEGMENT->segment_num);\
+            if (!(condition))                                   \
+                stm_fatalerror("fails: " #condition);           \
+            release_privatization_lock(STM_SEGMENT->segment_num);\
+        }                                                       \
+    }
+#endif
 
 /* ############# commit log ############# */
 
@@ -615,4 +628,103 @@ void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
     s_mutex_lock();
     synchronize_all_threads(STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE);
     s_mutex_unlock();
+}
+
+
+
+static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
+{
+    /* double-check that the result fits in one page */
+    assert(frag_size > 0);
+    assert(frag_size + ((uintptr_t)frag & 4095) <= 4096);
+
+    /* if the page of the fragment is fully shared, nothing to do */
+    assert(STM_PSEGMENT->privatization_lock);
+    if (is_shared_log_page((uintptr_t)frag / 4096))
+        return;                 /* nothing to do */
+
+    /* Enqueue this object (or fragemnt of object) */
+    if (STM_PSEGMENT->sq_len == SYNC_QUEUE_SIZE)
+        synchronize_objects_flush();
+    STM_PSEGMENT->sq_fragments[STM_PSEGMENT->sq_len] = frag;
+    STM_PSEGMENT->sq_fragsizes[STM_PSEGMENT->sq_len] = frag_size;
+    ++STM_PSEGMENT->sq_len;
+}
+
+static void synchronize_object_enqueue(object_t *obj)
+{
+    assert(!_is_young(obj));
+    assert(STM_PSEGMENT->privatization_lock);
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    ssize_t obj_size = stmcb_size_rounded_up(
+        (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
+    OPT_ASSERT(obj_size >= 16);
+
+    if (LIKELY(is_small_uniform(obj))) {
+        _synchronize_fragment((stm_char *)obj, obj_size);
+        return;
+    }
+
+    /* else, a more complicated case for large objects, to copy
+       around data only within the needed pages
+    */
+    uintptr_t start = (uintptr_t)obj;
+    uintptr_t end = start + obj_size;
+
+    do {
+        uintptr_t copy_up_to = (start + 4096) & ~4095;   /* end of page */
+        if (copy_up_to >= end) {
+            copy_up_to = end;        /* this is the last fragment */
+        }
+        uintptr_t copy_size = copy_up_to - start;
+
+        _synchronize_fragment((stm_char *)start, copy_size);
+
+        start = copy_up_to;
+    } while (start != end);
+}
+
+static void synchronize_objects_flush(void)
+{
+
+    /* Do a full memory barrier.  We must make sure that other
+       CPUs see the changes we did to the shared page ("S", in
+       synchronize_object_enqueue()) before we check the other segments
+       with is_private_page() (below).  Otherwise, we risk the
+       following: this CPU writes "S" but the writes are not visible yet;
+       then it checks is_private_page() and gets false, and does nothing
+       more; just afterwards another CPU sets its own private_page bit
+       and copies the page; but it risks doing so before seeing the "S"
+       writes.
+    */
+    /* XXX: not sure this applies anymore.  */
+    long j = STM_PSEGMENT->sq_len;
+    if (j == 0)
+        return;
+    STM_PSEGMENT->sq_len = 0;
+
+    __sync_synchronize();
+
+    long i, myself = STM_SEGMENT->segment_num;
+    do {
+        --j;
+        stm_char *frag = STM_PSEGMENT->sq_fragments[j];
+        uintptr_t page = ((uintptr_t)frag) / 4096UL;
+        if (is_shared_log_page(page))
+            continue;
+
+        ssize_t frag_size = STM_PSEGMENT->sq_fragsizes[j];
+
+        char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, frag);
+        for (i = 0; i < NB_SEGMENTS; i++) {
+            if (i == myself)
+                continue;
+
+            char *dst = REAL_ADDRESS(get_segment_base(i), frag);
+            if (is_private_log_page_in(i, page))
+                memcpy(dst, src, frag_size);
+            else
+                EVENTUALLY(memcmp(dst, src, frag_size) == 0);  /* same page */
+        }
+    } while (j > 0);
 }
