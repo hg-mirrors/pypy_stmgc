@@ -25,6 +25,7 @@
 #define FIRST_OBJECT_PAGE     ((READMARKER_END + 4095) / 4096UL)
 #define FIRST_NURSERY_PAGE    FIRST_OBJECT_PAGE
 #define END_NURSERY_PAGE      (FIRST_NURSERY_PAGE + NB_NURSERY_PAGES)
+#define NB_SHARED_PAGES       (NB_PAGES - END_NURSERY_PAGE)
 
 #define READMARKER_START      ((FIRST_OBJECT_PAGE * 4096UL) >> 4)
 #define FIRST_READMARKER_PAGE (READMARKER_START / 4096UL)
@@ -97,6 +98,7 @@ static struct stm_commit_log_entry_s commit_log_root = {NULL, -1};
 
 
 static char *stm_object_pages;
+static char *stm_file_pages;
 static int stm_object_pages_fd;
 static stm_thread_local_t *stm_all_thread_locals = NULL;
 

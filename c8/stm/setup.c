@@ -4,32 +4,54 @@
 
 
 #include <fcntl.h>           /* For O_* constants */
-static char *setup_mmap(char *reason, int *map_fd)
+static void setup_mmap(char *reason)
 {
-    char name[128] = "/__stmgc_c8__";
+    char name[] = "/__stmgc_c8__";
 
     /* Create the big shared memory object, and immediately unlink it.
        There is a small window where if this process is killed the
        object is left around.  It doesn't seem possible to do anything
        about it...
     */
-    int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+    stm_object_pages_fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
     shm_unlink(name);
 
-    if (fd == -1) {
+    if (stm_object_pages_fd == -1)
         stm_fatalerror("%s failed (stm_open): %m", reason);
-    }
-    if (ftruncate(fd, TOTAL_MEMORY) != 0) {
+
+    if (ftruncate(stm_object_pages_fd, NB_SHARED_PAGES) != 0)
         stm_fatalerror("%s failed (ftruncate): %m", reason);
-    }
-    char *result = mmap(NULL, TOTAL_MEMORY,
-                        PROT_READ | PROT_WRITE,
-                        MAP_PAGES_FLAGS & ~MAP_ANONYMOUS, fd, 0);
-    if (result == MAP_FAILED) {
+
+    stm_file_pages = mmap(NULL, NB_SHARED_PAGES * 4096UL,
+                          PROT_READ | PROT_WRITE,
+                          MAP_SHARED | MAP_NORESERVE,
+                          stm_object_pages_fd, 0);
+
+    if (stm_file_pages == MAP_FAILED)
         stm_fatalerror("%s failed (mmap): %m", reason);
+
+
+    /* reserve the whole virtual memory space of the program for
+       all segments: */
+    stm_object_pages = mmap(NULL, TOTAL_MEMORY,
+                            PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS,
+                            -1, 0);
+    if (stm_object_pages == MAP_FAILED)
+        stm_fatalerror("%s failed (mmap): %m", reason);
+
+    /* remap the shared part of the segments to the file pages */
+    long l;
+    for (l = 0; l < NB_SEGMENTS; l++) {
+        char *result = mmap(
+            stm_object_pages + (l * NB_PAGES + END_NURSERY_PAGE) * 4096UL, /* addr */
+            NB_SHARED_PAGES * 4096UL, /* len */
+            PROT_READ | PROT_WRITE,
+            MAP_FIXED | MAP_SHARED | MAP_NORESERVE,
+            stm_object_pages_fd, 0); /* file & offset */
+        if (result == MAP_FAILED)
+            stm_fatalerror("%s failed (mmap): %m", reason);
     }
-    *map_fd = fd;
-    return result;
 }
 static void close_fd_mmap(int map_fd)
 {
@@ -52,7 +74,7 @@ static void setup_protection_settings(void)
                      (FIRST_READMARKER_PAGE - 2) * 4096UL,
                      PROT_NONE);
 
-        /* STM_SEGMENT is in page 1 */
+        /* STM_SEGMENT-TL is in page 1 */
     }
 }
 
@@ -74,8 +96,12 @@ void stm_setup(void)
            (FIRST_READMARKER_PAGE * 4096UL));
     assert(_STM_FAST_ALLOC <= NB_NURSERY_PAGES * 4096);
 
-    stm_object_pages = setup_mmap("initial stm_object_pages mmap()",
-                                  &stm_object_pages_fd);
+    setup_mmap("initial stm_object_pages mmap()");
+
+    assert(stm_object_pages_fd);
+    assert(stm_object_pages);
+    assert(stm_file_pages);
+
     setup_protection_settings();
 
     long i;
