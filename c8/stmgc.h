@@ -232,6 +232,27 @@ static inline void stm_become_inevitable(stm_thread_local_t *tl,
 
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl, const char *msg);
 
+
+/* dummies for now: */
+__attribute__((always_inline))
+static inline void stm_write_card(object_t *obj, uintptr_t index)
+{
+    stm_write(obj);
+}
+
+static inline object_t *stm_setup_prebuilt_weakref(object_t *pp)
+{
+    return stm_setup_prebuilt(pp);
+}
+
+static inline void stm_flush_timing(stm_thread_local_t *tl, int verbose) {}
 /* ==================== END ==================== */
+
+static void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,
+                            object_t *following_object,
+                            char *outputbuf, size_t outputbufsize);
+
+static void (*stmcb_debug_print)(const char *cause, double time,
+                          const char *marker);
 
 #endif
