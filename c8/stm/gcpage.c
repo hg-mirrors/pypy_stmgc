@@ -19,7 +19,8 @@ static void setup_N_pages(char *pages_addr, uint64_t num)
     for (i = 0; i < NB_SEGMENTS; i++) {
         acquire_privatization_lock(i);
     }
-    pages_initialize_shared((pages_addr - stm_object_pages) / 4096UL, num);
+    pages_initialize_shared_for(STM_SEGMENT->segment_num,
+                                (pages_addr - stm_object_pages) / 4096UL, num);
     for (i = NB_SEGMENTS-1; i >= 0; i--) {
         release_privatization_lock(i);
     }
