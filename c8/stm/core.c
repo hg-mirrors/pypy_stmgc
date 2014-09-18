@@ -39,9 +39,8 @@ static void _update_obj_from(int from_seg, object_t *obj)
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     uintptr_t pagenum = (uintptr_t)obj / 4096UL;
 
-    OPT_ASSERT(!is_shared_log_page(pagenum));
-    assert(is_private_log_page_in(STM_SEGMENT->segment_num, pagenum));
-    assert(is_private_log_page_in(from_seg, pagenum));
+    assert(get_page_status_in(from_seg, pagenum) != PAGE_NO_ACCESS);
+    assert(get_page_status_in(STM_SEGMENT->segment_num, pagenum) != PAGE_NO_ACCESS);
 
     /* look the obj up in the other segment's modified_old_objects to
        get its backup copy: */
@@ -218,18 +217,17 @@ void _privatize_shared_page(uintptr_t pagenum)
     uintptr_t i;
     int my_segnum = STM_SEGMENT->segment_num;
 
-    assert(is_shared_log_page(pagenum));
-    char *src = (char*)(get_virt_page_of(0, pagenum) * 4096UL);
+    XXX();
+    //assert(is_shared_log_page(pagenum));
+    /* char *src = (char*)(get_virt_page_of(0, pagenum) * 4096UL); */
 
-    for (i = 1; i < NB_SEGMENTS; i++) {
-        assert(!is_private_log_page_in(i, pagenum));
+    /* for (i = 1; i < NB_SEGMENTS; i++) { */
+    /*     page_privatize_in(i, pagenum, src); */
+    /* } */
+    /* set_page_private_in(0, pagenum); */
 
-        page_privatize_in(i, pagenum, src);
-    }
-    set_page_private_in(0, pagenum);
-
-    OPT_ASSERT(is_private_log_page_in(my_segnum, pagenum));
-    assert(!is_shared_log_page(pagenum));
+    /* OPT_ASSERT(is_private_log_page_in(my_segnum, pagenum)); */
+    /* assert(!is_shared_log_page(pagenum)); */
 }
 
 void _stm_write_slowpath(object_t *obj)
@@ -259,23 +257,23 @@ void _stm_write_slowpath(object_t *obj)
 
     uintptr_t page;
     for (page = first_page; page <= end_page; page++) {
-        if (is_shared_log_page(page)) {
-            long i;
-            for (i = 0; i < NB_SEGMENTS; i++) {
-                acquire_privatization_lock(i);
-            }
-            if (is_shared_log_page(page))
-                _privatize_shared_page(page);
-            for (i = NB_SEGMENTS-1; i >= 0; i--) {
-                release_privatization_lock(i);
-            }
-        }
+        XXX();
+        /* if (is_shared_log_page(page)) { */
+        /*     long i; */
+        /*     for (i = 0; i < NB_SEGMENTS; i++) { */
+        /*         acquire_privatization_lock(i); */
+        /*     } */
+        /*     if (is_shared_log_page(page)) */
+        /*         _privatize_shared_page(page); */
+        /*     for (i = NB_SEGMENTS-1; i >= 0; i--) { */
+        /*         release_privatization_lock(i); */
+        /*     } */
+        /* } */
     }
     /* pages not shared anymore. but we still may have
        only a read protected page ourselves: */
 
     acquire_privatization_lock(my_segnum);
-    OPT_ASSERT(is_private_log_page_in(my_segnum, first_page));
 
     /* remove the WRITE_BARRIER flag */
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
