@@ -71,7 +71,7 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
 #include <stdbool.h>
-void stm_validate(void *free_if_abort);
+void stm_validate(void);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 

@@ -41,7 +41,7 @@ void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
-void stm_validate(void *free_if_abort);
+void stm_validate();
 bool _check_stm_validate();
 
 object_t *stm_setup_prebuilt(object_t *);
@@ -183,7 +183,7 @@ bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
 }
 
 bool _check_stm_validate(void) {
-    CHECKED(stm_validate(NULL));
+    CHECKED(stm_validate());
 }
 
 #undef CHECKED

@@ -138,6 +138,7 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
+static void _stm_validate(void *free_if_abort, bool locks_acquired);
 
 static inline void _duck(void) {
     /* put a call to _duck() between two instructions that set 0 into
