@@ -551,10 +551,19 @@ class BaseTest(object):
         self.push_root(ffi.cast("object_t *", 8))
 
     def check_char_everywhere(self, obj, expected_content, offset=HDR):
-        for i in range(len(self.tls)):
+        for i in range(self.NB_THREADS):
+            if self.current_thread != i:
+                self.switch(i)
+            tl = self.tls[i]
+            if not lib._stm_in_transaction(tl):
+                self.start_transaction()
+
+            # check:
             addr = lib._stm_get_segment_base(i)
             content = addr[int(ffi.cast("uintptr_t", obj)) + offset]
             assert content == expected_content
+
+            self.abort_transaction()
 
     def get_thread_local_obj(self):
         tl = self.tls[self.current_thread]
