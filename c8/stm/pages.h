@@ -22,7 +22,6 @@
 #define PAGE_FLAG_END     NB_PAGES
 /* == NB_SHARED_PAGES */
 
-
 struct page_shared_s {
 #if NB_SEGMENTS <= 4
     uint8_t by_segment;
@@ -68,21 +67,23 @@ static inline uintptr_t get_file_page_of(uintptr_t pagenum)
 static inline uint8_t get_page_status_in(long segnum, uintptr_t pagenum)
 {
     int seg_shift = segnum * 2;
-    uint64_t bitmask = 3UL << seg_shift;
+    OPT_ASSERT(seg_shift < 8 * sizeof(struct page_shared_s));
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_status[get_file_page_of(pagenum)];
 
-    return ((ps->by_segment & bitmask) >> seg_shift) & 3;
+    return (ps->by_segment >> seg_shift) & 3;
 }
 
 static inline void set_page_status_in(long segnum, uintptr_t pagenum, uint8_t status)
 {
-    OPT_ASSERT((status & 3) == status);
+    OPT_ASSERT(status < 3);
 
     int seg_shift = segnum * 2;
+    OPT_ASSERT(seg_shift < 8 * sizeof(struct page_shared_s));
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_status[get_file_page_of(pagenum)];
 
     assert(status != get_page_status_in(segnum, pagenum));
-    ps->by_segment |= status << seg_shift;
+    ps->by_segment &= ~(3UL << seg_shift); /* clear */
+    ps->by_segment |= status << seg_shift; /* set */
 }

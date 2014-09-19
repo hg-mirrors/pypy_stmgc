@@ -260,6 +260,15 @@ void stm_register_thread_local(stm_thread_local_t *tl)
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num));
     s_mutex_unlock();
+
+    if (num == 0) {
+        dprintf(("STM_GC_NURSERY: %d\n", STM_GC_NURSERY));
+        dprintf(("NB_PAGES: %d\n", NB_PAGES));
+        dprintf(("NB_SEGMENTS: %d\n", NB_SEGMENTS));
+        dprintf(("FIRST_OBJECT_PAGE=FIRST_NURSERY_PAGE: %lu\n", FIRST_OBJECT_PAGE));
+        dprintf(("END_NURSERY_PAGE: %lu\n", END_NURSERY_PAGE));
+        dprintf(("NB_SHARED_PAGES: %lu\n", NB_SHARED_PAGES));
+    }
 }
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)

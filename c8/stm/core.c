@@ -359,6 +359,7 @@ void _stm_write_slowpath(object_t *obj)
     struct object_s *bk_obj = malloc(obj_size);
     memcpy(bk_obj, realobj, obj_size);
 
+ retry:
     /* privatize pages: */
     acquire_all_privatization_locks();
 
@@ -368,14 +369,19 @@ void _stm_write_slowpath(object_t *obj)
         if (get_page_status_in(my_segnum, page) == PAGE_NO_ACCESS) {
             /* happens if there is a concurrent WB between us making the backup
                and acquiring the locks */
+            release_all_privatization_locks();
+
             volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
             *dummy = *dummy;            /* force segfault */
+
+            goto retry;
         }
         assert(get_page_status_in(my_segnum, page) != PAGE_NO_ACCESS);
 
         if (get_page_status_in(my_segnum, page) == PAGE_PRIVATE)
             continue;
 
+        assert(get_page_status_in(my_segnum, page) == PAGE_SHARED);
         /* make sure all the others are NO_ACCESS
            choosing to make us PRIVATE is harder because then nobody must ever
            update the shared page in stm_validate() except if it is the sole
