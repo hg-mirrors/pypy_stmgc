@@ -365,9 +365,13 @@ void _stm_write_slowpath(object_t *obj)
     uintptr_t page;
     for (page = first_page; page <= end_page; page++) {
         /* check if our page is private or we are the only shared-page holder */
+        if (get_page_status_in(my_segnum, page) == PAGE_NO_ACCESS) {
+            /* happens if there is a concurrent WB between us making the backup
+               and acquiring the locks */
+            volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
+            *dummy = *dummy;            /* force segfault */
+        }
         assert(get_page_status_in(my_segnum, page) != PAGE_NO_ACCESS);
-        /* XXX: actually, it can be NO_ACCESS if somebody changed that after we
-           copied from it */
 
         if (get_page_status_in(my_segnum, page) == PAGE_PRIVATE)
             continue;
