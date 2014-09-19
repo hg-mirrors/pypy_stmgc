@@ -15,39 +15,6 @@ static void teardown_pages(void)
 }
 
 /************************************************************/
-static void check_remap_makes_sense(char *addr, size_t size, ssize_t pgoff)
-{
-    dprintf(("remap_file_pages: 0x%lx bytes: (seg%ld %p) --> (seg%ld %p)\n",
-             (long)size,
-             (long)((addr - stm_object_pages) / 4096UL) / NB_PAGES,
-             (void *)((addr - stm_object_pages) % (4096UL * NB_PAGES)),
-             (long)pgoff / NB_PAGES,
-             (void *)((pgoff % NB_PAGES) * 4096UL)));
-    assert(size % 4096 == 0);
-    assert(size <= TOTAL_MEMORY);
-    assert(((uintptr_t)addr) % 4096 == 0);
-    assert(addr >= stm_object_pages);
-    assert(addr <= stm_object_pages + TOTAL_MEMORY - size);
-    assert(pgoff >= 0);
-    assert(pgoff <= (TOTAL_MEMORY - size) / 4096UL);
-
-    /* assert remappings follow the rule that page N in one segment
-       can only be remapped to page N in another segment */
-    assert(((addr - stm_object_pages) / 4096UL - pgoff) % NB_PAGES == 0);
-}
-
-static void d_remap_file_pages(char *addr, size_t size, ssize_t pgoff)
-{
-    check_remap_makes_sense(addr, size, pgoff);
-
-    char *res = mmap(addr, size,
-                     PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_NORESERVE | MAP_FIXED,
-                     stm_object_pages_fd, pgoff * 4096UL);
-    if (UNLIKELY(res != addr))
-        stm_fatalerror("mmap (remapping page): %m");
-}
-
 
 static void pages_initialize_shared_for(long segnum, uintptr_t pagenum, uintptr_t count)
 {
@@ -101,6 +68,9 @@ static void page_privatize_in(int segnum, uintptr_t pagenum)
         stm_fatalerror("page_privatize_in failed (mmap): %m");
 
     set_page_status_in(segnum, pagenum, PAGE_PRIVATE);
+
+    volatile char *dummy = REAL_ADDRESS(get_segment_base(segnum), pagenum*4096UL);
+    *dummy = *dummy;            /* force copy-on-write from shared page */
 }
 
 

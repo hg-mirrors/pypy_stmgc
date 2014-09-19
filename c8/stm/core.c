@@ -91,8 +91,6 @@ static void bring_page_up_to_date(uintptr_t pagenum)
 
     /* make our page private */
     page_privatize_in(STM_SEGMENT->segment_num, pagenum);
-    volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, pagenum*4096UL);
-    *dummy = *dummy;            /* force copy-on-write from shared page */
 
     /* if there were modifications in the page, revert them: */
     copy_bk_objs_from(shared_page_holder, pagenum);
@@ -328,33 +326,6 @@ static void _validate_and_turn_inevitable()
 
 /* ############# STM ############# */
 
-void _privatize_shared_page(uintptr_t pagenum)
-{
-    /* privatize pages of obj for our segment iff previously
-       the pages were fully shared. */
-#ifndef NDEBUG
-    long l;
-    for (l = 0; l < NB_SEGMENTS; l++) {
-        assert(get_priv_segment(l)->privatization_lock);
-    }
-#endif
-
-    uintptr_t i;
-    int my_segnum = STM_SEGMENT->segment_num;
-
-    XXX();
-    //assert(is_shared_log_page(pagenum));
-    /* char *src = (char*)(get_virt_page_of(0, pagenum) * 4096UL); */
-
-    /* for (i = 1; i < NB_SEGMENTS; i++) { */
-    /*     page_privatize_in(i, pagenum, src); */
-    /* } */
-    /* set_page_private_in(0, pagenum); */
-
-    /* OPT_ASSERT(is_private_log_page_in(my_segnum, pagenum)); */
-    /* assert(!is_shared_log_page(pagenum)); */
-}
-
 void _stm_write_slowpath(object_t *obj)
 {
     assert(_seems_to_be_running_transaction());
@@ -374,31 +345,39 @@ void _stm_write_slowpath(object_t *obj)
     /* add to read set: */
     stm_read(obj);
 
-    /* create backup copy: */
+    /* create backup copy (this may cause several page faults XXX): */
     struct object_s *bk_obj = malloc(obj_size);
     memcpy(bk_obj, realobj, obj_size);
 
-    /* if there are shared pages, privatize them */
+    /* privatize pages: */
+    acquire_all_privatization_locks();
 
     uintptr_t page;
     for (page = first_page; page <= end_page; page++) {
-        XXX();
-        /* if (is_shared_log_page(page)) { */
-        /*     long i; */
-        /*     for (i = 0; i < NB_SEGMENTS; i++) { */
-        /*         acquire_privatization_lock(i); */
-        /*     } */
-        /*     if (is_shared_log_page(page)) */
-        /*         _privatize_shared_page(page); */
-        /*     for (i = NB_SEGMENTS-1; i >= 0; i--) { */
-        /*         release_privatization_lock(i); */
-        /*     } */
-        /* } */
-    }
-    /* pages not shared anymore. but we still may have
-       only a read protected page ourselves: */
+        /* check if our page is private or we are the only shared-page holder */
+        assert(get_page_status_in(my_segnum, page) != PAGE_NO_ACCESS);
 
-    acquire_privatization_lock(my_segnum);
+        if (get_page_status_in(my_segnum, page) == PAGE_PRIVATE)
+            continue;
+
+        /* make sure all the others are NO_ACCESS
+           choosing to make us PRIVATE is harder because then nobody must ever
+           update the shared page in stm_validate() except if it is the sole
+           reader of it. But then we don't actually know which revision the page is at. */
+        long i;
+        for (i = 0; i < NB_SEGMENTS; i++) {
+            if (i == my_segnum)
+                continue;
+
+            if (get_page_status_in(i, page) == PAGE_SHARED) {
+                /* xxx: unmap? */
+                mprotect((char*)(get_virt_page_of(i, page) * 4096UL), 4096UL, PROT_NONE);
+                set_page_status_in(i, page, PAGE_NO_ACCESS);
+            }
+        }
+    }
+    /* all pages are either private or we were the first to write to a shared
+       page and therefore got it as our private one */
 
     /* remove the WRITE_BARRIER flag */
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
@@ -407,7 +386,7 @@ void _stm_write_slowpath(object_t *obj)
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
 
     /* done fiddling with protection and privatization */
-    release_privatization_lock(my_segnum);
+    release_all_privatization_locks();
 
     /* phew, now add the obj to the write-set and register the
        backup copy. */
