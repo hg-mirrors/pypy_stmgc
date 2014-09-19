@@ -84,6 +84,8 @@ static void memcpy_to_accessible_pages(
     char *dst_end = realobj + len;
     uintptr_t loc_addr = (uintptr_t)dst_obj;
 
+    dprintf(("memcpy_to_accessible_pages(%d, %p, %p, %lu)\n", dst_segnum, dst_obj, src, len));
+
     while (realobj != dst_end) {
         if (get_page_status_in(dst_segnum, loc_addr / 4096UL) != PAGE_NO_ACCESS)
             *realobj = *src;
