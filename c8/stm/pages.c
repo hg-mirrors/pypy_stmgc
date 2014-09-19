@@ -64,7 +64,7 @@ static void page_privatize_in(int segnum, uintptr_t pagenum)
     char *result = mmap(
         addr, 4096UL, PROT_READ | PROT_WRITE,
         MAP_FIXED | MAP_PRIVATE | MAP_NORESERVE,
-        stm_object_pages_fd, get_file_page_of(pagenum));
+        stm_object_pages_fd, get_file_page_of(pagenum) * 4096UL);
     if (result == MAP_FAILED)
         stm_fatalerror("page_privatize_in failed (mmap): %m");
 
