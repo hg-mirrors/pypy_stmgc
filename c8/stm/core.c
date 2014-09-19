@@ -12,13 +12,11 @@ static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
     struct tree_s *tree = get_priv_segment(from_segnum)->modified_old_objects;
     wlog_t *item;
     TREE_LOOP_FORWARD(tree, item); {
-        if (item->addr >= pagenum * 4096UL && item->addr < (pagenum + 1) * 4096UL) {
-            object_t *obj = (object_t*)item->addr;
-            struct object_s* bk_obj = (struct object_s *)item->val;
-            size_t obj_size;
+        object_t *obj = (object_t*)item->addr;
+        struct object_s* bk_obj = (struct object_s *)item->val;
+        size_t obj_size = stmcb_size_rounded_up(bk_obj);
 
-            obj_size = stmcb_size_rounded_up(bk_obj);
-
+        if (item->addr < (pagenum + 1) * 4096UL && item->addr + obj_size > pagenum * 4096UL) {
             memcpy_to_accessible_pages(STM_SEGMENT->segment_num,
                                        obj, (char*)bk_obj, obj_size);
 
@@ -91,6 +89,7 @@ static void bring_page_up_to_date(uintptr_t pagenum)
 
     /* make our page private */
     page_privatize_in(STM_SEGMENT->segment_num, pagenum);
+    assert(get_page_status_in(my_segnum, pagenum) == PAGE_PRIVATE);
 
     /* if there were modifications in the page, revert them: */
     copy_bk_objs_from(shared_page_holder, pagenum);
@@ -362,6 +361,7 @@ void _stm_write_slowpath(object_t *obj)
     struct object_s *bk_obj = malloc(obj_size);
     memcpy(bk_obj, realobj, obj_size);
 
+    dprintf(("write_slowpath(%p): sz=%lu, bk=%p\n", obj, obj_size, bk_obj));
  retry:
     /* privatize pages: */
     acquire_all_privatization_locks();
@@ -398,6 +398,7 @@ void _stm_write_slowpath(object_t *obj)
                 /* xxx: unmap? */
                 mprotect((char*)(get_virt_page_of(i, page) * 4096UL), 4096UL, PROT_NONE);
                 set_page_status_in(i, page, PAGE_NO_ACCESS);
+                dprintf(("NO_ACCESS in seg %d page %lu\n", i, page));
             }
         }
     }
@@ -465,7 +466,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
 
     enter_safe_point_if_requested();
-    dprintf(("start_transaction\n"));
+    dprintf(("> start_transaction\n"));
 
     s_mutex_unlock();
 
@@ -538,7 +539,7 @@ void stm_commit_transaction(void)
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
-    dprintf(("stm_commit_transaction()\n"));
+    dprintf(("> stm_commit_transaction()\n"));
     minor_collection(1);
 
     _validate_and_add_to_commit_log();
