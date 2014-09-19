@@ -157,6 +157,8 @@ static void _update_obj_from(int from_seg, object_t *obj)
 {
     size_t obj_size;
 
+    assert(get_priv_segment(from_seg)->privatization_lock);
+
     /* look the obj up in the other segment's modified_old_objects to
        get its backup copy: */
     acquire_modified_objs_lock(from_seg);
@@ -170,7 +172,6 @@ static void _update_obj_from(int from_seg, object_t *obj)
     memcpy_to_accessible_pages(STM_SEGMENT->segment_num, obj,
                                (char*)item->val, obj_size);
 
-    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     release_modified_objs_lock(from_seg);
     return;
 
@@ -183,7 +184,6 @@ static void _update_obj_from(int from_seg, object_t *obj)
                                REAL_ADDRESS(get_segment_base(from_seg), obj),
                                obj_size);
 
-    obj->stm_flags |= GCFLAG_WRITE_BARRIER; /* may already be gone */
     release_modified_objs_lock(from_seg);
 }
 
@@ -196,14 +196,15 @@ static void _stm_validate(void *free_if_abort, bool locks_acquired)
        the committed objs. */
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         assert((uintptr_t)STM_PSEGMENT->last_commit_log_entry->next == -1);
+        if (locks_acquired)
+            release_all_privatization_locks();
         return;
     }
 
-    if (locks_acquired) {
+    if (locks_acquired)
         assert(all_privatization_locks_acquired());
-    } else {
+    else
         acquire_all_privatization_locks();
-    }
 
     volatile struct stm_commit_log_entry_s *cl, *prev_cl;
     cl = prev_cl = (volatile struct stm_commit_log_entry_s *)
@@ -214,12 +215,14 @@ static void _stm_validate(void *free_if_abort, bool locks_acquired)
     while ((cl = cl->next)) {
         if ((uintptr_t)cl == -1) {
             /* there is an inevitable transaction running */
+            release_all_privatization_locks();
 #if STM_TESTS
             free(free_if_abort);
             stm_abort_transaction();
 #endif
             cl = prev_cl;
             _stm_collectable_safe_point();
+            acquire_all_privatization_locks();
             continue;
         }
         prev_cl = cl;
@@ -407,9 +410,6 @@ void _stm_write_slowpath(object_t *obj)
     /* also add it to the GC list for minor collections */
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
 
-    /* done fiddling with protection and privatization */
-    release_all_privatization_locks();
-
     /* phew, now add the obj to the write-set and register the
        backup copy. */
     /* XXX: possibly slow check; try overflow objs again? */
@@ -420,6 +420,8 @@ void _stm_write_slowpath(object_t *obj)
         release_modified_objs_lock(my_segnum);
     }
 
+    /* done fiddling with protection and privatization */
+    release_all_privatization_locks();
 }
 
 static void reset_transaction_read_version(void)
