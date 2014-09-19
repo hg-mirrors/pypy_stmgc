@@ -39,8 +39,8 @@ struct page_shared_s {
 
 enum {
     PAGE_SHARED = 0,
-    PAGE_PRIVATE,
-    PAGE_NO_ACCESS,
+    PAGE_PRIVATE = 1,
+    PAGE_NO_ACCESS = 2,
 };
 
 static struct page_shared_s pages_status[NB_SHARED_PAGES];

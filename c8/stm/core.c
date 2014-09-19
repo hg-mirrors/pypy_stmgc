@@ -366,6 +366,8 @@ void _stm_write_slowpath(object_t *obj)
     for (page = first_page; page <= end_page; page++) {
         /* check if our page is private or we are the only shared-page holder */
         assert(get_page_status_in(my_segnum, page) != PAGE_NO_ACCESS);
+        /* XXX: actually, it can be NO_ACCESS if somebody changed that after we
+           copied from it */
 
         if (get_page_status_in(my_segnum, page) == PAGE_PRIVATE)
             continue;

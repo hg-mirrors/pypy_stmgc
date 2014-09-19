@@ -39,11 +39,12 @@ static void pages_initialize_shared_for(long segnum, uintptr_t pagenum, uintptr_
             char *segment_base = get_segment_base(i);
             mprotect(segment_base + pagenum * 4096UL,
                      count * 4096UL, PROT_NONE);
-        }
 
-        long amount = count;
-        while (amount-->0)
-            set_page_status_in(i, pagenum + amount, PAGE_NO_ACCESS);
+            long amount = count;
+            while (amount-->0) {
+                set_page_status_in(i, pagenum + amount, PAGE_NO_ACCESS);
+            }
+        }
     }
 }
 
