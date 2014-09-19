@@ -102,9 +102,7 @@ static void bring_page_up_to_date(uintptr_t pagenum)
 
     /* in case page is already newer, validate everything now to have a common
        revision for all pages */
-    stm_validate(NULL);
-
-    release_all_privatization_locks();
+    _stm_validate(NULL, true);
 }
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
@@ -189,7 +187,8 @@ static void _update_obj_from(int from_seg, object_t *obj)
     release_modified_objs_lock(from_seg);
 }
 
-void stm_validate(void *free_if_abort)
+
+static void _stm_validate(void *free_if_abort, bool locks_acquired)
 {
     /* go from last known entry in commit log to the
        most current one and apply all changes done
@@ -199,7 +198,12 @@ void stm_validate(void *free_if_abort)
         assert((uintptr_t)STM_PSEGMENT->last_commit_log_entry->next == -1);
         return;
     }
-    assert(all_privatization_locks_acquired());
+
+    if (locks_acquired) {
+        assert(all_privatization_locks_acquired());
+    } else {
+        acquire_all_privatization_locks();
+    }
 
     volatile struct stm_commit_log_entry_s *cl, *prev_cl;
     cl = prev_cl = (volatile struct stm_commit_log_entry_s *)
@@ -253,6 +257,7 @@ void stm_validate(void *free_if_abort)
         STM_PSEGMENT->last_commit_log_entry = (struct stm_commit_log_entry_s *)cl;
     }
 
+    release_all_privatization_locks();
     if (needs_abort) {
         free(free_if_abort);
         stm_abort_transaction();
@@ -303,7 +308,7 @@ static void _validate_and_add_to_commit_log()
 
     /* regular transaction: */
     do {
-        stm_validate(new);
+        _stm_validate(new, false);
 
         /* try attaching to commit log: */
         to = &(STM_PSEGMENT->last_commit_log_entry->next);
@@ -317,7 +322,7 @@ static void _validate_and_turn_inevitable()
 
     new = (struct stm_commit_log_entry_s*)-1;
     do {
-        stm_validate(NULL);
+        stm_validate();
 
         /* try attaching to commit log: */
         to = &(STM_PSEGMENT->last_commit_log_entry->next);
@@ -325,6 +330,11 @@ static void _validate_and_turn_inevitable()
 }
 
 /* ############# STM ############# */
+void stm_validate()
+{
+    _stm_validate(NULL, false);
+}
+
 
 void _stm_write_slowpath(object_t *obj)
 {
@@ -460,7 +470,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
 
     check_nursery_at_transaction_start();
 
-    stm_validate(NULL);
+    stm_validate();
 }
 
 long stm_start_transaction(stm_thread_local_t *tl)
