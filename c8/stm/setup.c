@@ -2,8 +2,9 @@
 # error "must be compiled via stmgc.c"
 #endif
 
-
+#include <signal.h>
 #include <fcntl.h>           /* For O_* constants */
+
 static void setup_mmap(char *reason)
 {
     char name[] = "/__stmgc_c8__";
@@ -79,6 +80,21 @@ static void setup_protection_settings(void)
 }
 
 
+static void setup_signal_handler(void)
+{
+    struct sigaction act;
+    memset(&act, 0, sizeof(act));
+
+	act.sa_sigaction = &_signal_handler;
+	/* The SA_SIGINFO flag tells sigaction() to use the sa_sigaction field, not sa_handler. */
+	act.sa_flags = SA_SIGINFO | SA_NODEFER;
+
+	if (sigaction(SIGSEGV, &act, NULL) < 0) {
+		perror ("sigaction");
+		abort();
+	}
+}
+
 void stm_setup(void)
 {
     /* Check that some values are acceptable */
@@ -103,6 +119,7 @@ void stm_setup(void)
     assert(stm_file_pages);
 
     setup_protection_settings();
+    setup_signal_handler();
 
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {

@@ -46,7 +46,23 @@ enum {
 static struct page_shared_s pages_status[NB_SHARED_PAGES];
 
 static void pages_initialize_shared_for(long segnum, uintptr_t pagenum, uintptr_t count);
-/* static void page_privatize_in(int segnum, uintptr_t pagenum, char *initialize_from); */
+static void page_privatize_in(int segnum, uintptr_t pagenum);
+static void memcpy_to_accessible_pages(int dst_segnum, object_t *dst_obj, char *src, size_t len);
+
+
+
+
+static inline uintptr_t get_virt_page_of(long segnum, uintptr_t pagenum)
+{
+    /* logical page -> virtual page */
+    return (uintptr_t)get_segment_base(segnum) / 4096UL + pagenum;
+}
+
+static inline uintptr_t get_file_page_of(uintptr_t pagenum)
+{
+    /* logical page -> file page */
+    return pagenum - PAGE_FLAG_START;
+}
 
 
 static inline uint8_t get_page_status_in(long segnum, uintptr_t pagenum)
@@ -54,7 +70,7 @@ static inline uint8_t get_page_status_in(long segnum, uintptr_t pagenum)
     int seg_shift = segnum * 2;
     uint64_t bitmask = 3UL << seg_shift;
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
-        &pages_status[pagenum - PAGE_FLAG_START];
+        &pages_status[get_file_page_of(pagenum)];
 
     return ((ps->by_segment & bitmask) >> seg_shift) & 3;
 }
@@ -65,16 +81,8 @@ static inline void set_page_status_in(long segnum, uintptr_t pagenum, uint8_t st
 
     int seg_shift = segnum * 2;
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
-        &pages_status[pagenum - PAGE_FLAG_START];
+        &pages_status[get_file_page_of(pagenum)];
 
     assert(status != get_page_status_in(segnum, pagenum));
     ps->by_segment |= status << seg_shift;
-}
-
-
-
-static inline uintptr_t get_virt_page_of(long segnum, uintptr_t pagenum)
-{
-    /* logical page -> virtual page */
-    return (uintptr_t)get_segment_base(segnum) / 4096UL + pagenum;
 }

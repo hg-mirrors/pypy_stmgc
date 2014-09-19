@@ -6,6 +6,8 @@
 #include <sys/mman.h>
 #include <errno.h>
 #include <pthread.h>
+#include <signal.h>
+
 
 /************************************************************/
 
@@ -135,7 +137,7 @@ static void abort_with_mutex(void) __attribute__((noreturn));
 static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
-
+static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
 
 static inline void _duck(void) {
     /* put a call to _duck() between two instructions that set 0 into
@@ -164,4 +166,35 @@ static inline void acquire_modified_objs_lock(int segnum)
 static inline void release_modified_objs_lock(int segnum)
 {
     spinlock_release(get_priv_segment(segnum)->modified_objs_lock);
+}
+
+
+static inline bool all_privatization_locks_acquired()
+{
+#ifndef NDEBUG
+    long l;
+    for (l = 0; l < NB_SEGMENTS; l++) {
+        if (!get_priv_segment(l)->privatization_lock)
+            return false;
+    }
+    return true;
+#else
+    abort();
+#endif
+}
+
+static inline void acquire_all_privatization_locks()
+{
+    long l;
+    for (l = 0; l < NB_SEGMENTS; l++) {
+        acquire_privatization_lock(l);
+    }
+}
+
+static inline void release_all_privatization_locks()
+{
+    long l;
+    for (l = NB_SEGMENTS-1; l >= 0; l--) {
+        release_privatization_lock(l);
+    }
 }

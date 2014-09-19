@@ -54,14 +54,10 @@ static void pages_initialize_shared_for(long segnum, uintptr_t pagenum, uintptr_
     /* call remap_file_pages() to make all pages in the range(pagenum,
        pagenum+count) PAGE_SHARED in segnum, and PAGE_NO_ACCESS in other segments */
 
-    dprintf(("pages_initialize_shared: 0x%ld - 0x%ld\n", pagenum,
-             pagenum + count));
-#ifndef NDEBUG
-    long l;
-    for (l = 0; l < NB_SEGMENTS; l++) {
-        assert(get_priv_segment(l)->privatization_lock);
-    }
-#endif
+    dprintf(("pages_initialize_shared: 0x%ld - 0x%ld\n", pagenum, pagenum + count));
+
+    assert(all_privatization_locks_acquired());
+
     assert(pagenum < NB_PAGES);
     if (count == 0)
         return;
@@ -85,43 +81,43 @@ static void pages_initialize_shared_for(long segnum, uintptr_t pagenum, uintptr_
 }
 
 
-/* static void page_privatize_in(int segnum, uintptr_t pagenum, char *initialize_from) */
-/* { */
-/* #ifndef NDEBUG */
-/*     long l; */
-/*     for (l = 0; l < NB_SEGMENTS; l++) { */
-/*         assert(get_priv_segment(l)->privatization_lock); */
-/*     } */
-/* #endif */
+static void page_privatize_in(int segnum, uintptr_t pagenum)
+{
+#ifndef NDEBUG
+    long l;
+    for (l = 0; l < NB_SEGMENTS; l++) {
+        assert(get_priv_segment(l)->privatization_lock);
+    }
+#endif
+    assert(get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS);
+    dprintf(("page_privatize(%lu) in seg:%d\n", pagenum, segnum));
 
-/*     /\* check this thread's 'pages_privatized' bit *\/ */
-/*     uint64_t bitmask = 1UL << segnum; */
-/*     volatile struct page_shared_s *ps = (volatile struct page_shared_s *) */
-/*         &pages_privatized[pagenum - PAGE_FLAG_START]; */
-/*     if (ps->by_segment & bitmask) { */
-/*         /\* the page is already privatized; nothing to do *\/ */
-/*         return; */
-/*     } */
+    char *addr = (char*)(get_virt_page_of(segnum, pagenum) * 4096UL);
+    char *result = mmap(
+        addr, 4096UL, PROT_READ | PROT_WRITE,
+        MAP_FIXED | MAP_PRIVATE | MAP_NORESERVE,
+        stm_object_pages_fd, get_file_page_of(pagenum));
+    if (result == MAP_FAILED)
+        stm_fatalerror("page_privatize_in failed (mmap): %m");
 
-/*     dprintf(("page_privatize(%lu) in seg:%d\n", pagenum, segnum)); */
+    set_page_status_in(segnum, pagenum, PAGE_PRIVATE);
+}
 
-/*     /\* add this thread's 'pages_privatized' bit *\/ */
-/*     ps->by_segment |= bitmask; */
 
-/*     /\* "unmaps" the page to make the address space location correspond */
-/*        again to its underlying file offset (XXX later we should again */
-/*        attempt to group together many calls to d_remap_file_pages() in */
-/*        succession) *\/ */
-/*     uintptr_t pagenum_in_file = NB_PAGES * segnum + pagenum; */
-/*     char *new_page = stm_object_pages + pagenum_in_file * 4096UL; */
+static void memcpy_to_accessible_pages(
+    int dst_segnum, object_t *dst_obj, char *src, size_t len)
+{
+    /* XXX: optimize */
 
-/*     /\* first write to the file page directly: *\/ */
-/*     ssize_t written = pwrite(stm_object_pages_fd, initialize_from, 4096UL, */
-/*                              pagenum_in_file * 4096UL); */
-/*     if (written != 4096) */
-/*         stm_fatalerror("pwrite didn't write the whole page: %zd", written); */
+    char *realobj = REAL_ADDRESS(get_segment_base(dst_segnum), dst_obj);
+    char *dst_end = realobj + len;
+    uintptr_t loc_addr = (uintptr_t)dst_obj;
 
-/*     /\* now remap virtual page in segment to the new file page *\/ */
-/*     write_fence(); */
-/*     d_remap_file_pages(new_page, 4096, pagenum_in_file); */
-/* } */
+    while (realobj != dst_end) {
+        if (get_page_status_in(dst_segnum, loc_addr / 4096UL) != PAGE_NO_ACCESS)
+            *realobj = *src;
+        realobj++;
+        loc_addr++;
+        src++;
+    }
+}

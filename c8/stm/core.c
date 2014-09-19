@@ -2,9 +2,135 @@
 # error "must be compiled via stmgc.c"
 #endif
 
-#include <signal.h>
+
+/* ############# signal handler ############# */
+static void _update_obj_from(int from_seg, object_t *obj);
+
+static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
+{
+    acquire_modified_objs_lock(from_segnum);
+    struct tree_s *tree = get_priv_segment(from_segnum)->modified_old_objects;
+    wlog_t *item;
+    TREE_LOOP_FORWARD(tree, item); {
+        if (item->addr >= pagenum * 4096UL && item->addr < (pagenum + 1) * 4096UL) {
+            object_t *obj = (object_t*)item->addr;
+            struct object_s* bk_obj = (struct object_s *)item->val;
+            size_t obj_size;
+
+            obj_size = stmcb_size_rounded_up(bk_obj);
+
+            memcpy_to_accessible_pages(STM_SEGMENT->segment_num,
+                                       obj, (char*)bk_obj, obj_size);
+
+            assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* bk_obj never written */
+        }
+    } TREE_LOOP_END;
+
+    release_modified_objs_lock(from_segnum);
+}
+
+static void update_page_from_to(
+    uintptr_t pagenum, struct stm_commit_log_entry_s *from,
+    struct stm_commit_log_entry_s *to)
+{
+    assert(all_privatization_locks_acquired());
+
+    volatile struct stm_commit_log_entry_s *cl;
+    cl = (volatile struct stm_commit_log_entry_s *)from;
+
+    if (from == to)
+        return;
+
+    while ((cl = cl->next)) {
+        if ((uintptr_t)cl == -1)
+            return;
+
+        OPT_ASSERT(cl->segment_num >= 0 && cl->segment_num < NB_SEGMENTS);
+
+        object_t *obj;
+        size_t i = 0;
+        while ((obj = cl->written[i])) {
+            _update_obj_from(cl->segment_num, obj);
+
+            i++;
+        };
+
+        /* last fully validated entry */
+        if (cl == to)
+            return;
+    }
+}
+
+static void bring_page_up_to_date(uintptr_t pagenum)
+{
+    /* XXX: bad, but no deadlocks: */
+    acquire_all_privatization_locks();
+
+    long i;
+    int my_segnum = STM_SEGMENT->segment_num;
+
+    assert(get_page_status_in(my_segnum, pagenum) == PAGE_NO_ACCESS);
+
+    /* find who has the PAGE_SHARED */
+    int shared_page_holder = -1;
+    int shared_ref_count = 0;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        if (i == my_segnum)
+            continue;
+        if (get_page_status_in(i, pagenum) == PAGE_SHARED) {
+            shared_page_holder = i;
+            shared_ref_count++;
+        }
+    }
+    assert(shared_page_holder != -1);
+
+    /* XXX: for now, we don't try to get the single shared page. We simply
+       regard it as private for its holder. */
+    /* this assert should be true for now... */
+    assert(shared_ref_count == 1);
+
+    /* make our page private */
+    page_privatize_in(STM_SEGMENT->segment_num, pagenum);
+    volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, pagenum*4096UL);
+    *dummy = *dummy;            /* force copy-on-write from shared page */
+
+    /* if there were modifications in the page, revert them: */
+    copy_bk_objs_from(shared_page_holder, pagenum);
+
+    /* if not already newer, update page to our revision */
+    update_page_from_to(
+        pagenum, get_priv_segment(shared_page_holder)->last_commit_log_entry,
+        STM_PSEGMENT->last_commit_log_entry);
+
+    /* in case page is already newer, validate everything now to have a common
+       revision for all pages */
+    stm_validate(NULL);
+
+    release_all_privatization_locks();
+}
+
+static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
+{
+    char *addr = siginfo->si_addr;
+    dprintf(("si_addr: %p\n", addr));
+    if (addr == NULL || addr < stm_object_pages || addr > stm_object_pages+TOTAL_MEMORY) {
+        /* actual segfault */
+        /* send to GDB (XXX) */
+        kill(getpid(), SIGINT);
+    }
+    /* XXX: should we save 'errno'? */
 
 
+    int segnum = get_segment_of_linear_address(addr);
+    OPT_ASSERT(segnum == STM_SEGMENT->segment_num);
+    dprintf(("-> segment: %d\n", segnum));
+    char *seg_base = STM_SEGMENT->segment_base;
+    uintptr_t pagenum = ((char*)addr - seg_base) / 4096UL;
+
+    bring_page_up_to_date(pagenum);
+
+    return;
+}
 
 /* ############# commit log ############# */
 
@@ -30,17 +156,10 @@ void _dbg_print_commit_log()
     }
 }
 
+
 static void _update_obj_from(int from_seg, object_t *obj)
 {
-    /* during validation this looks up the obj in the
-       from_seg (backup or normal) and copies the version
-       over the current segment's one */
     size_t obj_size;
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    uintptr_t pagenum = (uintptr_t)obj / 4096UL;
-
-    assert(get_page_status_in(from_seg, pagenum) != PAGE_NO_ACCESS);
-    assert(get_page_status_in(STM_SEGMENT->segment_num, pagenum) != PAGE_NO_ACCESS);
 
     /* look the obj up in the other segment's modified_old_objects to
        get its backup copy: */
@@ -51,7 +170,10 @@ static void _update_obj_from(int from_seg, object_t *obj)
     TREE_FIND(tree, (uintptr_t)obj, item, goto not_found);
 
     obj_size = stmcb_size_rounded_up((struct object_s*)item->val);
-    memcpy(realobj, (char*)item->val, obj_size);
+
+    memcpy_to_accessible_pages(STM_SEGMENT->segment_num, obj,
+                               (char*)item->val, obj_size);
+
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     release_modified_objs_lock(from_seg);
     return;
@@ -60,9 +182,11 @@ static void _update_obj_from(int from_seg, object_t *obj)
     /* copy from page directly (obj is unmodified) */
     obj_size = stmcb_size_rounded_up(
         (struct object_s*)REAL_ADDRESS(get_segment_base(from_seg), obj));
-    memcpy(realobj,
-           REAL_ADDRESS(get_segment_base(from_seg), obj),
-           obj_size);
+
+    memcpy_to_accessible_pages(STM_SEGMENT->segment_num, obj,
+                               REAL_ADDRESS(get_segment_base(from_seg), obj),
+                               obj_size);
+
     obj->stm_flags |= GCFLAG_WRITE_BARRIER; /* may already be gone */
     release_modified_objs_lock(from_seg);
 }
@@ -77,6 +201,7 @@ void stm_validate(void *free_if_abort)
         assert((uintptr_t)STM_PSEGMENT->last_commit_log_entry->next == -1);
         return;
     }
+    assert(all_privatization_locks_acquired());
 
     volatile struct stm_commit_log_entry_s *cl, *prev_cl;
     cl = prev_cl = (volatile struct stm_commit_log_entry_s *)
