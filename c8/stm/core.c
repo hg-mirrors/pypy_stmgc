@@ -4,10 +4,48 @@
 
 
 /* ############# signal handler ############# */
-static void _update_obj_from(int from_seg, object_t *obj);
+static void _update_obj_from(int from_seg, object_t *obj)
+{
+    /* updates 'obj' in our accessible pages from another segment's
+       page or bk copy. (never touch PROT_NONE memory) */
+    /* XXXXXXX: are we sure everything is readable in from_seg??? */
+    size_t obj_size;
+
+    assert(get_priv_segment(from_seg)->privatization_lock);
+
+    /* look the obj up in the other segment's modified_old_objects to
+       get its backup copy: */
+    acquire_modified_objs_lock(from_seg);
+
+    wlog_t *item;
+    struct tree_s *tree = get_priv_segment(from_seg)->modified_old_objects;
+    TREE_FIND(tree, (uintptr_t)obj, item, goto not_found);
+
+    obj_size = stmcb_size_rounded_up((struct object_s*)item->val);
+
+    memcpy_to_accessible_pages(STM_SEGMENT->segment_num, obj,
+                               (char*)item->val, obj_size);
+
+    release_modified_objs_lock(from_seg);
+    return;
+
+ not_found:
+    /* copy from page directly (obj is unmodified) */
+    obj_size = stmcb_size_rounded_up(
+        (struct object_s*)REAL_ADDRESS(get_segment_base(from_seg), obj));
+
+    memcpy_to_accessible_pages(STM_SEGMENT->segment_num, obj,
+                               REAL_ADDRESS(get_segment_base(from_seg), obj),
+                               obj_size);
+
+    release_modified_objs_lock(from_seg);
+}
+
 
 static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
 {
+    /* looks at all bk copies of objects overlapping page 'pagenum' and
+       copies to current segment (never touch PROT_NONE memory) */
     acquire_modified_objs_lock(from_segnum);
     struct tree_s *tree = get_priv_segment(from_segnum)->modified_old_objects;
     wlog_t *item;
@@ -17,6 +55,8 @@ static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
         size_t obj_size = stmcb_size_rounded_up(bk_obj);
 
         if (item->addr < (pagenum + 1) * 4096UL && item->addr + obj_size > pagenum * 4096UL) {
+            /* XXX: should actually only write to pagenum, but we validate
+               afterwards anyway and abort in case we had modifications there */
             memcpy_to_accessible_pages(STM_SEGMENT->segment_num,
                                        obj, (char*)bk_obj, obj_size);
 
@@ -31,6 +71,8 @@ static void update_page_from_to(
     uintptr_t pagenum, struct stm_commit_log_entry_s *from,
     struct stm_commit_log_entry_s *to)
 {
+    /* walk the commit log and update the page 'pagenum' until we reach
+       the same revision as our segment, or we reach the HEAD. */
     assert(all_privatization_locks_acquired());
 
     volatile struct stm_commit_log_entry_s *cl;
@@ -61,6 +103,9 @@ static void update_page_from_to(
 
 static void bring_page_up_to_date(uintptr_t pagenum)
 {
+    /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
+       and validates to newest revision */
+
     /* XXX: bad, but no deadlocks: */
     acquire_all_privatization_locks();
 
@@ -149,41 +194,6 @@ void _dbg_print_commit_log()
             i++;
         };
     }
-}
-
-
-static void _update_obj_from(int from_seg, object_t *obj)
-{
-    size_t obj_size;
-
-    assert(get_priv_segment(from_seg)->privatization_lock);
-
-    /* look the obj up in the other segment's modified_old_objects to
-       get its backup copy: */
-    acquire_modified_objs_lock(from_seg);
-
-    wlog_t *item;
-    struct tree_s *tree = get_priv_segment(from_seg)->modified_old_objects;
-    TREE_FIND(tree, (uintptr_t)obj, item, goto not_found);
-
-    obj_size = stmcb_size_rounded_up((struct object_s*)item->val);
-
-    memcpy_to_accessible_pages(STM_SEGMENT->segment_num, obj,
-                               (char*)item->val, obj_size);
-
-    release_modified_objs_lock(from_seg);
-    return;
-
- not_found:
-    /* copy from page directly (obj is unmodified) */
-    obj_size = stmcb_size_rounded_up(
-        (struct object_s*)REAL_ADDRESS(get_segment_base(from_seg), obj));
-
-    memcpy_to_accessible_pages(STM_SEGMENT->segment_num, obj,
-                               REAL_ADDRESS(get_segment_base(from_seg), obj),
-                               obj_size);
-
-    release_modified_objs_lock(from_seg);
 }
 
 
