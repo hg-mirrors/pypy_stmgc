@@ -543,3 +543,34 @@ class TestBasic(BaseTest):
         assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 56
         self.abort_transaction()
         assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 0
+
+    def test_abort_in_segfault_handler(self):
+        lp1 = stm_allocate_old(16)
+        lp2 = stm_allocate_old(16)
+
+        self.start_transaction()
+        stm_set_char(lp1, 'A')
+        stm_set_char(lp2, 'B')
+        self.commit_transaction()
+        # lp1 = S|N|N|N
+        # lp2 = S|N|N|N
+
+        self.switch(1)
+
+        self.start_transaction()
+        assert stm_get_char(lp1) == 'A'
+        # lp1 = S|P|N|N
+        # lp2 = S|N|N|N
+
+        self.switch(0)
+
+        self.start_transaction()
+        stm_set_char(lp1, 'C')
+        self.commit_transaction()
+        # lp1 = S|P|N|N
+        # lp2 = S|N|N|N
+
+        self.switch(1, validate=False)
+
+        # seg1 segfaults, validates, and aborts:
+        py.test.raises(Conflict, stm_get_char, lp2)
