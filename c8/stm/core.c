@@ -4,13 +4,42 @@
 
 
 /* ############# signal handler ############# */
-static void _update_obj_from(int from_seg, object_t *obj)
+static void memcpy_to_accessible_pages(
+    int dst_segnum, object_t *dst_obj,
+    char *src, size_t len, uintptr_t only_page)
+{
+    /* XXX: optimize */
+
+    char *realobj = REAL_ADDRESS(get_segment_base(dst_segnum), dst_obj);
+    char *dst_end = realobj + len;
+    uintptr_t loc_addr = (uintptr_t)dst_obj;
+
+    dprintf(("memcpy_to_accessible_pages(%d, %p, %p, %lu, %lu)\n",
+             dst_segnum, dst_obj, src, len, only_page));
+
+    while (realobj != dst_end) {
+        if (get_page_status_in(dst_segnum, loc_addr / 4096UL) != PAGE_NO_ACCESS
+            && (only_page == -1 || only_page == loc_addr / 4096UL)) {
+            *realobj = *src;
+        }
+        realobj++;
+        loc_addr++;
+        src++;
+    }
+}
+
+
+static void _update_obj_from(int from_seg, object_t *obj, uintptr_t only_page)
 {
     /* updates 'obj' in our accessible pages from another segment's
-       page or bk copy. (never touch PROT_NONE memory) */
+       page or bk copy. (never touch PROT_NONE memory)
+       only_page = -1 means update whole obj, only_page=pagenum means only
+       update memory in page 'pagenum'
+    */
     /* XXXXXXX: are we sure everything is readable in from_seg??? */
     size_t obj_size;
 
+    dprintf(("_update_obj_from(%d, %p)\n", from_seg, obj));
     assert(get_priv_segment(from_seg)->privatization_lock);
 
     /* look the obj up in the other segment's modified_old_objects to
@@ -24,7 +53,7 @@ static void _update_obj_from(int from_seg, object_t *obj)
     obj_size = stmcb_size_rounded_up((struct object_s*)item->val);
 
     memcpy_to_accessible_pages(STM_SEGMENT->segment_num, obj,
-                               (char*)item->val, obj_size);
+                               (char*)item->val, obj_size, only_page);
 
     release_modified_objs_lock(from_seg);
     return;
@@ -36,7 +65,7 @@ static void _update_obj_from(int from_seg, object_t *obj)
 
     memcpy_to_accessible_pages(STM_SEGMENT->segment_num, obj,
                                REAL_ADDRESS(get_segment_base(from_seg), obj),
-                               obj_size);
+                               obj_size, only_page);
 
     release_modified_objs_lock(from_seg);
 }
@@ -45,7 +74,9 @@ static void _update_obj_from(int from_seg, object_t *obj)
 static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
 {
     /* looks at all bk copies of objects overlapping page 'pagenum' and
-       copies to current segment (never touch PROT_NONE memory) */
+       copies to current segment (never touch PROT_NONE memory). */
+    dprintf(("copy_bk_objs_from(%d, %lu)\n", from_segnum, pagenum));
+
     acquire_modified_objs_lock(from_segnum);
     struct tree_s *tree = get_priv_segment(from_segnum)->modified_old_objects;
     wlog_t *item;
@@ -58,18 +89,16 @@ static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
             /* XXX: should actually only write to pagenum, but we validate
                afterwards anyway and abort in case we had modifications there */
             memcpy_to_accessible_pages(STM_SEGMENT->segment_num,
-                                       obj, (char*)bk_obj, obj_size);
-
-            assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* bk_obj never written */
+                                       obj, (char*)bk_obj, obj_size, pagenum);
         }
     } TREE_LOOP_END;
 
     release_modified_objs_lock(from_segnum);
 }
 
-static void update_page_from_to(
-    uintptr_t pagenum, struct stm_commit_log_entry_s *from,
-    struct stm_commit_log_entry_s *to)
+static void update_page_from_to(uintptr_t pagenum,
+                                struct stm_commit_log_entry_s *from,
+                                struct stm_commit_log_entry_s *to)
 {
     /* walk the commit log and update the page 'pagenum' until we reach
        the same revision as our segment, or we reach the HEAD. */
@@ -90,7 +119,7 @@ static void update_page_from_to(
         object_t *obj;
         size_t i = 0;
         while ((obj = cl->written[i])) {
-            _update_obj_from(cl->segment_num, obj);
+            _update_obj_from(cl->segment_num, obj, pagenum);
 
             i++;
         };
@@ -105,6 +134,8 @@ static void bring_page_up_to_date(uintptr_t pagenum)
 {
     /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
        and validates to newest revision */
+
+    dprintf(("bring_page_up_to_date(%lu), seg %d\n", pagenum, STM_SEGMENT->segment_num));
 
     /* XXX: bad, but no deadlocks: */
     acquire_all_privatization_locks();
@@ -241,7 +272,7 @@ static void _stm_validate(void *free_if_abort, bool locks_acquired)
         object_t *obj;
         size_t i = 0;
         while ((obj = cl->written[i])) {
-            _update_obj_from(cl->segment_num, obj);
+            _update_obj_from(cl->segment_num, obj, -1);
 
             if (_stm_was_read(obj)) {
                 needs_abort = true;
