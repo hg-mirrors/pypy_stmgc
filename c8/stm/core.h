@@ -19,7 +19,6 @@
 #define NB_PAGES            (2500*256)    // 2500MB
 #define NB_SEGMENTS         STM_NB_SEGMENTS
 #define NB_SEGMENTS_MAX     240    /* don't increase NB_SEGMENTS past this */
-#define MAP_PAGES_FLAGS     (MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE)
 #define NB_NURSERY_PAGES    (STM_GC_NURSERY/4)
 
 #define TOTAL_MEMORY          (NB_PAGES * 4096UL * NB_SEGMENTS)
