@@ -40,6 +40,16 @@ static void pages_initialize_shared_for(long segnum, uintptr_t pagenum, uintptr_
             mprotect(segment_base + pagenum * 4096UL,
                      count * 4096UL, PROT_NONE);
 
+            /* char *result = mmap( */
+            /*     segment_base + pagenum * 4096UL, */
+            /*     count * 4096UL, */
+            /*     PROT_NONE, */
+            /*     MAP_FIXED|MAP_NORESERVE|MAP_PRIVATE|MAP_ANONYMOUS, */
+            /*     -1, 0); */
+            /* if (result == MAP_FAILED) */
+            /*     stm_fatalerror("pages_initialize_shared failed (mmap): %m"); */
+
+
             long amount = count;
             while (amount-->0) {
                 set_page_status_in(i, pagenum + amount, PAGE_NO_ACCESS);

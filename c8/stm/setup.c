@@ -20,7 +20,7 @@ static void setup_mmap(char *reason)
     if (stm_object_pages_fd == -1)
         stm_fatalerror("%s failed (stm_open): %m", reason);
 
-    if (ftruncate(stm_object_pages_fd, NB_SHARED_PAGES) != 0)
+    if (ftruncate(stm_object_pages_fd, NB_SHARED_PAGES * 4096UL) != 0)
         stm_fatalerror("%s failed (ftruncate): %m", reason);
 
     stm_file_pages = mmap(NULL, NB_SHARED_PAGES * 4096UL,
