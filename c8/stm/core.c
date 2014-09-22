@@ -71,11 +71,11 @@ static void _update_obj_from(int from_seg, object_t *obj, uintptr_t only_page)
 }
 
 
-static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
+static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum)
 {
     /* looks at all bk copies of objects overlapping page 'pagenum' and
        copies to current segment (never touch PROT_NONE memory). */
-    dprintf(("copy_bk_objs_from(%d, %lu)\n", from_segnum, pagenum));
+    dprintf(("copy_bk_objs_in_page_from(%d, %lu)\n", from_segnum, pagenum));
 
     acquire_modified_objs_lock(from_segnum);
     struct tree_s *tree = get_priv_segment(from_segnum)->modified_old_objects;
@@ -96,9 +96,9 @@ static void copy_bk_objs_from(int from_segnum, uintptr_t pagenum)
     release_modified_objs_lock(from_segnum);
 }
 
-static void update_page_from_to(uintptr_t pagenum,
-                                struct stm_commit_log_entry_s *from,
-                                struct stm_commit_log_entry_s *to)
+static void update_page_revision_from_to(uintptr_t pagenum,
+                                         struct stm_commit_log_entry_s *from,
+                                         struct stm_commit_log_entry_s *to)
 {
     /* walk the commit log and update the page 'pagenum' until we reach
        the same revision as our segment, or we reach the HEAD. */
@@ -130,12 +130,12 @@ static void update_page_from_to(uintptr_t pagenum,
     }
 }
 
-static void bring_page_up_to_date(uintptr_t pagenum)
+static void handle_segfault_in_page(uintptr_t pagenum)
 {
     /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
        and validates to newest revision */
 
-    dprintf(("bring_page_up_to_date(%lu), seg %d\n", pagenum, STM_SEGMENT->segment_num));
+    dprintf(("handle_segfault_in_page(%lu), seg %d\n", pagenum, STM_SEGMENT->segment_num));
 
     /* XXX: bad, but no deadlocks: */
     acquire_all_privatization_locks();
@@ -168,10 +168,10 @@ static void bring_page_up_to_date(uintptr_t pagenum)
     assert(get_page_status_in(my_segnum, pagenum) == PAGE_PRIVATE);
 
     /* if there were modifications in the page, revert them: */
-    copy_bk_objs_from(shared_page_holder, pagenum);
+    copy_bk_objs_in_page_from(shared_page_holder, pagenum);
 
     /* if not already newer, update page to our revision */
-    update_page_from_to(
+    update_page_revision_from_to(
         pagenum, get_priv_segment(shared_page_holder)->last_commit_log_entry,
         STM_PSEGMENT->last_commit_log_entry);
 
@@ -198,7 +198,7 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
     char *seg_base = STM_SEGMENT->segment_base;
     uintptr_t pagenum = ((char*)addr - seg_base) / 4096UL;
 
-    bring_page_up_to_date(pagenum);
+    handle_segfault_in_page(pagenum);
 
     return;
 }

@@ -71,7 +71,6 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
 #include <stdbool.h>
-void stm_validate(void);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 
@@ -226,6 +225,7 @@ static inline void stm_become_inevitable(stm_thread_local_t *tl,
 }
 
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl, const char *msg);
+void stm_validate(void);
 
 /* ==================== END ==================== */
 
