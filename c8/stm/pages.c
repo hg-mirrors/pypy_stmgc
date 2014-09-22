@@ -73,24 +73,3 @@ static void page_privatize_in(int segnum, uintptr_t pagenum)
     volatile char *dummy = REAL_ADDRESS(get_segment_base(segnum), pagenum*4096UL);
     *dummy = *dummy;            /* force copy-on-write from shared page */
 }
-
-
-static void memcpy_to_accessible_pages(
-    int dst_segnum, object_t *dst_obj, char *src, size_t len)
-{
-    /* XXX: optimize */
-
-    char *realobj = REAL_ADDRESS(get_segment_base(dst_segnum), dst_obj);
-    char *dst_end = realobj + len;
-    uintptr_t loc_addr = (uintptr_t)dst_obj;
-
-    dprintf(("memcpy_to_accessible_pages(%d, %p, %p, %lu)\n", dst_segnum, dst_obj, src, len));
-
-    while (realobj != dst_end) {
-        if (get_page_status_in(dst_segnum, loc_addr / 4096UL) != PAGE_NO_ACCESS)
-            *realobj = *src;
-        realobj++;
-        loc_addr++;
-        src++;
-    }
-}

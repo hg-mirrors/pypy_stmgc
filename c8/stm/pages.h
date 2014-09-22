@@ -46,7 +46,6 @@ static struct page_shared_s pages_status[NB_SHARED_PAGES];
 
 static void pages_initialize_shared_for(long segnum, uintptr_t pagenum, uintptr_t count);
 static void page_privatize_in(int segnum, uintptr_t pagenum);
-static void memcpy_to_accessible_pages(int dst_segnum, object_t *dst_obj, char *src, size_t len);
 
 
 
