@@ -535,7 +535,7 @@ class TestRandom(BaseTest):
     def test_fixed_16_bytes_objects(self, seed=1010):
         rnd = random.Random(seed)
 
-        N_OBJECTS = 3
+        N_OBJECTS = 4
         N_THREADS = self.NB_THREADS
         ex = Exec(self)
         ex.do("################################################################\n"*10)
@@ -575,7 +575,7 @@ class TestRandom(BaseTest):
             op_minor_collect,
             #op_major_collect,
         ]
-        for _ in range(200):
+        for _ in range(500):
             # make sure we are in a transaction:
             curr_thread = op_switch_thread(ex, global_state, curr_thread)
 
