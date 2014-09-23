@@ -197,6 +197,9 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
     dprintf(("-> segment: %d\n", segnum));
     char *seg_base = STM_SEGMENT->segment_base;
     uintptr_t pagenum = ((char*)addr - seg_base) / 4096UL;
+    /* XXX actual segfault also if the pagenum is out of bounds,
+       say < END_NURSERY_PAGE.  Important for crashing cleanly on
+       %gs:NULL accesses */
 
     handle_segfault_in_page(pagenum);
 
