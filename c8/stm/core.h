@@ -102,10 +102,9 @@ enum /* transaction_state */ {
 struct stm_undo_s {
     object_t *object;   /* the object that is modified */
     char *backup;       /* some backup data (a slice of the original obj) */
-    uint64_t slice;     /* location and size of this slice (== the whole
-                           object, unless card marking is enabled).  The
-                           size is in the lower 2 bytes, and the offset
-                           in the remaining 6 bytes. */
+    uint64_t slice;     /* location and size of this slice (cannot cross
+                           pages).  The size is in the lower 2 bytes, and
+                           the offset in the remaining 6 bytes. */
 };
 #define SLICE_OFFSET(slice)  ((slice) >> 16)
 #define SLICE_SIZE(slice)    ((int)((slice) & 0xFFFF))
@@ -181,7 +180,6 @@ static inline void release_privatization_lock(int segnum)
 
 static inline void acquire_modified_objs_lock(int segnum)
 {
-    /* XXX no longer neeeded? */
     spinlock_acquire(get_priv_segment(segnum)->modified_objs_lock);
 }
 
