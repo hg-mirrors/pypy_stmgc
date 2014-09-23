@@ -181,6 +181,7 @@ static inline void release_privatization_lock(int segnum)
 
 static inline void acquire_modified_objs_lock(int segnum)
 {
+    /* XXX no longer neeeded? */
     spinlock_acquire(get_priv_segment(segnum)->modified_objs_lock);
 }
 

@@ -601,29 +601,36 @@ static void reset_modified_from_backup_copies(int segment_num)
 #pragma push_macro("STM_SEGMENT")
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
-    acquire_modified_objs_lock(segment_num);
+    //acquire_modified_objs_lock(segment_num);
 
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
-    abort();
-    struct tree_s *tree = NULL; //XXX pseg->modified_old_objects;
-    wlog_t *item;
-    TREE_LOOP_FORWARD(tree, item); {
-        object_t *obj = (object_t*)item->addr;
-        struct object_s* bk_obj = (struct object_s *)item->val;
-        size_t obj_size;
+    struct list_s *list = pseg->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
-        obj_size = stmcb_size_rounded_up(bk_obj);
+    for (; undo < end; undo++) {
+        object_t *obj = undo->object;
+        char *dst = REAL_ADDRESS(pseg->pub.segment_base, obj);
 
-        memcpy(REAL_ADDRESS(pseg->pub.segment_base, obj),
-               bk_obj, obj_size);
-        assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* not written */
+        memcpy(dst + SLICE_OFFSET(undo->slice),
+               undo->backup,
+               SLICE_SIZE(undo->slice));
+        free(undo->backup);
+    }
 
-        free(bk_obj);
-    } TREE_LOOP_END;
+#ifndef NDEBUG
+    /* check that all objects have the GCFLAG_WRITE_BARRIER afterwards */
+    undo = (struct stm_undo_s *)list->items;
+    for (; undo < end; undo++) {
+        object_t *obj = undo->object;
+        char *dst = REAL_ADDRESS(pseg->pub.segment_base, obj);
+        assert(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
+    }
+#endif
 
-    tree_clear(tree);
+    list_clear(list);
 
-    release_modified_objs_lock(segment_num);
+    //release_modified_objs_lock(segment_num);
 
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
