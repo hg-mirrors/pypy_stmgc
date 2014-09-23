@@ -51,7 +51,16 @@ struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
 
     uint8_t modified_objs_lock;
-    struct tree_s *modified_old_objects;
+
+    /* All the old objects (older than the current transaction) that
+       the current transaction attempts to modify.  This is used to
+       track the STM status: these are old objects that where written
+       to and that will need to be recorded in the commit log.  The
+       list contains three entries for every such object, in the same
+       format as 'struct stm_undo_s' below.
+    */
+    struct list_s *modified_old_objects;
+
     struct list_s *objects_pointing_to_nursery;
     struct tree_s *young_outside_nursery;
     struct tree_s *nursery_objects_shadows;
@@ -90,12 +99,24 @@ enum /* transaction_state */ {
 };
 
 /* Commit Log things */
-struct stm_commit_log_entry_s {
-    volatile struct stm_commit_log_entry_s *next;
-    int segment_num;
-    object_t *written[];        /* terminated with a NULL ptr */
+struct stm_undo_s {
+    object_t *object;   /* the object that is modified */
+    char *backup;       /* some backup data (a slice of the original obj) */
+    uint64_t slice;     /* location and size of this slice (== the whole
+                           object, unless card marking is enabled).  The
+                           size is in the lower 2 bytes, and the offset
+                           in the remaining 6 bytes. */
 };
-static struct stm_commit_log_entry_s commit_log_root = {NULL, -1};
+#define SLICE_OFFSET(slice)  ((slice) >> 16)
+#define SLICE_SIZE(slice)    ((int)((slice) & 0xFFFF))
+
+struct stm_commit_log_entry_s {
+    struct stm_commit_log_entry_s *volatile next;
+    int segment_num;
+    size_t written_count;
+    struct stm_undo_s written[];
+};
+static struct stm_commit_log_entry_s commit_log_root = {NULL, -1, 0};
 
 
 static char *stm_object_pages;
@@ -137,7 +158,7 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
-static void _stm_validate(void *free_if_abort, bool locks_acquired);
+static void _stm_validate(void *free_if_abort);
 
 static inline void _duck(void) {
     /* put a call to _duck() between two instructions that set 0 into
