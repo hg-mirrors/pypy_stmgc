@@ -290,6 +290,7 @@ static void _stm_validate(void *free_if_abort)
                     needs_abort = true;
                 }
             }
+            /* XXXX Here I'm doing something wrong -- arigo */
             reapply_undo_log(undo);
         }
 
