@@ -287,7 +287,7 @@ static void _stm_validate(void *free_if_abort)
     }
 }
 
-static struct stm_commit_log_entry_s *_create_commit_log_entry()
+static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 {
     /* puts all modified_old_objects in a new commit log entry */
 
@@ -548,6 +548,19 @@ static void _finish_transaction()
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 }
 
+static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
+{
+#ifndef NDEBUG
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+    for (; undo < end; undo++) {
+        object_t *obj = undo->object;
+        char *dst = REAL_ADDRESS(segbase, obj);
+        assert(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
+    }
+#endif
+}
+
 void stm_commit_transaction(void)
 {
     assert(!_has_mutex());
@@ -557,27 +570,17 @@ void stm_commit_transaction(void)
     dprintf(("> stm_commit_transaction()\n"));
     minor_collection(1);
 
+    /* minor_collection() above should have set again all WRITE_BARRIER flags.
+       Check that again here for the objects that are about to be copied into
+       the commit log. */
+    check_all_write_barrier_flags(STM_SEGMENT->segment_base,
+                                  STM_PSEGMENT->modified_old_objects);
+
     _validate_and_add_to_commit_log();
-
-    /* clear WRITE_BARRIER flags, free all backup copies,
-       and clear the tree: */
-    acquire_modified_objs_lock(STM_SEGMENT->segment_num);
-
-    abort();
-    struct tree_s *tree = NULL; //XXX STM_PSEGMENT->modified_old_objects;
-    wlog_t *item;
-    TREE_LOOP_FORWARD(tree, item); {
-        object_t *obj = (object_t*)item->addr;
-        struct object_s* bk_obj = (struct object_s *)item->val;
-        free(bk_obj);
-        obj->stm_flags |= GCFLAG_WRITE_BARRIER;
-    } TREE_LOOP_END;
-    tree_clear(tree);
-
-    release_modified_objs_lock(STM_SEGMENT->segment_num);
 
     invoke_and_clear_user_callbacks(0);   /* for commit */
 
+    /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
     enter_safe_point_if_requested();
     assert(STM_SEGMENT->nursery_end == NURSERY_END);
@@ -618,15 +621,8 @@ static void reset_modified_from_backup_copies(int segment_num)
         free(undo->backup);
     }
 
-#ifndef NDEBUG
     /* check that all objects have the GCFLAG_WRITE_BARRIER afterwards */
-    undo = (struct stm_undo_s *)list->items;
-    for (; undo < end; undo++) {
-        object_t *obj = undo->object;
-        char *dst = REAL_ADDRESS(pseg->pub.segment_base, obj);
-        assert(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
-    }
-#endif
+    check_all_write_barrier_flags(pseg->pub.segment_base, list);
 
     list_clear(list);
 
