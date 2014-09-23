@@ -191,18 +191,22 @@ void _dbg_print_commit_log()
 {
     struct stm_commit_log_entry_s *cl = &commit_log_root;
 
-    fprintf(stderr, "commit log root (%p, %d)\n", cl->next, cl->segment_num);
+    fprintf(stderr, "commit log:\n");
     while ((cl = cl->next)) {
         if (cl == (void *)-1) {
             fprintf(stderr, "  INEVITABLE\n");
             return;
         }
-        fprintf(stderr, "  elem (%p, %d)\n", cl->next, cl->segment_num);
+        fprintf(stderr, "  entry at %p: seg %d\n", cl, cl->segment_num);
         struct stm_undo_s *undo = cl->written;
         struct stm_undo_s *end = undo + cl->written_count;
         for (; undo < end; undo++) {
-            fprintf(stderr, "    obj %p, size %d, ofs %lu\n", undo->object,
+            fprintf(stderr, "    obj %p, size %d, ofs %lu: ", undo->object,
                     SLICE_SIZE(undo->slice), SLICE_OFFSET(undo->slice));
+            long i;
+            for (i=0; i<SLICE_SIZE(undo->slice); i += 8)
+                fprintf(stderr, " 0x%016lx", *(long *)(undo->backup + i));
+            fprintf(stderr, "\n");
         }
     }
 }
