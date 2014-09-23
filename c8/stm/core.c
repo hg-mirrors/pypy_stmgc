@@ -182,28 +182,36 @@ static void handle_segfault_in_page(uintptr_t pagenum)
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
+    int saved_errno = errno;
     char *addr = siginfo->si_addr;
     dprintf(("si_addr: %p\n", addr));
-    if (addr == NULL || addr < stm_object_pages || addr > stm_object_pages+TOTAL_MEMORY) {
-        /* actual segfault */
-        /* send to GDB (XXX) */
-        kill(getpid(), SIGINT);
+    if (addr == NULL || addr < stm_object_pages ||
+        addr >= stm_object_pages+TOTAL_MEMORY) {
+        /* actual segfault, unrelated to stmgc */
+        fprintf(stderr, "Segmentation fault: accessing %p\n", addr);
+        abort();
     }
-    /* XXX: should we save 'errno'? */
-
 
     int segnum = get_segment_of_linear_address(addr);
-    OPT_ASSERT(segnum == STM_SEGMENT->segment_num);
+    if (segnum != STM_SEGMENT->segment_num) {
+        fprintf(stderr, "Segmentation fault: accessing %p (seg %d) from"
+                        " seg %d\n", addr, STM_SEGMENT->segment_num, segnum);
+        abort();
+    }
     dprintf(("-> segment: %d\n", segnum));
+
     char *seg_base = STM_SEGMENT->segment_base;
     uintptr_t pagenum = ((char*)addr - seg_base) / 4096UL;
-    /* XXX actual segfault also if the pagenum is out of bounds,
-       say < END_NURSERY_PAGE.  Important for crashing cleanly on
-       %gs:NULL accesses */
+    if (pagenum < END_NURSERY_PAGE) {
+        fprintf(stderr, "Segmentation fault: accessing %p (seg %d "
+                        "page %lu)\n", addr, segnum, pagenum);
+        abort();
+    }
 
     handle_segfault_in_page(pagenum);
 
-    return;
+    errno = saved_errno;
+    /* now return and retry */
 }
 
 /* ############# commit log ############# */
@@ -464,6 +472,7 @@ void _stm_write_slowpath(object_t *obj)
                     (uintptr_t)obj, (uintptr_t)bk_obj);
         release_modified_objs_lock(my_segnum);
     }
+    /* XXX else... what occurs with bk_obj? */
 
     /* done fiddling with protection and privatization */
     release_all_privatization_locks();
