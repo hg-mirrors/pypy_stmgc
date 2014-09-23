@@ -147,6 +147,7 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     }
 
     release_modified_objs_lock(shared_page_holder);
+    release_all_privatization_locks();
 }
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
@@ -279,7 +280,9 @@ static void _stm_validate(void *free_if_abort)
                    then we will proceed below to update our segment from
                    the old (but unmodified) version to the newer version. */
                 if (!needs_abort) {
+                    release_modified_objs_lock(STM_SEGMENT->segment_num);
                     reset_modified_from_backup_copies(STM_SEGMENT->segment_num);
+                    acquire_modified_objs_lock(STM_SEGMENT->segment_num);
                     needs_abort = true;
                 }
             }
