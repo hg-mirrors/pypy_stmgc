@@ -5,17 +5,9 @@
 
 /* ############# signal handler ############# */
 
-static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum)
+static void _copy_from_undo_log(uintptr_t pagenum, struct stm_undo_s *undo,
+                                struct stm_undo_s *end)
 {
-    /* looks at all bk copies of objects overlapping page 'pagenum' and
-       copies the part in 'pagenum' back to the current segment */
-    dprintf(("copy_bk_objs_in_page_from(%d, %lu)\n", from_segnum, pagenum));
-
-    acquire_modified_objs_lock(from_segnum);
-    struct list_s *list = get_priv_segment(from_segnum)->modified_old_objects;
-    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
-    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
-
     for (; undo < end; undo++) {
         object_t *obj = undo->object;
         stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
@@ -26,40 +18,57 @@ static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum)
             memcpy(dst, undo->backup, SLICE_SIZE(undo->slice));
         }
     }
-    release_modified_objs_lock(from_segnum);
 }
 
-static void update_page_revision_from_to(uintptr_t pagenum,
-                                         struct stm_commit_log_entry_s *from,
-                                         struct stm_commit_log_entry_s *to)
+static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum)
 {
-    /* walk the commit log and update the page 'pagenum' until we reach
-       the same revision as our segment, or we reach the HEAD. */
+    /* looks at all bk copies of objects overlapping page 'pagenum' and
+       copies the part in 'pagenum' back to the current segment */
+    dprintf(("copy_bk_objs_in_page_from(%d, %lu)\n", from_segnum, pagenum));
+
+    struct list_s *list = get_priv_segment(from_segnum)->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+
+    _copy_from_undo_log(pagenum, undo, end);
+}
+
+static void go_to_the_future(uintptr_t pagenum,
+                             struct stm_commit_log_entry_s *from,
+                             struct stm_commit_log_entry_s *to)
+{
+    /* walk FORWARDS the commit log and update the page 'pagenum',
+       initially at revision 'from', until we reach the revision 'to'. */
     assert(all_privatization_locks_acquired());
 
-    volatile struct stm_commit_log_entry_s *cl;
-    cl = (volatile struct stm_commit_log_entry_s *)from;
+    while (from != to) {
+        from = from->next;
 
-    if (from == to)
-        return;
+        struct stm_undo_s *undo = from->written;
+        struct stm_undo_s *end = from->written + from->written_count;
 
-    while ((cl = cl->next)) {
-        if (cl == (void *)-1)
-            return;
+        _copy_from_undo_log(pagenum, undo, end);
+    }
+}
 
-        OPT_ASSERT(cl->segment_num >= 0 && cl->segment_num < NB_SEGMENTS);
+static void go_to_the_past(uintptr_t pagenum,
+                           struct stm_commit_log_entry_s *from,
+                           struct stm_commit_log_entry_s *to)
+{
+    /* walk BACKWARDS the commit log and update the page 'pagenum',
+       initially at revision 'from', until we reach the revision 'to'. */
+    assert(all_privatization_locks_acquired());
 
-        object_t *obj;
-        size_t i = 0;
-        while ((obj = cl->written[i].object)) {
-            abort(); //_update_obj_from(cl->segment_num, obj, pagenum);
+    /* XXXXXXX Recursive algo for now, fix this! */
 
-            i++;
-        };
+    if (from != to) {
+        struct stm_commit_log_entry_s *cl = from->next;
+        go_to_the_past(pagenum, cl, to);
 
-        /* last fully validated entry */
-        if (cl == to)
-            return;
+        struct stm_undo_s *undo = cl->written;
+        struct stm_undo_s *end = cl->written + cl->written_count;
+
+        _copy_from_undo_log(pagenum, undo, end);
     }
 }
 
@@ -96,23 +105,48 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     /* this assert should be true for now... */
     assert(shared_ref_count == 1);
 
+    /* acquire this lock, so that we know we should get a view
+       of the page we're about to copy that is consistent with the
+       backup copies in the other thread's 'modified_old_objects'. */
+    acquire_modified_objs_lock(shared_page_holder);
+
     /* make our page private */
     page_privatize_in(STM_SEGMENT->segment_num, pagenum);
     assert(get_page_status_in(my_segnum, pagenum) == PAGE_PRIVATE);
 
-    /* if there were modifications in the page, revert them: */
+    /* if there were modifications in the page, revert them. */
     copy_bk_objs_in_page_from(shared_page_holder, pagenum);
 
-    /* Note that we can't really read without careful locking
-       'get_priv_segment(shared_page_holder)->last_commit_log_entry'.
-       Instead, we're just assuming that the current status of the
-       page is xxxxxxxxxxxxxxx
-    */
-    abort();
+    /* we need to go from 'src_version' to 'target_version'.  This
+       might need a walk into the past or the future. */
+    struct stm_commit_log_entry_s *src_version, *target_version, *c1, *c2;
+    src_version = get_priv_segment(shared_page_holder)->last_commit_log_entry;
+    target_version = STM_PSEGMENT->last_commit_log_entry;
 
-    /* in case page is already newer, validate everything now to have a common
-       revision for all pages */
-    //_stm_validate(NULL, true);
+    c1 = src_version;
+    c2 = target_version;
+    while (1) {
+        if (c1 == target_version) {
+            go_to_the_future(pagenum, src_version, target_version);
+            break;
+        }
+        if (c2 == src_version) {
+            go_to_the_past(pagenum, src_version, target_version);
+            break;
+        }
+        c1 = c1->next;
+        if (c1 == (void *)-1 || c1 == NULL) {
+            go_to_the_past(pagenum, src_version, target_version);
+            break;
+        }
+        c2 = c2->next;
+        if (c2 == (void *)-1 || c2 == NULL) {
+            go_to_the_future(pagenum, src_version, target_version);
+            break;
+        }
+    }
+
+    release_modified_objs_lock(shared_page_holder);
 }
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
@@ -210,6 +244,11 @@ static void _stm_validate(void *free_if_abort)
     struct stm_commit_log_entry_s *next_cl;
     /* Don't check this 'cl'. This entry is already checked */
 
+    /* We need this lock to prevent a segfault handler in a different thread
+       from seeing inconsistent data.  It could also be done by carefully
+       ordering things, but later. */
+    acquire_modified_objs_lock(STM_SEGMENT->segment_num);
+
     bool needs_abort = false;
     while ((next_cl = cl->next) != NULL) {
         if (next_cl == (void *)-1) {
@@ -248,8 +287,11 @@ static void _stm_validate(void *free_if_abort)
         }
 
         /* last fully validated entry */
+
         STM_PSEGMENT->last_commit_log_entry = cl;
     }
+
+    release_modified_objs_lock(STM_SEGMENT->segment_num);
 
     if (needs_abort) {
         if (free_if_abort != (void *)-1)
@@ -316,6 +358,7 @@ static void _validate_and_add_to_commit_log(void)
 
     acquire_modified_objs_lock(STM_SEGMENT->segment_num);
     list_clear(STM_PSEGMENT->modified_old_objects);
+    STM_PSEGMENT->last_commit_log_entry = new;
     release_modified_objs_lock(STM_SEGMENT->segment_num);
 }
 
