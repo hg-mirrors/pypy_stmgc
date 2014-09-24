@@ -88,8 +88,8 @@ static void go_to_the_past(uintptr_t pagenum,
 
     /* XXXXXXX Recursive algo for now, fix this! */
     if (from != to) {
-        struct stm_commit_log_entry_s *cl = from->next;
-        go_to_the_past(pagenum, cl, to);
+        struct stm_commit_log_entry_s *cl = to->next;
+        go_to_the_past(pagenum, from, cl);
 
         struct stm_undo_s *undo = cl->written;
         struct stm_undo_s *end = cl->written + cl->written_count;
