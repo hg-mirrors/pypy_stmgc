@@ -252,6 +252,41 @@ class TestBasic(BaseTest):
         py.test.raises(Conflict, self.commit_transaction)
         assert res == 'a'
 
+    def test_read_write_15(self):
+        lp1 = stm_allocate_old(16) # allocated in seg0
+        lp2 = stm_allocate_old(16) # allocated in seg0
+        stm_get_real_address(lp1)[HDR] = 'a' #setchar
+        stm_get_real_address(lp2)[HDR] = 'b' #setchar
+        # S|P|P|P|P
+        #
+        # NO_ACCESS in all segments except seg0 (shared page holder)
+        #
+        # all seg at R0
+        #
+        self.start_transaction()
+        #
+        self.switch(1) # with private page
+        self.start_transaction()
+        stm_set_char(lp2, 'C')
+        self.commit_transaction() # R1
+        assert last_commit_log_entries() == [lp2] # commit 'C'
+        self.start_transaction()
+        stm_set_char(lp2, 'c') # R1.1
+        #
+        self.switch(2)
+        self.start_transaction()
+        stm_set_char(lp1, 'D')
+        self.commit_transaction()  # R2
+        assert last_commit_log_entries() == [lp1] # commit 'D'
+        self.start_transaction()
+        stm_set_char(lp1, 'd') # R2.1
+        #
+        self.switch(3)
+        self.start_transaction() # stm_validate() -> R2
+        assert stm_get_char(lp1) == 'D'
+        assert stm_get_char(lp2) == 'C'
+        self.commit_transaction()
+        #
 
 
     def test_commit_fresh_objects(self):
