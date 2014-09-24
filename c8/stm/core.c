@@ -57,27 +57,6 @@ static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum)
 
     import_objects(-1, pagenum, undo, end);
 }
-
-static void go_to_the_future(uintptr_t pagenum,
-                             struct stm_commit_log_entry_s *from,
-                             struct stm_commit_log_entry_s *to)
-{
-    if (from == to)
-        return;
-
-    /* walk FORWARDS the commit log and update the page 'pagenum',
-       initially at revision 'from', until we reach the revision 'to'. */
-    while (from != to) {
-        from = from->next;
-
-        struct stm_undo_s *undo = from->written;
-        struct stm_undo_s *end = from->written + from->written_count;
-
-        import_objects(from->segment_num, pagenum, undo, end);
-        copy_bk_objs_in_page_from(from->segment_num, pagenum);
-    }
-}
-
 static void go_to_the_past(uintptr_t pagenum,
                            struct stm_commit_log_entry_s *from,
                            struct stm_commit_log_entry_s *to)
@@ -95,6 +74,50 @@ static void go_to_the_past(uintptr_t pagenum,
 
         import_objects(-1, pagenum, undo, end);
     }
+}
+
+
+static void go_to_the_future(uintptr_t pagenum,
+                             struct stm_commit_log_entry_s *from,
+                             struct stm_commit_log_entry_s *to)
+{
+    if (from == to)
+        return;
+
+    /* XXX: specialize. We now go to the HEAD revision, and back again
+       to where we want. Otherwise, we have to look at backup copies in
+       the log entries, modified objs, page content and their revisions...
+
+       Same logic as _stm_validate() */
+
+    /* XXXXXXXXXXXXXXXX CORRECT LOCKING NEEDED XXXXXXXXXXXXXXXXXXXXXX */
+    struct stm_commit_log_entry_s *cl = from;
+    struct stm_commit_log_entry_s *next_cl;
+
+    uint64_t segment_copied_from = 0;
+    while ((next_cl = cl->next) != NULL) {
+        if (next_cl == (void *)-1)
+            break;
+
+        cl = next_cl;
+
+        struct stm_undo_s *undo = cl->written;
+        struct stm_undo_s *end = cl->written + cl->written_count;
+
+        segment_copied_from |= (1UL << cl->segment_num);
+        import_objects(cl->segment_num, -1, undo, end);
+    }
+
+    /* XXXXXXXXXXXXXXXX CORRECT LOCKING NEEDED XXXXXXXXXXXXXXXXXXXXXX */
+    int segnum;
+    for (segnum = 0; segment_copied_from != 0; segnum++) {
+        if (segment_copied_from & (1UL << segnum)) {
+            segment_copied_from &= ~(1UL << segnum);
+            copy_bk_objs_in_page_from(segnum, -1);
+        }
+    }
+
+    go_to_the_past(pagenum, cl, to);
 }
 
 static void handle_segfault_in_page(uintptr_t pagenum)
