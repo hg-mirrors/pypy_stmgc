@@ -109,6 +109,14 @@ struct stm_undo_s {
 #define SLICE_OFFSET(slice)  ((slice) >> 16)
 #define SLICE_SIZE(slice)    ((int)((slice) & 0xFFFF))
 
+/* The model is: we have a global chained list, from 'commit_log_root',
+   of 'struct stm_commit_log_entry_s' entries.  Every one is fully
+   read-only apart from the 'next' field.  Every one stands for one
+   commit that occurred.  It lists the old objects that were modified
+   in this commit, and their attached "undo logs" --- that is, the
+   data from 'written[n].backup' is the content of (slices of) the
+   object as they were *before* that commit occurred.
+*/
 struct stm_commit_log_entry_s {
     struct stm_commit_log_entry_s *volatile next;
     int segment_num;
