@@ -3,22 +3,47 @@
 #endif
 
 
-/* ############# signal handler ############# */
-
-static void _copy_from_undo_log(uintptr_t pagenum, struct stm_undo_s *undo,
-                                struct stm_undo_s *end)
+/* General helper: copies objects into our own segment, from some
+   source described by a range of 'struct stm_undo_s'.  Maybe later
+   we could specialize this function to avoid the checks in the
+   inner loop.
+*/
+static void import_objects(
+        int from_segnum,            /* or -1: from undo->backup */
+        uintptr_t pagenum,          /* or -1: "all accessible" */
+        struct stm_undo_s *undo,
+        struct stm_undo_s *end)
 {
+    char *src_segment_base = (from_segnum >= 0 ? get_segment_base(from_segnum)
+                                               : NULL);
+
     for (; undo < end; undo++) {
         object_t *obj = undo->object;
         stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
         uintptr_t current_page_num = ((uintptr_t)oslice) / 4096;
 
-        if (current_page_num == pagenum) {
-            char *dst = REAL_ADDRESS(STM_SEGMENT->segment_base, oslice);
-            memcpy(dst, undo->backup, SLICE_SIZE(undo->slice));
+        if (pagenum == -1) {
+            if (get_page_status_in(STM_SEGMENT->segment_num,
+                                   current_page_num) == PAGE_NO_ACCESS)
+                continue;
         }
+        else {
+            if (current_page_num != pagenum)
+                continue;
+        }
+
+        char *src, *dst;
+        if (src_segment_base != NULL)
+            src = REAL_ADDRESS(src_segment_base, oslice);
+        else
+            src = undo->backup;
+        dst = REAL_ADDRESS(STM_SEGMENT->segment_base, oslice);
+        memcpy(dst, src, SLICE_SIZE(undo->slice));
     }
 }
+
+
+/* ############# signal handler ############# */
 
 static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum)
 {
@@ -30,24 +55,27 @@ static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum)
     struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
-    _copy_from_undo_log(pagenum, undo, end);
+    import_objects(-1, pagenum, undo, end);
 }
 
 static void go_to_the_future(uintptr_t pagenum,
                              struct stm_commit_log_entry_s *from,
                              struct stm_commit_log_entry_s *to)
 {
+    if (from == to)
+        return;
+    abort();  // XXX I think it's broken, ignoring the other segment's
+              // 'modified_old_objects'; but is that reachable anyway?
+
     /* walk FORWARDS the commit log and update the page 'pagenum',
        initially at revision 'from', until we reach the revision 'to'. */
-    assert(all_privatization_locks_acquired());
-
     while (from != to) {
         from = from->next;
 
         struct stm_undo_s *undo = from->written;
         struct stm_undo_s *end = from->written + from->written_count;
 
-        _copy_from_undo_log(pagenum, undo, end);
+        import_objects(from->segment_num, pagenum, undo, end);
     }
 }
 
@@ -57,10 +85,8 @@ static void go_to_the_past(uintptr_t pagenum,
 {
     /* walk BACKWARDS the commit log and update the page 'pagenum',
        initially at revision 'from', until we reach the revision 'to'. */
-    assert(all_privatization_locks_acquired());
 
     /* XXXXXXX Recursive algo for now, fix this! */
-
     if (from != to) {
         struct stm_commit_log_entry_s *cl = from->next;
         go_to_the_past(pagenum, cl, to);
@@ -68,7 +94,7 @@ static void go_to_the_past(uintptr_t pagenum,
         struct stm_undo_s *undo = cl->written;
         struct stm_undo_s *end = cl->written + cl->written_count;
 
-        _copy_from_undo_log(pagenum, undo, end);
+        import_objects(-1, pagenum, undo, end);
     }
 }
 
@@ -123,6 +149,9 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     src_version = get_priv_segment(shared_page_holder)->last_commit_log_entry;
     target_version = STM_PSEGMENT->last_commit_log_entry;
 
+    release_modified_objs_lock(shared_page_holder);
+    release_all_privatization_locks();
+
     c1 = src_version;
     c2 = target_version;
     while (1) {
@@ -145,9 +174,6 @@ static void handle_segfault_in_page(uintptr_t pagenum)
             break;
         }
     }
-
-    release_modified_objs_lock(shared_page_holder);
-    release_all_privatization_locks();
 }
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
@@ -211,32 +237,6 @@ void _dbg_print_commit_log()
     }
 }
 
-static void reapply_undo_log(struct stm_undo_s *undo)
-{
-    /* read the object (or object slice) described by 'undo', and
-       re-applies it to our current segment.
-    */
-    dprintf(("_update_obj_from_undo(obj=%p, size=%d, ofs=%lu)\n",
-             undo->object, SLICE_SIZE(undo->slice), SLICE_OFFSET(undo->slice)));
-
-    size_t ofs = SLICE_OFFSET(undo->slice);
-    size_t size = SLICE_SIZE(undo->slice);
-    stm_char *slice_start = ((stm_char *)undo->object) + ofs;
-    stm_char *slice_end = slice_start + size;
-
-    uintptr_t page_start = ((uintptr_t)slice_start) / 4096;
-    assert((uintptr_t)slice_end <= (page_start + 1) * 4096);
-
-    if (get_page_status_in(STM_SEGMENT->segment_num, page_start)
-            == PAGE_NO_ACCESS) {
-        return;   /* ignore the object: it is in a NO_ACCESS page */
-    }
-
-    char *src = undo->backup;
-    char *dst = REAL_ADDRESS(STM_SEGMENT->segment_base, slice_start);
-    memcpy(dst, src, size);
-}
-
 static void reset_modified_from_backup_copies(int segment_num);  /* forward */
 
 static void _stm_validate(void *free_if_abort)
@@ -255,6 +255,7 @@ static void _stm_validate(void *free_if_abort)
     acquire_modified_objs_lock(STM_SEGMENT->segment_num);
 
     bool needs_abort = false;
+    uint64_t segment_copied_from = 0;
     while ((next_cl = cl->next) != NULL) {
         if (next_cl == (void *)-1) {
             /* there is an inevitable transaction running */
@@ -263,7 +264,10 @@ static void _stm_validate(void *free_if_abort)
                 free(free_if_abort);
             stm_abort_transaction();
 #endif
-            abort();  /* XXX non-busy wait here */
+            abort();  /* XXX non-busy wait here
+                         or: XXX do we always need to wait?  we should just
+                         break out of this loop and let the caller handle it
+                         if it wants to */
             _stm_collectable_safe_point();
             acquire_all_privatization_locks();
             continue;
@@ -273,26 +277,30 @@ static void _stm_validate(void *free_if_abort)
         /*int srcsegnum = cl->segment_num;
           OPT_ASSERT(srcsegnum >= 0 && srcsegnum < NB_SEGMENTS);*/
 
-        struct stm_undo_s *undo = cl->written;
-        struct stm_undo_s *end = cl->written + cl->written_count;
-
-        for (; undo < end; undo++) {
-
-            if (_stm_was_read(undo->object)) {
-                /* first reset all modified objects from the backup
-                   copies as soon as the first conflict is detected;
-                   then we will proceed below to update our segment from
-                   the old (but unmodified) version to the newer version. */
-                if (!needs_abort) {
+        if (!needs_abort) {
+            struct stm_undo_s *undo = cl->written;
+            struct stm_undo_s *end = cl->written + cl->written_count;
+            for (; undo < end; undo++) {
+                if (_stm_was_read(undo->object)) {
+                    /* first reset all modified objects from the backup
+                       copies as soon as the first conflict is detected;
+                       then we will proceed below to update our segment from
+                       the old (but unmodified) version to the newer version.
+                    */
                     release_modified_objs_lock(STM_SEGMENT->segment_num);
                     reset_modified_from_backup_copies(STM_SEGMENT->segment_num);
                     acquire_modified_objs_lock(STM_SEGMENT->segment_num);
                     needs_abort = true;
+                    break;
                 }
             }
-            /* XXXX Here I'm doing something wrong -- arigo */
-            reapply_undo_log(undo);
         }
+
+        struct stm_undo_s *undo = cl->written;
+        struct stm_undo_s *end = cl->written + cl->written_count;
+
+        segment_copied_from |= (1UL << cl->segment_num);
+        import_objects(cl->segment_num, -1, undo, end);
 
         /* last fully validated entry */
 
@@ -300,6 +308,15 @@ static void _stm_validate(void *free_if_abort)
     }
 
     release_modified_objs_lock(STM_SEGMENT->segment_num);
+
+    /* XXXXXXXXXXXXXXXX CORRECT LOCKING NEEDED XXXXXXXXXXXXXXXXXXXXXX */
+    int segnum;
+    for (segnum = 0; segment_copied_from != 0; segnum++) {
+        if (segment_copied_from & (1UL << segnum)) {
+            segment_copied_from &= ~(1UL << segnum);
+            copy_bk_objs_in_page_from(segnum, -1);
+        }
+    }
 
     if (needs_abort) {
         if (free_if_abort != (void *)-1)
