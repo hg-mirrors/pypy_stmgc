@@ -110,7 +110,8 @@ class TestBasic(BaseTest):
         #
         py.test.raises(Conflict, self.switch, 0) # detects rw conflict
 
-    def test_read_write_11(self):
+    @py.test.mark.parametrize("only_bk", [0, 1])
+    def test_read_write_11(self, only_bk):
         # test that stm_validate() and the SEGV-handler
         # always ensure up-to-date views of pages:
         lp1 = stm_allocate_old(16)
@@ -135,6 +136,10 @@ class TestBasic(BaseTest):
         self.commit_transaction()
         assert last_commit_log_entries() == [lp1] # commit 'x'
         #
+        if only_bk:
+            self.start_transaction()
+            stm_set_char(lp1, 'y') # 'x' is only in bk_copy
+        #
         #
         self.switch(2)
         self.start_transaction() # stm_validate()
@@ -145,8 +150,8 @@ class TestBasic(BaseTest):
         # is out-of-date because seg1 committed 'x'
         # (seg1 hasn't done stm_validate() since)
 
-
-    def test_read_write_12(self):
+    @py.test.mark.parametrize("only_bk", [0, 1])
+    def test_read_write_12(self, only_bk):
         # test that stm_validate() and the SEGV-handler
         # always ensure up-to-date views of pages:
         lp1 = stm_allocate_old(16)
@@ -167,6 +172,10 @@ class TestBasic(BaseTest):
         assert last_commit_log_entries() == [lp1]
         # '1' is committed
         #
+        if only_bk:
+            self.start_transaction()
+            stm_set_char(lp1, 'y') # '1' is only in bk_copy
+        #
         self.switch(2)
         self.start_transaction() # stm_validate()
         res = stm_get_char(lp1) # should be '1'
@@ -176,6 +185,45 @@ class TestBasic(BaseTest):
         # of segment 0 that didn't do stm_validate() and
         # therefore is still outdated.
         py.test.raises(Conflict, self.switch, 0)
+
+    @py.test.mark.parametrize("only_bk", [0, 1])
+    def test_read_write_13(self, only_bk):
+        # test that stm_validate() and the SEGV-handler
+        # always ensure up-to-date views of pages:
+        lp1 = stm_allocate_old(16)
+        stm_get_real_address(lp1)[HDR] = 'a' #setchar
+        #
+        self.start_transaction()
+        stm_set_char(lp1, '0') # shared->private
+        # prot_none in seg: 1,2,3
+        #
+        self.switch(1)
+        self.start_transaction()
+        stm_set_char(lp1, '1')
+        self.switch(2)
+        self.start_transaction()
+        # prot_none in seg: 2,3
+        #
+        self.switch(0)
+        self.commit_transaction()
+        assert last_commit_log_entries() == [lp1] # commit '0'
+        #
+        py.test.raises(Conflict, self.switch, 1)
+        self.start_transaction() # updates to '0'
+        stm_set_char(lp1, 'x')
+        self.commit_transaction()
+        assert last_commit_log_entries() == [lp1] # commit 'x'
+        #
+        if only_bk:
+            self.start_transaction()
+            stm_set_char(lp1, 'y') # 'x' is only in bk_copy
+        #
+        #
+        self.switch(2, validate=False) # NO stm_validate
+        res = stm_get_char(lp1) # SEGV -> should not validate and go back in time -> 'a'
+        py.test.raises(Conflict, self.commit_transaction) # 'a' is outdated, fail to commit
+        assert res == 'a'
+
 
     def test_commit_fresh_objects(self):
         self.start_transaction()
