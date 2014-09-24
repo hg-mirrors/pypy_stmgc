@@ -74,9 +74,8 @@ static void go_to_the_future(uintptr_t pagenum,
         struct stm_undo_s *end = from->written + from->written_count;
 
         import_objects(from->segment_num, pagenum, undo, end);
+        copy_bk_objs_in_page_from(from->segment_num, pagenum);
     }
-
-    copy_bk_objs_in_page_from(to->segment_num, pagenum);
 }
 
 static void go_to_the_past(uintptr_t pagenum,
