@@ -64,8 +64,6 @@ static void go_to_the_future(uintptr_t pagenum,
 {
     if (from == to)
         return;
-    abort();  // XXX I think it's broken, ignoring the other segment's
-              // 'modified_old_objects'; but is that reachable anyway?
 
     /* walk FORWARDS the commit log and update the page 'pagenum',
        initially at revision 'from', until we reach the revision 'to'. */
@@ -77,6 +75,8 @@ static void go_to_the_future(uintptr_t pagenum,
 
         import_objects(from->segment_num, pagenum, undo, end);
     }
+
+    copy_bk_objs_in_page_from(to->segment_num, pagenum);
 }
 
 static void go_to_the_past(uintptr_t pagenum,

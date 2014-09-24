@@ -224,6 +224,35 @@ class TestBasic(BaseTest):
         py.test.raises(Conflict, self.commit_transaction) # 'a' is outdated, fail to commit
         assert res == 'a'
 
+    @py.test.mark.parametrize("only_bk", [0, 1])
+    def test_read_write_14(self, only_bk):
+        lp1 = stm_allocate_old(16) # allocated in seg0
+        stm_get_real_address(lp1)[HDR] = 'a' #setchar
+        # S|P|P|P|P
+        #
+        # NO_ACCESS in all segments except seg0 (shared page holder)
+        #
+        #
+        self.switch(2)
+        self.start_transaction() # stm_validate()
+        #
+        self.switch(1) # with private page
+        self.start_transaction()
+        stm_set_char(lp1, 'C')
+        self.commit_transaction()
+        assert last_commit_log_entries() == [lp1] # commit 'C'
+        #
+        if only_bk:
+            self.start_transaction()
+            stm_set_char(lp1, 'y') # '1' is only in bk_copy
+        #
+        #
+        self.switch(2, validate=False)
+        res = stm_get_char(lp1) # should be 'a'
+        py.test.raises(Conflict, self.commit_transaction)
+        assert res == 'a'
+
+
 
     def test_commit_fresh_objects(self):
         self.start_transaction()
