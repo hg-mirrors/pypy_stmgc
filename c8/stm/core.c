@@ -228,12 +228,18 @@ static void _stm_validate(void *free_if_abort)
        the committed objs. */
     struct stm_commit_log_entry_s *cl = STM_PSEGMENT->last_commit_log_entry;
     struct stm_commit_log_entry_s *next_cl;
+    int my_segnum = STM_SEGMENT->segment_num;
     /* Don't check this 'cl'. This entry is already checked */
+
+    if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+        assert(cl->next == -1);
+        return;
+    }
 
     /* We need this lock to prevent a segfault handler in a different thread
        from seeing inconsistent data.  It could also be done by carefully
        ordering things, but later. */
-    acquire_modified_objs_lock(STM_SEGMENT->segment_num);
+    acquire_modified_objs_lock(my_segnum);
 
     /* XXXXXXXXXX: we shouldn't be able to update pages while someone else copies
        from our pages (signal handler / import objs) */
@@ -243,6 +249,7 @@ static void _stm_validate(void *free_if_abort)
     while ((next_cl = cl->next) != NULL) {
         if (next_cl == (void *)-1) {
             /* there is an inevitable transaction running */
+            release_modified_objs_lock(my_segnum);
 #if STM_TESTS
             if (free_if_abort != (void *)-1)
                 free(free_if_abort);
@@ -254,6 +261,7 @@ static void _stm_validate(void *free_if_abort)
                          if it wants to */
 
             _stm_collectable_safe_point();
+            acquire_modified_objs_lock(my_segnum);
             continue;
         }
         assert(next_cl->rev_num > cl->rev_num);
@@ -272,9 +280,9 @@ static void _stm_validate(void *free_if_abort)
                        then we will proceed below to update our segment from
                        the old (but unmodified) version to the newer version.
                     */
-                    release_modified_objs_lock(STM_SEGMENT->segment_num);
-                    reset_modified_from_backup_copies(STM_SEGMENT->segment_num);
-                    acquire_modified_objs_lock(STM_SEGMENT->segment_num);
+                    release_modified_objs_lock(my_segnum);
+                    reset_modified_from_backup_copies(my_segnum);
+                    acquire_modified_objs_lock(my_segnum);
                     needs_abort = true;
                     break;
                 }
@@ -292,7 +300,7 @@ static void _stm_validate(void *free_if_abort)
         STM_PSEGMENT->last_commit_log_entry = cl;
     }
 
-    release_modified_objs_lock(STM_SEGMENT->segment_num);
+    release_modified_objs_lock(my_segnum);
 
     /* XXXXXXXXXXXXXXXX CORRECT LOCKING NEEDED XXXXXXXXXXXXXXXXXXXXXX */
     int segnum;
@@ -682,7 +690,11 @@ static void reset_modified_from_backup_copies(int segment_num)
         memcpy(dst + SLICE_OFFSET(undo->slice),
                undo->backup,
                SLICE_SIZE(undo->slice));
-        free(undo->backup);
+
+        if (SLICE_OFFSET(undo->slice) == 0) {
+            /* only free bk copy once: */
+            free(undo->backup);
+        }
     }
 
     /* check that all objects have the GCFLAG_WRITE_BARRIER afterwards */
