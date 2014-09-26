@@ -120,10 +120,11 @@ struct stm_undo_s {
 struct stm_commit_log_entry_s {
     struct stm_commit_log_entry_s *volatile next;
     int segment_num;
+    uint64_t rev_num;
     size_t written_count;
     struct stm_undo_s written[];
 };
-static struct stm_commit_log_entry_s commit_log_root = {NULL, -1, 0};
+static struct stm_commit_log_entry_s commit_log_root = {NULL, -1, 0, 0};
 
 
 static char *stm_object_pages;

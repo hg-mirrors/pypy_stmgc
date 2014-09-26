@@ -61,6 +61,7 @@ static void go_to_the_past(uintptr_t pagenum,
                            struct stm_commit_log_entry_s *from,
                            struct stm_commit_log_entry_s *to)
 {
+    assert(from->rev_num >= to->rev_num);
     /* walk BACKWARDS the commit log and update the page 'pagenum',
        initially at revision 'from', until we reach the revision 'to'. */
 
@@ -81,6 +82,7 @@ static void go_to_the_future(uintptr_t pagenum,
                              struct stm_commit_log_entry_s *from,
                              struct stm_commit_log_entry_s *to)
 {
+    assert(from->rev_num <= to->rev_num);
     if (from == to)
         return;
 
@@ -167,35 +169,18 @@ static void handle_segfault_in_page(uintptr_t pagenum)
 
     /* we need to go from 'src_version' to 'target_version'.  This
        might need a walk into the past or the future. */
-    struct stm_commit_log_entry_s *src_version, *target_version, *c1, *c2;
+    struct stm_commit_log_entry_s *src_version, *target_version;
     src_version = get_priv_segment(shared_page_holder)->last_commit_log_entry;
     target_version = STM_PSEGMENT->last_commit_log_entry;
 
     release_modified_objs_lock(shared_page_holder);
     release_all_privatization_locks();
 
-    c1 = src_version;
-    c2 = target_version;
-    while (1) {
-        if (c1 == target_version) {
-            go_to_the_future(pagenum, src_version, target_version);
-            break;
-        }
-        if (c2 == src_version) {
-            go_to_the_past(pagenum, src_version, target_version);
-            break;
-        }
-        c1 = c1->next;
-        if (c1 == (void *)-1 || c1 == NULL) {
-            go_to_the_past(pagenum, src_version, target_version);
-            break;
-        }
-        c2 = c2->next;
-        if (c2 == (void *)-1 || c2 == NULL) {
-            go_to_the_future(pagenum, src_version, target_version);
-            break;
-        }
-    }
+    /* adapt revision of page to our revision: */
+    if (src_version->rev_num < target_version->rev_num)
+        go_to_the_future(pagenum, src_version, target_version);
+    else if (src_version->rev_num > target_version->rev_num)
+        go_to_the_past(pagenum, src_version, target_version);
 }
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
@@ -245,7 +230,7 @@ void _dbg_print_commit_log()
             fprintf(stderr, "  INEVITABLE\n");
             return;
         }
-        fprintf(stderr, "  entry at %p: seg %d\n", cl, cl->segment_num);
+        fprintf(stderr, "  entry at %p: seg %d, rev %lu\n", cl, cl->segment_num, cl->rev_num);
         struct stm_undo_s *undo = cl->written;
         struct stm_undo_s *end = undo + cl->written_count;
         for (; undo < end; undo++) {
@@ -276,6 +261,9 @@ static void _stm_validate(void *free_if_abort)
        ordering things, but later. */
     acquire_modified_objs_lock(STM_SEGMENT->segment_num);
 
+    /* XXXXXXXXXX: we shouldn't be able to update pages while someone else copies
+       from our pages (signal handler / import objs) */
+
     bool needs_abort = false;
     uint64_t segment_copied_from = 0;
     while ((next_cl = cl->next) != NULL) {
@@ -290,10 +278,11 @@ static void _stm_validate(void *free_if_abort)
                          or: XXX do we always need to wait?  we should just
                          break out of this loop and let the caller handle it
                          if it wants to */
+
             _stm_collectable_safe_point();
-            acquire_all_privatization_locks();
             continue;
         }
+        assert(next_cl->rev_num > cl->rev_num);
         cl = next_cl;
 
         /*int srcsegnum = cl->segment_num;
@@ -362,6 +351,7 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 
     result->next = NULL;
     result->segment_num = STM_SEGMENT->segment_num;
+    result->rev_num = -1;       /* invalid */
     result->written_count = count;
     memcpy(result->written, list->items, count * sizeof(struct stm_undo_s));
     return result;
@@ -376,9 +366,13 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 
         /* try to attach to commit log: */
         old = STM_PSEGMENT->last_commit_log_entry;
-        if (old->next == NULL &&
-                __sync_bool_compare_and_swap(&old->next, NULL, new))
-            break;   /* success! */
+        if (old->next == NULL) {
+            if ((uintptr_t)new != -1) /* INEVITABLE */
+                new->rev_num = old->rev_num + 1;
+
+            if (__sync_bool_compare_and_swap(&old->next, NULL, new))
+                break;   /* success! */
+        }
     }
 }
 
@@ -394,6 +388,7 @@ static void _validate_and_add_to_commit_log(void)
     new = _create_commit_log_entry();
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         old = STM_PSEGMENT->last_commit_log_entry;
+        new->rev_num = old->rev_num + 1;
         OPT_ASSERT(old->next == (void *)-1);
 
         bool yes = __sync_bool_compare_and_swap(&old->next, (void*)-1, new);
