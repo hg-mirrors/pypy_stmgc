@@ -108,6 +108,7 @@ struct stm_undo_s {
 };
 #define SLICE_OFFSET(slice)  ((slice) >> 16)
 #define SLICE_SIZE(slice)    ((int)((slice) & 0xFFFF))
+#define NEW_SLICE(offset, size) (((uint64_t)(offset)) << 16 | (size))
 
 /* The model is: we have a global chained list, from 'commit_log_root',
    of 'struct stm_commit_log_entry_s' entries.  Every one is fully

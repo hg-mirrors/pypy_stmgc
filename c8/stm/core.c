@@ -32,11 +32,13 @@ static void import_objects(
                 continue;
         }
 
+        dprintf(("import slice obj=%p off=%lu pg=%lu\n",
+                 obj, SLICE_OFFSET(undo->slice), current_page_num));
         char *src, *dst;
         if (src_segment_base != NULL)
             src = REAL_ADDRESS(src_segment_base, oslice);
         else
-            src = undo->backup;
+            src = undo->backup + SLICE_OFFSET(undo->slice);
         dst = REAL_ADDRESS(STM_SEGMENT->segment_base, oslice);
         memcpy(dst, src, SLICE_SIZE(undo->slice));
     }
@@ -469,19 +471,33 @@ void _stm_write_slowpath(object_t *obj)
        if 'obj' is merely an overflow object.  FIX ME, likely by copying
        the overflow number logic from c7. */
 
-    assert(first_page == end_page);  /* XXX! */
-    /* XXX do the case where first_page != end_page in pieces.  Maybe also
-       use mprotect() again to mark pages of the object as read-only, and
-       only stick it into modified_old_objects page-by-page?  Maybe it's
-       possible to do card-marking that way, too. */
-
-    uintptr_t slice = obj_size;
-    assert(SLICE_OFFSET(slice) == 0 && SLICE_SIZE(slice) == obj_size);
-
     acquire_modified_objs_lock(STM_SEGMENT->segment_num);
-    STM_PSEGMENT->modified_old_objects = list_append3(
-        STM_PSEGMENT->modified_old_objects,
-        (uintptr_t)obj, (uintptr_t)bk_obj, slice);
+    uintptr_t slice_sz;
+    uintptr_t in_page_offset = (uintptr_t)obj % 4096UL;
+    uintptr_t remaining_obj_sz = obj_size;
+    for (page = first_page; page <= end_page; page++) {
+        /* XXX Maybe also use mprotect() again to mark pages of the object as read-only, and
+           only stick it into modified_old_objects page-by-page?  Maybe it's
+           possible to do card-marking that way, too. */
+        OPT_ASSERT(remaining_obj_sz);
+
+        slice_sz = remaining_obj_sz;
+        if (in_page_offset + slice_sz > 4096UL) {
+            /* not over page boundaries */
+            slice_sz = 4096UL - in_page_offset;
+        }
+
+        STM_PSEGMENT->modified_old_objects = list_append3(
+            STM_PSEGMENT->modified_old_objects,
+            (uintptr_t)obj,     /* obj */
+            (uintptr_t)bk_obj,  /* bk_addr */
+            NEW_SLICE(obj_size - remaining_obj_sz, slice_sz));
+
+        remaining_obj_sz -= slice_sz;
+        in_page_offset = (in_page_offset + slice_sz) % 4096UL; /* mostly 0 */
+    }
+    OPT_ASSERT(remaining_obj_sz == 0);
+
     release_modified_objs_lock(STM_SEGMENT->segment_num);
 
     /* done fiddling with protection and privatization */

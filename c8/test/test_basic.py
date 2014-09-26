@@ -733,6 +733,7 @@ class TestBasic(BaseTest):
         assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 0
 
     def test_abort_in_segfault_handler(self):
+        py.test.skip("not doing that anymore")
         lp1 = stm_allocate_old(16)
         lp2 = stm_allocate_old(16)
 
