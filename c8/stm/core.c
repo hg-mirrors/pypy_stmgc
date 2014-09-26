@@ -57,6 +57,7 @@ static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum)
 
     import_objects(-1, pagenum, undo, end);
 }
+
 static void go_to_the_past(uintptr_t pagenum,
                            struct stm_commit_log_entry_s *from,
                            struct stm_commit_log_entry_s *to)
@@ -78,49 +79,6 @@ static void go_to_the_past(uintptr_t pagenum,
 }
 
 
-static void go_to_the_future(uintptr_t pagenum,
-                             struct stm_commit_log_entry_s *from,
-                             struct stm_commit_log_entry_s *to)
-{
-    assert(from->rev_num <= to->rev_num);
-    if (from == to)
-        return;
-
-    /* XXX: specialize. We now go to the HEAD revision, and back again
-       to where we want. Otherwise, we have to look at backup copies in
-       the log entries, modified objs, page content and their revisions...
-
-       Same logic as _stm_validate() */
-
-    /* XXXXXXXXXXXXXXXX CORRECT LOCKING NEEDED XXXXXXXXXXXXXXXXXXXXXX */
-    struct stm_commit_log_entry_s *cl = from;
-    struct stm_commit_log_entry_s *next_cl;
-
-    uint64_t segment_copied_from = 0;
-    while ((next_cl = cl->next) != NULL) {
-        if (next_cl == (void *)-1)
-            break;
-
-        cl = next_cl;
-
-        struct stm_undo_s *undo = cl->written;
-        struct stm_undo_s *end = cl->written + cl->written_count;
-
-        segment_copied_from |= (1UL << cl->segment_num);
-        import_objects(cl->segment_num, -1, undo, end);
-    }
-
-    /* XXXXXXXXXXXXXXXX CORRECT LOCKING NEEDED XXXXXXXXXXXXXXXXXXXXXX */
-    int segnum;
-    for (segnum = 0; segment_copied_from != 0; segnum++) {
-        if (segment_copied_from & (1UL << segnum)) {
-            segment_copied_from &= ~(1UL << segnum);
-            copy_bk_objs_in_page_from(segnum, -1);
-        }
-    }
-
-    go_to_the_past(pagenum, cl, to);
-}
 
 static void handle_segfault_in_page(uintptr_t pagenum)
 {
@@ -137,49 +95,63 @@ static void handle_segfault_in_page(uintptr_t pagenum)
 
     assert(get_page_status_in(my_segnum, pagenum) == PAGE_NO_ACCESS);
 
-    /* find who has the PAGE_SHARED */
+    /* find who has the most recent revision of our page */
     int shared_page_holder = -1;
     int shared_ref_count = 0;
+    int copy_from_segnum = -1;
+    uint64_t most_recent_rev = 0;
     for (i = 0; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
+
         if (get_page_status_in(i, pagenum) == PAGE_SHARED) {
+            /* mostly for debugging now: */
             shared_page_holder = i;
             shared_ref_count++;
         }
+
+        struct stm_commit_log_entry_s *log_entry;
+        log_entry = get_priv_segment(i)->last_commit_log_entry;
+        if (get_page_status_in(i, pagenum) != PAGE_NO_ACCESS
+            && (copy_from_segnum == -1 || log_entry->rev_num > most_recent_rev)) {
+            copy_from_segnum = i;
+            most_recent_rev = log_entry->rev_num;
+        }
     }
-    assert(shared_page_holder != -1);
+    OPT_ASSERT(shared_page_holder != -1);
+    OPT_ASSERT(copy_from_segnum != -1 && copy_from_segnum != my_segnum);
 
     /* XXX: for now, we don't try to get the single shared page. We simply
        regard it as private for its holder. */
     /* this assert should be true for now... */
     assert(shared_ref_count == 1);
 
-    /* acquire this lock, so that we know we should get a view
-       of the page we're about to copy that is consistent with the
-       backup copies in the other thread's 'modified_old_objects'. */
-    acquire_modified_objs_lock(shared_page_holder);
-
     /* make our page private */
     page_privatize_in(STM_SEGMENT->segment_num, pagenum);
     assert(get_page_status_in(my_segnum, pagenum) == PAGE_PRIVATE);
 
+    acquire_modified_objs_lock(copy_from_segnum);
+    pagecopy((char*)(get_virt_page_of(my_segnum, pagenum) * 4096UL),
+             (char*)(get_virt_page_of(copy_from_segnum, pagenum) * 4096UL));
+
     /* if there were modifications in the page, revert them. */
-    copy_bk_objs_in_page_from(shared_page_holder, pagenum);
+    copy_bk_objs_in_page_from(copy_from_segnum, pagenum);
 
     /* we need to go from 'src_version' to 'target_version'.  This
-       might need a walk into the past or the future. */
+       might need a walk into the past. */
     struct stm_commit_log_entry_s *src_version, *target_version;
-    src_version = get_priv_segment(shared_page_holder)->last_commit_log_entry;
+    src_version = get_priv_segment(copy_from_segnum)->last_commit_log_entry;
+    OPT_ASSERT(src_version->rev_num == most_recent_rev);
     target_version = STM_PSEGMENT->last_commit_log_entry;
 
-    release_modified_objs_lock(shared_page_holder);
+    release_modified_objs_lock(copy_from_segnum);
     release_all_privatization_locks();
 
-    /* adapt revision of page to our revision: */
-    if (src_version->rev_num < target_version->rev_num)
-        go_to_the_future(pagenum, src_version, target_version);
-    else if (src_version->rev_num > target_version->rev_num)
+    /* adapt revision of page to our revision:
+       if our rev is higher than the page we copy from, everything
+       is fine as we never read/modified the page anyway
+     */
+    if (src_version->rev_num > target_version->rev_num)
         go_to_the_past(pagenum, src_version, target_version);
 }
 
