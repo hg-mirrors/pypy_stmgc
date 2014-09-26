@@ -32,8 +32,9 @@ static void import_objects(
                 continue;
         }
 
-        dprintf(("import slice obj=%p off=%lu pg=%lu\n",
-                 obj, SLICE_OFFSET(undo->slice), current_page_num));
+        dprintf(("import slice seg=%d obj=%p off=%lu sz=%d pg=%lu\n",
+                 from_segnum, obj, SLICE_OFFSET(undo->slice),
+                 SLICE_SIZE(undo->slice), current_page_num));
         char *src, *dst;
         if (src_segment_base != NULL)
             src = REAL_ADDRESS(src_segment_base, oslice);
@@ -232,7 +233,7 @@ static void _stm_validate(void *free_if_abort)
     /* Don't check this 'cl'. This entry is already checked */
 
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
-        assert(cl->next == -1);
+        assert(cl->next == (void*)-1);
         return;
     }
 
@@ -691,8 +692,9 @@ static void reset_modified_from_backup_copies(int segment_num)
                undo->backup,
                SLICE_SIZE(undo->slice));
 
-        if (SLICE_OFFSET(undo->slice) == 0) {
-            /* only free bk copy once: */
+        size_t obj_size = stmcb_size_rounded_up(undo->backup);
+        if (obj_size - SLICE_OFFSET(undo->slice) <= 4096UL) {
+            /* only free bk copy once (last slice): */
             free(undo->backup);
         }
     }
