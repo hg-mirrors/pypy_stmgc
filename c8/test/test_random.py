@@ -10,7 +10,7 @@ class Exec(object):
         self.thread_num = 0
 
     def do(self, cmd):
-        color = "\033[%dm" % (31 + self.thread_num % 6)
+        color = ">> \033[%dm" % (31 + (self.thread_num + 5) % 6)
         print >> sys.stderr, color + cmd + "\033[0m"
         exec cmd in globals(), self.content
 
