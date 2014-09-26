@@ -497,7 +497,8 @@ def op_assert_modified(ex, global_state, thread_state):
 
 def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
     if new_thread_state is None:
-        new_thread_state = global_state.rnd.choice(global_state.thread_states)
+        new_thread_state = global_state.rnd.choice(
+            global_state.thread_states + [thread_state] * 3) # more likely not switch
 
     if new_thread_state != thread_state:
         if thread_state.transaction_state:

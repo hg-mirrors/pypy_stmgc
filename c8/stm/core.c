@@ -9,7 +9,8 @@
    inner loop.
 */
 static void import_objects(
-        int from_segnum,            /* or -1: from undo->backup */
+        int from_segnum,            /* or -1: from undo->backup,
+                                       or -2: from undo->backup if not stm_was_read(obj) */
         uintptr_t pagenum,          /* or -1: "all accessible" */
         struct stm_undo_s *undo,
         struct stm_undo_s *end)
@@ -32,6 +33,9 @@ static void import_objects(
                 continue;
         }
 
+        if (from_segnum == -2 && _stm_was_read(obj))
+            continue;           /* only copy unmodified */
+
         dprintf(("import slice seg=%d obj=%p off=%lu sz=%d pg=%lu\n",
                  from_segnum, obj, SLICE_OFFSET(undo->slice),
                  SLICE_SIZE(undo->slice), current_page_num));
@@ -48,7 +52,8 @@ static void import_objects(
 
 /* ############# signal handler ############# */
 
-static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum)
+static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum,
+                                      bool only_if_not_modified)
 {
     /* looks at all bk copies of objects overlapping page 'pagenum' and
        copies the part in 'pagenum' back to the current segment */
@@ -58,7 +63,8 @@ static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum)
     struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
-    import_objects(-1, pagenum, undo, end);
+    import_objects(only_if_not_modified ? -2 : -1,
+                   pagenum, undo, end);
 }
 
 static void go_to_the_past(uintptr_t pagenum,
@@ -138,7 +144,7 @@ static void handle_segfault_in_page(uintptr_t pagenum)
              (char*)(get_virt_page_of(copy_from_segnum, pagenum) * 4096UL));
 
     /* if there were modifications in the page, revert them. */
-    copy_bk_objs_in_page_from(copy_from_segnum, pagenum);
+    copy_bk_objs_in_page_from(copy_from_segnum, pagenum, false);
 
     /* we need to go from 'src_version' to 'target_version'.  This
        might need a walk into the past. */
@@ -290,14 +296,15 @@ static void _stm_validate(void *free_if_abort)
             }
         }
 
-        struct stm_undo_s *undo = cl->written;
-        struct stm_undo_s *end = cl->written + cl->written_count;
+        if (cl->written_count) {
+            struct stm_undo_s *undo = cl->written;
+            struct stm_undo_s *end = cl->written + cl->written_count;
 
-        segment_copied_from |= (1UL << cl->segment_num);
-        import_objects(cl->segment_num, -1, undo, end);
+            segment_copied_from |= (1UL << cl->segment_num);
+            import_objects(cl->segment_num, -1, undo, end);
+        }
 
         /* last fully validated entry */
-
         STM_PSEGMENT->last_commit_log_entry = cl;
     }
 
@@ -308,7 +315,10 @@ static void _stm_validate(void *free_if_abort)
     for (segnum = 0; segment_copied_from != 0; segnum++) {
         if (segment_copied_from & (1UL << segnum)) {
             segment_copied_from &= ~(1UL << segnum);
-            copy_bk_objs_in_page_from(segnum, -1);
+            /* here we can actually have our own modified version, so
+               make sure to only copy things that are not modified in our
+               segment... */
+            copy_bk_objs_in_page_from(segnum, -1, true);
         }
     }
 
