@@ -689,13 +689,15 @@ static void reset_modified_from_backup_copies(int segment_num)
         char *dst = REAL_ADDRESS(pseg->pub.segment_base, obj);
 
         memcpy(dst + SLICE_OFFSET(undo->slice),
-               undo->backup,
+               undo->backup + SLICE_OFFSET(undo->slice),
                SLICE_SIZE(undo->slice));
 
         size_t obj_size = stmcb_size_rounded_up(undo->backup);
         if (obj_size - SLICE_OFFSET(undo->slice) <= 4096UL) {
             /* only free bk copy once (last slice): */
             free(undo->backup);
+            dprintf(("reset_modified_from_backup_copies(%d): obj=%p obj_sz=%lu\n",
+                     segment_num, obj, obj_size));
         }
     }
 
