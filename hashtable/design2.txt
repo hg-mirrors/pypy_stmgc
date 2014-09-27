@@ -1,0 +1,124 @@
+Goal
+======
+
+The goal is to have dictionaries where a read-write or write-write
+conflict does not cause aborts if they occur with keys that have
+different 64-bit hashes.
+
+(We might prefer the condition to be "on different keys even in case of
+hash collision", but that's hard to achieve in general: for Python
+dicts, "to be equal" involves calling the __eq__() method of objects.)
+
+We distinguish between reading a value associated to a key, and only
+checking that the key is in the dictionary.  It makes a difference if
+a concurrent transaction writes to the value.
+
+Some operations on a dict (particularly len() and __nonzero__()) involve
+the global state of the dict, and thus cause conflict with any write
+that adds or removes keys.  They should not cause conflicts with reads,
+or with writes that only change existing values.
+
+In theory, we might refine this to: a len() only conflicts with a
+different transaction whose net effect is to change the length (adding 3
+keys and removing 3 other keys is fine); and a __nonzero__() only
+conflicts with a transaction whose net effect is to change the dict from
+empty to non-empty or vice-versa.  The latter is probably more important
+than the former, so we'll ignore the former.
+
+Iterating over the keys of a dict doesn't have to conflict with other
+transactions that only change existing values.  Iterating over the
+values or the items conflict with other transactions doing any write at
+all.
+
+
+Idea
+======
+
+A dict is implemented used two distinct parts: the committed part,
+and the uncommitted one.  Each part is optimized differently.
+
+
+Committed part
+--------------
+
+The committed part uses separate chaining with linked lists.  It is an
+array of pointers of length some power of two.  From the hash, we access
+item (hash & (power_of_two - 1)).  We get a pointer to some Entry
+object, with fields "hash", "key", "value", and "next".  The "hash"
+field stored in the Entry objects is the full 64-bit hash.  The "next"
+field might point to more Entry objects.
+
+This whole structure is only modified during commit, by special code not
+subject to the normal STM rules.  There is only one writer, the
+transaction currently trying to commit; but we need to be careful so that
+concurrent reads work as expected.
+
+For the sequel, the committed part works theoretically like an array of
+length 2**64, indexed by the hash, where each item contains zero of more
+Entry objects with that hash value.
+
+
+Uncommitted part
+----------------
+
+For the uncommitted part we can use a hash table similar to the one used
+for RPython dicts, with open addressing.  We import data from the
+committed part to this uncommitted part when needed (at the granularity
+of a 64-bit hash value).  More precisely, the uncommitted part can be in
+one of these states:
+
+* It can be a freshly created dictionary, with no committed part yet.
+  That's the easy case: the uncommitted hash table is all we need.
+
+* Or, we have a committed part, and we have imported from it
+  zero or more 64-bit hash values.  We need to remember which ones.
+  That includes the imports that yielded zero key/value pairs.  For each
+  imported hash value, we make (zero or more) entries in the uncommitted
+  part where we copy the key, but where the value is initially missing.
+  The value is copied lazily, with another lookup that will mark the
+  Entry object as "read" in the usual STM sense.
+
+* We may have additionally imported the "emptiness" or "non-emptiness"
+  of the committed part.
+
+* Last option: the current transaction is depending on the exact set
+  of committed keys.  We no longer need to remember which ones
+  individually.  This state is equivalent to having imported *all*
+  possible 64-bit hash values.
+
+
+Commit time
+-----------
+
+At commit time, we need to do these extra steps.  The points followed by
+(*) need to be done carefully because concurrent threads might be
+reading the same data.
+
+* First, we do the usual STM validation.  It will detect read-write
+  and write-write conflicts on existing values thanks to the read and
+  write markers xxx
+
+* We validate the keys: for every imported hash value, we check that
+  importing it now would give us the same answer as it did previously
+  (i.e. the committed table has got the same set of keys with this
+  particular hash as it did previously).
+
+* For key/value pairs that have been newly added by the current
+  transaction, the validation above is enough too: to add a key/value
+  pair, we must have imported all Entries with the same hash anyway.
+  So at this point we only need to create and attach(*) new Entry
+  objects for new key/value pairs.
+
+
+xxxxxxxxxxx
+
+
+
+* First, we create new Entry objects for all key/value pairs that
+  are created by the current transaction.
+
+* First, we create or update the Entry objects for all key/value
+  pairs that have been modified by the current transaction.  We
+  store the new ones by carefully changing the array of pointers.
+
+* 
