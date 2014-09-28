@@ -68,5 +68,7 @@ Then:
 * Global operations, like getting the list of keys, work by mass-marking
   all the lines in H (all 2**64 of them, so obviously it needs to be
   special-cased in the implementation).  More precisely, len(), keys(),
-  etc., sets all the lines' read markers; clear() sets all the lines'
-  write markers.
+  clear(), etc., set all the lines' read markers; clear() additionally
+  sets all the non-empty lines' write markers (so that it doesn't conflict
+  with another transaction checking that some key is really not in the
+  dict).
