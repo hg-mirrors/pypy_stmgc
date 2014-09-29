@@ -810,3 +810,20 @@ class TestBasic(BaseTest):
         self.switch(1) # validate -> R2
 
         assert stm_get_char(lp_char_5, 384 - 1) == 'o'
+
+    def test_repeated_wb(self):
+        lp_char_5 = stm_allocate_old(384)
+
+        self.start_transaction()
+        stm_set_char(lp_char_5, 'i', 384 - 1, False)
+        stm_set_char(lp_char_5, 'i', HDR, False)
+
+        stm_minor_collect()
+
+        stm_set_char(lp_char_5, 'j', 384 - 1, False)
+        stm_set_char(lp_char_5, 'j', HDR, False)
+
+        self.abort_transaction()
+
+        self.check_char_everywhere(lp_char_5, '\0', offset=HDR)
+        self.check_char_everywhere(lp_char_5, '\0', offset=384-1)

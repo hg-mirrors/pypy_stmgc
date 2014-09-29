@@ -429,7 +429,22 @@ void _stm_write_slowpath(object_t *obj)
     /* add to read set: */
     stm_read(obj);
 
-    /* create backup copy (this may cause several page faults XXX): */
+    /* XXX: add overflow number again? n^2 algorithm ahead... */
+    struct list_s *list = STM_PSEGMENT->modified_old_objects;
+    int i, c = list_count(list);
+    for (i = 0; i < c; i += 3) {
+        if (list->items[i] == (uintptr_t)obj) {
+            /* already executed WB once in this transaction. do GC
+               part again: */
+            obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+            LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+            return;
+        }
+    }
+
+    /* create backup copy (this may cause several page faults
+       XXX: do backup later and maybe allow for having NO_ACCESS
+       pages around anyway (kind of card marking)): */
     struct object_s *bk_obj = malloc(obj_size);
     memcpy(bk_obj, realobj, obj_size);
 
@@ -468,7 +483,6 @@ void _stm_write_slowpath(object_t *obj)
            update the shared page in stm_validate() except if it is the sole
            reader of it. But then we don't actually know which revision the page is at. */
         /* XXX this is a temporary solution I suppose */
-        int i;
         for (i = 0; i < NB_SEGMENTS; i++) {
             if (i == my_segnum)
                 continue;
@@ -708,12 +722,14 @@ static void reset_modified_from_backup_copies(int segment_num)
                undo->backup + SLICE_OFFSET(undo->slice),
                SLICE_SIZE(undo->slice));
 
-        size_t obj_size = stmcb_size_rounded_up(undo->backup);
+        size_t obj_size = stmcb_size_rounded_up((struct object_s*)undo->backup);
+        dprintf(("reset_modified_from_backup_copies(%d): obj=%p off=%lu bk=%p obj_sz=%lu\n",
+                 segment_num, obj, SLICE_OFFSET(undo->slice), undo->backup, obj_size));
+
         if (obj_size - SLICE_OFFSET(undo->slice) <= 4096UL) {
             /* only free bk copy once (last slice): */
             free(undo->backup);
-            dprintf(("reset_modified_from_backup_copies(%d): obj=%p obj_sz=%lu\n",
-                     segment_num, obj, obj_size));
+            dprintf(("-> free(%p)\n", undo->backup));
         }
     }
 
