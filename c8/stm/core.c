@@ -156,6 +156,8 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     release_modified_objs_lock(copy_from_segnum);
     release_all_privatization_locks();
 
+    dprintf(("handle_segfault_in_page: rev %lu to rev %lu\n",
+             src_version->rev_num, target_version->rev_num));
     /* adapt revision of page to our revision:
        if our rev is higher than the page we copy from, everything
        is fine as we never read/modified the page anyway
@@ -217,9 +219,9 @@ void _dbg_print_commit_log()
         for (; undo < end; undo++) {
             fprintf(stderr, "    obj %p, size %d, ofs %lu: ", undo->object,
                     SLICE_SIZE(undo->slice), SLICE_OFFSET(undo->slice));
-            long i;
-            for (i=0; i<SLICE_SIZE(undo->slice); i += 8)
-                fprintf(stderr, " 0x%016lx", *(long *)(undo->backup + i));
+            /* long i; */
+            /* for (i=0; i<SLICE_SIZE(undo->slice); i += 8) */
+            /*     fprintf(stderr, " 0x%016lx", *(long *)(undo->backup + i)); */
             fprintf(stderr, "\n");
         }
     }
@@ -258,9 +260,8 @@ static void _stm_validate(void *free_if_abort)
             /* there is an inevitable transaction running */
             release_modified_objs_lock(my_segnum);
 #if STM_TESTS
-            if (free_if_abort != (void *)-1)
-                free(free_if_abort);
-            stm_abort_transaction();
+            needs_abort = true;
+            goto complete_work_and_possibly_abort;
 #endif
             abort();  /* XXX non-busy wait here
                          or: XXX do we always need to wait?  we should just
@@ -310,6 +311,9 @@ static void _stm_validate(void *free_if_abort)
 
     release_modified_objs_lock(my_segnum);
 
+#if STM_TESTS
+ complete_work_and_possibly_abort:;
+#endif
     /* XXXXXXXXXXXXXXXX CORRECT LOCKING NEEDED XXXXXXXXXXXXXXXXXXXXXX */
     int segnum;
     for (segnum = 0; segment_copied_from != 0; segnum++) {
@@ -317,8 +321,10 @@ static void _stm_validate(void *free_if_abort)
             segment_copied_from &= ~(1UL << segnum);
             /* here we can actually have our own modified version, so
                make sure to only copy things that are not modified in our
-               segment... */
-            copy_bk_objs_in_page_from(segnum, -1, true);
+               segment... (if we do not abort) */
+            copy_bk_objs_in_page_from(
+                segnum, -1,     /* any page */
+                !needs_abort);  /* if we abort, we still want to copy everything */
         }
     }
 

@@ -298,6 +298,7 @@ class GlobalState(object):
 
             confl_set = other_trs.read_set & trs.write_set
             if confl_set:
+                assert not other_trs.inevitable
                 # trs wins!
                 other_trs.set_must_abort(objs_in_conflict=confl_set)
                 assert not trs.check_must_abort()
@@ -506,14 +507,16 @@ def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
         ex.do('#')
         #
         trs = new_thread_state.transaction_state
-        if trs is not None and not trs.inevitable:
-            if global_state.is_inevitable_transaction_running():
-                trs.set_must_abort()
-        conflicts = trs is not None and trs.check_must_abort()
+        if trs and not trs.check_must_abort():
+            global_state.check_if_can_become_inevitable(trs)
+        conflicts = trs and trs.check_must_abort()
         ex.thread_num = new_thread_state.num
         #
+        if conflicts:
+            ex.do("# objs_in_conflict=%s" % trs.objs_in_conflict)
         ex.do(raising_call(conflicts,
                            "self.switch", new_thread_state.num))
+
         if conflicts:
             new_thread_state.abort_transaction()
         elif trs:
