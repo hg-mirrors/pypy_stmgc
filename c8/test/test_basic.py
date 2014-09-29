@@ -783,3 +783,30 @@ class TestBasic(BaseTest):
         #
         self.switch(0) # validate -> R2
         assert stm_get_char(lp_char_5, 384 - 1) == 'i'
+
+    def test_bug2(self):
+        lp_char_5 = stm_allocate_old(384)
+
+        self.start_transaction() # R1
+        stm_set_char(lp_char_5, 'i', 384 - 1, False)
+        stm_set_char(lp_char_5, 'i', HDR, False)
+        #
+        self.switch(1)
+        self.start_transaction()
+        #
+        #
+        self.switch(3)
+        self.start_transaction()  # R1
+        stm_set_char(lp_char_5, 'o', 384 - 1, False) # bk_copy
+        stm_set_char(lp_char_5, 'o', HDR, False)
+        self.commit_transaction() # R2
+
+        self.start_transaction()  # R2
+        stm_set_char(lp_char_5, 'r', 384 - 1, False) # bk_copy
+        stm_set_char(lp_char_5, 'r', HDR, False)
+        #
+        py.test.raises(Conflict, self.switch, 0) # abort modified objs
+        #
+        self.switch(1) # validate -> R2
+
+        assert stm_get_char(lp_char_5, 384 - 1) == 'o'
