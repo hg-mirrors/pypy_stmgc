@@ -10,7 +10,7 @@
 */
 static void import_objects(
         int from_segnum,            /* or -1: from undo->backup,
-                                       or -2: from undo->backup if not stm_was_read(obj) */
+                                       or -2: from undo->backup if not modified */
         uintptr_t pagenum,          /* or -1: "all accessible" */
         struct stm_undo_s *undo,
         struct stm_undo_s *end)
@@ -33,8 +33,16 @@ static void import_objects(
                 continue;
         }
 
-        if (from_segnum == -2 && _stm_was_read(obj))
+        if (from_segnum == -2 && _stm_was_read(obj) && (obj->stm_flags & GCFLAG_WB_EXECUTED)) {
+            /* called from stm_validate():
+                > if not was_read(), we certainly didn't modify
+                > if not WB_EXECUTED, we may have read from the obj in a different page but
+                  did not modify it (should not occur right now, but future proof!)
+               only the WB_EXECUTED alone is not enough, since we may have imported from a
+               segment's private page (which had the flag set) */
+            assert(IMPLY(_stm_was_read(obj), (obj->stm_flags & GCFLAG_WB_EXECUTED))); /* for now */
             continue;           /* only copy unmodified */
+        }
 
         dprintf(("import slice seg=%d obj=%p off=%lu sz=%d pg=%lu\n",
                  from_segnum, obj, SLICE_OFFSET(undo->slice),
@@ -46,6 +54,11 @@ static void import_objects(
             src = undo->backup + SLICE_OFFSET(undo->slice);
         dst = REAL_ADDRESS(STM_SEGMENT->segment_base, oslice);
         memcpy(dst, src, SLICE_SIZE(undo->slice));
+
+        if (src_segment_base == NULL) {
+            /* backups never should have WB_EXECUTED */
+            assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
+        }
     }
 }
 
@@ -57,7 +70,8 @@ static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum,
 {
     /* looks at all bk copies of objects overlapping page 'pagenum' and
        copies the part in 'pagenum' back to the current segment */
-    dprintf(("copy_bk_objs_in_page_from(%d, %lu)\n", from_segnum, pagenum));
+    dprintf(("copy_bk_objs_in_page_from(%d, %lu, %d)\n",
+             from_segnum, pagenum, only_if_not_modified));
 
     struct list_s *list = get_priv_segment(from_segnum)->modified_old_objects;
     struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
@@ -429,17 +443,13 @@ void _stm_write_slowpath(object_t *obj)
     /* add to read set: */
     stm_read(obj);
 
-    /* XXX: add overflow number again? n^2 algorithm ahead... */
-    struct list_s *list = STM_PSEGMENT->modified_old_objects;
-    int i, c = list_count(list);
-    for (i = 0; i < c; i += 3) {
-        if (list->items[i] == (uintptr_t)obj) {
-            /* already executed WB once in this transaction. do GC
-               part again: */
-            obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-            LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
-            return;
-        }
+    if (obj->stm_flags & GCFLAG_WB_EXECUTED) {
+        /* already executed WB once in this transaction. do GC
+           part again: */
+        dprintf(("write_slowpath-fast(%p)\n", obj));
+        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+        return;
     }
 
     /* create backup copy (this may cause several page faults
@@ -447,6 +457,7 @@ void _stm_write_slowpath(object_t *obj)
        pages around anyway (kind of card marking)): */
     struct object_s *bk_obj = malloc(obj_size);
     memcpy(bk_obj, realobj, obj_size);
+    assert(!(bk_obj->stm_flags & GCFLAG_WB_EXECUTED));
 
     dprintf(("write_slowpath(%p): sz=%lu, bk=%p\n", obj, obj_size, bk_obj));
  retry:
@@ -483,6 +494,7 @@ void _stm_write_slowpath(object_t *obj)
            update the shared page in stm_validate() except if it is the sole
            reader of it. But then we don't actually know which revision the page is at. */
         /* XXX this is a temporary solution I suppose */
+        int i;
         for (i = 0; i < NB_SEGMENTS; i++) {
             if (i == my_segnum)
                 continue;
@@ -497,12 +509,6 @@ void _stm_write_slowpath(object_t *obj)
     }
     /* all pages are either private or we were the first to write to a shared
        page and therefore got it as our private one */
-
-    /* remove the WRITE_BARRIER flag */
-    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-
-    /* also add it to the GC list for minor collections */
-    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
 
     /* phew, now add the obj to the write-set and register the
        backup copy. */
@@ -538,9 +544,15 @@ void _stm_write_slowpath(object_t *obj)
     OPT_ASSERT(remaining_obj_sz == 0);
 
     release_modified_objs_lock(STM_SEGMENT->segment_num);
-
     /* done fiddling with protection and privatization */
     release_all_privatization_locks();
+
+    /* remove the WRITE_BARRIER flag and add WB_EXECUTED */
+    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+    obj->stm_flags |= GCFLAG_WB_EXECUTED;
+
+    /* also add it to the GC list for minor collections */
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
 }
 
 static void reset_transaction_read_version(void)
@@ -561,6 +573,18 @@ static void reset_transaction_read_version(void)
         memset(readmarkers, 0, NB_READMARKER_PAGES * 4096UL);
     }
     STM_SEGMENT->transaction_read_version = 1;
+}
+
+static void reset_wb_executed_flags(void)
+{
+    struct list_s *list = STM_PSEGMENT->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+
+    for (; undo < end; undo++) {
+        object_t *obj = undo->object;
+        obj->stm_flags &= ~GCFLAG_WB_EXECUTED;
+    }
 }
 
 
@@ -660,6 +684,7 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
         object_t *obj = undo->object;
         char *dst = REAL_ADDRESS(segbase, obj);
         assert(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
+        assert(!(((struct object_s *)dst)->stm_flags & GCFLAG_WB_EXECUTED));
     }
 #endif
 }
@@ -672,6 +697,8 @@ void stm_commit_transaction(void)
 
     dprintf(("> stm_commit_transaction()\n"));
     minor_collection(1);
+
+    reset_wb_executed_flags();
 
     /* minor_collection() above should have set again all WRITE_BARRIER flags.
        Check that again here for the objects that are about to be copied into
@@ -739,7 +766,6 @@ static void reset_modified_from_backup_copies(int segment_num)
     list_clear(list);
 
     release_modified_objs_lock(segment_num);
-
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
