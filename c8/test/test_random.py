@@ -8,10 +8,12 @@ class Exec(object):
     def __init__(self, test):
         self.content = {'self': test}
         self.thread_num = 0
+        self.executed = []
 
     def do(self, cmd):
         color = ">> \033[%dm" % (31 + (self.thread_num + 5) % 6)
         print >> sys.stderr, color + cmd + "\033[0m"
+        self.executed.append(cmd)
         exec cmd in globals(), self.content
 
 
@@ -579,7 +581,7 @@ class TestRandom(BaseTest):
             op_minor_collect,
             #op_major_collect,
         ]
-        for _ in range(500):
+        for _ in range(1000):
             # make sure we are in a transaction:
             curr_thread = op_switch_thread(ex, global_state, curr_thread)
 
@@ -616,6 +618,6 @@ class TestRandom(BaseTest):
         test_fun.__name__ = 'test_random_%d' % seed
         return test_fun
 
-    for _seed in range(5000, 5200):
+    for _seed in range(5000, 5400):
         _fn = _make_fun(_seed)
         locals()[_fn.__name__] = _fn

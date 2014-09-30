@@ -37,7 +37,9 @@
 enum /* stm_flags */ {
     GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
     GCFLAG_HAS_SHADOW = 0x02,
+    GCFLAG_WB_EXECUTED = 0x04,
 };
+
 
 
 /************************************************************/

@@ -164,7 +164,9 @@ static void collect_oldrefs_to_nursery(void)
     struct list_s *lst = STM_PSEGMENT->objects_pointing_to_nursery;
 
     while (!list_is_empty(lst)) {
-        object_t *obj = (object_t *)list_pop_item(lst);;
+        object_t *obj = (object_t *)list_pop_item(lst);
+
+        assert(!_is_in_nursery(obj));
 
         _collect_now(obj);
 
