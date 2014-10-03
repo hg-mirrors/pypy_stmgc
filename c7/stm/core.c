@@ -343,7 +343,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
 
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
-    change_timing_state(STM_TIME_RUN_CURRENT);
+    timing_event(tl, STM_TRANSACTION_START, NULL, NULL);
     STM_PSEGMENT->start_time = tl->_timing_cur_start;
     STM_PSEGMENT->signalled_to_commit_soon = false;
     STM_PSEGMENT->safe_point = SP_RUNNING;
@@ -783,7 +783,7 @@ static void push_modified_to_other_segments(void)
     list_clear(STM_PSEGMENT->modified_old_objects_markers);
 }
 
-static void _finish_transaction(int attribute_to)
+static void _finish_transaction(enum stm_event_e final_event)
 {
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
@@ -812,9 +812,6 @@ void stm_commit_transaction(void)
 
     minor_collection(/*commit=*/ true);
 
-    /* the call to minor_collection() above leaves us with
-       STM_TIME_BOOKKEEPING */
-
     /* synchronize overflow objects living in privatized pages */
     push_overflow_objects_from_privatized_pages();
 
@@ -838,9 +835,9 @@ void stm_commit_transaction(void)
 
     /* if a major collection is required, do it here */
     if (is_major_collection_requested()) {
-        int oldstate = change_timing_state(STM_TIME_MAJOR_GC);
+        timing_event(NULL, STM_GC_MAJOR_START, NULL, NULL);
         major_collection_now_at_safe_point();
-        change_timing_state(oldstate);
+        timing_event(NULL, STM_GC_MAJOR_STOP, NULL, NULL);
     }
 
     /* synchronize modified old objects to other threads */
@@ -867,7 +864,7 @@ void stm_commit_transaction(void)
     }
 
     /* done */
-    _finish_transaction(STM_TIME_RUN_COMMITTED);
+    _finish_transaction(STM_TR_COMMIT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
@@ -1052,16 +1049,16 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
     /* invoke the callbacks */
     invoke_and_clear_user_callbacks(1);   /* for abort */
 
-    int attribute_to = STM_TIME_RUN_ABORTED_OTHER;
+    enum stm_event_e final_event = STM_TR_ABORT_OTHER;
 
     if (is_abort(STM_SEGMENT->nursery_end)) {
         /* done aborting */
-        attribute_to = STM_SEGMENT->nursery_end;
+        final_event = STM_SEGMENT->nursery_end;
         STM_SEGMENT->nursery_end = pause_signalled ? NSE_SIGPAUSE
                                                    : NURSERY_END;
     }
 
-    _finish_transaction(attribute_to);
+    _finish_transaction(final_event);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     /* Broadcast C_ABORTED to wake up contention.c */
