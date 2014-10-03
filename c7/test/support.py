@@ -24,12 +24,6 @@ typedef struct {
     size_t mem_bytes_to_clear_on_abort;
     long last_abort__bytes_in_nursery;
     int associated_segment_num;
-    uint32_t events[];
-    float timing[];
-    int longest_marker_state;
-    double longest_marker_time;
-    char longest_marker_self[];
-    char longest_marker_other[];
     ...;
 } stm_thread_local_t;
 
@@ -113,29 +107,39 @@ long stm_can_move(object_t *);
 long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
-#define STM_TIME_OUTSIDE_TRANSACTION ...
-#define STM_TIME_RUN_CURRENT ...
-#define STM_TIME_RUN_COMMITTED ...
-#define STM_TIME_RUN_ABORTED_WRITE_WRITE ...
-#define STM_TIME_RUN_ABORTED_WRITE_READ ...
-#define STM_TIME_RUN_ABORTED_INEVITABLE ...
-#define STM_TIME_RUN_ABORTED_OTHER ...
-#define STM_TIME_WAIT_FREE_SEGMENT ...
-#define STM_TIME_WAIT_WRITE_READ ...
-#define STM_TIME_WAIT_INEVITABLE ...
-#define STM_TIME_WAIT_OTHER ...
-#define STM_TIME_BOOKKEEPING ...
-#define STM_TIME_MINOR_GC ...
-#define STM_TIME_MAJOR_GC ...
-#define STM_TIME_SYNC_PAUSE ...
+enum stm_event_e {
+    /* always STM_TRANSACTION_START followed later by one of the STM_TR_xxx */
+    STM_TRANSACTION_START,
+    STM_TR_COMMIT,
+    STM_TR_ABORT_WRITE_WRITE,    /* self write loc, other write loc */
+    STM_TR_ABORT_WRITE_READ,     /* self write loc, other = null; or opposite */
+    STM_TR_ABORT_INEVITABLE,     /* self cur loc, other turned-inev loc */
+    STM_TR_ABORT_OTHER,          /* ?, ? */
+
+    /* always one STM_WT_xxx followed later by STM_WAIT_DONE */
+    STM_WT_FREE_SEGMENT,
+    STM_WT_SYNC_PAUSE,
+    STM_WT_WRITE_READ,           /* self write loc, other = null; or opposite */
+    STM_WT_INEVITABLE,           /* self cur loc, other turned-inev loc */
+    STM_WAIT_DONE,
+
+    /* start and end of GC cycles */
+    STM_GC_MINOR_START,
+    STM_GC_MINOR_STOP,
+    STM_GC_MAJOR_START,
+    STM_GC_MAJOR_STOP,
+    ...
+};
 
 void stm_flush_timing(stm_thread_local_t *, int);
 
 void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,
                             object_t *following_object,
                             char *outputbuf, size_t outputbufsize);
-void (*stmcb_debug_print)(const char *cause, double time,
-                          const char *marker);
+void (*stmcb_timing_event)(stm_thread_local_t *tl,
+                           enum stm_event_e event,
+                           const char *marker1,
+                           const char *marker2);
 
 void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
 void stm_update_marker_num(stm_thread_local_t *, uintptr_t);

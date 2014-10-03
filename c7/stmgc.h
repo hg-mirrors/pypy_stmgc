@@ -54,27 +54,32 @@ struct stm_shadowentry_s {
     object_t *ss;
 };
 
-enum stm_time_e {
-    STM_TIME_OUTSIDE_TRANSACTION,
-    STM_TIME_RUN_CURRENT,
-    STM_TIME_RUN_COMMITTED,
-    STM_TIME_RUN_ABORTED_WRITE_WRITE,
-    STM_TIME_RUN_ABORTED_WRITE_READ,
-    STM_TIME_RUN_ABORTED_INEVITABLE,
-    STM_TIME_RUN_ABORTED_OTHER,
-    STM_TIME_WAIT_FREE_SEGMENT,
-    STM_TIME_WAIT_WRITE_READ,
-    STM_TIME_WAIT_INEVITABLE,
-    STM_TIME_WAIT_OTHER,
-    STM_TIME_SYNC_COMMIT_SOON,
-    STM_TIME_BOOKKEEPING,
-    STM_TIME_MINOR_GC,
-    STM_TIME_MAJOR_GC,
-    STM_TIME_SYNC_PAUSE,
+/* Profiling events (in the comments: value for marker1, value for marker2) */
+enum stm_event_e {
+    /* always STM_TRANSACTION_START followed later by one of the STM_TR_xxx */
+    STM_TRANSACTION_START,
+    STM_TR_COMMIT,
+    STM_TR_ABORT_WRITE_WRITE,    /* self write loc, other write loc */
+    STM_TR_ABORT_WRITE_READ,     /* self write loc, other = null; or opposite */
+    STM_TR_ABORT_INEVITABLE,     /* self cur loc, other turned-inev loc */
+    STM_TR_ABORT_OTHER,          /* ?, ? */
+
+    /* always one STM_WT_xxx followed later by STM_WAIT_DONE */
+    STM_WT_FREE_SEGMENT,
+    STM_WT_SYNC_PAUSE,
+    STM_WT_WRITE_READ,           /* self write loc, other = null; or opposite */
+    STM_WT_INEVITABLE,           /* self cur loc, other turned-inev loc */
+    STM_WAIT_DONE,
+
+    /* start and end of GC cycles */
+    STM_GC_MINOR_START,
+    STM_GC_MINOR_STOP,
+    STM_GC_MAJOR_START,
+    STM_GC_MAJOR_STOP,
+
     _STM_TIME_N
 };
-
-#define _STM_MARKER_LEN  80
+#define _STM_MARKER_LEN  128
 
 typedef struct stm_thread_local_s {
     /* every thread should handle the shadow stack itself */
@@ -90,16 +95,6 @@ typedef struct stm_thread_local_s {
     /* after an abort, some details about the abort are stored there.
        (these fields are not modified on a successful commit) */
     long last_abort__bytes_in_nursery;
-    /* timing information, accumulated */
-    uint32_t events[_STM_TIME_N];
-    float timing[_STM_TIME_N];
-    double _timing_cur_start;
-    enum stm_time_e _timing_cur_state;
-    /* the marker with the longest associated time so far */
-    enum stm_time_e longest_marker_state;
-    double longest_marker_time;
-    char longest_marker_self[_STM_MARKER_LEN];
-    char longest_marker_other[_STM_MARKER_LEN];
     /* the next fields are handled internally by the library */
     int associated_segment_num;
     struct stm_thread_local_s *prev, *next;
@@ -448,8 +443,10 @@ void stm_flush_timing(stm_thread_local_t *tl, int verbose);
 extern void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,
                                    object_t *following_object,
                                    char *outputbuf, size_t outputbufsize);
-extern void (*stmcb_debug_print)(const char *cause, double time,
-                                 const char *marker);
+extern void (*stmcb_timing_event)(stm_thread_local_t *tl,
+                                  enum stm_event_e event,
+                                  const char *marker1,
+                                  const char *marker2);
 
 /* Conventience macros to push the markers into the shadowstack */
 #define STM_PUSH_MARKER(tl, odd_num, p)   do {  \

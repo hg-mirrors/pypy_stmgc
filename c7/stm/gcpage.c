@@ -141,7 +141,7 @@ static void major_collection_if_requested(void)
 
     if (is_major_collection_requested()) {   /* if still true */
 
-        int oldstate = change_timing_state(STM_TIME_MAJOR_GC);
+        timing_event(NULL, STM_GC_MAJOR_START, NULL, NULL);
 
         synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
 
@@ -149,7 +149,7 @@ static void major_collection_if_requested(void)
             major_collection_now_at_safe_point();
         }
 
-        change_timing_state(oldstate);
+        timing_event(NULL, STM_GC_MAJOR_STOP, NULL, NULL);
     }
 
     s_mutex_unlock();
