@@ -181,6 +181,7 @@ static bool contention_management(uint8_t other_segment_num,
         if (must_abort())
             abort_with_mutex();
 
+        abort(); /* XXX
         struct stm_priv_segment_info_s *pseg =
             get_priv_segment(STM_SEGMENT->segment_num);
         double elapsed =
@@ -188,6 +189,7 @@ static bool contention_management(uint8_t other_segment_num,
                                    STM_TIME_RUN_CURRENT);
         marker_copy(pseg->pub.running_thread, pseg,
                     wait_category, elapsed);
+                 */
     }
 
     else if (!contmgr.abort_other) {

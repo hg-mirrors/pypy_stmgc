@@ -79,6 +79,7 @@ char *_stm_expand_marker(void)
     return _result;
 }
 
+#if 0   // XXX
 static void marker_copy(stm_thread_local_t *tl,
                         struct stm_priv_segment_info_s *pseg,
                         enum stm_time_e attribute_to, double time)
@@ -103,6 +104,7 @@ static void marker_copy(stm_thread_local_t *tl,
     pseg->marker_self[0] = 0;
     pseg->marker_other[0] = 0;
 }
+#endif
 
 static void marker_fetch_obj_write(uint8_t in_segment_num, object_t *obj,
                                    uintptr_t marker[2])
