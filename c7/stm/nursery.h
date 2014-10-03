@@ -1,7 +1,11 @@
 
-/* '_stm_nursery_section_end' is either NURSERY_END or NSE_SIGxxx */
-#define NSE_SIGPAUSE   STM_TIME_WAIT_OTHER
-#define NSE_SIGCOMMITSOON   STM_TIME_SYNC_COMMIT_SOON
+/* 'nursery_end' is either NURSERY_END, NSE_SIGxxx, or STM_TR_ABORT_xxx. */
+#define NSE_SIGPAUSE        (_STM_NSE_SIGNAL_MAX - 1)
+#define NSE_SIGCOMMITSOON   (_STM_NSE_SIGNAL_MAX - 2)
+
+#if !(STM_TR_ABORT_OTHER < NSE_SIGCOMMITSOON)
+#  error "STM_TR_ABORT_xxx is too large; increase _STM_NSE_SIGNAL_MAX"
+#endif
 
 
 static uint32_t highest_overflow_number;

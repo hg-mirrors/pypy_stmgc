@@ -54,33 +54,6 @@ struct stm_shadowentry_s {
     object_t *ss;
 };
 
-/* Profiling events (in the comments: value for marker1, value for marker2) */
-enum stm_event_e {
-    /* always STM_TRANSACTION_START followed later by one of the STM_TR_xxx */
-    STM_TRANSACTION_START,
-    STM_TR_COMMIT,
-    STM_TR_ABORT_WRITE_WRITE,    /* self write loc, other write loc */
-    STM_TR_ABORT_WRITE_READ,     /* self write loc, other = null; or opposite */
-    STM_TR_ABORT_INEVITABLE,     /* self cur loc, other turned-inev loc */
-    STM_TR_ABORT_OTHER,          /* ?, ? */
-
-    /* always one STM_WT_xxx followed later by STM_WAIT_DONE */
-    STM_WT_FREE_SEGMENT,
-    STM_WT_SYNC_PAUSE,
-    STM_WT_WRITE_READ,           /* self write loc, other = null; or opposite */
-    STM_WT_INEVITABLE,           /* self cur loc, other turned-inev loc */
-    STM_WAIT_DONE,
-
-    /* start and end of GC cycles */
-    STM_GC_MINOR_START,
-    STM_GC_MINOR_STOP,
-    STM_GC_MAJOR_START,
-    STM_GC_MAJOR_STOP,
-
-    _STM_TIME_N
-};
-#define _STM_MARKER_LEN  128
-
 typedef struct stm_thread_local_s {
     /* every thread should handle the shadow stack itself */
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
@@ -150,7 +123,7 @@ uint64_t _stm_total_allocated(void);
 #define _STM_CARD_SIZE                 32     /* must be >= 32 */
 #define _STM_MIN_CARD_COUNT            17
 #define _STM_MIN_CARD_OBJ_SIZE         (_STM_CARD_SIZE * _STM_MIN_CARD_COUNT)
-#define _STM_NSE_SIGNAL_MAX     _STM_TIME_N
+#define _STM_NSE_SIGNAL_MAX            63
 #define _STM_FAST_ALLOC           (66*1024)
 
 
@@ -436,6 +409,33 @@ void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
 /* Temporary? */
 void stm_flush_timing(stm_thread_local_t *tl, int verbose);
 
+
+/* Profiling events (in the comments: value for marker1, value for marker2) */
+enum stm_event_e {
+    /* always STM_TRANSACTION_START followed later by one of the STM_TR_xxx */
+    STM_TRANSACTION_START,
+    STM_TR_COMMIT,
+    STM_TR_ABORT_WRITE_WRITE,    /* self write loc, other write loc */
+    STM_TR_ABORT_WRITE_READ,     /* self write loc, other = null; or opposite */
+    STM_TR_ABORT_INEVITABLE,     /* self cur loc?, other turned-inev loc */
+    STM_TR_ABORT_OTHER,          /* ?, ? */
+
+    /* always one STM_WT_xxx followed later by STM_WAIT_DONE */
+    STM_WT_FREE_SEGMENT,
+    STM_WT_SYNC_PAUSE,
+    STM_WT_WRITE_READ,           /* self write loc, other = null; or opposite */
+    STM_WT_INEVITABLE,           /* self cur loc?, other turned-inev loc */
+    STM_WAIT_DONE,
+
+    /* start and end of GC cycles */
+    STM_GC_MINOR_START,
+    STM_GC_MINOR_STOP,
+    STM_GC_MAJOR_START,
+    STM_GC_MAJOR_STOP,
+
+    _STM_EVENT_N
+};
+#define _STM_MARKER_LEN  128
 
 /* The markers pushed in the shadowstack are an odd number followed by a
    regular pointer.  When needed, this library invokes this callback to

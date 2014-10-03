@@ -142,12 +142,11 @@ static void wait_for_end_of_inevitable_transaction(
             else {
                 /* wait for stm_commit_transaction() to finish this
                    inevitable transaction */
+                stm_thread_local_t *tl = tl_or_null_if_can_abort;
                 signal_other_to_commit_soon(other_pseg);
-                change_timing_state_tl(tl_or_null_if_can_abort,
-                                       STM_TIME_WAIT_INEVITABLE);
+                timing_event_wt_inevitable(tl, other_pseg);
                 cond_wait(C_INEVITABLE);
-                /* don't bother changing the timing state again: the caller
-                   will very soon go to STM_TIME_RUN_CURRENT */
+                timing_event(tl, STM_WAIT_DONE, NULL, NULL);
             }
             goto restart;
         }
@@ -188,8 +187,9 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
     }
     /* No segment available.  Wait until release_thread_segment()
        signals that one segment has been freed. */
-    change_timing_state_tl(tl, STM_TIME_WAIT_FREE_SEGMENT);
+    timing_event(tl, STM_WT_FREE_SEGMENT, NULL, NULL);
     cond_wait(C_SEGMENT_FREE);
+    timing_event(tl, STM_WAIT_DONE, NULL, NULL);
 
     /* Return false to the caller, which will call us again */
     return false;

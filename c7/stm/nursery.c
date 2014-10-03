@@ -572,11 +572,11 @@ static void minor_collection(bool commit)
 
     stm_safe_point();
 
-    change_timing_state(STM_TIME_MINOR_GC);
+    timing_event(NULL, STM_GC_MINOR_START, NULL, NULL);
 
     _do_minor_collection(commit);
 
-    change_timing_state(commit ? STM_TIME_BOOKKEEPING : STM_TIME_RUN_CURRENT);
+    timing_event(NULL, STM_GC_MINOR_STOP, NULL, NULL);
 }
 
 void stm_collect(long level)
