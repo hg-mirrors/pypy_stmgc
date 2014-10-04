@@ -70,5 +70,10 @@ Then:
   special-cased in the implementation).  More precisely, len(), keys(),
   clear(), etc., set all the lines' read markers; clear() additionally
   sets all the non-empty lines' write markers (so that it doesn't conflict
-  with another transaction checking that some key is really not in the
+  with another transaction checking that some different key is not in the
   dict).
+
+* We have an additional pair of markers (read and write) for the 'empty'
+  flag.  It is read whenever we check 'bool(dict)'.  It is written only
+  when we are about to commit and the emptiness state changed in this
+  transaction.
