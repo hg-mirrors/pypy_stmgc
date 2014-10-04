@@ -398,9 +398,8 @@ void stm_start_inevitable_transaction(stm_thread_local_t *tl)
 {
     /* used to be more efficient, starting directly an inevitable transaction,
        but there is no real point any more, I believe */
-    s_mutex_lock();
-    _stm_start_transaction(tl);
-    _stm_become_inevitable("start_inevitable_transaction");
+    stm_start_transaction(tl);
+    stm_become_inevitable(tl, "start_inevitable_transaction");
 }
 
 
