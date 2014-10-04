@@ -225,6 +225,8 @@ static pthread_t *_get_cpth(stm_thread_local_t *tl)
     return (pthread_t *)(tl->creating_pthread);
 }
 
+static int thread_local_counters = 0;
+
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
     int num;
@@ -247,6 +249,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
        numbers automatically. */
     num = (num % NB_SEGMENTS) + 1;
     tl->associated_segment_num = num;
+    tl->thread_local_counter = ++thread_local_counters;
     *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num));

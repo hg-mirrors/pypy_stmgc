@@ -152,6 +152,9 @@ typedef void (*stmcb_timing_event_fn)(stm_thread_local_t *tl,
                                       stm_loc_marker_t *markers);
 stmcb_timing_event_fn stmcb_timing_event;
 
+int stm_set_timing_log(const char *profiling_file_name,
+                       int expand_marker(stm_loc_marker_t *, char *, int));
+
 void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
 void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
 void stm_pop_marker(stm_thread_local_t *);

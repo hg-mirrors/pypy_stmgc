@@ -66,10 +66,11 @@ typedef struct stm_thread_local_s {
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
     /* after an abort, some details about the abort are stored there.
-       (these fields are not modified on a successful commit) */
+       (this field is not modified on a successful commit) */
     long last_abort__bytes_in_nursery;
     /* the next fields are handled internally by the library */
     int associated_segment_num;
+    int thread_local_counter;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
 } stm_thread_local_t;
@@ -467,6 +468,17 @@ extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
                                   enum stm_event_e event,
                                   stm_loc_marker_t *markers);
 
+/* Calling this sets up a stmcb_timing_event callback that will produce
+   a binary file calling 'profiling_file_name'.  After a fork(), it is
+   written to 'profiling_file_name.fork<PID>'.  Call it with NULL to
+   stop profiling.  Returns -1 in case of error (see errno then).
+   The optional 'expand_marker' function pointer is called to expand
+   the marker's odd_number and object into data, starting at the given
+   position and with the given maximum length. */
+int stm_set_timing_log(const char *profiling_file_name,
+                       int expand_marker(stm_loc_marker_t *, char *, int));
+
+
 /* Convenience macros to push the markers into the shadowstack */
 #define STM_PUSH_MARKER(tl, odd_num, p)   do {  \
     uintptr_t _odd_num = (odd_num);             \
@@ -491,8 +503,6 @@ extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
     }                                                           \
     _ss->ss = (object_t *)_odd_num;                             \
 } while (0)
-
-char *_stm_expand_marker(void);
 
 
 /* ==================== END ==================== */
