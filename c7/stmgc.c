@@ -15,7 +15,6 @@
 #include "stm/fprintcolor.h"
 #include "stm/weakref.h"
 #include "stm/marker.h"
-#include "stm/timing.h"
 
 #include "stm/misc.c"
 #include "stm/list.c"

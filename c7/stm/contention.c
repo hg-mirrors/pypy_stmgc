@@ -3,34 +3,50 @@
 #endif
 
 
-enum contention_kind_e {
+/* Here are the possible kinds of contention:
 
-    /* A write-write contention occurs when we running our transaction
-       and detect that we are about to write to an object that another
-       thread is also writing to.  This kind of contention must be
-       resolved before continuing.  This *must* abort one of the two
-       threads: the caller's thread is not at a safe-point, so cannot
-       wait! */
-    WRITE_WRITE_CONTENTION,
+   STM_CONTENTION_WRITE_WRITE
 
-    /* A write-read contention occurs when we are trying to commit: it
+       A write-write contention occurs when we are running our
+       transaction and detect that we are about to write to an object
+       that another thread is also writing to.  This kind of
+       contention must be resolved before continuing.  This *must*
+       abort one of the two threads: the caller's thread is not at a
+       safe-point, so cannot wait!
+
+       It is reported as a timing event with the following two markers:
+       the current thread (i.e. where the second-in-time write occurs);
+       and the other thread (from its 'modified_old_objects_markers',
+       where the first-in-time write occurred).
+
+   STM_CONTENTION_WRITE_READ
+
+       A write-read contention occurs when we are trying to commit: it
        means that an object we wrote to was also read by another
        transaction.  Even though it would seem obvious that we should
        just abort the other thread and proceed in our commit, a more
        subtle answer would be in some cases to wait for the other thread
        to commit first.  It would commit having read the old value, and
-       then we can commit our change to it. */
-    WRITE_READ_CONTENTION,
+       then we can commit our change to it.
 
-    /* An inevitable contention occurs when we're trying to become
+       It is reported as a timing event with only one marker: the
+       older location of the write that was done by the current thread.
+
+    STM_CONTENTION_INEVITABLE
+
+       An inevitable contention occurs when we're trying to become
        inevitable but another thread already is.  We can never abort the
        other thread in this case, but we still have the choice to abort
-       ourselves or pause until the other thread commits. */
-    INEVITABLE_CONTENTION,
-};
+       ourselves or pause until the other thread commits.
+
+       It is reported with two markers, one for the current thread and
+       one for the other thread.  Each marker gives the location that
+       attempts to make the transaction inevitable.
+*/
+
 
 struct contmgr_s {
-    enum contention_kind_e kind;
+    enum stm_event_e kind;
     struct stm_priv_segment_info_s *other_pseg;
     bool abort_other;
     bool try_sleep;  // XXX add a way to timeout, but should handle repeated
@@ -99,7 +115,7 @@ static void cm_pause_if_younger(struct contmgr_s *cm)
 
 
 static bool contention_management(uint8_t other_segment_num,
-                                  enum contention_kind_e kind,
+                                  enum stm_event_e kind,
                                   object_t *obj)
 {
     assert(_has_mutex());
@@ -108,6 +124,9 @@ static bool contention_management(uint8_t other_segment_num,
     bool others_may_have_run = false;
     if (must_abort())
         abort_with_mutex();
+
+    /* Report the contention */
+    timing_contention(kind, other_segment_num, obj);
 
     /* Who should abort here: this thread, or the other thread? */
     struct contmgr_s contmgr;
@@ -138,19 +157,8 @@ static bool contention_management(uint8_t other_segment_num,
         contmgr.abort_other = false;
     }
 
-
-    int wait_category =
-        kind == WRITE_READ_CONTENTION ? STM_TIME_WAIT_WRITE_READ :
-        kind == INEVITABLE_CONTENTION ? STM_TIME_WAIT_INEVITABLE :
-        STM_TIME_WAIT_OTHER;
-
-    int abort_category =
-        kind == WRITE_WRITE_CONTENTION ? STM_TIME_RUN_ABORTED_WRITE_WRITE :
-        kind == WRITE_READ_CONTENTION ? STM_TIME_RUN_ABORTED_WRITE_READ :
-        kind == INEVITABLE_CONTENTION ? STM_TIME_RUN_ABORTED_INEVITABLE :
-        STM_TIME_RUN_ABORTED_OTHER;
-
-
+    /* Do one of three things here...
+     */
     if (contmgr.try_sleep && kind != WRITE_WRITE_CONTENTION &&
         contmgr.other_pseg->safe_point != SP_WAIT_FOR_C_TRANSACTION_DONE) {
         others_may_have_run = true;
@@ -166,12 +174,26 @@ static bool contention_management(uint8_t other_segment_num,
         contmgr.other_pseg->signal_when_done = true;
         marker_contention(kind, false, other_segment_num, obj);
 
-        change_timing_state(wait_category);
-
         /* tell the other to commit ASAP */
         signal_other_to_commit_soon(contmgr.other_pseg);
 
+        enum stm_event_e wait_category;
+        switch (kind) {
+        case WRITE_READ_CONTENTION:
+            wait_category = STM_WT_WRITE_READ;
+            break;
+        case INEVITABLE_CONTENTION:
+            wait_category = STM_WT_INEVITABLE;
+            break;
+        default:
+            stm_fatalerror("unexpected wait kind: %d", kind);
+        }
+
         dprintf(("pausing...\n"));
+
+        timing_event(STM_SEGMENT->running_thread, wait_category, .., ..);
+        ...;
+        
         cond_signal(C_AT_SAFE_POINT);
         STM_PSEGMENT->safe_point = SP_WAIT_FOR_C_TRANSACTION_DONE;
         cond_wait(C_TRANSACTION_DONE);
