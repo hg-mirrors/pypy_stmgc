@@ -159,7 +159,7 @@ static bool contention_management(uint8_t other_segment_num,
 
     /* Do one of three things here...
      */
-    if (contmgr.try_sleep && kind != WRITE_WRITE_CONTENTION &&
+    if (contmgr.try_sleep && kind != STM_CONTENTION_WRITE_WRITE &&
         contmgr.other_pseg->safe_point != SP_WAIT_FOR_C_TRANSACTION_DONE) {
         others_may_have_run = true;
         /* Sleep.
@@ -172,28 +172,12 @@ static bool contention_management(uint8_t other_segment_num,
              itself already paused here.
         */
         contmgr.other_pseg->signal_when_done = true;
-        marker_contention(kind, false, other_segment_num, obj);
 
         /* tell the other to commit ASAP */
         signal_other_to_commit_soon(contmgr.other_pseg);
 
-        enum stm_event_e wait_category;
-        switch (kind) {
-        case WRITE_READ_CONTENTION:
-            wait_category = STM_WT_WRITE_READ;
-            break;
-        case INEVITABLE_CONTENTION:
-            wait_category = STM_WT_INEVITABLE;
-            break;
-        default:
-            stm_fatalerror("unexpected wait kind: %d", kind);
-        }
-
         dprintf(("pausing...\n"));
 
-        timing_event(STM_SEGMENT->running_thread, wait_category, .., ..);
-        ...;
-        
         cond_signal(C_AT_SAFE_POINT);
         STM_PSEGMENT->safe_point = SP_WAIT_FOR_C_TRANSACTION_DONE;
         cond_wait(C_TRANSACTION_DONE);
@@ -202,16 +186,6 @@ static bool contention_management(uint8_t other_segment_num,
 
         if (must_abort())
             abort_with_mutex();
-
-        abort(); /* XXX
-        struct stm_priv_segment_info_s *pseg =
-            get_priv_segment(STM_SEGMENT->segment_num);
-        double elapsed =
-            change_timing_state_tl(pseg->pub.running_thread,
-                                   STM_TIME_RUN_CURRENT);
-        marker_copy(pseg->pub.running_thread, pseg,
-                    wait_category, elapsed);
-                 */
     }
 
     else if (!contmgr.abort_other) {
@@ -219,16 +193,13 @@ static bool contention_management(uint8_t other_segment_num,
         signal_other_to_commit_soon(contmgr.other_pseg);
 
         dprintf(("abort in contention: kind %d\n", kind));
-        STM_SEGMENT->nursery_end = abort_category;
-        marker_contention(kind, false, other_segment_num, obj);
         abort_with_mutex();
     }
 
     else {
         /* We have to signal the other thread to abort, and wait until
            it does. */
-        contmgr.other_pseg->pub.nursery_end = abort_category;
-        marker_contention(kind, true, other_segment_num, obj);
+        contmgr.other_pseg->pub.nursery_end = NSE_SIGABORT;
 
         int sp = contmgr.other_pseg->safe_point;
         switch (sp) {
@@ -320,7 +291,8 @@ static void write_write_contention_management(uintptr_t lock_idx,
         assert(get_priv_segment(other_segment_num)->write_lock_num ==
                prev_owner);
 
-        contention_management(other_segment_num, WRITE_WRITE_CONTENTION, obj);
+        contention_management(other_segment_num,
+                              STM_CONTENTION_WRITE_WRITE, obj);
 
         /* now we return into _stm_write_slowpath() and will try again
            to acquire the write lock on our object. */
@@ -332,10 +304,12 @@ static void write_write_contention_management(uintptr_t lock_idx,
 static bool write_read_contention_management(uint8_t other_segment_num,
                                              object_t *obj)
 {
-    return contention_management(other_segment_num, WRITE_READ_CONTENTION, obj);
+    return contention_management(other_segment_num,
+                                 STM_CONTENTION_WRITE_READ, obj);
 }
 
 static void inevitable_contention_management(uint8_t other_segment_num)
 {
-    contention_management(other_segment_num, INEVITABLE_CONTENTION, NULL);
+    contention_management(other_segment_num,
+                          STM_CONTENTION_INEVITABLE, NULL);
 }

@@ -123,7 +123,7 @@ uint64_t _stm_total_allocated(void);
 #define _STM_CARD_SIZE                 32     /* must be >= 32 */
 #define _STM_MIN_CARD_COUNT            17
 #define _STM_MIN_CARD_OBJ_SIZE         (_STM_CARD_SIZE * _STM_MIN_CARD_COUNT)
-#define _STM_NSE_SIGNAL_MAX            63
+#define _STM_NSE_SIGNAL_MAX            7
 #define _STM_FAST_ALLOC           (66*1024)
 
 
@@ -404,10 +404,6 @@ long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
    commits. */
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
                                             const char *msg);
-
-
-/* Temporary? */
-void stm_flush_timing(stm_thread_local_t *tl, int verbose);
 
 
 /* Profiling events.  In the comments: content of the markers, if any */

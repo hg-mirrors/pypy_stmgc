@@ -138,8 +138,6 @@ enum stm_event_e {
     ...
 };
 
-void stm_flush_timing(stm_thread_local_t *, int);
-
 typedef struct {
     stm_thread_local_t *tl;
     /* If segment_base==NULL, the remaining fields are undefined.  If non-NULL,
@@ -155,7 +153,6 @@ void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
 void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
 void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
 void stm_pop_marker(stm_thread_local_t *);
-char *_stm_expand_marker(void);
 """)
 
 

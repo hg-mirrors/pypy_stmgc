@@ -40,8 +40,7 @@ static void _timing_fetch_inev(void)
     STM_PSEGMENT->marker_inev.object = marker.object;
 }
 
-static void marker_fetch_obj_write(object_t *obj,
-                                   struct stm_loc_marker_t *out_marker)
+static void marker_fetch_obj_write(object_t *obj, stm_loc_marker_t *out_marker)
 {
     /* From 'out_marker->tl', fill in 'out_marker->segment_base' and
        'out_marker->odd_number' and 'out_marker->object' from the
@@ -117,12 +116,12 @@ static void _timing_contention(enum stm_event_e kind,
     markers[1].segment_base = other_pseg->pub.segment_base;
 
     switch (kind) {
-    case WRITE_WRITE_CONTENTION:
+    case STM_CONTENTION_WRITE_WRITE:
         marker_fetch_obj_write(obj, &markers[1]);
         break;
-    case INEVITABLE_CONTENTION:
-        markers[1].odd_number = other_pseg->marker_inev[0];
-        markers[1].object = (object_t *)other_pseg->marker_inev[1];
+    case STM_CONTENTION_INEVITABLE:
+        markers[1].odd_number = other_pseg->marker_inev.odd_number;
+        markers[1].object = other_pseg->marker_inev.object;
         break;
     default:
         markers[1].odd_number = 0;
@@ -130,11 +129,14 @@ static void _timing_contention(enum stm_event_e kind,
         break;
     }
 
-    release_marker_lock(other_segment_base);
-
     stmcb_timing_event(markers[0].tl, kind, markers);
+
+    /* only release the lock after stmcb_timing_event(), otherwise it could
+       run into race conditions trying to interpret 'markers[1].object' */
+    release_marker_lock(other_segment_base);
 }
 
 
-void (*stmcb_timing_event)(enum stm_event_e event,
-                           stm_loc_marker_t *markers[2]);
+void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
+                           enum stm_event_e event,
+                           stm_loc_marker_t *markers);
