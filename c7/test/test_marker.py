@@ -8,8 +8,12 @@ class TestMarker(BaseTest):
         seen = []
         @ffi.callback("stmcb_timing_event_fn")
         def timing_event(tl, event, markers):
-            if event == kind:
-                seen.append(tl)
+            if kind == "ALL":
+                seen.append(event)
+            elif event != kind:
+                return
+            seen.append(tl)
+            if markers:
                 seen.append(markers[0].tl)
                 seen.append(markers[0].segment_base)
                 seen.append(markers[0].odd_number)
@@ -18,6 +22,8 @@ class TestMarker(BaseTest):
                 seen.append(markers[1].segment_base)
                 seen.append(markers[1].odd_number)
                 seen.append(markers[1].object)
+            else:
+                seen.append(None)
         lib.stmcb_timing_event = timing_event
         self.timing_event_keepalive = timing_event
         self.seen = seen
@@ -205,3 +211,23 @@ class TestMarker(BaseTest):
         py.test.raises(Conflict, self.switch, 0)
         #
         self.check_recording(21, ffi.NULL, 0, ffi.NULL)
+
+    def test_all(self):
+        self.recording("ALL")
+        self.start_transaction()
+        self.commit_transaction()
+        self.start_transaction()
+        stm_major_collect()
+        self.abort_transaction()
+        assert self.seen == [
+            lib.STM_TRANSACTION_START,  self.tls[0], None,
+            lib.STM_GC_MINOR_START,     self.tls[0], None,
+            lib.STM_GC_MINOR_DONE,      self.tls[0], None,
+            lib.STM_TRANSACTION_COMMIT, self.tls[0], None,
+            lib.STM_TRANSACTION_START,  self.tls[0], None,
+            lib.STM_GC_MINOR_START,     self.tls[0], None,
+            lib.STM_GC_MINOR_DONE,      self.tls[0], None,
+            lib.STM_GC_MAJOR_START,     self.tls[0], None,
+            lib.STM_GC_MAJOR_DONE,      self.tls[0], None,
+            lib.STM_TRANSACTION_ABORT,  self.tls[0], None,
+            ]
