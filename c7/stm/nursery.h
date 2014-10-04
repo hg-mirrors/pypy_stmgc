@@ -1,10 +1,12 @@
 
-/* 'nursery_end' is either NURSERY_END, NSE_SIGxxx, or STM_TR_ABORT_xxx. */
-#define NSE_SIGPAUSE        (_STM_NSE_SIGNAL_MAX - 1)
-#define NSE_SIGCOMMITSOON   (_STM_NSE_SIGNAL_MAX - 2)
+/* 'nursery_end' is either NURSERY_END or one of NSE_SIGxxx */
+#define NSE_SIGABORT        1
+#define NSE_SIGPAUSE        2
+#define NSE_SIGCOMMITSOON   3
+#define _NSE_NUM_SIGNALS    4
 
-#if !(STM_TR_ABORT_OTHER < NSE_SIGCOMMITSOON)
-#  error "STM_TR_ABORT_xxx is too large; increase _STM_NSE_SIGNAL_MAX"
+#if _NSE_NUM_SIGNALS >= _STM_NSE_SIGNAL_MAX
+#  error "increase _STM_NSE_SIGNAL_MAX"
 #endif
 
 
