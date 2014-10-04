@@ -438,6 +438,23 @@ enum stm_event_e {
     _STM_EVENT_N
 };
 
+#define STM_EVENT_NAMES                         \
+    "transaction start",                        \
+    "transaction commit",                       \
+    "transaction abort",                        \
+    "contention write write",                   \
+    "contention write read",                    \
+    "contention inevitable",                    \
+    "aborting other contention",                \
+    "wait free segment",                        \
+    "wait sync pause",                          \
+    "wait contention",                          \
+    "wait done",                                \
+    "gc minor start",                           \
+    "gc minor done",                            \
+    "gc major start",                           \
+    "gc major done"
+
 /* The markers pushed in the shadowstack are an odd number followed by a
    regular pointer. */
 typedef struct {
