@@ -295,9 +295,15 @@ int main(void)
 
     stm_setup();
     stm_register_thread_local(&stm_thread_local);
+
+    /* check that we can use stm_start_inevitable_transaction() without
+       any rjbuf on the stack */
+    stm_start_inevitable_transaction(&stm_thread_local);
+    stm_commit_transaction();
+
+
     stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
     stmcb_expand_marker = expand_marker;
-
 
     setup_list();
 
