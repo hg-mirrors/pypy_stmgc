@@ -425,11 +425,13 @@ static void collect_roots_from_markers(uintptr_t num_old)
     for (i = num_old + 1; i < total; i += 2) {
         minor_trace_if_young((object_t **)list_ptr_to_item(mlst, i));
     }
-    if (STM_PSEGMENT->marker_inev[1]) {
-        uintptr_t *pmarker_inev_obj = (uintptr_t *)
+    if (STM_PSEGMENT->marker_inev.segment_base) {
+        assert(STM_PSEGMENT->marker_inev.segment_base ==
+               STM_SEGMENT->segment_base);
+        object_t **pmarker_inev_obj = (object_t **)
             REAL_ADDRESS(STM_SEGMENT->segment_base,
-                         &STM_PSEGMENT->marker_inev[1]);
-        minor_trace_if_young((object_t **)pmarker_inev_obj);
+                         &STM_PSEGMENT->marker_inev.object);
+        minor_trace_if_young(pmarker_inev_obj);
     }
 }
 
@@ -572,11 +574,11 @@ static void minor_collection(bool commit)
 
     stm_safe_point();
 
-    timing_event(NULL, STM_GC_MINOR_START, NULL, NULL);
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_START);
 
     _do_minor_collection(commit);
 
-    timing_event(NULL, STM_GC_MINOR_STOP, NULL, NULL);
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_DONE);
 }
 
 void stm_collect(long level)

@@ -22,8 +22,8 @@ static void close_fd_mmap(int ignored)
 static char *setup_mmap(char *reason, int *map_fd)
 {
     char name[128];
-    sprintf(name, "/stmgc-c7-bigmem-%ld-%.18e",
-            (long)getpid(), get_stm_time());
+    sprintf(name, "/stmgc-c7-bigmem-%ld",
+            (long)getpid());
 
     /* Create the big shared memory object, and immediately unlink it.
        There is a small window where if this process is killed the
@@ -241,8 +241,6 @@ void stm_register_thread_local(stm_thread_local_t *tl)
         num = tl->prev->associated_segment_num;
     }
     tl->thread_local_obj = NULL;
-    tl->_timing_cur_state = STM_TIME_OUTSIDE_TRANSACTION;
-    tl->_timing_cur_start = get_stm_time();
 
     /* assign numbers consecutively, but that's for tests; we could also
        assign the same number to all of them and they would get their own

@@ -187,7 +187,6 @@ static void fork_abort_thread(long i)
 #ifndef NDEBUG
     pr->running_pthread = pthread_self();
 #endif
-    strcpy(pr->marker_self, "fork");
     tl->shadowstack = NULL;
     pr->shadowstack_at_start_of_transaction = NULL;
     stm_rewind_jmp_forget(tl);

@@ -410,45 +410,51 @@ void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
 void stm_flush_timing(stm_thread_local_t *tl, int verbose);
 
 
-/* Profiling events (in the comments: value for marker1, value for marker2) */
+/* Profiling events.  In the comments: content of the markers, if any */
 enum stm_event_e {
-    /* always STM_TRANSACTION_START followed later by one of the STM_TR_xxx */
+    /* always STM_TRANSACTION_START followed later by one of COMMIT or ABORT */
     STM_TRANSACTION_START,
-    STM_TR_COMMIT,
-    STM_TR_ABORT_WRITE_WRITE,    /* self write loc, other write loc */
-    STM_TR_ABORT_WRITE_READ,     /* self write loc, other = null; or opposite */
-    STM_TR_ABORT_INEVITABLE,     /* self cur loc?, other turned-inev loc */
-    STM_TR_ABORT_OTHER,          /* ?, ? */
+    STM_TRANSACTION_COMMIT,
+    STM_TRANSACTION_ABORT,
 
-    /* always one STM_WT_xxx followed later by STM_WAIT_DONE */
-    STM_WT_FREE_SEGMENT,
-    STM_WT_SYNC_PAUSE,
-    STM_WT_WRITE_READ,           /* self write loc, other = null; or opposite */
-    STM_WT_INEVITABLE,           /* self cur loc?, other turned-inev loc */
+    /* contention; see details at the start of contention.c */
+    STM_CONTENTION_WRITE_WRITE,  /* markers: self loc / other written loc */
+    STM_CONTENTION_WRITE_READ,   /* markers: self written loc / other missing */
+    STM_CONTENTION_INEVITABLE,   /* markers: self loc / other inev loc */
+
+    /* following a contention, we get from the same thread one of:
+       STM_ABORTING_OTHER_CONTENTION, STM_TRANSACTION_ABORT (self-abort),
+       or STM_WAIT_CONTENTION (self-wait). */
+    STM_ABORTING_OTHER_CONTENTION,
+
+    /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE */
+    STM_WAIT_FREE_SEGMENT,
+    STM_WAIT_SYNC_PAUSE,
+    STM_WAIT_CONTENTION,
     STM_WAIT_DONE,
 
     /* start and end of GC cycles */
     STM_GC_MINOR_START,
-    STM_GC_MINOR_STOP,
+    STM_GC_MINOR_DONE,
     STM_GC_MAJOR_START,
-    STM_GC_MAJOR_STOP,
+    STM_GC_MAJOR_DONE,
 
     _STM_EVENT_N
 };
-#define _STM_MARKER_LEN  128
 
 /* The markers pushed in the shadowstack are an odd number followed by a
-   regular pointer.  When needed, this library invokes this callback to
-   turn this pair into a human-readable explanation. */
-extern void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,
-                                   object_t *following_object,
-                                   char *outputbuf, size_t outputbufsize);
-extern void (*stmcb_timing_event)(stm_thread_local_t *tl,
+   regular pointer. */
+typedef struct {
+    stm_thread_local_t *tl;
+    char *segment_base;    /* base to interpret the 'object' below */
+    uintptr_t odd_number;  /* marker odd number, or 0 if marker is missing */
+    object_t *object;      /* marker object, or NULL if marker is missing */
+} stm_loc_marker_t;
+extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
                                   enum stm_event_e event,
-                                  const char *marker1,
-                                  const char *marker2);
+                                  stm_loc_marker_t *markers);
 
-/* Conventience macros to push the markers into the shadowstack */
+/* Convenience macros to push the markers into the shadowstack */
 #define STM_PUSH_MARKER(tl, odd_num, p)   do {  \
     uintptr_t _odd_num = (odd_num);             \
     assert(_odd_num & 1);                       \
