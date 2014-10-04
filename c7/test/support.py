@@ -146,9 +146,11 @@ typedef struct {
     uintptr_t odd_number;
     object_t *object;
 } stm_loc_marker_t;
-void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
-                           enum stm_event_e event,
-                           stm_loc_marker_t *markers);
+
+typedef void (*stmcb_timing_event_fn)(stm_thread_local_t *tl,
+                                      enum stm_event_e event,
+                                      stm_loc_marker_t *markers);
+stmcb_timing_event_fn stmcb_timing_event;
 
 void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
 void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
@@ -552,8 +554,7 @@ class BaseTest(object):
         self.current_thread = 0
 
     def teardown_method(self, meth):
-        lib.stmcb_expand_marker = ffi.NULL
-        lib.stmcb_debug_print = ffi.NULL
+        lib.stmcb_timing_event = ffi.NULL
         tl = self.tls[self.current_thread]
         if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
             self.commit_transaction()      # must succeed!
@@ -639,7 +640,7 @@ class BaseTest(object):
         self.push_root(ffi.cast("object_t *", 8))
 
     def check_char_everywhere(self, obj, expected_content, offset=HDR):
-        for i in range(len(self.tls)):
+        for i in range(len(self.tls) + 1):
             addr = lib._stm_get_segment_base(i)
             content = addr[int(ffi.cast("uintptr_t", obj)) + offset]
             assert content == expected_content
