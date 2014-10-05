@@ -24,12 +24,6 @@ typedef struct {
     size_t mem_bytes_to_clear_on_abort;
     long last_abort__bytes_in_nursery;
     int associated_segment_num;
-    uint32_t events[];
-    float timing[];
-    int longest_marker_state;
-    double longest_marker_time;
-    char longest_marker_self[];
-    char longest_marker_other[];
     ...;
 } stm_thread_local_t;
 
@@ -113,34 +107,57 @@ long stm_can_move(object_t *);
 long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
-#define STM_TIME_OUTSIDE_TRANSACTION ...
-#define STM_TIME_RUN_CURRENT ...
-#define STM_TIME_RUN_COMMITTED ...
-#define STM_TIME_RUN_ABORTED_WRITE_WRITE ...
-#define STM_TIME_RUN_ABORTED_WRITE_READ ...
-#define STM_TIME_RUN_ABORTED_INEVITABLE ...
-#define STM_TIME_RUN_ABORTED_OTHER ...
-#define STM_TIME_WAIT_FREE_SEGMENT ...
-#define STM_TIME_WAIT_WRITE_READ ...
-#define STM_TIME_WAIT_INEVITABLE ...
-#define STM_TIME_WAIT_OTHER ...
-#define STM_TIME_BOOKKEEPING ...
-#define STM_TIME_MINOR_GC ...
-#define STM_TIME_MAJOR_GC ...
-#define STM_TIME_SYNC_PAUSE ...
+/* Profiling events.  In the comments: content of the markers, if any */
+enum stm_event_e {
+    /* always STM_TRANSACTION_START followed later by one of COMMIT or ABORT */
+    STM_TRANSACTION_START,
+    STM_TRANSACTION_COMMIT,
+    STM_TRANSACTION_ABORT,
 
-void stm_flush_timing(stm_thread_local_t *, int);
+    /* contention; see details at the start of contention.c */
+    STM_CONTENTION_WRITE_WRITE,  /* markers: self loc / other written loc */
+    STM_CONTENTION_WRITE_READ,   /* markers: self written loc / other missing */
+    STM_CONTENTION_INEVITABLE,   /* markers: self inev loc / other inev loc */
 
-void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,
-                            object_t *following_object,
-                            char *outputbuf, size_t outputbufsize);
-void (*stmcb_debug_print)(const char *cause, double time,
-                          const char *marker);
+    /* following a contention, we get from the same thread one of:
+       STM_ABORTING_OTHER_CONTENTION, STM_TRANSACTION_ABORT (self-abort),
+       or STM_WAIT_CONTENTION (self-wait). */
+    STM_ABORTING_OTHER_CONTENTION,
+
+    /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE */
+    STM_WAIT_FREE_SEGMENT,
+    STM_WAIT_SYNC_PAUSE,
+    STM_WAIT_CONTENTION,
+    STM_WAIT_DONE,
+
+    /* start and end of GC cycles */
+    STM_GC_MINOR_START,
+    STM_GC_MINOR_DONE,
+    STM_GC_MAJOR_START,
+    STM_GC_MAJOR_DONE,
+    ...
+};
+
+typedef struct {
+    stm_thread_local_t *tl;
+    /* If segment_base==NULL, the remaining fields are undefined.  If non-NULL,
+       the rest is a marker to interpret from this segment_base addr. */
+    char *segment_base;
+    uintptr_t odd_number;
+    object_t *object;
+} stm_loc_marker_t;
+
+typedef void (*stmcb_timing_event_fn)(stm_thread_local_t *tl,
+                                      enum stm_event_e event,
+                                      stm_loc_marker_t *markers);
+stmcb_timing_event_fn stmcb_timing_event;
+
+int stm_set_timing_log(const char *profiling_file_name,
+                       int expand_marker(stm_loc_marker_t *, char *, int));
 
 void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
 void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
 void stm_pop_marker(stm_thread_local_t *);
-char *_stm_expand_marker(void);
 """)
 
 
@@ -540,8 +557,7 @@ class BaseTest(object):
         self.current_thread = 0
 
     def teardown_method(self, meth):
-        lib.stmcb_expand_marker = ffi.NULL
-        lib.stmcb_debug_print = ffi.NULL
+        lib.stmcb_timing_event = ffi.NULL
         tl = self.tls[self.current_thread]
         if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
             self.commit_transaction()      # must succeed!
@@ -627,7 +643,7 @@ class BaseTest(object):
         self.push_root(ffi.cast("object_t *", 8))
 
     def check_char_everywhere(self, obj, expected_content, offset=HDR):
-        for i in range(len(self.tls)):
+        for i in range(len(self.tls) + 1):
             addr = lib._stm_get_segment_base(i)
             content = addr[int(ffi.cast("uintptr_t", obj)) + offset]
             assert content == expected_content

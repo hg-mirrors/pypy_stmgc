@@ -14,8 +14,8 @@
 #include "stm/extra.h"
 #include "stm/fprintcolor.h"
 #include "stm/weakref.h"
-#include "stm/timing.h"
 #include "stm/marker.h"
+#include "stm/prof.h"
 
 #include "stm/misc.c"
 #include "stm/list.c"
@@ -34,6 +34,6 @@
 #include "stm/extra.c"
 #include "stm/fprintcolor.c"
 #include "stm/weakref.c"
-#include "stm/timing.c"
 #include "stm/marker.c"
+#include "stm/prof.c"
 #include "stm/rewind_setjmp.c"
