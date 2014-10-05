@@ -10,12 +10,12 @@ def read_log(filename):
     assert header == "STMGC-C7-PROF01\n"
     result = []
     while True:
-        packet = f.read(15)
+        packet = f.read(19)
         if not packet: break
-        sec, nsec, threadnum, event, len0, len1 = \
-              struct.unpack("IIIBBB", packet)
+        sec, nsec, threadnum, otherthreadnum, event, len0, len1 = \
+              struct.unpack("IIIIBBB", packet)
         result.append((sec + 0.000000001 * nsec,
-                       threadnum,
+                       (threadnum, otherthreadnum),
                        event,
                        f.read(len0),
                        f.read(len1)))
@@ -65,13 +65,13 @@ class TestProf(BaseTest):
             lib.stm_set_timing_log(ffi.NULL, ffi.NULL)
 
         result = read_log(filename)
-        id0 = result[0][1]
-        id1 = result[1][1]
-        assert result[0][1:5] == (id0, lib.STM_TRANSACTION_START, '', '')
-        assert result[1][1:5] == (id1, lib.STM_TRANSACTION_START, '', '')
-        assert result[2][1:5] == (id1, lib.STM_GC_MINOR_START, '', '')
-        assert result[3][1:5] == (id1, lib.STM_GC_MINOR_DONE, '', '')
-        assert result[4][1:5] == (id1, lib.STM_CONTENTION_WRITE_READ,
+        id0 = result[0][1][0]
+        id1 = result[1][1][0]
+        assert result[0][1:5] == ((id0, 0), lib.STM_TRANSACTION_START, '', '')
+        assert result[1][1:5] == ((id1, 0), lib.STM_TRANSACTION_START, '', '')
+        assert result[2][1:5] == ((id1, 0), lib.STM_GC_MINOR_START, '', '')
+        assert result[3][1:5] == ((id1, 0), lib.STM_GC_MINOR_DONE, '', '')
+        assert result[4][1:5] == ((id1, id0), lib.STM_CONTENTION_WRITE_READ,
                                   chr(119), '')
-        assert result[5][1:5] == (id1, lib.STM_TRANSACTION_ABORT, '', '')
+        assert result[5][1:5] == ((id1, 0), lib.STM_TRANSACTION_ABORT, '', '')
         assert len(result) == 6
