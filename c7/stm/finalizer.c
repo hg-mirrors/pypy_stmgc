@@ -4,18 +4,15 @@ void (*stmcb_light_finalizer)(object_t *);
 
 void stm_enable_light_finalizer(object_t *obj)
 {
-    if (_is_young(obj)) {
-        STM_PSEGMENT->young_objects_with_light_finalizers = list_append(
-            STM_PSEGMENT->young_objects_with_light_finalizers, (uintptr_t)obj);
-    }
-    else {
-        STM_PSEGMENT->old_objects_with_light_finalizers = list_append(
-            STM_PSEGMENT->old_objects_with_light_finalizers, (uintptr_t)obj);
-    }
+    if (_is_young(obj))
+        LIST_APPEND(STM_PSEGMENT->young_objects_with_light_finalizers, obj);
+    else
+        LIST_APPEND(STM_PSEGMENT->old_objects_with_light_finalizers, obj);
 }
 
 static void deal_with_young_objects_with_finalizers(void)
 {
+    /* for light finalizers */
     struct list_s *lst = STM_PSEGMENT->young_objects_with_light_finalizers;
     long i, count = list_count(lst);
     for (i = 0; i < count; i++) {
@@ -30,8 +27,7 @@ static void deal_with_young_objects_with_finalizers(void)
         else {
             obj = pforwarded_array[1]; /* moved location */
             assert(!_is_young(obj));
-            STM_PSEGMENT->old_objects_with_light_finalizers = list_append(
-               STM_PSEGMENT->old_objects_with_light_finalizers, (uintptr_t)obj);
+            LIST_APPEND(STM_PSEGMENT->old_objects_with_light_finalizers, obj);
         }
     }
     list_clear(lst);
@@ -39,6 +35,7 @@ static void deal_with_young_objects_with_finalizers(void)
 
 static void deal_with_old_objects_with_finalizers(void)
 {
+    /* for light finalizers */
     long j;
     for (j = 1; j <= NB_SEGMENTS; j++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
@@ -62,4 +59,132 @@ static void deal_with_old_objects_with_finalizers(void)
             }
         }
     }
+}
+
+
+/************************************************************/
+/*  Algorithm for regular (non-light) finalizers.
+    Follows closely pypy/doc/discussion/finalizer-order.rst
+    as well as rpython/memory/gc/minimark.py.
+*/
+
+static inline int _finalization_state(object_t *obj)
+{
+    /* Returns the state, "0", 1, 2 or 3, as per finalizer-order.rst.
+       One difference is that the official state 0 is returned here
+       as a number that is <= 0. */
+    uintptr_t lock_idx = mark_loc(obj);
+    return write_locks[lock_idx] - (WL_FINALIZ_ORDER_1 - 1);
+}
+
+static void _bump_finalization_state_from_0_to_1(object_t *obj)
+{
+    uintptr_t lock_idx = mark_loc(obj);
+    assert(write_locks[lock_idx] < WL_FINALIZ_ORDER_1);
+    write_locks[lock_idx] = WL_FINALIZ_ORDER_1;
+}
+
+static struct list_s *_finalizer_tmpstack;
+
+static inline void append_to_finalizer_tmpstack(object_t **pobj)
+{
+    object_t *obj = *pobj;
+    if (obj != NULL)
+        LIST_APPEND(_finalizer_tmpstack, obj);
+}
+
+static void _recursively_bump_finalization_state(object_t *obj, int from_state,
+                                                 struct list_s *tmpstack)
+{
+    assert(_finalization_state(obj) == from_state);
+    assert(list_is_empty(tmpstack));
+    _finalizer_tmpstack = tmpstack;
+
+    while (1) {
+        if (_finalization_state(obj) == from_state) {
+            /* bump to the next state */
+            write_locks[mark_loc(obj)]++;
+
+            /* trace */
+            struct object_s *realobj =
+                (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
+            stmcb_trace(realobj, &append_to_finalizer_tmpstack);
+        }
+
+        if (list_is_empty(tmpstack))
+            break;
+
+        obj = (object_t *)list_pop_item(tmpstack);
+    }
+}
+
+static void deal_with_objects_with_finalizers(void)
+{
+    /* for non-light finalizers */
+
+    /* there is one 'objects_with_finalizers' list per segment, but it
+       doesn't really matter: all objects are considered equal, and if
+       they survive, they are added again into one list that is attached
+       at the end to an arbitrary segment. */
+    struct list_s *new_with_finalizer = list_create();
+    struct list_s *marked = list_create();
+    struct list_s *pending = list_create();
+    struct list_s *tmpstack = list_create();
+
+    long j;
+    for (j = 1; j <= NB_SEGMENTS; j++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
+
+        struct list_s *lst = pseg->objects_with_finalizers;
+        long i, count = list_count(lst);
+        for (i = 0; i < count; i++) {
+            object_t *x = (object_t *)list_item(lst, i);
+
+            assert(_finalization_state(x) != 1);
+            if (_finalization_state(x) >= 2) {
+                LIST_APPEND(new_with_finalizer, x);
+                continue;
+            }
+            LIST_APPEND(marked, x);
+            LIST_APPEND(pending, x);
+            while (!list_is_empty(pending)) {
+                object_t *y = (object_t *)list_pop_item(pending);
+                int state = _finalization_state(y);
+                if (state <= 0) {
+                    _bump_finalization_state_from_0_to_1(y);
+                    /* trace into the 'pending' list */
+                    struct object_s *realobj =
+                        (struct object_s *)REAL_ADDRESS(stm_object_pages, y);
+                    _finalizer_tmpstack = pending;
+                    stmcb_trace(realobj, &append_to_finalizer_tmpstack);
+                }
+                else if (state == 2) {
+                    _recursively_bump_finalization_state(y, 2, tmpstack);
+                }
+            }
+            _recursively_bump_finalization_state(x, 1, tmpstack);
+        }
+        list_clear(lst);
+    }
+
+    long i, count = list_count(marked);
+    for (i = 0; i < count; i++) {
+        object_t *x = (object_t *)list_item(marked, i);
+
+        int state = _finalization_state(x);
+        assert(state >= 2);
+        if (state == 2) {
+            LIST_APPEND(run_finalizers, x);
+            _recursively_bump_finalization_state(x, 2, tmpstack);
+        }
+        else {
+            LIST_APPEND(new_with_finalizer, x);
+        }
+    }
+
+    list_free(tmpstack);
+    list_free(pending);
+    list_free(marked);
+    list_free(get_priv_segment(1)->objects_with_finalizers);
+    get_priv_segment(1)->objects_with_finalizers = new_with_finalizer;
 }
