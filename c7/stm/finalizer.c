@@ -84,21 +84,30 @@ static void _bump_finalization_state_from_0_to_1(object_t *obj)
     write_locks[lock_idx] = WL_FINALIZ_ORDER_1;
 }
 
-static struct list_s *_finalizer_tmpstack;
+static struct list_s *_finalizer_tmpstack, *_finalizer_emptystack;
 
-static inline void append_to_finalizer_tmpstack(object_t **pobj)
+static inline void _append_to_finalizer_tmpstack(object_t **pobj)
 {
     object_t *obj = *pobj;
     if (obj != NULL)
         LIST_APPEND(_finalizer_tmpstack, obj);
 }
 
-static void _recursively_bump_finalization_state(object_t *obj, int from_state,
-                                                 struct list_s *tmpstack)
+static inline struct list_s *finalizer_trace(object_t *obj, struct list_s *lst)
 {
-    assert(_finalization_state(obj) == from_state);
+    struct object_s *realobj =
+        (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
+    _finalizer_tmpstack = lst;
+    stmcb_trace(realobj, &_append_to_finalizer_tmpstack);
+    return _finalizer_tmpstack;
+}
+
+static void _recursively_bump_finalization_state(object_t *obj, int from_state)
+{
+    struct list_s *tmpstack = _finalizer_emptystack;
     assert(list_is_empty(tmpstack));
-    _finalizer_tmpstack = tmpstack;
+
+    assert(_finalization_state(obj) == from_state);
 
     while (1) {
         if (_finalization_state(obj) == from_state) {
@@ -106,9 +115,7 @@ static void _recursively_bump_finalization_state(object_t *obj, int from_state,
             write_locks[mark_loc(obj)]++;
 
             /* trace */
-            struct object_s *realobj =
-                (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
-            stmcb_trace(realobj, &append_to_finalizer_tmpstack);
+            tmpstack = finalizer_trace(obj, tmpstack);
         }
 
         if (list_is_empty(tmpstack))
@@ -116,6 +123,7 @@ static void _recursively_bump_finalization_state(object_t *obj, int from_state,
 
         obj = (object_t *)list_pop_item(tmpstack);
     }
+    _finalizer_emptystack = tmpstack;
 }
 
 static void deal_with_objects_with_finalizers(void)
@@ -129,7 +137,7 @@ static void deal_with_objects_with_finalizers(void)
     struct list_s *new_with_finalizer = list_create();
     struct list_s *marked = list_create();
     struct list_s *pending = list_create();
-    struct list_s *tmpstack = list_create();
+    LIST_CREATE(_finalizer_emptystack);
 
     long j;
     for (j = 1; j <= NB_SEGMENTS; j++) {
@@ -152,17 +160,13 @@ static void deal_with_objects_with_finalizers(void)
                 int state = _finalization_state(y);
                 if (state <= 0) {
                     _bump_finalization_state_from_0_to_1(y);
-                    /* trace into the 'pending' list */
-                    struct object_s *realobj =
-                        (struct object_s *)REAL_ADDRESS(stm_object_pages, y);
-                    _finalizer_tmpstack = pending;
-                    stmcb_trace(realobj, &append_to_finalizer_tmpstack);
+                    pending = finalizer_trace(y, pending);
                 }
                 else if (state == 2) {
-                    _recursively_bump_finalization_state(y, 2, tmpstack);
+                    _recursively_bump_finalization_state(y, 2);
                 }
             }
-            _recursively_bump_finalization_state(x, 1, tmpstack);
+            _recursively_bump_finalization_state(x, 1);
         }
         list_clear(lst);
     }
@@ -175,14 +179,14 @@ static void deal_with_objects_with_finalizers(void)
         assert(state >= 2);
         if (state == 2) {
             LIST_APPEND(run_finalizers, x);
-            _recursively_bump_finalization_state(x, 2, tmpstack);
+            _recursively_bump_finalization_state(x, 2);
         }
         else {
             LIST_APPEND(new_with_finalizer, x);
         }
     }
 
-    list_free(tmpstack);
+    LIST_FREE(_finalizer_emptystack);
     list_free(pending);
     list_free(marked);
     list_free(get_priv_segment(1)->objects_with_finalizers);

@@ -2,7 +2,7 @@ from support import *
 import py
 
 
-class TestFinalizer(BaseTest):
+class TestLightFinalizer(BaseTest):
 
     def setup_method(self, meth):
         BaseTest.setup_method(self, meth)
