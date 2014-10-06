@@ -113,7 +113,7 @@ void stm_setup(void)
 
         /* Initialize STM_PSEGMENT */
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
-        assert(1 <= i && i < 255);   /* 255 is WL_VISITED in gcpage.c */
+        assert(1 <= i && i < 253);   /* 253 is WL_FINALIZ_ORDER_1 in gcpage.c */
         pr->write_lock_num = i;
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
@@ -130,10 +130,12 @@ void stm_setup(void)
         pr->callbacks_on_commit_and_abort[1] = tree_create();
         pr->young_objects_with_light_finalizers = list_create();
         pr->old_objects_with_light_finalizers = list_create();
+        pr->objects_with_finalizers = list_create();
         pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * i;
         highest_overflow_number = pr->overflow_number;
         pr->pub.transaction_read_version = 0xff;
     }
+    run_finalizers = list_create();
 
     /* The pages are shared lazily, as remap_file_pages() takes a relatively
        long time for each page.
@@ -173,7 +175,9 @@ void stm_teardown(void)
         tree_free(pr->callbacks_on_commit_and_abort[1]);
         list_free(pr->young_objects_with_light_finalizers);
         list_free(pr->old_objects_with_light_finalizers);
+        list_free(pr->objects_with_finalizers);
     }
+    list_free(run_finalizers);
 
     munmap(stm_object_pages, TOTAL_MEMORY);
     stm_object_pages = NULL;

@@ -199,9 +199,10 @@ struct stm_priv_segment_info_s {
     /* marker where this thread became inevitable */
     stm_loc_marker_t marker_inev;
 
-    /* Lightweight finalizers */
+    /* finalizers */
     struct list_s *young_objects_with_light_finalizers;
     struct list_s *old_objects_with_light_finalizers;
+    struct list_s *objects_with_finalizers;
 };
 
 enum /* safe_point */ {

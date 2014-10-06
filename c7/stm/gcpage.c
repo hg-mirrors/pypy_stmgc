@@ -161,7 +161,11 @@ static void major_collection_if_requested(void)
 
 static struct list_s *mark_objects_to_trace;
 
-#define WL_VISITED   255
+#define WL_FINALIZ_ORDER_1    253
+#define WL_FINALIZ_ORDER_2    254
+#define WL_FINALIZ_ORDER_3    WL_VISITED
+
+#define WL_VISITED            255
 
 
 static inline uintptr_t mark_loc(object_t *obj)
@@ -625,6 +629,11 @@ static void major_collection_now_at_safe_point(void)
     mark_visit_from_markers();
     mark_visit_from_roots();
     LIST_FREE(mark_objects_to_trace);
+
+    /* finalizer support: will mark as WL_VISITED all objects with a
+       finalizer and all objects reachable from there, and also moves
+       some objects from 'objects_with_finalizers' to 'run_finalizers'. */
+    deal_with_objects_with_finalizers();
 
     /* weakrefs and old light finalizers */
     stm_visit_old_weakrefs();
