@@ -626,8 +626,9 @@ static void major_collection_now_at_safe_point(void)
     mark_visit_from_roots();
     LIST_FREE(mark_objects_to_trace);
 
-    /* weakrefs: */
+    /* weakrefs and old light finalizers */
     stm_visit_old_weakrefs();
+    deal_with_old_objects_with_finalizers();
 
     /* cleanup */
     clean_up_segment_lists();
