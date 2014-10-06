@@ -31,3 +31,11 @@ class TestFinalizer(BaseTest):
         self.expect_finalized([])
         self.commit_transaction()
         self.expect_finalized([lp1])
+
+    def test_young_light_finalizer_dont_die(self):
+        self.start_transaction()
+        lp1 = stm_allocate(48)
+        lib.stm_enable_light_finalizer(lp1)
+        self.push_root(lp1)       # stays alive
+        self.commit_transaction()
+        self.expect_finalized([])
