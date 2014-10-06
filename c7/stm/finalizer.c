@@ -1,6 +1,7 @@
 
 
 void (*stmcb_light_finalizer)(object_t *);
+void (*stmcb_finalizer)(object_t *);
 
 void stm_enable_light_finalizer(object_t *obj)
 {
@@ -8,6 +9,11 @@ void stm_enable_light_finalizer(object_t *obj)
         LIST_APPEND(STM_PSEGMENT->young_objects_with_light_finalizers, obj);
     else
         LIST_APPEND(STM_PSEGMENT->old_objects_with_light_finalizers, obj);
+}
+
+object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up)
+{
+    abort();  // NOT IMPLEMENTED
 }
 
 static void deal_with_young_objects_with_finalizers(void)
@@ -47,7 +53,7 @@ static void deal_with_old_objects_with_finalizers(void)
             object_t* obj = (object_t *)list_item(lst, i);
             if (!mark_visited_test(obj)) {
                 /* not marked: object dies */
-                /* we're calling the light finalizer is a random thread,
+                /* we're calling the light finalizer in a random thread,
                    but it should work, because it was dead already at the
                    start of that thread's transaction, so any thread should
                    see the same, old content */

@@ -31,6 +31,7 @@ void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
+object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
 /*void stm_write_card(); use _checked_stm_write_card() instead */

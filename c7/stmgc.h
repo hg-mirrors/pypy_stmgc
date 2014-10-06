@@ -511,6 +511,18 @@ int stm_set_timing_log(const char *profiling_file_name,
 void (*stmcb_light_finalizer)(object_t *);
 void stm_enable_light_finalizer(object_t *);
 
+/* Support for regular finalizers.  Unreachable objects with
+   finalizers are kept alive, as well as everything they point to, and
+   stmcb_finalizer() is called after the major GC.  If there are
+   several objects with finalizers that reference each other in a
+   well-defined order (i.e. there are no cycles), then they are
+   finalized in order from outermost to innermost (i.e.  starting with
+   the ones that are unreachable even from others).  The finalizer is
+   called in a random thread, except for objects that have been
+   created by the current transaction in a thread; in that case, only
+   that thread can call the finalizer. */
+void (*stmcb_finalizer)(object_t *);
+object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 
 /* ==================== END ==================== */
 
