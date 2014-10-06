@@ -158,6 +158,9 @@ int stm_set_timing_log(const char *profiling_file_name,
 void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
 void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
 void stm_pop_marker(stm_thread_local_t *);
+
+void (*stmcb_light_finalizer)(object_t *);
+void stm_enable_light_finalizer(object_t *);
 """)
 
 

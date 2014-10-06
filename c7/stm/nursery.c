@@ -559,6 +559,7 @@ static void _do_minor_collection(bool commit)
 
     /* now all surviving nursery objects have been moved out */
     stm_move_young_weakrefs();
+    deal_with_young_objects_with_finalizers();
 
     throw_away_nursery(get_priv_segment(STM_SEGMENT->segment_num));
 
