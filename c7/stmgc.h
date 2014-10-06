@@ -505,6 +505,13 @@ int stm_set_timing_log(const char *profiling_file_name,
 } while (0)
 
 
+/* Support for light finalizers.  This is a simple version of
+   finalizers that guarantees not to do anything fancy, like not
+   resurrecting objects. */
+void (*stmcb_light_finalizer)(object_t *);
+void stm_enable_light_finalizer(object_t *);
+
+
 /* ==================== END ==================== */
 
 #endif
