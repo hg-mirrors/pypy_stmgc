@@ -73,3 +73,32 @@ class TestLightFinalizer(BaseTest):
         stm_major_collect()
         self.commit_transaction()
         self.expect_finalized([])
+
+
+class TestRegularFinalizer(BaseTest):
+
+    def setup_method(self, meth):
+        BaseTest.setup_method(self, meth)
+        #
+        @ffi.callback("void(object_t *)")
+        def finalizer(obj):
+            self.finalizers_called.append(obj)
+        self.finalizers_called = []
+        lib.stmcb_finalizer = finalizer
+        self._finalizer_keepalive = finalizer
+
+    def expect_finalized(self, objs):
+        assert self.finalizers_called == objs
+        self.finalizers_called = []
+
+    def test_no_finalizer(self):
+        self.start_transaction()
+        lp1 = stm_allocate(48)
+        stm_major_collect()
+        self.expect_finalized([])
+
+    def test_no_finalizer_in_minor_collection(self):
+        self.start_transaction()
+        lp1 = stm_allocate_with_finalizer(48)
+        stm_minor_collect()
+        self.expect_finalized([])
