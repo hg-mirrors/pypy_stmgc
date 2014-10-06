@@ -201,6 +201,7 @@ struct stm_priv_segment_info_s {
 
     /* Lightweight finalizers */
     struct list_s *young_objects_with_light_finalizers;
+    struct list_s *old_objects_with_light_finalizers;
 };
 
 enum /* safe_point */ {

@@ -39,3 +39,13 @@ class TestFinalizer(BaseTest):
         self.push_root(lp1)       # stays alive
         self.commit_transaction()
         self.expect_finalized([])
+
+    def test_old_light_finalizer(self):
+        self.start_transaction()
+        lp1 = stm_allocate(48)
+        self.push_root(lp1)
+        stm_minor_collect()
+        lp1 = self.pop_root()
+        lib.stm_enable_light_finalizer(lp1)
+        self.commit_transaction()
+        self.expect_finalized([])
