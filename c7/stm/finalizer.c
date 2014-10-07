@@ -123,15 +123,13 @@ static inline struct list_s *finalizer_trace(object_t *obj, struct list_s *lst)
     return _finalizer_tmpstack;
 }
 
-static void _recursively_bump_finalization_state(object_t *obj, int from_state)
+static void _recursively_bump_finalization_state(object_t *obj, int to_state)
 {
     struct list_s *tmpstack = _finalizer_emptystack;
     assert(list_is_empty(tmpstack));
 
-    assert(_finalization_state(obj) == from_state);
-
     while (1) {
-        if (_finalization_state(obj) == from_state) {
+        if (_finalization_state(obj) == to_state - 1) {
             /* bump to the next state */
             write_locks[mark_loc(obj)]++;
 
@@ -151,27 +149,35 @@ static void deal_with_objects_with_finalizers(void)
 {
     /* for non-light finalizers */
 
-    /* there is one 'objects_with_finalizers' list per segment, but it
-       doesn't really matter: all objects are considered equal, and if
-       they survive, they are added again into one list that is attached
-       at the end to an arbitrary segment. */
-    struct list_s *new_with_finalizer = list_create();
-    struct list_s *marked = list_create();
-    struct list_s *pending = list_create();
+    /* there is one 'objects_with_finalizers' list per segment.
+       Objects that survives remain the their original segment's list.
+       For objects that existed since a long time, it doesn't change
+       anything: any thread, through any segment, should see the same
+       old content.  (If the content was different between segments,
+       the object would be in a 'modified_old_objects' list somewhere,
+       and so it wouldn't be dead).  But it's important if the object
+       was created by the same transaction: then only that segment
+       sees valid content.
+    */
+    struct list_s *marked_seg[NB_SEGMENTS];
+    struct list_s *pending;
     LIST_CREATE(_finalizer_emptystack);
+    LIST_CREATE(pending);
 
     long j;
     for (j = 1; j <= NB_SEGMENTS; j++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
+        struct list_s *marked = list_create();
 
         struct list_s *lst = pseg->objects_with_finalizers;
         long i, count = list_count(lst);
+        lst->count = 0;
         for (i = 0; i < count; i++) {
             object_t *x = (object_t *)list_item(lst, i);
 
             assert(_finalization_state(x) != 1);
             if (_finalization_state(x) >= 2) {
-                LIST_APPEND(new_with_finalizer, x);
+                list_set_item(lst, lst->count++, (uintptr_t)x);
                 continue;
             }
             LIST_APPEND(marked, x);
@@ -184,32 +190,39 @@ static void deal_with_objects_with_finalizers(void)
                     pending = finalizer_trace(y, pending);
                 }
                 else if (state == 2) {
-                    _recursively_bump_finalization_state(y, 2);
+                    _recursively_bump_finalization_state(y, 3);
                 }
             }
-            _recursively_bump_finalization_state(x, 1);
-        }
-        list_clear(lst);
-    }
-
-    long i, count = list_count(marked);
-    for (i = 0; i < count; i++) {
-        object_t *x = (object_t *)list_item(marked, i);
-
-        int state = _finalization_state(x);
-        assert(state >= 2);
-        if (state == 2) {
-            LIST_APPEND(run_finalizers, x);
+            assert(_finalization_state(x) == 1);
             _recursively_bump_finalization_state(x, 2);
         }
-        else {
-            LIST_APPEND(new_with_finalizer, x);
+
+        marked_seg[j - 1] = marked;
+    }
+
+    LIST_FREE(pending);
+
+    for (j = 1; j <= NB_SEGMENTS; j++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
+        struct list_s *lst = pseg->objects_with_finalizers;
+        struct list_s *marked = marked_seg[j - 1];
+
+        long i, count = list_count(marked);
+        for (i = 0; i < count; i++) {
+            object_t *x = (object_t *)list_item(marked, i);
+
+            int state = _finalization_state(x);
+            assert(state >= 2);
+            if (state == 2) {
+                LIST_APPEND(pseg->run_finalizers, x);
+                _recursively_bump_finalization_state(x, 3);
+            }
+            else {
+                list_set_item(lst, lst->count++, (uintptr_t)x);
+            }
         }
+        list_free(marked);
     }
 
     LIST_FREE(_finalizer_emptystack);
-    list_free(pending);
-    list_free(marked);
-    list_free(get_priv_segment(1)->objects_with_finalizers);
-    get_priv_segment(1)->objects_with_finalizers = new_with_finalizer;
 }
