@@ -42,6 +42,8 @@ static void deal_with_young_objects_with_finalizers(void)
 static void deal_with_old_objects_with_finalizers(void)
 {
     /* for light finalizers */
+    int old_gs_register = STM_SEGMENT->segment_num;
+    int current_gs_register = old_gs_register;
     long j;
     for (j = 1; j <= NB_SEGMENTS; j++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
@@ -53,10 +55,21 @@ static void deal_with_old_objects_with_finalizers(void)
             object_t* obj = (object_t *)list_item(lst, i);
             if (!mark_visited_test(obj)) {
                 /* not marked: object dies */
-                /* we're calling the light finalizer in a random thread,
-                   but it should work, because it was dead already at the
-                   start of that thread's transaction, so any thread should
-                   see the same, old content */
+                /* we're calling the light finalizer in the same
+                   segment as where it was originally registered.  For
+                   objects that existed since a long time, it doesn't
+                   change anything: any thread should see the same old
+                   content (because if it wasn't the case, the object
+                   would be in a 'modified_old_objects' list
+                   somewhere, and so it wouldn't be dead).  But it's
+                   important if the object was created by the same
+                   transaction: then only that segment sees valid
+                   content.
+                */
+                if (j != current_gs_register) {
+                    set_gs_register(get_segment_base(j));
+                    current_gs_register = j;
+                }
                 stmcb_light_finalizer(obj);
             }
             else {
@@ -65,6 +78,8 @@ static void deal_with_old_objects_with_finalizers(void)
             }
         }
     }
+    if (old_gs_register != current_gs_register)
+        set_gs_register(get_segment_base(old_gs_register));
 }
 
 

@@ -63,6 +63,7 @@ bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
 bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 int stm_is_inevitable(void);
+long current_segment_num(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
@@ -373,6 +374,11 @@ void stm_pop_marker(stm_thread_local_t *tl)
 
 void stmcb_commit_soon()
 {
+}
+
+long current_segment_num(void)
+{
+    return STM_SEGMENT->segment_num;
 }
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
