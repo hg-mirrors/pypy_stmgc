@@ -131,11 +131,11 @@ void stm_setup(void)
         pr->young_objects_with_light_finalizers = list_create();
         pr->old_objects_with_light_finalizers = list_create();
         pr->objects_with_finalizers = list_create();
+        pr->run_finalizers = list_create();
         pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * i;
         highest_overflow_number = pr->overflow_number;
         pr->pub.transaction_read_version = 0xff;
     }
-    run_finalizers = list_create();
 
     /* The pages are shared lazily, as remap_file_pages() takes a relatively
        long time for each page.
@@ -176,8 +176,8 @@ void stm_teardown(void)
         list_free(pr->young_objects_with_light_finalizers);
         list_free(pr->old_objects_with_light_finalizers);
         list_free(pr->objects_with_finalizers);
+        list_free(pr->run_finalizers);
     }
-    list_free(run_finalizers);
 
     munmap(stm_object_pages, TOTAL_MEMORY);
     stm_object_pages = NULL;
