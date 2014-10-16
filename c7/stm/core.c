@@ -845,6 +845,8 @@ void stm_commit_transaction(void)
     push_modified_to_other_segments();
     _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
 
+    commit_finalizers();
+
     /* update 'overflow_number' if needed */
     if (STM_PSEGMENT->overflow_number_has_been_used) {
         highest_overflow_number += GCFLAG_OVERFLOW_NUMBER_bit0;
