@@ -9,7 +9,7 @@ static void init_finalizers(struct finalizers_s *f)
 {
     f->objects_with_finalizers = list_create();
     f->run_finalizers = NULL;
-    f->running_current = NULL;
+    f->running_next = NULL;
 }
 
 static void setup_finalizer(void)
@@ -57,6 +57,21 @@ static void _commit_finalizers(void)
     STM_PSEGMENT->finalizers = NULL;
 }
 
+static void _abort_finalizers(void)
+{
+    /* like _commit_finalizers(), but forget everything from the
+       current transaction */
+    if (STM_PSEGMENT->finalizers->run_finalizers != NULL) {
+        if (STM_PSEGMENT->finalizers->running_next != NULL) {
+            *STM_PSEGMENT->finalizers->running_next = (uintptr_t)-1;
+        }
+        list_free(STM_PSEGMENT->finalizers->run_finalizers);
+    }
+    list_free(STM_PSEGMENT->finalizers->objects_with_finalizers);
+    free(STM_PSEGMENT->finalizers);
+    STM_PSEGMENT->finalizers = NULL;
+}
+
 
 void stm_enable_light_finalizer(object_t *obj)
 {
@@ -68,11 +83,13 @@ void stm_enable_light_finalizer(object_t *obj)
 
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up)
 {
-    if (STM_PSEGMENT->finalizers == NULL)
-    struct finalizers_s *f = malloc(sizeof(struct finalizers_s));
-    if (f == NULL)
-        stm_fatalerror("out of memory in create_finalizers");   /* XXX */
-        STM_PSEGMENT->finalizers = create_finalizers();
+    if (STM_PSEGMENT->finalizers == NULL) {
+        struct finalizers_s *f = malloc(sizeof(struct finalizers_s));
+        if (f == NULL)
+            stm_fatalerror("out of memory in create_finalizers");   /* XXX */
+        init_finalizers(f);
+        STM_PSEGMENT->finalizers = f;
+    }
 
     object_t *obj = _allocate_old(size_rounded_up);
     LIST_APPEND(STM_PSEGMENT->finalizers->objects_with_finalizers, obj);
@@ -275,6 +292,7 @@ static void mark_finalize_step2(struct finalizers_s *f, struct list_s *marked)
             _recursively_bump_finalization_state(x, 3);
         }
         else {
+            struct list_s *lst = f->objects_with_finalizers;
             list_set_item(lst, lst->count++, (uintptr_t)x);
         }
     }
@@ -357,7 +375,7 @@ static void execute_finalizers(struct finalizers_s *f)
     LIST_FREE(f->run_finalizers);
 }
 
-static void _invoke_general_finalizers(void)
+static void _invoke_general_finalizers(stm_thread_local_t *tl)
 {
     /* called between transactions */
     static int lock = 0;

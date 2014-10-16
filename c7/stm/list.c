@@ -34,7 +34,7 @@ static struct list_s *list_extend(struct list_s *lst, struct list_s *lst2,
                                   uintptr_t slicestart)
 {
     if (lst2->count <= slicestart)
-        return;
+        return lst;
     uintptr_t baseindex = lst->count;
     lst->count = baseindex + lst2->count - slicestart;
     uintptr_t lastindex = lst->count - 1;

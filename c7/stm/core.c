@@ -374,6 +374,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[1]));
     assert(STM_PSEGMENT->objects_pointing_to_nursery == NULL);
     assert(STM_PSEGMENT->large_overflow_objects == NULL);
+    assert(STM_PSEGMENT->finalizers == NULL);
 #ifndef NDEBUG
     /* this should not be used when objects_pointing_to_nursery == NULL */
     STM_PSEGMENT->modified_old_objects_markers_num_old = 99999999999999999L;
@@ -867,10 +868,13 @@ void stm_commit_transaction(void)
     }
 
     /* done */
+    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     _finish_transaction(STM_TRANSACTION_COMMIT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
+
+    invoke_general_finalizers(tl);
 }
 
 void stm_abort_transaction(void)
@@ -1047,6 +1051,8 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
 
     /* invoke the callbacks */
     invoke_and_clear_user_callbacks(1);   /* for abort */
+
+    abort_finalizers();
 
     if (is_abort(STM_SEGMENT->nursery_end)) {
         /* done aborting */
