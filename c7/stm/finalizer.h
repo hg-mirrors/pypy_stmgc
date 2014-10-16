@@ -13,19 +13,27 @@ static void setup_finalizer(void);
 static void teardown_finalizer(void);
 
 static void _commit_finalizers(void);
+static void _abort_finalizers(void);
 
 #define commit_finalizers()   do {              \
     if (STM_PSEGMENT->finalizers != NULL)       \
         _commit_finalizers();                   \
 } while (0)
 
+#define abort_finalizers()   do {               \
+    if (STM_PSEGMENT->finalizers != NULL)       \
+        _abort_finalizers();                    \
+} while (0)
+
 
 /* regular finalizers (objs from already-committed transactions) */
 static struct finalizers_s g_finalizers;
 
-static void _invoke_general_finalizers(void);
+static void _invoke_general_finalizers(stm_thread_local_t *tl);
 
-#define invoke_general_finalizers()    do {     \
-    if (g_finalizers->run_finalizers != NULL)   \
-        _invoke_general_finalizers();           \
+#define invoke_general_finalizers(tl)    do {   \
+    if (g_finalizers.run_finalizers != NULL)    \
+        _invoke_general_finalizers(tl);         \
 } while (0)
+
+static void execute_finalizers(struct finalizers_s *f);
