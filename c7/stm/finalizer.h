@@ -1,6 +1,7 @@
 
 struct finalizers_s {
     struct list_s *objects_with_finalizers;
+    uintptr_t count_non_young;
     struct list_s *run_finalizers;
     uintptr_t *running_next;
 };

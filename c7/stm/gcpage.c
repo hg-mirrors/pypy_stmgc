@@ -111,20 +111,14 @@ static char *allocate_outside_nursery_large(uint64_t size)
     return addr;
 }
 
-static object_t *_allocate_old(ssize_t size_rounded_up)
+object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
+    /* only for tests xxx but stm_setup_prebuilt() uses this now too */
     char *p = allocate_outside_nursery_large(size_rounded_up);
     memset(p, 0, size_rounded_up);
 
     object_t *o = (object_t *)(p - stm_object_pages);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
-    return o;
-}
-
-object_t *_stm_allocate_old(ssize_t size_rounded_up)
-{
-    /* only for tests xxx but stm_setup_prebuilt() uses this now too */
-    object_t *o = _allocate_old(size_rounded_up);
 
     if (testing_prebuilt_objs == NULL)
         testing_prebuilt_objs = list_create();

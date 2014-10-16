@@ -163,6 +163,8 @@ void stm_pop_marker(stm_thread_local_t *);
 
 void (*stmcb_light_finalizer)(object_t *);
 void stm_enable_light_finalizer(object_t *);
+
+void (*stmcb_finalizer)(object_t *);
 """)
 
 
@@ -458,6 +460,18 @@ def stm_set_ref(obj, idx, ref, use_cards=False):
 def stm_get_ref(obj, idx):
     stm_read(obj)
     return lib._get_ptr(obj, idx)
+
+def stm_allocate_with_finalizer(size):
+    o = lib.stm_allocate_with_finalizer(size)
+    tid = 42 + size
+    lib._set_type_id(o, tid)
+    return o
+
+def stm_allocate_with_finalizer_refs(n):
+    o = lib.stm_allocate_with_finalizer(HDR + n * WORD)
+    tid = 421420 + n
+    lib._set_type_id(o, tid)
+    return o
 
 def stm_set_char(obj, c, offset=HDR, use_cards=False):
     assert HDR <= offset < stm_get_obj_size(obj)
