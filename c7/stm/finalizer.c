@@ -8,6 +8,7 @@ void (*stmcb_finalizer)(object_t *);
 static void init_finalizers(struct finalizers_s *f)
 {
     f->objects_with_finalizers = list_create();
+    f->count_non_young = 0;
     f->run_finalizers = NULL;
     f->running_next = NULL;
 }
@@ -83,6 +84,8 @@ void stm_enable_light_finalizer(object_t *obj)
 
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up)
 {
+    object_t *obj = _stm_allocate_external(size_rounded_up);
+
     if (STM_PSEGMENT->finalizers == NULL) {
         struct finalizers_s *f = malloc(sizeof(struct finalizers_s));
         if (f == NULL)
@@ -90,8 +93,6 @@ object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up)
         init_finalizers(f);
         STM_PSEGMENT->finalizers = f;
     }
-
-    object_t *obj = _allocate_old(size_rounded_up);
     LIST_APPEND(STM_PSEGMENT->finalizers->objects_with_finalizers, obj);
     return obj;
 }
@@ -201,16 +202,17 @@ static inline void _append_to_finalizer_tmpstack(object_t **pobj)
         LIST_APPEND(_finalizer_tmpstack, obj);
 }
 
-static inline struct list_s *finalizer_trace(object_t *obj, struct list_s *lst)
+static inline struct list_s *finalizer_trace(char *base, object_t *obj,
+                                             struct list_s *lst)
 {
-    struct object_s *realobj =
-        (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
+    struct object_s *realobj = (struct object_s *)REAL_ADDRESS(base, obj);
     _finalizer_tmpstack = lst;
     stmcb_trace(realobj, &_append_to_finalizer_tmpstack);
     return _finalizer_tmpstack;
 }
 
-static void _recursively_bump_finalization_state(object_t *obj, int to_state)
+static void _recursively_bump_finalization_state(char *base, object_t *obj,
+                                                 int to_state)
 {
     struct list_s *tmpstack = _finalizer_emptystack;
     assert(list_is_empty(tmpstack));
@@ -221,7 +223,7 @@ static void _recursively_bump_finalization_state(object_t *obj, int to_state)
             write_locks[mark_loc(obj)]++;
 
             /* trace */
-            tmpstack = finalizer_trace(obj, tmpstack);
+            tmpstack = finalizer_trace(base, obj, tmpstack);
         }
 
         if (list_is_empty(tmpstack))
@@ -232,7 +234,7 @@ static void _recursively_bump_finalization_state(object_t *obj, int to_state)
     _finalizer_emptystack = tmpstack;
 }
 
-static struct list_s *mark_finalize_step1(struct finalizers_s *f)
+static struct list_s *mark_finalize_step1(char *base, struct finalizers_s *f)
 {
     if (f == NULL)
         return NULL;
@@ -259,20 +261,21 @@ static struct list_s *mark_finalize_step1(struct finalizers_s *f)
             int state = _finalization_state(y);
             if (state <= 0) {
                 _bump_finalization_state_from_0_to_1(y);
-                pending = finalizer_trace(y, pending);
+                pending = finalizer_trace(base, y, pending);
             }
             else if (state == 2) {
-                _recursively_bump_finalization_state(y, 3);
+                _recursively_bump_finalization_state(base, y, 3);
             }
         }
         _finalizer_pending = pending;
         assert(_finalization_state(x) == 1);
-        _recursively_bump_finalization_state(x, 2);
+        _recursively_bump_finalization_state(base, x, 2);
     }
     return marked;
 }
 
-static void mark_finalize_step2(struct finalizers_s *f, struct list_s *marked)
+static void mark_finalize_step2(char *base, struct finalizers_s *f,
+                                struct list_s *marked)
 {
     if (f == NULL)
         return;
@@ -289,7 +292,7 @@ static void mark_finalize_step2(struct finalizers_s *f, struct list_s *marked)
             if (run_finalizers == NULL)
                 run_finalizers = list_create();
             LIST_APPEND(run_finalizers, x);
-            _recursively_bump_finalization_state(x, 3);
+            _recursively_bump_finalization_state(base, x, 3);
         }
         else {
             struct list_s *lst = f->objects_with_finalizers;
@@ -325,17 +328,19 @@ static void deal_with_objects_with_finalizers(void)
     long j;
     for (j = 1; j <= NB_SEGMENTS; j++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
-        marked_seg[j] = mark_finalize_step1(pseg->finalizers);
+        marked_seg[j] = mark_finalize_step1(pseg->pub.segment_base,
+                                            pseg->finalizers);
     }
-    marked_seg[0] = mark_finalize_step1(&g_finalizers);
+    marked_seg[0] = mark_finalize_step1(stm_object_pages, &g_finalizers);
 
     LIST_FREE(_finalizer_pending);
 
     for (j = 1; j <= NB_SEGMENTS; j++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
-        mark_finalize_step2(pseg->finalizers, marked_seg[j]);
+        mark_finalize_step2(pseg->pub.segment_base, pseg->finalizers,
+                            marked_seg[j]);
     }
-    mark_finalize_step2(&g_finalizers, marked_seg[0]);
+    mark_finalize_step2(stm_object_pages, &g_finalizers, marked_seg[0]);
 
     LIST_FREE(_finalizer_emptystack);
 }

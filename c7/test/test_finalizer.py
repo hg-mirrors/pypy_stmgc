@@ -127,3 +127,23 @@ class TestRegularFinalizer(BaseTest):
         lp1 = stm_allocate_with_finalizer(48)
         stm_minor_collect()
         self.expect_finalized([])
+
+    def test_finalizer_in_major_collection(self):
+        self.start_transaction()
+        lp1 = stm_allocate_with_finalizer(48)
+        lp2 = stm_allocate_with_finalizer(48)
+        lp3 = stm_allocate_with_finalizer(48)
+        print lp1, lp2, lp3
+        stm_major_collect()
+        self.expect_finalized([lp1, lp2, lp3])
+
+    def test_finalizer_ordering(self):
+        self.start_transaction()
+        lp1 = stm_allocate_with_finalizer_refs(1)
+        lp2 = stm_allocate_with_finalizer_refs(1)
+        lp3 = stm_allocate_with_finalizer_refs(1)
+        print lp1, lp2, lp3
+        stm_set_ref(lp3, 0, lp1)
+        stm_set_ref(lp1, 0, lp2)
+        stm_major_collect()
+        self.expect_finalized([lp3])
