@@ -151,6 +151,7 @@ void stm_setup(void)
     setup_gcpage();
     setup_pages();
     setup_forksupport();
+    setup_finalizer();
 }
 
 void stm_teardown(void)
@@ -183,6 +184,7 @@ void stm_teardown(void)
     stm_object_pages = NULL;
     close_fd_mmap(stm_object_pages_fd);
 
+    teardown_finalizer();
     teardown_core();
     teardown_sync();
     teardown_gcpage();
