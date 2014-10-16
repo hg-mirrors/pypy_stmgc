@@ -147,3 +147,23 @@ class TestRegularFinalizer(BaseTest):
         stm_set_ref(lp1, 0, lp2)
         stm_major_collect()
         self.expect_finalized([lp3])
+
+    def test_finalizer_extra_transation(self):
+        self.start_transaction()
+        lp1 = stm_allocate_with_finalizer(32)
+        print lp1
+        self.push_root(lp1)
+        self.commit_transaction()
+
+        self.start_transaction()
+        lp1b = self.pop_root()
+        assert lp1b == lp1
+        self.expect_finalized([])
+        self.commit_transaction()
+        self.expect_finalized([])
+
+        self.start_transaction()
+        stm_major_collect()
+        self.expect_finalized([])
+        self.commit_transaction()
+        self.expect_finalized([lp1])
