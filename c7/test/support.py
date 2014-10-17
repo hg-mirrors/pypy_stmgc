@@ -31,6 +31,7 @@ void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
+object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 
 /*void stm_write_card(); use _checked_stm_write_card() instead */
@@ -62,6 +63,7 @@ bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
 bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 int stm_is_inevitable(void);
+long current_segment_num(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
@@ -158,6 +160,11 @@ int stm_set_timing_log(const char *profiling_file_name,
 void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
 void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
 void stm_pop_marker(stm_thread_local_t *);
+
+void (*stmcb_light_finalizer)(object_t *);
+void stm_enable_light_finalizer(object_t *);
+
+void (*stmcb_finalizer)(object_t *);
 """)
 
 
@@ -370,6 +377,11 @@ void stm_pop_marker(stm_thread_local_t *tl)
 void stmcb_commit_soon()
 {
 }
+
+long current_segment_num(void)
+{
+    return STM_SEGMENT->segment_num;
+}
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
                     ('STM_NO_AUTOMATIC_SETJMP', '1'),
@@ -448,6 +460,18 @@ def stm_set_ref(obj, idx, ref, use_cards=False):
 def stm_get_ref(obj, idx):
     stm_read(obj)
     return lib._get_ptr(obj, idx)
+
+def stm_allocate_with_finalizer(size):
+    o = lib.stm_allocate_with_finalizer(size)
+    tid = 42 + size
+    lib._set_type_id(o, tid)
+    return o
+
+def stm_allocate_with_finalizer_refs(n):
+    o = lib.stm_allocate_with_finalizer(HDR + n * WORD)
+    tid = 421420 + n
+    lib._set_type_id(o, tid)
+    return o
 
 def stm_set_char(obj, c, offset=HDR, use_cards=False):
     assert HDR <= offset < stm_get_obj_size(obj)
