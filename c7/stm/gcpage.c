@@ -153,8 +153,7 @@ static void major_collection_if_requested(void)
     }
 
     s_mutex_unlock();
-
-    execute_finalizers(STM_PSEGMENT->finalizers);
+    exec_local_finalizers();
 }
 
 

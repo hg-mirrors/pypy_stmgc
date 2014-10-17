@@ -167,3 +167,18 @@ class TestRegularFinalizer(BaseTest):
         self.expect_finalized([])
         self.commit_transaction()
         self.expect_finalized([lp1])
+
+    def test_run_cb_for_all_threads(self):
+        self.start_transaction()
+        lp1 = stm_allocate_with_finalizer(48)
+        print lp1
+        #
+        self.switch(1)
+        self.start_transaction()
+        lp2 = stm_allocate_with_finalizer(56)
+        print lp2
+
+        self.expect_finalized([])
+        stm_major_collect()
+        self.switch(0)
+        self.expect_finalized([lp2, lp1])
