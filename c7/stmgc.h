@@ -516,11 +516,15 @@ void stm_enable_light_finalizer(object_t *);
    stmcb_finalizer() is called after the major GC.  If there are
    several objects with finalizers that reference each other in a
    well-defined order (i.e. there are no cycles), then they are
-   finalized in order from outermost to innermost (i.e.  starting with
-   the ones that are unreachable even from others).  The finalizer is
-   called in a random thread, except for objects that have been
-   created by the current transaction in a thread; in that case, only
-   that thread can call the finalizer. */
+   finalized in order from outermost to innermost (i.e. starting with
+   the ones that are unreachable even from others).
+
+   For objects that have been created by the current transaction, if a
+   major GC runs while that transaction is alive and finds the object
+   unreachable, the finalizer is called immediately in the same
+   transaction.  For older objects, the finalizer is called from a
+   random thread between regular transactions, in a new custom
+   transaction. */
 void (*stmcb_finalizer)(object_t *);
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 
