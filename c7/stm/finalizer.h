@@ -37,4 +37,11 @@ static void _invoke_general_finalizers(stm_thread_local_t *tl);
         _invoke_general_finalizers(tl);         \
 } while (0)
 
-static void execute_finalizers(struct finalizers_s *f);
+static void _execute_finalizers(struct finalizers_s *f);
+
+#define any_local_finalizers() (STM_PSEGMENT->finalizers != NULL &&         \
+                               STM_PSEGMENT->finalizers->run_finalizers != NULL)
+#define exec_local_finalizers()  do {                   \
+    if (any_local_finalizers())                         \
+        _execute_finalizers(STM_PSEGMENT->finalizers);  \
+} while (0)

@@ -345,9 +345,9 @@ static void deal_with_objects_with_finalizers(void)
     LIST_FREE(_finalizer_emptystack);
 }
 
-static void execute_finalizers(struct finalizers_s *f)
+static void _execute_finalizers(struct finalizers_s *f)
 {
-    if (f == NULL || f->run_finalizers == NULL)
+    if (f->run_finalizers == NULL)
         return;   /* nothing to do */
 
  restart:
@@ -395,7 +395,7 @@ static void _invoke_general_finalizers(stm_thread_local_t *tl)
     stm_rewind_jmp_enterframe(tl, &rjbuf);
     stm_start_transaction(tl);
 
-    execute_finalizers(&g_finalizers);
+    _execute_finalizers(&g_finalizers);
 
     stm_commit_transaction();
     stm_rewind_jmp_leaveframe(tl, &rjbuf);
