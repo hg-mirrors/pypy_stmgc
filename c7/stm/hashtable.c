@@ -1,0 +1,276 @@
+#include "stmgc.h"
+
+/*
+Design of stmgc's "hashtable" objects
+=====================================
+
+A "hashtable" is theoretically a lazily-filled array of objects of
+length 2**64.  Initially it is full of NULLs.  It's obviously
+implemented as a dictionary in which NULL objects are not needed.
+
+The only operations on a hashtable are reading or writing an object at
+a given index.
+
+There are two markers for every index (a read and a write marker).
+This is unlike regular arrays, which have only two markers in total.
+
+
+Implementation
+--------------
+
+First idea: have the hashtable in raw memory, pointing to "entry"
+objects.  The entry objects themselves point to the user-specified
+objects, and they have the read/write markers.  Every entry object
+itself, once created, stays around.  It is only removed by the next
+major GC if it points to NULL and its read/write markers are not set
+in any currently-running transaction.
+*/
+
+
+typedef TLPREFIX struct stm_hashtable_entry_s {
+    struct object_s header;
+    uintptr_t index;
+    object_t *object;
+} stm_hashtable_entry_t;
+
+
+#define INITIAL_HASHTABLE_SIZE   8
+#define PERTURB_SHIFT            5
+#define RESIZING_LOCK            0
+
+typedef struct {
+    uintptr_t mask;
+
+    /* 'resize_counter' start at an odd value, and is decremented (by
+       6) for every new item put in 'items'.  When it crosses 0, we
+       instead allocate a bigger table and change 'resize_counter' to
+       be a regular pointer to it (which is then even).  The whole
+       structure is immutable then.
+
+       The field 'resize_counter' also works as a write lock: changes
+       go via the intermediate value RESIZING_LOCK (0).
+    */
+    uintptr_t resize_counter;
+
+    stm_hashtable_entry_t *items[INITIAL_HASHTABLE_SIZE];
+} stm_hashtable_table_t;
+
+#define IS_EVEN(p) (((p) & 1) == 0)
+
+struct stm_hashtable_s {
+    stm_hashtable_table_t *table;
+    stm_hashtable_table_t initial_table;
+};
+
+
+static inline void init_table(stm_hashtable_table_t *table, uintptr_t itemcount)
+{
+    table->mask = itemcount - 1;
+    table->resize_counter = itemcount * 4 + 1;
+    memset(table->items, 0, itemcount * sizeof(stm_hashtable_entry_t *));
+}
+
+stm_hashtable_t *stm_hashtable_create(void)
+{
+    stm_hashtable_t *hashtable = malloc(sizeof(stm_hashtable_t));
+    assert(hashtable);
+    hashtable->table = &hashtable->initial_table;
+    init_table(&hashtable->initial_table, INITIAL_HASHTABLE_SIZE);
+    return hashtable;
+}
+
+void stm_hashtable_free(stm_hashtable_t *hashtable)
+{
+    uintptr_t rc = hashtable->initial_table.resize_counter;
+    free(hashtable);
+    while (IS_EVEN(rc)) {
+        assert(rc != RESIZING_LOCK);
+
+        stm_hashtable_table_t *table = (stm_hashtable_table_t *)rc;
+        rc = table->resize_counter;
+        free(table);
+    }
+}
+
+#if 0
+static void stm_compact_hashtable(stm_hashtable_t *hashtable)
+{
+    stm_hashtable_table_t *table = hashtable->table;
+    assert(!IS_EVEN(table->resize_counter));
+
+    if (table != &hashtable->initial_table) {
+        uintptr_t rc = hashtable->initial_table.resize_counter;
+        while (1) {
+            assert(IS_EVEN(rc));
+            assert(rc != RESIZING_LOCK);
+
+            stm_hashtable_table_t *old_table = (stm_hashtable_table_t *)rc;
+            if (old_table == table)
+                break;
+            rc = old_table->resize_counter;
+            free(old_table);
+        }
+        hashtable->initial_table.resize_counter = (uintptr_t)table;
+    }
+    if (table->resize_counter < table->mask * 3) {
+        uintptr_t j, mask = table->mask;
+        uintptr_t rc = table->resize_counter;
+        for (j = 0; j <= mask; j++) {
+            stm_hashtable_entry_t *e = table->items[j];
+            if (e != NULL && e->object == NULL) {
+                if (!_stm_was_read_by_anybody(e)) {
+                    table->items[j] = NULL;
+                    rc += 6;
+                }
+            }
+        }
+        table->resize_counter = rc;
+    }
+}
+#endif
+
+#define VOLATILE_HASHTABLE(p)    ((volatile stm_hashtable_t *)(p))
+#define VOLATILE_TABLE(p)  ((volatile stm_hashtable_table_t *)(p))
+
+static void _insert_clean(stm_hashtable_table_t *table,
+                          stm_hashtable_entry_t *entry)
+{
+    uintptr_t mask = table->mask;
+    uintptr_t i = entry->index & mask;
+    if (table->items[i] == NULL) {
+        table->items[i] = entry;
+        return;
+    }
+
+    uintptr_t perturb = entry->index;
+    while (1) {
+        i = (i << 2) + i + perturb + 1;
+        i &= mask;
+        if (table->items[i] == NULL) {
+            table->items[i] = entry;
+            return;
+        }
+
+        perturb >>= PERTURB_SHIFT;
+    }
+}
+
+static stm_hashtable_entry_t *_stm_hashtable_lookup(stm_hashtable_t *hashtable,
+                                                    uintptr_t index)
+{
+    stm_hashtable_table_t *table;
+    uintptr_t mask;
+    uintptr_t i;
+    stm_hashtable_entry_t *entry;
+
+ restart:
+    /* classical dict lookup logic */
+    table = VOLATILE_HASHTABLE(hashtable)->table;
+    mask = table->mask;      /* read-only field */
+    i = index & mask;
+    entry = VOLATILE_TABLE(table)->items[i];
+    if (entry != NULL) {
+        if (entry->index == index)
+            return entry;           /* found at the first try */
+
+        uintptr_t perturb = index;
+        while (1) {
+            i = (i << 2) + i + perturb + 1;
+            i &= mask;
+            entry = VOLATILE_TABLE(table)->items[i];
+            if (entry != NULL) {
+                if (entry->index == index)
+                    return entry;    /* found */
+            }
+            else
+                break;
+            perturb >>= PERTURB_SHIFT;
+        }
+    }
+    /* here, we didn't find the 'entry' with the correct index. */
+
+    uintptr_t rc = VOLATILE_TABLE(table)->resize_counter;
+
+    /* if rc is RESIZING_LOCK (which is 0, so even), a concurrent thread
+       is writing to the hashtable.  Or, if rc is another even number, it is
+       actually a pointer to the next version of the table, installed
+       just now.  In both cases, this thread must simply spin loop.
+    */
+    if (IS_EVEN(rc)) {
+        spin_loop();
+        goto restart;
+    }
+    /* in the other cases, we need to grab the RESIZING_LOCK.
+     */
+    if (!__sync_bool_compare_and_swap(&table->resize_counter,
+                                      rc, RESIZING_LOCK)) {
+        goto restart;
+    }
+    /* we now have the lock.  Check that 'table->items[i]' is still NULL,
+       i.e. hasn't been populated under our feet.
+    */
+    if (table->items[i] != NULL) {
+        table->resize_counter = rc;    /* unlock */
+        goto restart;
+    }
+    /* if rc is greater than 6, there is enough room for a new
+       item in the current table.
+    */
+    if (rc > 6) {
+        entry = (stm_hashtable_entry_t *)
+            _stm_allocate_old(sizeof(stm_hashtable_entry_t));
+        entry->index = index;
+        write_fence();     /* make sure 'entry' is fully initialized here */
+        table->items[i] = entry;
+        write_fence();     /* make sure 'table->items' is written here */
+        VOLATILE_TABLE(table)->resize_counter = rc - 6;    /* unlock */
+        return entry;
+    }
+    else {
+        /* if rc is smaller than 6, we must allocate a new bigger table.
+         */
+        uintptr_t biggercount = (table->mask + 1) * 2;
+        if (biggercount < 50000)
+            biggercount *= 2;
+        size_t size = (offsetof(stm_hashtable_table_t, items)
+                       + biggercount * sizeof(stm_hashtable_entry_t *));
+        stm_hashtable_table_t *biggertable = malloc(size);
+        assert(biggertable);
+        table->resize_counter = (uintptr_t)biggertable;
+        /* unlock, but put the new table, so IS_EVEN() is still true */
+
+        init_table(biggertable, biggercount);
+
+        uintptr_t j;
+        rc = biggertable->resize_counter;
+        for (j = 0; j <= mask; j++) {
+            entry = table->items[j];
+            if (entry != NULL) {
+                _insert_clean(biggertable, entry);
+                rc -= 6;
+            }
+        }
+        biggertable->resize_counter = rc;
+
+        write_fence();   /* make sure as well that 'biggertable' is valid here;
+                            and make sure 'table->resize_counter' is updated
+                            ('table' must be immutable from now on). */
+        VOLATILE_HASHTABLE(hashtable)->table = biggertable;
+        goto restart;
+    }
+}
+
+object_t *stm_hashtable_read(stm_hashtable_t *hashtable, uintptr_t index)
+{
+    stm_hashtable_entry_t *e = _stm_hashtable_lookup(hashtable, index);
+    stm_read((object_t *)e);
+    return e->object;
+}
+
+void stm_hashtable_write(stm_hashtable_t *hashtable, uintptr_t index,
+                         object_t *nvalue)
+{
+    stm_hashtable_entry_t *e = _stm_hashtable_lookup(hashtable, index);
+    stm_write((object_t *)e);
+    e->object = nvalue;
+}

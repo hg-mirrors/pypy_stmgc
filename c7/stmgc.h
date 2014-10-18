@@ -528,6 +528,17 @@ void stm_enable_light_finalizer(object_t *);
 void (*stmcb_finalizer)(object_t *);
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 
+/* Hashtables.  Keys are 64-bit unsigned integers, values are
+   'object_t *'.  Note that the type 'stm_hashtable_t' is not an
+   object type at all; you need to allocate and free it explicitly.
+   If you want to embed the hashtable inside an 'object_t' you
+   probably need a light finalizer to do the freeing. */
+typedef struct stm_hashtable_s stm_hashtable_t;
+stm_hashtable_t *stm_hashtable_create(void);
+void stm_hashtable_free(stm_hashtable_t *);
+object_t *stm_hashtable_read(stm_hashtable_t *, uintptr_t key);
+void stm_hashtable_write(stm_hashtable_t *, uintptr_t key, object_t *nvalue);
+
 /* ==================== END ==================== */
 
 #endif

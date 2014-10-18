@@ -165,6 +165,12 @@ void (*stmcb_light_finalizer)(object_t *);
 void stm_enable_light_finalizer(object_t *);
 
 void (*stmcb_finalizer)(object_t *);
+
+typedef struct stm_hashtable_s stm_hashtable_t;
+stm_hashtable_t *stm_hashtable_create(void);
+void stm_hashtable_free(stm_hashtable_t *);
+object_t *stm_hashtable_read(stm_hashtable_t *, uintptr_t key);
+void stm_hashtable_write(stm_hashtable_t *, uintptr_t key, object_t *nvalue);
 """)
 
 
