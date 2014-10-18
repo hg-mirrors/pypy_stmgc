@@ -508,7 +508,7 @@ int stm_set_timing_log(const char *profiling_file_name,
 /* Support for light finalizers.  This is a simple version of
    finalizers that guarantees not to do anything fancy, like not
    resurrecting objects. */
-void (*stmcb_light_finalizer)(object_t *);
+extern void (*stmcb_light_finalizer)(object_t *);
 void stm_enable_light_finalizer(object_t *);
 
 /* Support for regular finalizers.  Unreachable objects with
@@ -525,7 +525,7 @@ void stm_enable_light_finalizer(object_t *);
    transaction.  For older objects, the finalizer is called from a
    random thread between regular transactions, in a new custom
    transaction. */
-void (*stmcb_finalizer)(object_t *);
+extern void (*stmcb_finalizer)(object_t *);
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 
 /* Hashtables.  Keys are 64-bit unsigned integers, values are
@@ -538,6 +538,7 @@ stm_hashtable_t *stm_hashtable_create(void);
 void stm_hashtable_free(stm_hashtable_t *);
 object_t *stm_hashtable_read(stm_hashtable_t *, uintptr_t key);
 void stm_hashtable_write(stm_hashtable_t *, uintptr_t key, object_t *nvalue);
+extern uint32_t stm_hashtable_entry_userdata;
 
 /* ==================== END ==================== */
 

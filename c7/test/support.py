@@ -171,6 +171,7 @@ stm_hashtable_t *stm_hashtable_create(void);
 void stm_hashtable_free(stm_hashtable_t *);
 object_t *stm_hashtable_read(stm_hashtable_t *, uintptr_t key);
 void stm_hashtable_write(stm_hashtable_t *, uintptr_t key, object_t *nvalue);
+uint32_t stm_hashtable_entry_userdata;
 """)
 
 
@@ -410,6 +411,7 @@ GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
 FAST_ALLOC = lib._STM_FAST_ALLOC
+lib.stm_hashtable_entry_userdata = 42 + HDR + 2 * 8
 
 class Conflict(Exception):
     pass
