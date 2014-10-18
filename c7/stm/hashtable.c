@@ -29,9 +29,12 @@ in any currently-running transaction.
 
 typedef TLPREFIX struct stm_hashtable_entry_s {
     struct object_s header;
+    uint32_t userdata;
     uintptr_t index;
     object_t *object;
 } stm_hashtable_entry_t;
+
+uint32_t stm_hashtable_entry_userdata;
 
 
 #define INITIAL_HASHTABLE_SIZE   8
@@ -219,7 +222,9 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(stm_hashtable_t *hashtable,
     if (rc > 6) {
         entry = (stm_hashtable_entry_t *)
             _stm_allocate_old(sizeof(stm_hashtable_entry_t));
+        entry->userdata = stm_hashtable_entry_userdata;
         entry->index = index;
+        entry->object = NULL;
         write_fence();     /* make sure 'entry' is fully initialized here */
         table->items[i] = entry;
         write_fence();     /* make sure 'table->items' is written here */
