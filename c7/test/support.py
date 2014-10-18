@@ -170,7 +170,9 @@ typedef struct stm_hashtable_s stm_hashtable_t;
 stm_hashtable_t *stm_hashtable_create(void);
 void stm_hashtable_free(stm_hashtable_t *);
 object_t *stm_hashtable_read(stm_hashtable_t *, uintptr_t key);
-void stm_hashtable_write(stm_hashtable_t *, uintptr_t key, object_t *nvalue);
+bool _check_hashtable_read(stm_hashtable_t *, uintptr_t key);
+object_t *hashtable_read_result;
+bool _check_hashtable_write(stm_hashtable_t *, uintptr_t key, object_t *nvalue);
 uint32_t stm_hashtable_entry_userdata;
 """)
 
@@ -245,6 +247,18 @@ bool _check_become_inevitable(stm_thread_local_t *tl) {
 
 bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
     CHECKED(stm_become_globally_unique_transaction(tl, "TESTGUT"));
+}
+
+object_t *hashtable_read_result;
+
+bool _check_hashtable_read(stm_hashtable_t *h, uintptr_t key)
+{
+    CHECKED(hashtable_read_result = stm_hashtable_read(h, key));
+}
+
+bool _check_hashtable_write(stm_hashtable_t *h, uintptr_t key, object_t *nvalue)
+{
+    CHECKED(stm_hashtable_write(h, key, nvalue));
 }
 
 #undef CHECKED
@@ -563,7 +577,6 @@ def old_objects_with_cards():
     if count < 0:
         return None
     return map(lib._stm_enum_old_objects_with_cards, range(count))
-
 
 
 
