@@ -220,11 +220,19 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(stm_hashtable_t *hashtable,
        item in the current table.
     */
     if (rc > 6) {
-        entry = (stm_hashtable_entry_t *)
-            _stm_allocate_old(sizeof(stm_hashtable_entry_t));
-        entry->userdata = stm_hashtable_entry_userdata;
-        entry->index = index;
-        entry->object = NULL;
+        char *p = allocate_outside_nursery_large(sizeof(stm_hashtable_entry_t));
+        entry = (stm_hashtable_entry_t *)(p - stm_object_pages);
+
+        long j;
+        for (j = 0; j <= NB_SEGMENTS; j++) {
+            struct stm_hashtable_entry_s *e = (struct stm_hashtable_entry_s *)
+                REAL_ADDRESS(get_segment_base(j), entry);
+            e->header.stm_flags = GCFLAG_WRITE_BARRIER;
+            e->userdata = stm_hashtable_entry_userdata;
+            e->index = index;
+            e->object = NULL;
+        }
+
         write_fence();     /* make sure 'entry' is fully initialized here */
         table->items[i] = entry;
         write_fence();     /* make sure 'table->items' is written here */
