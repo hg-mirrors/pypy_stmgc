@@ -85,3 +85,30 @@ class TestHashtable(BaseTest):
         self.switch(1)
         self.start_transaction()
         py.test.raises(Conflict, "h[1234] = lp2")
+
+    def test_keepalive_minor(self):
+        h = StmHashTable()
+        self.start_transaction()
+        lp1 = stm_allocate(16)
+        stm_set_char(lp1, 'N')
+        h[1234] = lp1
+        stm_minor_collect()
+        lp1b = h[1234]
+        assert lp1b != ffi.NULL
+        assert stm_get_char(lp1b) == 'N'
+        assert lp1b != lp1
+
+    def test_keepalive_major(self):
+        h = StmHashTable()
+        lp1 = stm_allocate_old(16)
+        #
+        self.start_transaction()
+        stm_set_char(lp1, 'N')
+        h[1234] = lp1
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        stm_major_collect()
+        lp1b = h[1234]
+        assert lp1b == lp1
+        assert stm_get_char(lp1b) == 'N'
