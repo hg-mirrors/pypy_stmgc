@@ -18,6 +18,9 @@ static void import_objects(
     char *src_segment_base = (from_segnum >= 0 ? get_segment_base(from_segnum)
                                                : NULL);
 
+    assert(IMPLY(from_segnum >= 0, get_priv_segment(from_segnum)->modification_lock));
+    assert(STM_PSEGMENT->modification_lock);
+
     for (; undo < end; undo++) {
         object_t *obj = undo->object;
         stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
@@ -70,8 +73,8 @@ static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum,
 {
     /* looks at all bk copies of objects overlapping page 'pagenum' and
        copies the part in 'pagenum' back to the current segment */
-    dprintf(("copy_bk_objs_in_page_from(%d, %lu, %d)\n",
-             from_segnum, pagenum, only_if_not_modified));
+    dprintf(("copy_bk_objs_in_page_from(%d, %ld, %d)\n",
+             from_segnum, (long)pagenum, only_if_not_modified));
 
     struct list_s *list = get_priv_segment(from_segnum)->modified_old_objects;
     struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
@@ -85,6 +88,7 @@ static void go_to_the_past(uintptr_t pagenum,
                            struct stm_commit_log_entry_s *from,
                            struct stm_commit_log_entry_s *to)
 {
+    assert(STM_PSEGMENT->modification_lock);
     assert(from->rev_num >= to->rev_num);
     /* walk BACKWARDS the commit log and update the page 'pagenum',
        initially at revision 'from', until we reach the revision 'to'. */
@@ -150,10 +154,11 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     assert(shared_ref_count == 1);
 
     /* make our page private */
-    page_privatize_in(STM_SEGMENT->segment_num, pagenum);
+    page_privatize_in(my_segnum, pagenum);
     assert(get_page_status_in(my_segnum, pagenum) == PAGE_PRIVATE);
 
-    acquire_modified_objs_lock(copy_from_segnum);
+    uint64_t to_lock = (1UL << copy_from_segnum)| (1UL << my_segnum);
+    acquire_modification_lock_set(to_lock);
     pagecopy((char*)(get_virt_page_of(my_segnum, pagenum) * 4096UL),
              (char*)(get_virt_page_of(copy_from_segnum, pagenum) * 4096UL));
 
@@ -167,8 +172,6 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     OPT_ASSERT(src_version->rev_num == most_recent_rev);
     target_version = STM_PSEGMENT->last_commit_log_entry;
 
-    release_modified_objs_lock(copy_from_segnum);
-    release_all_privatization_locks();
 
     dprintf(("handle_segfault_in_page: rev %lu to rev %lu\n",
              src_version->rev_num, target_version->rev_num));
@@ -178,6 +181,9 @@ static void handle_segfault_in_page(uintptr_t pagenum)
      */
     if (src_version->rev_num > target_version->rev_num)
         go_to_the_past(pagenum, src_version, target_version);
+
+    release_modification_lock_set(to_lock);
+    release_all_privatization_locks();
 }
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
@@ -245,102 +251,97 @@ static void reset_modified_from_backup_copies(int segment_num);  /* forward */
 
 static void _stm_validate(void *free_if_abort)
 {
+    dprintf(("_stm_validate(%p)\n", free_if_abort));
     /* go from last known entry in commit log to the
        most current one and apply all changes done
        by other transactions. Abort if we read one of
        the committed objs. */
-    struct stm_commit_log_entry_s *cl = STM_PSEGMENT->last_commit_log_entry;
-    struct stm_commit_log_entry_s *next_cl;
+    struct stm_commit_log_entry_s *first_cl = STM_PSEGMENT->last_commit_log_entry;
+    struct stm_commit_log_entry_s *next_cl, *last_cl, *cl;
     int my_segnum = STM_SEGMENT->segment_num;
     /* Don't check this 'cl'. This entry is already checked */
 
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
-        assert(cl->next == (void*)-1);
+        assert(first_cl->next == (void*)-1);
         return;
     }
 
-    /* We need this lock to prevent a segfault handler in a different thread
-       from seeing inconsistent data.  It could also be done by carefully
-       ordering things, but later. */
-    acquire_modified_objs_lock(my_segnum);
-
-    /* XXXXXXXXXX: we shouldn't be able to update pages while someone else copies
-       from our pages (signal handler / import objs) */
-
-    bool needs_abort = false;
-    uint64_t segment_copied_from = 0;
+    /* Find the set of segments we need to copy from and lock them: */
+    uint64_t segments_to_lock = 1UL << my_segnum;
+    cl = first_cl;
     while ((next_cl = cl->next) != NULL) {
         if (next_cl == (void *)-1) {
-            /* there is an inevitable transaction running */
-            release_modified_objs_lock(my_segnum);
 #if STM_TESTS
-            needs_abort = true;
-            goto complete_work_and_possibly_abort;
+            if (free_if_abort != (void *)-1)
+                free(free_if_abort);
+            stm_abort_transaction();
 #endif
-            abort();  /* XXX non-busy wait here
-                         or: XXX do we always need to wait?  we should just
-                         break out of this loop and let the caller handle it
-                         if it wants to */
-
-            _stm_collectable_safe_point();
-            acquire_modified_objs_lock(my_segnum);
-            continue;
+            /* only go this far when validating */
+            break;
         }
         assert(next_cl->rev_num > cl->rev_num);
         cl = next_cl;
 
-        /*int srcsegnum = cl->segment_num;
-          OPT_ASSERT(srcsegnum >= 0 && srcsegnum < NB_SEGMENTS);*/
+        if (cl->written_count) {
+            segments_to_lock |= (1UL << cl->segment_num);
+        }
+    }
+    last_cl = cl;
+    acquire_modification_lock_set(segments_to_lock);
 
-        if (!needs_abort) {
-            struct stm_undo_s *undo = cl->written;
-            struct stm_undo_s *end = cl->written + cl->written_count;
-            for (; undo < end; undo++) {
-                if (_stm_was_read(undo->object)) {
-                    /* first reset all modified objects from the backup
-                       copies as soon as the first conflict is detected;
-                       then we will proceed below to update our segment from
-                       the old (but unmodified) version to the newer version.
-                    */
-                    release_modified_objs_lock(my_segnum);
-                    reset_modified_from_backup_copies(my_segnum);
-                    acquire_modified_objs_lock(my_segnum);
-                    needs_abort = true;
-                    break;
+
+    /* import objects from first_cl to last_cl: */
+    bool needs_abort = false;
+    if (first_cl != last_cl) {
+        uint64_t segment_really_copied_from = 0UL;
+
+        cl = first_cl;
+        while ((cl = cl->next) != NULL) {
+            if (!needs_abort) {
+                struct stm_undo_s *undo = cl->written;
+                struct stm_undo_s *end = cl->written + cl->written_count;
+                for (; undo < end; undo++) {
+                    if (_stm_was_read(undo->object)) {
+                        /* first reset all modified objects from the backup
+                           copies as soon as the first conflict is detected;
+                           then we will proceed below to update our segment from
+                           the old (but unmodified) version to the newer version.
+                        */
+                        reset_modified_from_backup_copies(my_segnum);
+                        needs_abort = true;
+                        break;
+                    }
                 }
             }
+
+            if (cl->written_count) {
+                struct stm_undo_s *undo = cl->written;
+                struct stm_undo_s *end = cl->written + cl->written_count;
+
+                segment_really_copied_from |= (1UL << cl->segment_num);
+                import_objects(cl->segment_num, -1, undo, end);
+            }
+
+            /* last fully validated entry */
+            STM_PSEGMENT->last_commit_log_entry = cl;
         }
 
-        if (cl->written_count) {
-            struct stm_undo_s *undo = cl->written;
-            struct stm_undo_s *end = cl->written + cl->written_count;
-
-            segment_copied_from |= (1UL << cl->segment_num);
-            import_objects(cl->segment_num, -1, undo, end);
-        }
-
-        /* last fully validated entry */
-        STM_PSEGMENT->last_commit_log_entry = cl;
-    }
-
-    release_modified_objs_lock(my_segnum);
-
-#if STM_TESTS
- complete_work_and_possibly_abort:;
-#endif
-    /* XXXXXXXXXXXXXXXX CORRECT LOCKING NEEDED XXXXXXXXXXXXXXXXXXXXXX */
-    int segnum;
-    for (segnum = 0; segment_copied_from != 0; segnum++) {
-        if (segment_copied_from & (1UL << segnum)) {
-            segment_copied_from &= ~(1UL << segnum);
-            /* here we can actually have our own modified version, so
-               make sure to only copy things that are not modified in our
-               segment... (if we do not abort) */
-            copy_bk_objs_in_page_from(
-                segnum, -1,     /* any page */
-                !needs_abort);  /* if we abort, we still want to copy everything */
+        OPT_ASSERT(segment_really_copied_from < (1 << NB_SEGMENTS));
+        int segnum;
+        for (segnum = 0; segnum < NB_SEGMENTS; segnum++) {
+            if (segment_really_copied_from & (1UL << segnum)) {
+                /* here we can actually have our own modified version, so
+                   make sure to only copy things that are not modified in our
+                   segment... (if we do not abort) */
+                copy_bk_objs_in_page_from(
+                    segnum, -1,     /* any page */
+                    !needs_abort);  /* if we abort, we still want to copy everything */
+            }
         }
     }
+
+    /* done with modifications */
+    release_modification_lock_set(segments_to_lock);
 
     if (needs_abort) {
         if (free_if_abort != (void *)-1)
@@ -411,10 +412,10 @@ static void _validate_and_add_to_commit_log(void)
         _validate_and_attach(new);
     }
 
-    acquire_modified_objs_lock(STM_SEGMENT->segment_num);
+    acquire_modification_lock(STM_SEGMENT->segment_num);
     list_clear(STM_PSEGMENT->modified_old_objects);
     STM_PSEGMENT->last_commit_log_entry = new;
-    release_modified_objs_lock(STM_SEGMENT->segment_num);
+    release_modification_lock(STM_SEGMENT->segment_num);
 }
 
 /* ############# STM ############# */
@@ -516,7 +517,7 @@ void _stm_write_slowpath(object_t *obj)
        if 'obj' is merely an overflow object.  FIX ME, likely by copying
        the overflow number logic from c7. */
 
-    acquire_modified_objs_lock(STM_SEGMENT->segment_num);
+    acquire_modification_lock(STM_SEGMENT->segment_num);
     uintptr_t slice_sz;
     uintptr_t in_page_offset = (uintptr_t)obj % 4096UL;
     uintptr_t remaining_obj_sz = obj_size;
@@ -543,7 +544,7 @@ void _stm_write_slowpath(object_t *obj)
     }
     OPT_ASSERT(remaining_obj_sz == 0);
 
-    release_modified_objs_lock(STM_SEGMENT->segment_num);
+    release_modification_lock(STM_SEGMENT->segment_num);
     /* done fiddling with protection and privatization */
     release_all_privatization_locks();
 
@@ -734,7 +735,7 @@ static void reset_modified_from_backup_copies(int segment_num)
 #pragma push_macro("STM_SEGMENT")
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
-    acquire_modified_objs_lock(segment_num);
+    assert(get_priv_segment(segment_num)->modification_lock);
 
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
     struct list_s *list = pseg->modified_old_objects;
@@ -764,8 +765,6 @@ static void reset_modified_from_backup_copies(int segment_num)
     check_all_write_barrier_flags(pseg->pub.segment_base, list);
 
     list_clear(list);
-
-    release_modified_objs_lock(segment_num);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
@@ -790,7 +789,9 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     long bytes_in_nursery = throw_away_nursery(pseg);
 
+    acquire_modification_lock(segment_num);
     reset_modified_from_backup_copies(segment_num);
+    release_modification_lock(segment_num);
 
     stm_thread_local_t *tl = pseg->pub.running_thread;
 #ifdef STM_NO_AUTOMATIC_SETJMP

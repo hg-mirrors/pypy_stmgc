@@ -285,7 +285,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
                     ],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0', '-Wall', '-ferror-limit=1'],
+     extra_compile_args=['-g', '-O0', '-Wall', '-Werror', '-ferror-limit=1'],
      extra_link_args=['-g', '-lrt'],
      force_generic_engine=True)
 
