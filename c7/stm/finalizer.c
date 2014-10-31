@@ -58,28 +58,59 @@ static void _commit_finalizers(void)
     STM_PSEGMENT->finalizers = NULL;
 }
 
-static void _abort_finalizers(void)
+static void abort_finalizers(void)
 {
     /* like _commit_finalizers(), but forget everything from the
        current transaction */
-    if (STM_PSEGMENT->finalizers->run_finalizers != NULL) {
-        if (STM_PSEGMENT->finalizers->running_next != NULL) {
-            *STM_PSEGMENT->finalizers->running_next = (uintptr_t)-1;
+    if (STM_PSEGMENT->finalizers != NULL) {
+        if (STM_PSEGMENT->finalizers->run_finalizers != NULL) {
+            if (STM_PSEGMENT->finalizers->running_next != NULL) {
+                *STM_PSEGMENT->finalizers->running_next = (uintptr_t)-1;
+            }
+            list_free(STM_PSEGMENT->finalizers->run_finalizers);
         }
-        list_free(STM_PSEGMENT->finalizers->run_finalizers);
+        list_free(STM_PSEGMENT->finalizers->objects_with_finalizers);
+        free(STM_PSEGMENT->finalizers);
+        STM_PSEGMENT->finalizers = NULL;
     }
-    list_free(STM_PSEGMENT->finalizers->objects_with_finalizers);
-    free(STM_PSEGMENT->finalizers);
-    STM_PSEGMENT->finalizers = NULL;
+
+    /* also call the light finalizers for objects that are about to
+       be forgotten from the current transaction */
+    struct list_s *lst = STM_PSEGMENT->young_objects_with_light_finalizers;
+    long i, count = list_count(lst);
+    if (lst > 0) {
+        for (i = 0; i < count; i++) {
+            object_t *obj = (object_t *)list_item(lst, i);
+            assert(_is_young(obj));
+            stmcb_light_finalizer(obj);
+        }
+        list_clear(lst);
+    }
+
+    /* also deals with overflow objects: they are at the tail of
+       old_objects_with_light_finalizers (this list is kept in order
+       and we cannot add any already-committed object) */
+    lst = STM_PSEGMENT->old_objects_with_light_finalizers;
+    count = list_count(lst);
+    while (count > 0) {
+        object_t *obj = (object_t *)list_item(lst, --count);
+        if (!IS_OVERFLOW_OBJ(STM_PSEGMENT, obj))
+            break;
+        lst->count = count;
+        stmcb_light_finalizer(obj);
+    }
 }
 
 
 void stm_enable_light_finalizer(object_t *obj)
 {
-    if (_is_young(obj))
+    if (_is_young(obj)) {
         LIST_APPEND(STM_PSEGMENT->young_objects_with_light_finalizers, obj);
-    else
+    }
+    else {
+        assert(_is_from_same_transaction(obj));
         LIST_APPEND(STM_PSEGMENT->old_objects_with_light_finalizers, obj);
+    }
 }
 
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up)
@@ -108,7 +139,7 @@ static void deal_with_young_objects_with_finalizers(void)
     struct list_s *lst = STM_PSEGMENT->young_objects_with_light_finalizers;
     long i, count = list_count(lst);
     for (i = 0; i < count; i++) {
-        object_t* obj = (object_t *)list_item(lst, i);
+        object_t *obj = (object_t *)list_item(lst, i);
         assert(_is_young(obj));
 
         object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
@@ -138,7 +169,7 @@ static void deal_with_old_objects_with_finalizers(void)
         long i, count = list_count(lst);
         lst->count = 0;
         for (i = 0; i < count; i++) {
-            object_t* obj = (object_t *)list_item(lst, i);
+            object_t *obj = (object_t *)list_item(lst, i);
             if (!mark_visited_test(obj)) {
                 /* not marked: object dies */
                 /* we're calling the light finalizer in the same

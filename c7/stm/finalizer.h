@@ -14,16 +14,11 @@ static void setup_finalizer(void);
 static void teardown_finalizer(void);
 
 static void _commit_finalizers(void);
-static void _abort_finalizers(void);
+static void abort_finalizers(void);
 
 #define commit_finalizers()   do {              \
     if (STM_PSEGMENT->finalizers != NULL)       \
         _commit_finalizers();                   \
-} while (0)
-
-#define abort_finalizers()   do {               \
-    if (STM_PSEGMENT->finalizers != NULL)       \
-        _abort_finalizers();                    \
 } while (0)
 
 
