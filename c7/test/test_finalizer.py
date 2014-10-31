@@ -49,6 +49,15 @@ class TestLightFinalizer(BaseTest):
         self.commit_transaction()
         self.expect_finalized([])
 
+    def test_young_light_finalizer_aborts(self):
+        self.start_transaction()
+        lp1 = stm_allocate(48)
+        lib.stm_enable_light_finalizer(lp1)
+        self.expect_finalized([])
+        self.abort_transaction()
+        self.start_transaction()
+        self.expect_finalized([lp1], from_tlnum=0)
+
     def test_old_light_finalizer(self):
         self.start_transaction()
         lp1 = stm_allocate(48)
@@ -98,6 +107,30 @@ class TestLightFinalizer(BaseTest):
         self.expect_finalized([])
         stm_major_collect()
         self.expect_finalized([lp1], from_tlnum=1)
+
+    def test_old_light_finalizer_aborts(self):
+        self.start_transaction()
+        lp1 = stm_allocate(48)
+        lib.stm_enable_light_finalizer(lp1)
+        self.push_root(lp1)
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        self.expect_finalized([])
+        self.abort_transaction()
+        self.expect_finalized([])
+
+    def test_overflow_light_finalizer_aborts(self):
+        self.start_transaction()
+        lp1 = stm_allocate(48)
+        lib.stm_enable_light_finalizer(lp1)
+        self.push_root(lp1)
+        stm_minor_collect()
+        lp1 = self.pop_root()
+        self.push_root(lp1)
+        self.expect_finalized([])
+        self.abort_transaction()
+        self.expect_finalized([lp1], from_tlnum=0)
 
 
 class TestRegularFinalizer(BaseTest):
