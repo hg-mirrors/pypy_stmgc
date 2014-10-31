@@ -536,9 +536,11 @@ object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 typedef struct stm_hashtable_s stm_hashtable_t;
 stm_hashtable_t *stm_hashtable_create(void);
 void stm_hashtable_free(stm_hashtable_t *);
-object_t *stm_hashtable_read(stm_hashtable_t *, uintptr_t key);
-void stm_hashtable_write(stm_hashtable_t *, uintptr_t key, object_t *nvalue);
+object_t *stm_hashtable_read(object_t *, stm_hashtable_t *, uintptr_t key);
+void stm_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
+                         object_t *nvalue);
 extern uint32_t stm_hashtable_entry_userdata;
+void stm_hashtable_tracefn(stm_hashtable_t *, void (object_t **));
 
 /* ==================== END ==================== */
 

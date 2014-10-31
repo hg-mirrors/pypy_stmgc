@@ -44,6 +44,10 @@ static inline bool _is_young(object_t *obj)
         tree_contains(STM_PSEGMENT->young_outside_nursery, (uintptr_t)obj));
 }
 
+static inline bool _is_from_same_transaction(object_t *obj) {
+    return _is_young(obj) || IS_OVERFLOW_OBJ(STM_PSEGMENT, obj);
+}
+
 long stm_can_move(object_t *obj)
 {
     /* 'long' return value to avoid using 'bool' in the public interface */
