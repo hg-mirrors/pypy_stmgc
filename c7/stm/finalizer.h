@@ -14,7 +14,7 @@ static void setup_finalizer(void);
 static void teardown_finalizer(void);
 
 static void _commit_finalizers(void);
-static void abort_finalizers(void);
+static void abort_finalizers(struct stm_priv_segment_info_s *);
 
 #define commit_finalizers()   do {              \
     if (STM_PSEGMENT->finalizers != NULL)       \
