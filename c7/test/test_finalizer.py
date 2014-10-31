@@ -9,6 +9,7 @@ class TestLightFinalizer(BaseTest):
         #
         @ffi.callback("void(object_t *)")
         def light_finalizer(obj):
+            assert stm_get_obj_size(obj) == 48
             segnum = lib.current_segment_num()
             tlnum = '?'
             for n, tl in enumerate(self.tls):
@@ -19,6 +20,10 @@ class TestLightFinalizer(BaseTest):
         self.light_finalizers_called = []
         lib.stmcb_light_finalizer = light_finalizer
         self._light_finalizer_keepalive = light_finalizer
+
+    def teardown_method(self, meth):
+        lib.stmcb_light_finalizer = ffi.NULL
+        BaseTest.teardown_method(self, meth)
 
     def expect_finalized(self, objs, from_tlnum=None):
         assert [obj for (obj, tlnum) in self.light_finalizers_called] == objs

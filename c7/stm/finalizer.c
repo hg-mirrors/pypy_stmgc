@@ -58,30 +58,37 @@ static void _commit_finalizers(void)
     STM_PSEGMENT->finalizers = NULL;
 }
 
-static void abort_finalizers(void)
+static void abort_finalizers(struct stm_priv_segment_info_s *pseg)
 {
     /* like _commit_finalizers(), but forget everything from the
        current transaction */
-    if (STM_PSEGMENT->finalizers != NULL) {
-        if (STM_PSEGMENT->finalizers->run_finalizers != NULL) {
-            if (STM_PSEGMENT->finalizers->running_next != NULL) {
-                *STM_PSEGMENT->finalizers->running_next = (uintptr_t)-1;
+    if (pseg->finalizers != NULL) {
+        if (pseg->finalizers->run_finalizers != NULL) {
+            if (pseg->finalizers->running_next != NULL) {
+                *pseg->finalizers->running_next = (uintptr_t)-1;
             }
-            list_free(STM_PSEGMENT->finalizers->run_finalizers);
+            list_free(pseg->finalizers->run_finalizers);
         }
-        list_free(STM_PSEGMENT->finalizers->objects_with_finalizers);
-        free(STM_PSEGMENT->finalizers);
-        STM_PSEGMENT->finalizers = NULL;
+        list_free(pseg->finalizers->objects_with_finalizers);
+        free(pseg->finalizers);
+        pseg->finalizers = NULL;
     }
 
-    /* also call the light finalizers for objects that are about to
+    /* call the light finalizers for objects that are about to
        be forgotten from the current transaction */
-    struct list_s *lst = STM_PSEGMENT->young_objects_with_light_finalizers;
+    char *old_gs_register = STM_SEGMENT->segment_base;
+    bool must_fix_gs = old_gs_register != pseg->pub.segment_base;
+
+    struct list_s *lst = pseg->young_objects_with_light_finalizers;
     long i, count = list_count(lst);
     if (lst > 0) {
         for (i = 0; i < count; i++) {
             object_t *obj = (object_t *)list_item(lst, i);
             assert(_is_young(obj));
+            if (must_fix_gs) {
+                set_gs_register(pseg->pub.segment_base);
+                must_fix_gs = false;
+            }
             stmcb_light_finalizer(obj);
         }
         list_clear(lst);
@@ -90,15 +97,22 @@ static void abort_finalizers(void)
     /* also deals with overflow objects: they are at the tail of
        old_objects_with_light_finalizers (this list is kept in order
        and we cannot add any already-committed object) */
-    lst = STM_PSEGMENT->old_objects_with_light_finalizers;
+    lst = pseg->old_objects_with_light_finalizers;
     count = list_count(lst);
     while (count > 0) {
         object_t *obj = (object_t *)list_item(lst, --count);
-        if (!IS_OVERFLOW_OBJ(STM_PSEGMENT, obj))
+        if (!IS_OVERFLOW_OBJ(pseg, obj))
             break;
         lst->count = count;
+        if (must_fix_gs) {
+            set_gs_register(pseg->pub.segment_base);
+            must_fix_gs = false;
+        }
         stmcb_light_finalizer(obj);
     }
+
+    if (STM_SEGMENT->segment_base != old_gs_register)
+        set_gs_register(old_gs_register);
 }
 
 

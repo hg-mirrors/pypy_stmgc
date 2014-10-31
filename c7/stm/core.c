@@ -973,6 +973,8 @@ static void abort_data_structures_from_segment_num(int segment_num)
                        (int)pseg->transaction_state);
     }
 
+    abort_finalizers(pseg);
+
     /* throw away the content of the nursery */
     long bytes_in_nursery = throw_away_nursery(pseg);
 
@@ -1060,8 +1062,6 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
 
     /* invoke the callbacks */
     invoke_and_clear_user_callbacks(1);   /* for abort */
-
-    abort_finalizers();
 
     if (is_abort(STM_SEGMENT->nursery_end)) {
         /* done aborting */
