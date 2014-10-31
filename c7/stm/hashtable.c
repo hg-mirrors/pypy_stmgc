@@ -158,7 +158,8 @@ static void _insert_clean(stm_hashtable_table_t *table,
     }
 }
 
-static stm_hashtable_entry_t *_stm_hashtable_lookup(stm_hashtable_t *hashtable,
+static stm_hashtable_entry_t *_stm_hashtable_lookup(object_t *hashtableobj,
+                                                    stm_hashtable_t *hashtable,
                                                     uintptr_t index)
 {
     stm_hashtable_table_t *table;
@@ -220,19 +221,29 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(stm_hashtable_t *hashtable,
        item in the current table.
     */
     if (rc > 6) {
-        char *p = allocate_outside_nursery_large(sizeof(stm_hashtable_entry_t));
-        entry = (stm_hashtable_entry_t *)(p - stm_object_pages);
-
-        long j;
-        for (j = 0; j <= NB_SEGMENTS; j++) {
-            struct stm_hashtable_entry_s *e = (struct stm_hashtable_entry_s *)
-                REAL_ADDRESS(get_segment_base(j), entry);
-            e->header.stm_flags = GCFLAG_WRITE_BARRIER;
-            e->userdata = stm_hashtable_entry_userdata;
-            e->index = index;
-            e->object = NULL;
+        if (_is_from_same_transaction(hashtableobj)) {
+            entry = (stm_hashtable_entry_t *)
+                stm_allocate(sizeof(stm_hashtable_entry_t));
+            entry->userdata = stm_hashtable_entry_userdata;
+            entry->index = index;
+            entry->object = NULL;
         }
+        else {
+            char *p = allocate_outside_nursery_large(
+                          sizeof(stm_hashtable_entry_t));
+            entry = (stm_hashtable_entry_t *)(p - stm_object_pages);
 
+            long j;
+            for (j = 0; j <= NB_SEGMENTS; j++) {
+                struct stm_hashtable_entry_s *e;
+                e = (struct stm_hashtable_entry_s *)
+                        REAL_ADDRESS(get_segment_base(j), entry);
+                e->header.stm_flags = GCFLAG_WRITE_BARRIER;
+                e->userdata = stm_hashtable_entry_userdata;
+                e->index = index;
+                e->object = NULL;
+            }
+        }
         write_fence();     /* make sure 'entry' is fully initialized here */
         table->items[i] = entry;
         write_fence();     /* make sure 'table->items' is written here */
@@ -242,13 +253,15 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(stm_hashtable_t *hashtable,
     else {
         /* if rc is smaller than 6, we must allocate a new bigger table.
          */
-        uintptr_t biggercount = (table->mask + 1) * 2;
+        uintptr_t biggercount = table->mask + 1;
         if (biggercount < 50000)
+            biggercount *= 4;
+        else
             biggercount *= 2;
         size_t size = (offsetof(stm_hashtable_table_t, items)
                        + biggercount * sizeof(stm_hashtable_entry_t *));
         stm_hashtable_table_t *biggertable = malloc(size);
-        assert(biggertable);
+        assert(biggertable);   // XXX
         table->resize_counter = (uintptr_t)biggertable;
         /* unlock, but put the new table, so IS_EVEN() is still true */
 
@@ -265,7 +278,7 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(stm_hashtable_t *hashtable,
         }
         biggertable->resize_counter = rc;
 
-        write_fence();   /* make sure as well that 'biggertable' is valid here;
+        write_fence();   /* make sure that 'biggertable' is valid here,
                             and make sure 'table->resize_counter' is updated
                             ('table' must be immutable from now on). */
         VOLATILE_HASHTABLE(hashtable)->table = biggertable;
@@ -273,17 +286,34 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(stm_hashtable_t *hashtable,
     }
 }
 
-object_t *stm_hashtable_read(stm_hashtable_t *hashtable, uintptr_t index)
+object_t *stm_hashtable_read(object_t *hashtableobj, stm_hashtable_t *hashtable,
+                             uintptr_t index)
 {
-    stm_hashtable_entry_t *e = _stm_hashtable_lookup(hashtable, index);
+    stm_hashtable_entry_t *e = _stm_hashtable_lookup(hashtableobj, hashtable,
+                                                     index);
     stm_read((object_t *)e);
     return e->object;
 }
 
-void stm_hashtable_write(stm_hashtable_t *hashtable, uintptr_t index,
-                         object_t *nvalue)
+void stm_hashtable_write(object_t *hashtableobj, stm_hashtable_t *hashtable,
+                         uintptr_t index, object_t *nvalue)
 {
-    stm_hashtable_entry_t *e = _stm_hashtable_lookup(hashtable, index);
+    stm_hashtable_entry_t *e = _stm_hashtable_lookup(hashtableobj, hashtable,
+                                                     index);
     stm_write((object_t *)e);
     e->object = nvalue;
+}
+
+void stm_hashtable_tracefn(stm_hashtable_t *hashtable, void trace(object_t **))
+{
+    stm_hashtable_table_t *table;
+    table = VOLATILE_HASHTABLE(hashtable)->table;
+
+    uintptr_t j, mask = table->mask;
+    for (j = 0; j <= mask; j++) {
+        stm_hashtable_entry_t **pentry = &table->items[j];
+        if (*pentry != NULL) {
+            trace((object_t **)pentry);
+        }
+    }
 }

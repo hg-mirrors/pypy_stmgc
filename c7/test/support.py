@@ -169,11 +169,15 @@ void (*stmcb_finalizer)(object_t *);
 typedef struct stm_hashtable_s stm_hashtable_t;
 stm_hashtable_t *stm_hashtable_create(void);
 void stm_hashtable_free(stm_hashtable_t *);
-object_t *stm_hashtable_read(stm_hashtable_t *, uintptr_t key);
-bool _check_hashtable_read(stm_hashtable_t *, uintptr_t key);
+bool _check_hashtable_read(object_t *, stm_hashtable_t *, uintptr_t key);
 object_t *hashtable_read_result;
-bool _check_hashtable_write(stm_hashtable_t *, uintptr_t key, object_t *nvalue);
+bool _check_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
+                            object_t *nvalue);
 uint32_t stm_hashtable_entry_userdata;
+void stm_hashtable_tracefn(stm_hashtable_t *, void (object_t **));
+
+void _set_hashtable(object_t *obj, stm_hashtable_t *h);
+stm_hashtable_t *_get_hashtable(object_t *obj);
 """)
 
 
@@ -251,14 +255,15 @@ bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
 
 object_t *hashtable_read_result;
 
-bool _check_hashtable_read(stm_hashtable_t *h, uintptr_t key)
+bool _check_hashtable_read(object_t *hobj, stm_hashtable_t *h, uintptr_t key)
 {
-    CHECKED(hashtable_read_result = stm_hashtable_read(h, key));
+    CHECKED(hashtable_read_result = stm_hashtable_read(hobj, h, key));
 }
 
-bool _check_hashtable_write(stm_hashtable_t *h, uintptr_t key, object_t *nvalue)
+bool _check_hashtable_write(object_t *hobj, stm_hashtable_t *h, uintptr_t key,
+                            object_t *nvalue)
 {
-    CHECKED(stm_hashtable_write(h, key, nvalue));
+    CHECKED(stm_hashtable_write(hobj, h, key, nvalue));
 }
 
 #undef CHECKED
@@ -289,6 +294,20 @@ object_t * _get_weakref(object_t *obj)
     return *WEAKREF_PTR(obj, size);
 }
 
+void _set_hashtable(object_t *obj, stm_hashtable_t *h)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    *(stm_hashtable_t *TLPREFIX *)field_addr = h;
+}
+
+stm_hashtable_t *_get_hashtable(object_t *obj)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    return *(stm_hashtable_t *TLPREFIX *)field_addr;
+}
+
 void _set_ptr(object_t *obj, int n, object_t *v)
 {
     long nrefs = (long)((myobj_t*)obj)->type_id - 421420;
@@ -317,7 +336,14 @@ object_t * _get_ptr(object_t *obj, int n)
 ssize_t stmcb_size_rounded_up(struct object_s *obj)
 {
     struct myobj_s *myobj = (struct myobj_s*)obj;
+    assert(myobj->type_id != 0);
     if (myobj->type_id < 421420) {
+        if (myobj->type_id == 421419) {    /* hashtable */
+            return sizeof(struct myobj_s) + 1 * sizeof(void*);
+        }
+        if (myobj->type_id == 421418) {    /* hashtable entry */
+            return 8 * 3;
+        }
         /* basic case: tid equals 42 plus the size of the object */
         assert(myobj->type_id >= 42 + sizeof(struct myobj_s));
         assert((myobj->type_id - 42) >= 16);
@@ -337,6 +363,17 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 {
     int i;
     struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id == 421419) {
+        /* hashtable */
+        stm_hashtable_t *h = *((stm_hashtable_t **)(myobj + 1));
+        stm_hashtable_tracefn(h, visit);
+        return;
+    }
+    if (myobj->type_id == 421418) {
+        /* hashtable entry */
+        object_t **ref = ((object_t **)myobj) + 2;
+        visit(ref);
+    }
     if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
@@ -355,6 +392,8 @@ void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
 {
     int i;
     struct myobj_s *myobj = (struct myobj_s*)obj;
+    assert(myobj->type_id != 421419);
+    assert(myobj->type_id != 421418);
     if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
@@ -425,7 +464,7 @@ GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
 FAST_ALLOC = lib._STM_FAST_ALLOC
-lib.stm_hashtable_entry_userdata = 42 + HDR + 2 * 8
+lib.stm_hashtable_entry_userdata = 421418
 
 class Conflict(Exception):
     pass
@@ -462,6 +501,18 @@ def stm_allocate_weakref(point_to_obj, size=None):
     lib._set_type_id(o, tid)
     lib._set_weakref(o, point_to_obj)
     return o
+
+def stm_allocate_hashtable():
+    o = lib.stm_allocate(16)
+    tid = 421419
+    lib._set_type_id(o, tid)
+    h = lib.stm_hashtable_create()
+    lib._set_hashtable(o, h)
+    return o
+
+def get_hashtable(o):
+    assert lib._get_type_id(o) == 421419
+    return lib._get_hashtable(o)
 
 def stm_get_weakref(o):
     return lib._get_weakref(o)
