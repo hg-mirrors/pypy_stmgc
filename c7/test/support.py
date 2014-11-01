@@ -172,7 +172,7 @@ void stm_hashtable_free(stm_hashtable_t *);
 bool _check_hashtable_read(object_t *, stm_hashtable_t *, uintptr_t key);
 object_t *hashtable_read_result;
 bool _check_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
-                            object_t *nvalue);
+                            object_t *nvalue, stm_thread_local_t *tl);
 uint32_t stm_hashtable_entry_userdata;
 void stm_hashtable_tracefn(stm_hashtable_t *, void (object_t **));
 
@@ -261,9 +261,9 @@ bool _check_hashtable_read(object_t *hobj, stm_hashtable_t *h, uintptr_t key)
 }
 
 bool _check_hashtable_write(object_t *hobj, stm_hashtable_t *h, uintptr_t key,
-                            object_t *nvalue)
+                            object_t *nvalue, stm_thread_local_t *tl)
 {
-    CHECKED(stm_hashtable_write(hobj, h, key, nvalue));
+    CHECKED(stm_hashtable_write(hobj, h, key, nvalue, tl));
 }
 
 #undef CHECKED

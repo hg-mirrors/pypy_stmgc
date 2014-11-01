@@ -538,7 +538,7 @@ stm_hashtable_t *stm_hashtable_create(void);
 void stm_hashtable_free(stm_hashtable_t *);
 object_t *stm_hashtable_read(object_t *, stm_hashtable_t *, uintptr_t key);
 void stm_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
-                         object_t *nvalue);
+                         object_t *nvalue, stm_thread_local_t *);
 extern uint32_t stm_hashtable_entry_userdata;
 void stm_hashtable_tracefn(stm_hashtable_t *, void (object_t **));
 

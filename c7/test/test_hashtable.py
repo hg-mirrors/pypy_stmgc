@@ -10,9 +10,9 @@ def htget(o, key):
         raise Conflict
     return lib.hashtable_read_result
 
-def htset(o, key, nvalue):
+def htset(o, key, nvalue, tl):
     h = get_hashtable(o)
-    res = lib._check_hashtable_write(o, h, key, nvalue)
+    res = lib._check_hashtable_write(o, h, key, nvalue, tl)
     if res:
         raise Conflict
 
@@ -59,9 +59,10 @@ class TestHashtable(BaseTest):
 
     def test_set_value(self):
         self.start_transaction()
+        tl0 = self.tls[self.current_thread]
         h = self.allocate_hashtable()
         lp1 = stm_allocate(16)
-        htset(h, 12345678901, lp1)
+        htset(h, 12345678901, lp1, tl0)
         assert htget(h, 12345678901) == lp1
         for i in range(64):
             index = 12345678901 ^ (1 << i)
@@ -73,16 +74,17 @@ class TestHashtable(BaseTest):
         lp2 = stm_allocate_old(16)
         #
         self.start_transaction()
+        tl0 = self.tls[self.current_thread]
         h = self.allocate_hashtable()
         self.push_root(h)
         stm_set_char(lp1, 'A')
-        htset(h, 1234, lp1)
+        htset(h, 1234, lp1, tl0)
         self.commit_transaction()
         #
         self.start_transaction()
         h = self.pop_root()
         stm_set_char(lp2, 'B')
-        htset(h, 9991234, lp2)
+        htset(h, 9991234, lp2, tl0)
         #
         self.switch(1)
         self.start_transaction()
@@ -96,7 +98,7 @@ class TestHashtable(BaseTest):
         assert htget(h, 9991234) == lp2
         assert stm_get_char(lp2) == 'B'
         assert htget(h, 1234) == lp1
-        htset(h, 1234, ffi.NULL)
+        htset(h, 1234, ffi.NULL, tl0)
         self.commit_transaction()
         #
         self.start_transaction()
@@ -114,11 +116,13 @@ class TestHashtable(BaseTest):
         self.start_transaction()
         h = self.pop_root()
         self.push_root(h)
-        htset(h, 1234, lp1)
+        tl0 = self.tls[self.current_thread]
+        htset(h, 1234, lp1, tl0)
         #
         self.switch(1)
         self.start_transaction()
-        py.test.raises(Conflict, "htset(h, 1234, lp2)")
+        tl1 = self.tls[self.current_thread]
+        py.test.raises(Conflict, "htset(h, 1234, lp2, tl1)")
         #
         self.switch(0)
         self.pop_root()
@@ -131,7 +135,8 @@ class TestHashtable(BaseTest):
         self.push_root(h)
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'N')
-        htset(h, 1234, lp1)
+        tl0 = self.tls[self.current_thread]
+        htset(h, 1234, lp1, tl0)
         stm_minor_collect()
         h = self.pop_root()
         lp1b = htget(h, 1234)
@@ -146,7 +151,8 @@ class TestHashtable(BaseTest):
         h = self.allocate_hashtable()
         self.push_root(h)
         stm_set_char(lp1, 'N')
-        htset(h, 1234, lp1)
+        tl0 = self.tls[self.current_thread]
+        htset(h, 1234, lp1, tl0)
         self.commit_transaction()
         #
         self.start_transaction()
@@ -158,3 +164,126 @@ class TestHashtable(BaseTest):
         #
         stm_major_collect()       # to get rid of the hashtable object
         self.commit_transaction()
+
+    def test_minor_collect_bug1(self):
+        self.start_transaction()
+        lp1 = stm_allocate(32)
+        self.push_root(lp1)
+        h = self.allocate_hashtable()
+        self.push_root(h)
+        stm_minor_collect()
+        h = self.pop_root()
+        lp1 = self.pop_root()
+        print 'h', h                       # 0xa040010
+        print 'lp1', lp1                   # 0xa040040
+        tl0 = self.tls[self.current_thread]
+        htset(h, 1, lp1, tl0)
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        assert htget(h, 1) == lp1
+        stm_major_collect()       # to get rid of the hashtable object
+
+    def test_random_single_thread(self):
+        import random
+        values = []
+        mirror = {}
+        roots = []
+        def push_roots():
+            assert roots == []
+            for k, hitems in mirror.items():
+                assert lib._get_type_id(k) == 421419
+                for key, value in hitems.items():
+                    assert lib._get_type_id(value) < 1000
+                    self.push_root(value)
+                    roots.append(key)
+                self.push_root(k)
+                roots.append(None)
+            for v in values:
+                self.push_root(v)
+            mirror.clear()
+        #
+        def pop_roots():
+            assert mirror == {}
+            for i in reversed(range(len(values))):
+                values[i] = self.pop_root()
+                assert stm_get_char(values[i]) == chr((i + 1) & 255)
+            for r in reversed(roots):
+                obj = self.pop_root()
+                if r is None:
+                    assert lib._get_type_id(obj) == 421419
+                    mirror[obj] = curhitems = {}
+                else:
+                    assert lib._get_type_id(obj) < 1000
+                    curhitems[r] = obj
+            del roots[:]
+        #
+        for i in range(100):
+            print "start_transaction"
+            self.start_transaction()
+            pop_roots()
+            for j in range(10):
+                r = random.random()
+                if r < 0.05:
+                    h = self.allocate_hashtable()
+                    print "allocate_hashtable ->", h
+                    mirror[h] = {}
+                elif r < 0.10:
+                    print "stm_minor_collect"
+                    push_roots()
+                    stm_minor_collect()
+                    pop_roots()
+                elif r < 0.11:
+                    print "stm_major_collect"
+                    push_roots()
+                    stm_major_collect()
+                    pop_roots()
+                elif r < 0.5:
+                    if not mirror: continue
+                    h = random.choice(mirror.keys())
+                    if not mirror[h]: continue
+                    key = random.choice(mirror[h].keys())
+                    value = mirror[h][key]
+                    print "htget(%r, %r) == %r" % (h, key, value)
+                    push_roots()
+                    self.push_root(value)
+                    result = htget(h, key)
+                    value = self.pop_root()
+                    assert result == value
+                    pop_roots()
+                elif r < 0.6:
+                    if not mirror: continue
+                    h = random.choice(mirror.keys())
+                    key = random.randrange(0, 40)
+                    if key in mirror[h]: continue
+                    print "htget(%r, %r) == NULL" % (h, key)
+                    push_roots()
+                    assert htget(h, key) == ffi.NULL
+                    pop_roots()
+                elif r < 0.63:
+                    if not mirror: continue
+                    h, _ = mirror.popitem()
+                    print "popped", h
+                elif r < 0.75:
+                    obj = stm_allocate(32)
+                    values.append(obj)
+                    stm_set_char(obj, chr(len(values) & 255))
+                else:
+                    if not mirror or not values: continue
+                    h = random.choice(mirror.keys())
+                    key = random.randrange(0, 32)
+                    value = random.choice(values)
+                    print "htset(%r, %r, %r)" % (h, key, value)
+                    push_roots()
+                    tl = self.tls[self.current_thread]
+                    htset(h, key, value, tl)
+                    pop_roots()
+                    mirror[h][key] = value
+            push_roots()
+            print "commit_transaction"
+            self.commit_transaction()
+        #
+        self.start_transaction()
+        self.become_inevitable()
+        pop_roots()
+        stm_major_collect()       # to get rid of the hashtable objects

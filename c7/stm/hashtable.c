@@ -221,7 +221,9 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(object_t *hashtableobj,
        item in the current table.
     */
     if (rc > 6) {
-        if (_is_from_same_transaction(hashtableobj)) {
+        /* we can only enter here once!  If we allocate stuff, we may
+           run the GC, and so 'hashtableobj' might move afterwards. */
+        if (_is_young(hashtableobj)) {
             entry = (stm_hashtable_entry_t *)
                 stm_allocate(sizeof(stm_hashtable_entry_t));
             entry->userdata = stm_hashtable_entry_userdata;
@@ -296,11 +298,14 @@ object_t *stm_hashtable_read(object_t *hashtableobj, stm_hashtable_t *hashtable,
 }
 
 void stm_hashtable_write(object_t *hashtableobj, stm_hashtable_t *hashtable,
-                         uintptr_t index, object_t *nvalue)
+                         uintptr_t index, object_t *nvalue,
+                         stm_thread_local_t *tl)
 {
+    STM_PUSH_ROOT(*tl, nvalue);
     stm_hashtable_entry_t *e = _stm_hashtable_lookup(hashtableobj, hashtable,
                                                      index);
     stm_write((object_t *)e);
+    STM_POP_ROOT(*tl, nvalue);
     e->object = nvalue;
 }
 
