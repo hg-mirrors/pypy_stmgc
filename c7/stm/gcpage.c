@@ -344,6 +344,8 @@ static inline void mark_record_trace(object_t **pobj)
     LIST_APPEND(mark_objects_to_trace, obj);
 }
 
+#define TRACE_FOR_MAJOR_COLLECTION  (&mark_record_trace)
+
 static void mark_trace(object_t *obj, char *segment_base)
 {
     assert(list_is_empty(mark_objects_to_trace));
@@ -352,7 +354,7 @@ static void mark_trace(object_t *obj, char *segment_base)
         /* trace into the object (the version from 'segment_base') */
         struct object_s *realobj =
             (struct object_s *)REAL_ADDRESS(segment_base, obj);
-        stmcb_trace(realobj, &mark_record_trace);
+        stmcb_trace(realobj, TRACE_FOR_MAJOR_COLLECTION);
 
         if (list_is_empty(mark_objects_to_trace))
             break;
