@@ -195,6 +195,7 @@ class TestRandomHashtable(BaseTestHashtable):
         self.values = []
         self.mirror = None
         self.roots = []
+        self.other_thread = ([], [])
 
     def push_roots(self):
         assert self.roots is None
@@ -226,6 +227,13 @@ class TestRandomHashtable(BaseTestHashtable):
                 assert lib._get_type_id(obj) < 1000
                 curhitems[r] = obj
         self.roots = None
+
+    def exchange_threads(self):
+        old_thread = (self.values, self.roots)
+        self.switch(1 - self.current_thread)
+        (self.values, self.roots) = self.other_thread
+        self.mirror = None
+        self.other_thread = old_thread
 
     def test_random_single_thread(self):
         import random
@@ -298,4 +306,89 @@ class TestRandomHashtable(BaseTestHashtable):
         self.start_transaction()
         self.become_inevitable()
         self.pop_roots()
+        stm_major_collect()       # to get rid of the hashtable objects
+
+    def test_random_multiple_threads(self):
+        import random
+        self.start_transaction()
+        self.exchange_threads()
+        self.start_transaction()
+        self.pop_roots()
+        #
+        for j in range(1000):
+            r = random.random()
+            if r > 0.9:
+                if r > 0.95:
+                    self.push_roots()
+                    self.commit_transaction()
+                    self.start_transaction()
+                    self.pop_roots()
+                else:
+                    self.push_roots()
+                    self.exchange_threads()
+                    self.pop_roots()
+                continue
+
+            if r < 0.05:
+                h = self.allocate_hashtable()
+                print "allocate_hashtable ->", h
+                self.mirror[h] = {}
+            elif r < 0.10:
+                print "stm_minor_collect"
+                self.push_roots()
+                stm_minor_collect()
+                self.pop_roots()
+            elif r < 0.11:
+                print "stm_major_collect"
+                self.push_roots()
+                stm_major_collect()
+                self.pop_roots()
+            elif r < 0.5:
+                if not self.mirror: continue
+                h = random.choice(self.mirror.keys())
+                if not self.mirror[h]: continue
+                key = random.choice(self.mirror[h].keys())
+                value = self.mirror[h][key]
+                print "htget(%r, %r) == %r" % (h, key, value)
+                self.push_roots()
+                self.push_root(value)
+                result = htget(h, key)
+                value = self.pop_root()
+                assert result == value
+                self.pop_roots()
+            elif r < 0.6:
+                if not self.mirror: continue
+                h = random.choice(self.mirror.keys())
+                key = random.randrange(0, 40)
+                if key in self.mirror[h]: continue
+                print "htget(%r, %r) == NULL" % (h, key)
+                self.push_roots()
+                assert htget(h, key) == ffi.NULL
+                self.pop_roots()
+            elif r < 0.63:
+                if not self.mirror: continue
+                h, _ = self.mirror.popitem()
+                print "popped", h
+            elif r < 0.75:
+                obj = stm_allocate(32)
+                self.values.append(obj)
+                stm_set_char(obj, chr(len(self.values) & 255))
+            else:
+                if not self.mirror or not self.values: continue
+                h = random.choice(self.mirror.keys())
+                key = random.randrange(0, 32)
+                value = random.choice(self.values)
+                print "htset(%r, %r, %r)" % (h, key, value)
+                self.push_roots()
+                tl = self.tls[self.current_thread]
+                htset(h, key, value, tl)
+                self.pop_roots()
+                self.mirror[h][key] = value
+        #
+        print 'closing down...'
+        self.become_inevitable()
+        self.commit_transaction()
+        self.exchange_threads()
+        self.pop_roots()
+        self.become_inevitable()
         stm_major_collect()       # to get rid of the hashtable objects
