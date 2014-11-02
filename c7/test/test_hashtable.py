@@ -17,7 +17,7 @@ def htset(o, key, nvalue, tl):
         raise Conflict
 
 
-class TestHashtable(BaseTest):
+class BaseTestHashtable(BaseTest):
 
     def setup_method(self, meth):
         BaseTest.setup_method(self, meth)
@@ -48,6 +48,9 @@ class TestHashtable(BaseTest):
         lib.stm_enable_light_finalizer(h)
         self.seen_hashtables += 1
         return h
+
+
+class TestHashtable(BaseTestHashtable):
 
     def test_empty(self):
         self.start_transaction()
@@ -184,106 +187,115 @@ class TestHashtable(BaseTest):
         assert htget(h, 1) == lp1
         stm_major_collect()       # to get rid of the hashtable object
 
+
+class TestRandomHashtable(BaseTestHashtable):
+
+    def setup_method(self, meth):
+        BaseTestHashtable.setup_method(self, meth)
+        self.values = []
+        self.mirror = None
+        self.roots = []
+
+    def push_roots(self):
+        assert self.roots is None
+        self.roots = []
+        for k, hitems in self.mirror.items():
+            assert lib._get_type_id(k) == 421419
+            for key, value in hitems.items():
+                assert lib._get_type_id(value) < 1000
+                self.push_root(value)
+                self.roots.append(key)
+            self.push_root(k)
+            self.roots.append(None)
+        for v in self.values:
+            self.push_root(v)
+        self.mirror = None
+
+    def pop_roots(self):
+        assert self.mirror is None
+        for i in reversed(range(len(self.values))):
+            self.values[i] = self.pop_root()
+            assert stm_get_char(self.values[i]) == chr((i + 1) & 255)
+        self.mirror = {}
+        for r in reversed(self.roots):
+            obj = self.pop_root()
+            if r is None:
+                assert lib._get_type_id(obj) == 421419
+                self.mirror[obj] = curhitems = {}
+            else:
+                assert lib._get_type_id(obj) < 1000
+                curhitems[r] = obj
+        self.roots = None
+
     def test_random_single_thread(self):
         import random
-        values = []
-        mirror = {}
-        roots = []
-        def push_roots():
-            assert roots == []
-            for k, hitems in mirror.items():
-                assert lib._get_type_id(k) == 421419
-                for key, value in hitems.items():
-                    assert lib._get_type_id(value) < 1000
-                    self.push_root(value)
-                    roots.append(key)
-                self.push_root(k)
-                roots.append(None)
-            for v in values:
-                self.push_root(v)
-            mirror.clear()
-        #
-        def pop_roots():
-            assert mirror == {}
-            for i in reversed(range(len(values))):
-                values[i] = self.pop_root()
-                assert stm_get_char(values[i]) == chr((i + 1) & 255)
-            for r in reversed(roots):
-                obj = self.pop_root()
-                if r is None:
-                    assert lib._get_type_id(obj) == 421419
-                    mirror[obj] = curhitems = {}
-                else:
-                    assert lib._get_type_id(obj) < 1000
-                    curhitems[r] = obj
-            del roots[:]
         #
         for i in range(100):
             print "start_transaction"
             self.start_transaction()
-            pop_roots()
+            self.pop_roots()
             for j in range(10):
                 r = random.random()
                 if r < 0.05:
                     h = self.allocate_hashtable()
                     print "allocate_hashtable ->", h
-                    mirror[h] = {}
+                    self.mirror[h] = {}
                 elif r < 0.10:
                     print "stm_minor_collect"
-                    push_roots()
+                    self.push_roots()
                     stm_minor_collect()
-                    pop_roots()
+                    self.pop_roots()
                 elif r < 0.11:
                     print "stm_major_collect"
-                    push_roots()
+                    self.push_roots()
                     stm_major_collect()
-                    pop_roots()
+                    self.pop_roots()
                 elif r < 0.5:
-                    if not mirror: continue
-                    h = random.choice(mirror.keys())
-                    if not mirror[h]: continue
-                    key = random.choice(mirror[h].keys())
-                    value = mirror[h][key]
+                    if not self.mirror: continue
+                    h = random.choice(self.mirror.keys())
+                    if not self.mirror[h]: continue
+                    key = random.choice(self.mirror[h].keys())
+                    value = self.mirror[h][key]
                     print "htget(%r, %r) == %r" % (h, key, value)
-                    push_roots()
+                    self.push_roots()
                     self.push_root(value)
                     result = htget(h, key)
                     value = self.pop_root()
                     assert result == value
-                    pop_roots()
+                    self.pop_roots()
                 elif r < 0.6:
-                    if not mirror: continue
-                    h = random.choice(mirror.keys())
+                    if not self.mirror: continue
+                    h = random.choice(self.mirror.keys())
                     key = random.randrange(0, 40)
-                    if key in mirror[h]: continue
+                    if key in self.mirror[h]: continue
                     print "htget(%r, %r) == NULL" % (h, key)
-                    push_roots()
+                    self.push_roots()
                     assert htget(h, key) == ffi.NULL
-                    pop_roots()
+                    self.pop_roots()
                 elif r < 0.63:
-                    if not mirror: continue
-                    h, _ = mirror.popitem()
+                    if not self.mirror: continue
+                    h, _ = self.mirror.popitem()
                     print "popped", h
                 elif r < 0.75:
                     obj = stm_allocate(32)
-                    values.append(obj)
-                    stm_set_char(obj, chr(len(values) & 255))
+                    self.values.append(obj)
+                    stm_set_char(obj, chr(len(self.values) & 255))
                 else:
-                    if not mirror or not values: continue
-                    h = random.choice(mirror.keys())
+                    if not self.mirror or not self.values: continue
+                    h = random.choice(self.mirror.keys())
                     key = random.randrange(0, 32)
-                    value = random.choice(values)
+                    value = random.choice(self.values)
                     print "htset(%r, %r, %r)" % (h, key, value)
-                    push_roots()
+                    self.push_roots()
                     tl = self.tls[self.current_thread]
                     htset(h, key, value, tl)
-                    pop_roots()
-                    mirror[h][key] = value
-            push_roots()
+                    self.pop_roots()
+                    self.mirror[h][key] = value
+            self.push_roots()
             print "commit_transaction"
             self.commit_transaction()
         #
         self.start_transaction()
         self.become_inevitable()
-        pop_roots()
+        self.pop_roots()
         stm_major_collect()       # to get rid of the hashtable objects
