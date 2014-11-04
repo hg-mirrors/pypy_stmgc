@@ -27,12 +27,7 @@ in any currently-running transaction.
 */
 
 
-typedef TLPREFIX struct stm_hashtable_entry_s {
-    struct object_s header;
-    uint32_t userdata;
-    uintptr_t index;
-    object_t *object;
-} stm_hashtable_entry_t;
+typedef TLPREFIX struct stm_hashtable_entry_s stm_hashtable_entry_t;
 
 uint32_t stm_hashtable_entry_userdata;
 
