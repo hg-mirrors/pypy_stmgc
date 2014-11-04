@@ -342,7 +342,7 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj)
             return sizeof(struct myobj_s) + 1 * sizeof(void*);
         }
         if (myobj->type_id == 421418) {    /* hashtable entry */
-            return 8 * 3;
+            return sizeof(struct stm_hashtable_entry_s);
         }
         /* basic case: tid equals 42 plus the size of the object */
         assert(myobj->type_id >= 42 + sizeof(struct myobj_s));
@@ -371,7 +371,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     }
     if (myobj->type_id == 421418) {
         /* hashtable entry */
-        object_t **ref = ((object_t **)myobj) + 2;
+        object_t **ref = &((struct stm_hashtable_entry_s *)myobj)->object;
         visit(ref);
     }
     if (myobj->type_id < 421420) {

@@ -542,6 +542,13 @@ void stm_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
 extern uint32_t stm_hashtable_entry_userdata;
 void stm_hashtable_tracefn(stm_hashtable_t *, void (object_t **));
 
+struct stm_hashtable_entry_s {
+    struct object_s header;
+    uint32_t userdata;
+    uintptr_t index;
+    object_t *object;
+};
+
 /* ==================== END ==================== */
 
 #endif
