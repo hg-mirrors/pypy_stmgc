@@ -134,6 +134,9 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
                                   uintptr_t biggercount,
                                   bool remove_unread)
 {
+    dprintf(("rehash %p to %ld, remove_unread=%d\n",
+             hashtable, biggercount, (int)remove_unread));
+
     size_t size = (offsetof(stm_hashtable_table_t, items)
                    + biggercount * sizeof(stm_hashtable_entry_t *));
     stm_hashtable_table_t *biggertable = malloc(size);
@@ -239,7 +242,7 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(object_t *hashtableobj,
     if (rc > 6) {
         /* we can only enter here once!  If we allocate stuff, we may
            run the GC, and so 'hashtableobj' might move afterwards. */
-        if (_is_young(hashtableobj)) {
+        if (_is_from_same_transaction(hashtableobj)) {
             entry = (stm_hashtable_entry_t *)
                 stm_allocate(sizeof(stm_hashtable_entry_t));
             entry->userdata = stm_hashtable_entry_userdata;
@@ -247,6 +250,7 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(object_t *hashtableobj,
             entry->object = NULL;
         }
         else {
+            acquire_privatization_lock();
             char *p = allocate_outside_nursery_large(
                           sizeof(stm_hashtable_entry_t));
             entry = (stm_hashtable_entry_t *)(p - stm_object_pages);
@@ -261,6 +265,7 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(object_t *hashtableobj,
                 e->index = index;
                 e->object = NULL;
             }
+            release_privatization_lock();
         }
         write_fence();     /* make sure 'entry' is fully initialized here */
         table->items[i] = entry;
@@ -341,9 +346,34 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
     }
 }
 
+static void _hashtable_minor_trace(object_t **pobj)
+{
+    abort();
+    object_t *obj = *pobj;
+    if (!_is_in_nursery(obj))
+        return;
+
+    TRACE_FOR_MINOR_COLLECTION(pobj);
+
+    obj = *pobj;
+    char *real_obj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    assert(((struct stm_hashtable_entry_s *)real_obj)->userdata ==
+           stm_hashtable_entry_userdata);
+
+    long j, num = STM_SEGMENT->segment_num;
+    for (j = 0; j <= NB_SEGMENTS; j++) {
+        if (j == num)
+            continue;
+        memcpy(REAL_ADDRESS(get_segment_base(j), obj), real_obj,
+               sizeof(struct stm_hashtable_entry_s));
+    }
+}
+
 void stm_hashtable_tracefn(stm_hashtable_t *hashtable, void trace(object_t **))
 {
-    if (trace == TRACE_FOR_MAJOR_COLLECTION)
+    if (trace == TRACE_FOR_MINOR_COLLECTION)
+        trace = &_hashtable_minor_trace;
+    else if (trace == TRACE_FOR_MAJOR_COLLECTION)
         _stm_compact_hashtable(hashtable);
 
     stm_hashtable_table_t *table;
