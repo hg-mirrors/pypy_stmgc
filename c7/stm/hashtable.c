@@ -1,5 +1,3 @@
-#include "stmgc.h"
-
 /*
 Design of stmgc's "hashtable" objects
 =====================================
