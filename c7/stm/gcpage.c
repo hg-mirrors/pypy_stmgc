@@ -631,6 +631,7 @@ static void major_collection_now_at_safe_point(void)
     mark_visit_from_modified_objects();
     mark_visit_from_markers();
     mark_visit_from_roots();
+    mark_visit_from_finalizer_pending();
     LIST_FREE(mark_objects_to_trace);
 
     /* finalizer support: will mark as WL_VISITED all objects with a

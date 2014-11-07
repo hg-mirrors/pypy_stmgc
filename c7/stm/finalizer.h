@@ -6,6 +6,7 @@ struct finalizers_s {
     uintptr_t *running_next;
 };
 
+static void mark_visit_from_finalizer_pending(void);
 static void deal_with_young_objects_with_finalizers(void);
 static void deal_with_old_objects_with_finalizers(void);
 static void deal_with_objects_with_finalizers(void);
