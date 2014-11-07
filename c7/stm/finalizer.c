@@ -390,6 +390,24 @@ static void deal_with_objects_with_finalizers(void)
     LIST_FREE(_finalizer_emptystack);
 }
 
+static void mark_visit_from_finalizer1(char *base, struct finalizers_s *f)
+{
+    if (f != NULL && f->run_finalizers != NULL) {
+        LIST_FOREACH_R(f->run_finalizers, object_t * /*item*/,
+                       mark_visit_object(item, base));
+    }
+}
+
+static void mark_visit_from_finalizer_pending(void)
+{
+    long j;
+    for (j = 1; j <= NB_SEGMENTS; j++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
+        mark_visit_from_finalizer1(pseg->pub.segment_base, pseg->finalizers);
+    }
+    mark_visit_from_finalizer1(stm_object_pages, &g_finalizers);
+}
+
 static void _execute_finalizers(struct finalizers_s *f)
 {
     if (f->run_finalizers == NULL)
