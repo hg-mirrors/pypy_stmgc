@@ -140,6 +140,7 @@ class TestLightFinalizer(BaseTest):
 
 class TestRegularFinalizer(BaseTest):
     expect_content_character = None
+    run_major_collect_in_finalizer = False
 
     def setup_method(self, meth):
         BaseTest.setup_method(self, meth)
@@ -151,6 +152,8 @@ class TestRegularFinalizer(BaseTest):
             if self.expect_content_character is not None:
                 assert stm_get_char(obj) == self.expect_content_character
             self.finalizers_called.append(obj)
+            if self.run_major_collect_in_finalizer:
+                stm_major_collect()
         self.finalizers_called = []
         lib.stmcb_finalizer = finalizer
         self._finalizer_keepalive = finalizer
@@ -206,7 +209,7 @@ class TestRegularFinalizer(BaseTest):
         stm_major_collect()
         self.expect_finalized([lp3])
 
-    def test_finalizer_extra_transation(self):
+    def test_finalizer_extra_transaction(self):
         self.start_transaction()
         lp1 = stm_allocate_with_finalizer(32)
         print lp1
@@ -240,3 +243,12 @@ class TestRegularFinalizer(BaseTest):
         stm_major_collect()
         self.switch(0)
         self.expect_finalized([lp2, lp1])
+
+    def test_run_major_collect_in_finalizer(self):
+        self.run_major_collect_in_finalizer = True
+        self.start_transaction()
+        lp1 = stm_allocate_with_finalizer(32)
+        lp2 = stm_allocate_with_finalizer(32)
+        lp3 = stm_allocate_with_finalizer(32)
+        print lp1, lp2, lp3
+        stm_major_collect()
