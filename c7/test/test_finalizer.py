@@ -139,12 +139,17 @@ class TestLightFinalizer(BaseTest):
 
 
 class TestRegularFinalizer(BaseTest):
+    expect_content_character = None
 
     def setup_method(self, meth):
         BaseTest.setup_method(self, meth)
         #
         @ffi.callback("void(object_t *)")
         def finalizer(obj):
+            print "finalizing!", obj
+            assert stm_get_obj_size(obj) in [16, 32, 48, 56]
+            if self.expect_content_character is not None:
+                assert stm_get_char(obj) == self.expect_content_character
             self.finalizers_called.append(obj)
         self.finalizers_called = []
         lib.stmcb_finalizer = finalizer
@@ -174,6 +179,21 @@ class TestRegularFinalizer(BaseTest):
         print lp1, lp2, lp3
         stm_major_collect()
         self.expect_finalized([lp1, lp2, lp3])
+
+    def test_finalizer_from_other_thread(self):
+        self.start_transaction()
+        lp1 = stm_allocate_with_finalizer(48)
+        stm_set_char(lp1, 'H')
+        self.expect_content_character = 'H'
+        print lp1
+        #
+        self.switch(1)
+        self.start_transaction()
+        stm_major_collect()
+        self.expect_finalized([])      # marked as dead, but wrong thread
+        #
+        self.switch(0)
+        self.expect_finalized([lp1])   # now it has been finalized
 
     def test_finalizer_ordering(self):
         self.start_transaction()
