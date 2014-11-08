@@ -187,6 +187,26 @@ class TestHashtable(BaseTestHashtable):
         assert htget(h, 1) == lp1
         stm_major_collect()       # to get rid of the hashtable object
 
+    def test_minor_collect_bug1_different_thread(self):
+        self.start_transaction()
+        lp1 = stm_allocate(32)
+        self.push_root(lp1)
+        h = self.allocate_hashtable()
+        self.push_root(h)
+        stm_minor_collect()
+        h = self.pop_root()
+        lp1 = self.pop_root()
+        print 'h', h                       # 0xa040010
+        print 'lp1', lp1                   # 0xa040040
+        tl0 = self.tls[self.current_thread]
+        htset(h, 1, lp1, tl0)
+        self.commit_transaction()
+        #
+        self.switch(1)            # in a different thread
+        self.start_transaction()
+        assert htget(h, 1) == lp1
+        stm_major_collect()       # to get rid of the hashtable object
+
 
 class TestRandomHashtable(BaseTestHashtable):
 
