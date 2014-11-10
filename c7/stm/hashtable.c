@@ -25,8 +25,6 @@ in any currently-running transaction.
 */
 
 
-typedef TLPREFIX struct stm_hashtable_entry_s stm_hashtable_entry_t;
-
 uint32_t stm_hashtable_entry_userdata;
 
 
@@ -170,9 +168,9 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
     VOLATILE_HASHTABLE(hashtable)->table = biggertable;
 }
 
-static stm_hashtable_entry_t *_stm_hashtable_lookup(object_t *hashtableobj,
-                                                    stm_hashtable_t *hashtable,
-                                                    uintptr_t index)
+stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
+                                            stm_hashtable_t *hashtable,
+                                            uintptr_t index)
 {
     stm_hashtable_table_t *table;
     uintptr_t mask;
@@ -305,22 +303,20 @@ static stm_hashtable_entry_t *_stm_hashtable_lookup(object_t *hashtableobj,
     }
 }
 
-object_t *stm_hashtable_read(object_t *hashtableobj, stm_hashtable_t *hashtable,
-                             uintptr_t index)
+object_t *stm_hashtable_read(object_t *hobj, stm_hashtable_t *hashtable,
+                             uintptr_t key)
 {
-    stm_hashtable_entry_t *e = _stm_hashtable_lookup(hashtableobj, hashtable,
-                                                     index);
+    stm_hashtable_entry_t *e = stm_hashtable_lookup(hobj, hashtable, key);
     stm_read((object_t *)e);
     return e->object;
 }
 
-void stm_hashtable_write(object_t *hashtableobj, stm_hashtable_t *hashtable,
-                         uintptr_t index, object_t *nvalue,
+void stm_hashtable_write(object_t *hobj, stm_hashtable_t *hashtable,
+                         uintptr_t key, object_t *nvalue,
                          stm_thread_local_t *tl)
 {
     STM_PUSH_ROOT(*tl, nvalue);
-    stm_hashtable_entry_t *e = _stm_hashtable_lookup(hashtableobj, hashtable,
-                                                     index);
+    stm_hashtable_entry_t *e = stm_hashtable_lookup(hobj, hashtable, key);
     stm_write((object_t *)e);
     STM_POP_ROOT(*tl, nvalue);
     e->object = nvalue;
