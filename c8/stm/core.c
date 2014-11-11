@@ -157,6 +157,8 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     page_privatize_in(my_segnum, pagenum);
     assert(get_page_status_in(my_segnum, pagenum) == PAGE_PRIVATE);
 
+    /* before copying anything, acquire modification locks from our and
+       the other segment */
     uint64_t to_lock = (1UL << copy_from_segnum)| (1UL << my_segnum);
     acquire_modification_lock_set(to_lock);
     pagecopy((char*)(get_virt_page_of(my_segnum, pagenum) * 4096UL),
@@ -169,7 +171,6 @@ static void handle_segfault_in_page(uintptr_t pagenum)
        might need a walk into the past. */
     struct stm_commit_log_entry_s *src_version, *target_version;
     src_version = get_priv_segment(copy_from_segnum)->last_commit_log_entry;
-    OPT_ASSERT(src_version->rev_num == most_recent_rev);
     target_version = STM_PSEGMENT->last_commit_log_entry;
 
 
@@ -229,7 +230,7 @@ void _dbg_print_commit_log()
 
     fprintf(stderr, "commit log:\n");
     while ((cl = cl->next)) {
-        if (cl == (void *)-1) {
+        if (cl == INEV_RUNNING) {
             fprintf(stderr, "  INEVITABLE\n");
             return;
         }
@@ -262,7 +263,7 @@ static void _stm_validate(void *free_if_abort)
     /* Don't check this 'cl'. This entry is already checked */
 
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
-        assert(first_cl->next == (void*)-1);
+        assert(first_cl->next == INEV_RUNNING);
         return;
     }
 
@@ -270,13 +271,13 @@ static void _stm_validate(void *free_if_abort)
     uint64_t segments_to_lock = 1UL << my_segnum;
     cl = first_cl;
     while ((next_cl = cl->next) != NULL) {
-        if (next_cl == (void *)-1) {
+        if (next_cl == INEV_RUNNING) {
 #if STM_TESTS
             if (free_if_abort != (void *)-1)
                 free(free_if_abort);
             stm_abort_transaction();
 #endif
-            /* only go this far when validating */
+            /* only validate entries up to INEV */
             break;
         }
         assert(next_cl->rev_num > cl->rev_num);
@@ -324,7 +325,10 @@ static void _stm_validate(void *free_if_abort)
 
             /* last fully validated entry */
             STM_PSEGMENT->last_commit_log_entry = cl;
+            if (cl == last_cl)
+                break;
         }
+        assert(cl == last_cl);
 
         OPT_ASSERT(segment_really_copied_from < (1 << NB_SEGMENTS));
         int segnum;
@@ -346,6 +350,8 @@ static void _stm_validate(void *free_if_abort)
     if (needs_abort) {
         if (free_if_abort != (void *)-1)
             free(free_if_abort);
+        /* pages may be inconsistent */
+
         stm_abort_transaction();
     }
 }
@@ -381,18 +387,25 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
         /* try to attach to commit log: */
         old = STM_PSEGMENT->last_commit_log_entry;
         if (old->next == NULL) {
-            if ((uintptr_t)new != -1) /* INEVITABLE */
+            if (new != INEV_RUNNING) /* INEVITABLE */
                 new->rev_num = old->rev_num + 1;
 
             if (__sync_bool_compare_and_swap(&old->next, NULL, new))
                 break;   /* success! */
+        } else if (old->next == INEV_RUNNING) {
+            /* we failed because there is an INEV transaction running */
+            usleep(10);
         }
+
+        /* check for requested safe point. otherwise an INEV transaction
+           may try to commit but cannot because of the busy-loop here. */
+        _stm_collectable_safe_point();
     }
 }
 
 static void _validate_and_turn_inevitable(void)
 {
-    _validate_and_attach((struct stm_commit_log_entry_s *)-1);
+    _validate_and_attach((struct stm_commit_log_entry_s *)INEV_RUNNING);
 }
 
 static void _validate_and_add_to_commit_log(void)
@@ -403,9 +416,9 @@ static void _validate_and_add_to_commit_log(void)
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         old = STM_PSEGMENT->last_commit_log_entry;
         new->rev_num = old->rev_num + 1;
-        OPT_ASSERT(old->next == (void *)-1);
+        OPT_ASSERT(old->next == INEV_RUNNING);
 
-        bool yes = __sync_bool_compare_and_swap(&old->next, (void*)-1, new);
+        bool yes = __sync_bool_compare_and_swap(&old->next, INEV_RUNNING, new);
         OPT_ASSERT(yes);
     }
     else {
