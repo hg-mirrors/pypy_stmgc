@@ -123,6 +123,7 @@ struct stm_undo_s {
    data from 'written[n].backup' is the content of (slices of) the
    object as they were *before* that commit occurred.
 */
+#define INEV_RUNNING ((void*)-1)
 struct stm_commit_log_entry_s {
     struct stm_commit_log_entry_s *volatile next;
     int segment_num;
