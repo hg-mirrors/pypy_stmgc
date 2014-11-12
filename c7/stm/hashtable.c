@@ -22,6 +22,11 @@ objects, and they have the read/write markers.  Every entry object
 itself, once created, stays around.  It is only removed by the next
 major GC if it points to NULL and its read/write markers are not set
 in any currently-running transaction.
+
+References
+----------
+
+Inspired by: http://ppl.stanford.edu/papers/podc011-bronson.pdf
 */
 
 
