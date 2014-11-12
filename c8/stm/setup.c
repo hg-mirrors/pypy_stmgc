@@ -3,55 +3,61 @@
 #endif
 
 #include <signal.h>
-
-#ifdef USE_REMAP_FILE_PAGES
-static char *setup_mmap(char *reason, int *ignored)
-{
-    char *result = mmap(NULL, TOTAL_MEMORY,
-                        PROT_READ | PROT_WRITE,
-                        MAP_PAGES_FLAGS, -1, 0);
-    if (result == MAP_FAILED)
-        stm_fatalerror("%s failed: %m", reason);
-
-    return result;
-}
-static void close_fd_mmap(int ignored)
-{
-}
-#else
 #include <fcntl.h>           /* For O_* constants */
-static char *setup_mmap(char *reason, int *map_fd)
+
+static void setup_mmap(char *reason)
 {
-    char name[128];
+    char name[] = "/__stmgc_c8__";
 
     /* Create the big shared memory object, and immediately unlink it.
        There is a small window where if this process is killed the
        object is left around.  It doesn't seem possible to do anything
        about it...
     */
-    int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+    stm_object_pages_fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
     shm_unlink(name);
 
-    if (fd == -1) {
+    if (stm_object_pages_fd == -1)
         stm_fatalerror("%s failed (stm_open): %m", reason);
-    }
-    if (ftruncate(fd, TOTAL_MEMORY) != 0) {
+
+    if (ftruncate(stm_object_pages_fd, NB_SHARED_PAGES * 4096UL) != 0)
         stm_fatalerror("%s failed (ftruncate): %m", reason);
-    }
-    char *result = mmap(NULL, TOTAL_MEMORY,
-                        PROT_READ | PROT_WRITE,
-                        MAP_PAGES_FLAGS & ~MAP_ANONYMOUS, fd, 0);
-    if (result == MAP_FAILED) {
+
+    stm_file_pages = mmap(NULL, NB_SHARED_PAGES * 4096UL,
+                          PROT_READ | PROT_WRITE,
+                          MAP_SHARED | MAP_NORESERVE,
+                          stm_object_pages_fd, 0);
+
+    if (stm_file_pages == MAP_FAILED)
         stm_fatalerror("%s failed (mmap): %m", reason);
+
+
+    /* reserve the whole virtual memory space of the program for
+       all segments: */
+    stm_object_pages = mmap(NULL, TOTAL_MEMORY,
+                            PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS,
+                            -1, 0);
+    if (stm_object_pages == MAP_FAILED)
+        stm_fatalerror("%s failed (mmap): %m", reason);
+
+    /* remap the shared part of the segments to the file pages */
+    long l;
+    for (l = 0; l < NB_SEGMENTS; l++) {
+        char *result = mmap(
+            stm_object_pages + (l * NB_PAGES + END_NURSERY_PAGE) * 4096UL, /* addr */
+            NB_SHARED_PAGES * 4096UL, /* len */
+            PROT_READ | PROT_WRITE,
+            MAP_FIXED | MAP_SHARED | MAP_NORESERVE,
+            stm_object_pages_fd, 0); /* file & offset */
+        if (result == MAP_FAILED)
+            stm_fatalerror("%s failed (mmap): %m", reason);
     }
-    *map_fd = fd;
-    return result;
 }
 static void close_fd_mmap(int map_fd)
 {
     close(map_fd);
 }
-#endif
 
 static void setup_protection_settings(void)
 {
@@ -63,33 +69,40 @@ static void setup_protection_settings(void)
            NULL accesses land.  We mprotect it so that accesses fail. */
         mprotect(segment_base, 4096, PROT_NONE);
 
-        /* TMP_COPY_PAGE is used for atomic privatization */
-        mprotect(segment_base + TMP_COPY_PAGE * 4096UL,
-                 4096UL, PROT_READ|PROT_WRITE);
-
         /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
-        if (FIRST_READMARKER_PAGE > TMP_COPY_PAGE + 1)
-            mprotect(segment_base + (TMP_COPY_PAGE + 1) * 4096,
-                     (FIRST_READMARKER_PAGE - TMP_COPY_PAGE - 1) * 4096UL,
+        if (FIRST_READMARKER_PAGE > 2)
+            mprotect(segment_base + 2 * 4096,
+                     (FIRST_READMARKER_PAGE - 2) * 4096UL,
                      PROT_NONE);
 
-        /* STM_SEGMENT */
-        mprotect(segment_base + ((uintptr_t)STM_SEGMENT / 4096UL) * 4096UL,
-                 4096UL, PROT_READ|PROT_WRITE);
+        /* STM_SEGMENT-TL is in page 1 */
     }
 }
 
 
+static void setup_signal_handler(void)
+{
+    struct sigaction act;
+    memset(&act, 0, sizeof(act));
+
+	act.sa_sigaction = &_signal_handler;
+	/* The SA_SIGINFO flag tells sigaction() to use the sa_sigaction field, not sa_handler. */
+	act.sa_flags = SA_SIGINFO | SA_NODEFER;
+
+	if (sigaction(SIGSEGV, &act, NULL) < 0) {
+		perror ("sigaction");
+		abort();
+	}
+}
+
 void stm_setup(void)
 {
     /* Check that some values are acceptable */
-    assert(TMP_COPY_PAGE > 0 && TMP_COPY_PAGE <= 1);
-    assert(TMP_COPY_PAGE * 4096 + 4096 <= ((uintptr_t)STM_SEGMENT));
+    assert(4096 <= ((uintptr_t)STM_SEGMENT));
     assert((uintptr_t)STM_SEGMENT == (uintptr_t)STM_PSEGMENT);
     assert(((uintptr_t)STM_PSEGMENT) + sizeof(*STM_PSEGMENT) <= FIRST_READMARKER_PAGE*4096);
 
     assert(NB_SEGMENTS <= NB_SEGMENTS_MAX);
-    assert(TMP_COPY_PAGE < FIRST_READMARKER_PAGE);
     assert(FIRST_READMARKER_PAGE * 4096UL <= READMARKER_START);
     assert(READMARKER_START < READMARKER_END);
     assert(READMARKER_END <= 4096UL * FIRST_OBJECT_PAGE);
@@ -99,9 +112,14 @@ void stm_setup(void)
            (FIRST_READMARKER_PAGE * 4096UL));
     assert(_STM_FAST_ALLOC <= NB_NURSERY_PAGES * 4096);
 
-    stm_object_pages = setup_mmap("initial stm_object_pages mmap()",
-                                  &stm_object_pages_fd);
+    setup_mmap("initial stm_object_pages mmap()");
+
+    assert(stm_object_pages_fd);
+    assert(stm_object_pages);
+    assert(stm_file_pages);
+
     setup_protection_settings();
+    setup_signal_handler();
 
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
@@ -118,7 +136,7 @@ void stm_setup(void)
         assert(0 <= i && i < 255);   /* 255 is WL_VISITED in gcpage.c */
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
-        pr->modified_old_objects = tree_create();
+        pr->modified_old_objects = list_create();
         pr->objects_pointing_to_nursery = list_create();
         pr->young_outside_nursery = tree_create();
         pr->nursery_objects_shadows = tree_create();
@@ -155,7 +173,7 @@ void stm_teardown(void)
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
         assert(list_is_empty(pr->objects_pointing_to_nursery));
         list_free(pr->objects_pointing_to_nursery);
-        tree_free(pr->modified_old_objects);
+        list_free(pr->modified_old_objects);
         tree_free(pr->young_outside_nursery);
         tree_free(pr->nursery_objects_shadows);
         tree_free(pr->callbacks_on_commit_and_abort[0]);
@@ -243,6 +261,15 @@ void stm_register_thread_local(stm_thread_local_t *tl)
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num));
     s_mutex_unlock();
+
+    if (num == 0) {
+        dprintf(("STM_GC_NURSERY: %d\n", STM_GC_NURSERY));
+        dprintf(("NB_PAGES: %d\n", NB_PAGES));
+        dprintf(("NB_SEGMENTS: %d\n", NB_SEGMENTS));
+        dprintf(("FIRST_OBJECT_PAGE=FIRST_NURSERY_PAGE: %lu\n", FIRST_OBJECT_PAGE));
+        dprintf(("END_NURSERY_PAGE: %lu\n", END_NURSERY_PAGE));
+        dprintf(("NB_SHARED_PAGES: %lu\n", NB_SHARED_PAGES));
+    }
 }
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)

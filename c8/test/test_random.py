@@ -8,10 +8,12 @@ class Exec(object):
     def __init__(self, test):
         self.content = {'self': test}
         self.thread_num = 0
+        self.executed = []
 
     def do(self, cmd):
-        color = "\033[%dm" % (31 + self.thread_num % 6)
+        color = ">> \033[%dm" % (31 + (self.thread_num + 5) % 6)
         print >> sys.stderr, color + cmd + "\033[0m"
+        self.executed.append(cmd)
         exec cmd in globals(), self.content
 
 
@@ -298,6 +300,7 @@ class GlobalState(object):
 
             confl_set = other_trs.read_set & trs.write_set
             if confl_set:
+                assert not other_trs.inevitable
                 # trs wins!
                 other_trs.set_must_abort(objs_in_conflict=confl_set)
                 assert not trs.check_must_abort()
@@ -497,7 +500,8 @@ def op_assert_modified(ex, global_state, thread_state):
 
 def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
     if new_thread_state is None:
-        new_thread_state = global_state.rnd.choice(global_state.thread_states)
+        new_thread_state = global_state.rnd.choice(
+            global_state.thread_states + [thread_state] * 3) # more likely not switch
 
     if new_thread_state != thread_state:
         if thread_state.transaction_state:
@@ -505,14 +509,16 @@ def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
         ex.do('#')
         #
         trs = new_thread_state.transaction_state
-        if trs is not None and not trs.inevitable:
-            if global_state.is_inevitable_transaction_running():
-                trs.set_must_abort()
-        conflicts = trs is not None and trs.check_must_abort()
+        if trs and not trs.check_must_abort():
+            global_state.check_if_can_become_inevitable(trs)
+        conflicts = trs and trs.check_must_abort()
         ex.thread_num = new_thread_state.num
         #
+        if conflicts:
+            ex.do("# objs_in_conflict=%s" % trs.objs_in_conflict)
         ex.do(raising_call(conflicts,
                            "self.switch", new_thread_state.num))
+
         if conflicts:
             new_thread_state.abort_transaction()
         elif trs:
@@ -535,7 +541,7 @@ class TestRandom(BaseTest):
     def test_fixed_16_bytes_objects(self, seed=1010):
         rnd = random.Random(seed)
 
-        N_OBJECTS = 3
+        N_OBJECTS = 4
         N_THREADS = self.NB_THREADS
         ex = Exec(self)
         ex.do("################################################################\n"*10)
@@ -575,7 +581,7 @@ class TestRandom(BaseTest):
             op_minor_collect,
             #op_major_collect,
         ]
-        for _ in range(200):
+        for _ in range(1000):
             # make sure we are in a transaction:
             curr_thread = op_switch_thread(ex, global_state, curr_thread)
 
@@ -612,6 +618,6 @@ class TestRandom(BaseTest):
         test_fun.__name__ = 'test_random_%d' % seed
         return test_fun
 
-    for _seed in range(5000, 5200):
+    for _seed in range(5000, 5400):
         _fn = _make_fun(_seed)
         locals()[_fn.__name__] = _fn

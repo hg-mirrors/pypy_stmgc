@@ -34,7 +34,7 @@ struct stm_segment_info_s {
     uintptr_t nursery_end;
     struct stm_thread_local_s *running_thread;
 };
-#define STM_SEGMENT           ((stm_segment_info_t *)8192)
+#define STM_SEGMENT           ((stm_segment_info_t *)4352)
 
 
 struct stm_shadowentry_s {
@@ -71,7 +71,6 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
 #include <stdbool.h>
-void stm_validate(void *free_if_abort);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 
@@ -231,6 +230,7 @@ static inline void stm_become_inevitable(stm_thread_local_t *tl,
 }
 
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl, const char *msg);
+void stm_validate(void);
 
 
 /* dummies for now: */

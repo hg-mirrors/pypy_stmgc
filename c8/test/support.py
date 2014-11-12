@@ -43,13 +43,14 @@ void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
-void stm_validate(void *free_if_abort);
+void stm_validate();
 bool _check_stm_validate();
 
 object_t *stm_setup_prebuilt(object_t *);
 void _stm_start_safe_point(void);
 bool _check_stop_safe_point(void);
 
+ssize_t _checked_stmcb_size_rounded_up(struct object_s *obj);
 
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
@@ -172,6 +173,20 @@ long _check_start_transaction(stm_thread_local_t *tl) {
     return 1;
 }
 
+ssize_t _checked_stmcb_size_rounded_up(struct object_s *obj)
+{
+    stm_thread_local_t *_tl = STM_SEGMENT->running_thread;      \
+    void **jmpbuf = _tl->rjthread.jmpbuf;                       \
+    if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
+        ssize_t res = stmcb_size_rounded_up(obj);
+        clear_jmpbuf(_tl);
+        return res;
+    }
+    clear_jmpbuf(_tl);
+    return 1;
+}
+
+
 bool _check_stop_safe_point(void) {
     CHECKED(_stm_stop_safe_point());
 }
@@ -189,7 +204,7 @@ bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
 }
 
 bool _check_stm_validate(void) {
-    CHECKED(stm_validate(NULL));
+    CHECKED(stm_validate());
 }
 
 #undef CHECKED
@@ -276,7 +291,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
                     ],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0', '-Wall', '-ferror-limit=1'],
+     extra_compile_args=['-g', '-O0', '-Wall', '-Werror', '-ferror-limit=1'],
      extra_link_args=['-g', '-lrt'],
      force_generic_engine=True)
 
@@ -408,7 +423,10 @@ def stm_get_private_page(pagenum):
     return lib._stm_get_private_page(pagenum)
 
 def stm_get_obj_size(o):
-    return lib.stmcb_size_rounded_up(stm_get_real_address(o))
+    res = lib._checked_stmcb_size_rounded_up(stm_get_real_address(o))
+    if res == 1:
+        raise Conflict()
+    return res
 
 def stm_get_obj_pages(o):
     start = int(ffi.cast('uintptr_t', o))
@@ -523,7 +541,7 @@ class BaseTest(object):
         assert res   # abort_transaction() didn't abort!
         assert not lib._stm_in_transaction(tl)
 
-    def switch(self, thread_num):
+    def switch(self, thread_num, validate=True):
         assert thread_num != self.current_thread
         tl = self.tls[self.current_thread]
         if lib._stm_in_transaction(tl):
@@ -535,7 +553,8 @@ class BaseTest(object):
         if lib._stm_in_transaction(tl2):
             lib._stm_test_switch(tl2)
             stm_stop_safe_point() # can raise Conflict
-            stm_validate() # can raise Conflict
+            if validate:
+                stm_validate() # can raise Conflict
 
     def switch_to_segment(self, seg_num):
         lib._stm_test_switch_segment(seg_num)
@@ -563,10 +582,19 @@ class BaseTest(object):
         self.push_root(ffi.cast("object_t *", 8))
 
     def check_char_everywhere(self, obj, expected_content, offset=HDR):
-        for i in range(len(self.tls)):
+        for i in range(self.NB_THREADS):
+            if self.current_thread != i:
+                self.switch(i)
+            tl = self.tls[i]
+            if not lib._stm_in_transaction(tl):
+                self.start_transaction()
+
+            # check:
             addr = lib._stm_get_segment_base(i)
             content = addr[int(ffi.cast("uintptr_t", obj)) + offset]
             assert content == expected_content
+
+            self.abort_transaction()
 
     def get_thread_local_obj(self):
         tl = self.tls[self.current_thread]

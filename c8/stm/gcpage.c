@@ -5,6 +5,7 @@
 
 static void setup_gcpage(void)
 {
+    /* XXXXXXX should use stm_file_pages, no? */
     uninitialized_page_start = stm_object_pages + END_NURSERY_PAGE * 4096UL;
     uninitialized_page_stop  = stm_object_pages + NB_PAGES * 4096UL;
 }
@@ -15,11 +16,13 @@ static void teardown_gcpage(void)
 
 static void setup_N_pages(char *pages_addr, uint64_t num)
 {
+    /* initialize to |S|N|N|N| */
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
         acquire_privatization_lock(i);
     }
-    pages_initialize_shared((pages_addr - stm_object_pages) / 4096UL, num);
+    pages_initialize_shared_for(STM_SEGMENT->segment_num,
+                                (pages_addr - stm_object_pages) / 4096UL, num);
     for (i = NB_SEGMENTS-1; i >= 0; i--) {
         release_privatization_lock(i);
     }

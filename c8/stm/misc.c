@@ -46,8 +46,9 @@ bool _stm_was_written(object_t *obj)
 long _stm_count_modified_old_objects(void)
 {
     assert(STM_PSEGMENT->modified_old_objects);
-    assert(tree_count(STM_PSEGMENT->modified_old_objects) < 10000);
-    return tree_count(STM_PSEGMENT->modified_old_objects);
+    assert(list_count(STM_PSEGMENT->modified_old_objects) < 30000);
+    assert((list_count(STM_PSEGMENT->modified_old_objects) % 3) == 0);
+    return list_count(STM_PSEGMENT->modified_old_objects) / 3;
 }
 
 long _stm_count_objects_pointing_to_nursery(void)
@@ -59,8 +60,8 @@ long _stm_count_objects_pointing_to_nursery(void)
 
 object_t *_stm_enum_modified_old_objects(long index)
 {
-    wlog_t* entry = tree_item(STM_PSEGMENT->modified_old_objects, index);
-    return (object_t*)entry->addr;
+    return (object_t *)list_item(
+        STM_PSEGMENT->modified_old_objects, index * 3);
 }
 
 object_t *_stm_enum_objects_pointing_to_nursery(long index)
@@ -69,13 +70,12 @@ object_t *_stm_enum_objects_pointing_to_nursery(long index)
         STM_PSEGMENT->objects_pointing_to_nursery, index);
 }
 
-static volatile struct stm_commit_log_entry_s *_last_cl_entry;
+static struct stm_commit_log_entry_s *_last_cl_entry;
 static long _last_cl_entry_index;
 void _stm_start_enum_last_cl_entry()
 {
     _last_cl_entry = &commit_log_root;
-    volatile struct stm_commit_log_entry_s *cl = (volatile struct stm_commit_log_entry_s *)
-        &commit_log_root;
+    struct stm_commit_log_entry_s *cl = &commit_log_root;
 
     while ((cl = cl->next)) {
         _last_cl_entry = cl;
@@ -85,8 +85,10 @@ void _stm_start_enum_last_cl_entry()
 
 object_t *_stm_next_last_cl_entry()
 {
-    if (_last_cl_entry != &commit_log_root)
-        return _last_cl_entry->written[_last_cl_entry_index++];
-    return NULL;
+    if (_last_cl_entry == &commit_log_root)
+        return NULL;
+    if (_last_cl_entry_index >= _last_cl_entry->written_count)
+        return NULL;
+    return _last_cl_entry->written[_last_cl_entry_index++].object;
 }
 #endif
