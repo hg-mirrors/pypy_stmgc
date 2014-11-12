@@ -197,7 +197,9 @@ static void collect_oldrefs_to_nursery(void)
         lst = STM_PSEGMENT->objects_pointing_to_nursery;
     }
 
+    acquire_privatization_lock(STM_SEGMENT->segment_num);
     synchronize_objects_flush();
+    release_privatization_lock(STM_SEGMENT->segment_num);
 }
 
 
