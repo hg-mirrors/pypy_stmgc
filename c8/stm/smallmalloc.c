@@ -60,7 +60,7 @@ static void grab_more_free_pages_for_small_allocations(void)
             goto out_of_memory;
 
         uninitialized_page_stop -= decrease_by;
-        first_small_uniform_loc = uninitialized_page_stop - stm_file_pages;
+        first_small_uniform_loc = uninitialized_page_stop - stm_file_pages + END_NURSERY_PAGE * 4096UL;
 
         /* XXX: */
         /* char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL; */
