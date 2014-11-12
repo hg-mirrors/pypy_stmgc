@@ -80,6 +80,7 @@ void _stm_test_switch_segment(int segnum);
 void _push_obj_to_other_segments(object_t *obj);
 
 char *stm_object_pages;
+char *stm_file_pages;
 object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
 bool (*_stm_smallmalloc_keep)(char *data);
 void _stm_smallmalloc_sweep(void);

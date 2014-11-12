@@ -6,8 +6,8 @@
 static void setup_gcpage(void)
 {
     /* XXXXXXX should use stm_file_pages, no? */
-    uninitialized_page_start = stm_object_pages + END_NURSERY_PAGE * 4096UL;
-    uninitialized_page_stop  = stm_object_pages + NB_PAGES * 4096UL;
+    uninitialized_page_start = stm_file_pages;
+    uninitialized_page_stop  = stm_file_pages + NB_SHARED_PAGES * 4096UL;
 }
 
 static void teardown_gcpage(void)
@@ -21,8 +21,10 @@ static void setup_N_pages(char *pages_addr, uint64_t num)
     for (i = 0; i < NB_SEGMENTS; i++) {
         acquire_privatization_lock(i);
     }
-    pages_initialize_shared_for(STM_SEGMENT->segment_num,
-                                (pages_addr - stm_object_pages) / 4096UL, num);
+    pages_initialize_shared_for(
+        STM_SEGMENT->segment_num,
+        get_page_of_file_page((pages_addr - stm_file_pages) / 4096UL),
+        num);
     for (i = NB_SEGMENTS-1; i >= 0; i--) {
         release_privatization_lock(i);
     }
@@ -31,7 +33,7 @@ static void setup_N_pages(char *pages_addr, uint64_t num)
 
 static int lock_growth_large = 0;
 
-static char *allocate_outside_nursery_large(uint64_t size)
+static stm_char *allocate_outside_nursery_large(uint64_t size)
 {
     /* XXX: real allocation */
     spinlock_acquire(lock_growth_large);
@@ -51,26 +53,27 @@ static char *allocate_outside_nursery_large(uint64_t size)
             stm_fatalerror("uninitialized_page_start changed?");
         }
     }
-    dprintf(("allocate_outside_nursery_large(%lu): %p, seg=%d, page=%lu\n",
-             size, addr, get_segment_of_linear_address(addr),
-             (addr - get_segment_base(get_segment_of_linear_address(addr))) / 4096UL));
+
+    dprintf(("allocate_outside_nursery_large(%lu): %p, page=%lu\n",
+             size, addr,
+             (uintptr_t)addr / 4096UL + END_NURSERY_PAGE));
 
     spinlock_release(lock_growth_large);
-    return addr;
+    return (stm_char*)(addr - stm_file_pages + END_NURSERY_PAGE * 4096UL);
 }
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
     /* only for tests xxx but stm_setup_prebuilt() uses this now too */
-    char *p = allocate_outside_nursery_large(size_rounded_up);
-    memset(p, 0, size_rounded_up);
+    stm_char *p = allocate_outside_nursery_large(size_rounded_up);
+    memset(stm_object_pages + (uintptr_t)p, 0, size_rounded_up);
 
-    object_t *o = (object_t *)(p - stm_object_pages);
+    object_t *o = (object_t *)p;
     o->stm_flags = GCFLAG_WRITE_BARRIER;
 
     dprintf(("allocate_old(%lu): %p, seg=%d, page=%lu\n",
              size_rounded_up, p,
-             get_segment_of_linear_address(p),
-             (p - STM_SEGMENT->segment_base) / 4096UL));
+             get_segment_of_linear_address(stm_object_pages + (uintptr_t)p),
+             (uintptr_t)p / 4096UL));
     return o;
 }

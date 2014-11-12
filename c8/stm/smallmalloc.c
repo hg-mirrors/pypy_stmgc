@@ -3,8 +3,8 @@
 #endif
 
 
-#define PAGE_SMSIZE_START   END_NURSERY_PAGE
-#define PAGE_SMSIZE_END     NB_PAGES
+#define PAGE_SMSIZE_START   0
+#define PAGE_SMSIZE_END     NB_SHARED_PAGES
 
 typedef struct {
     uint8_t sz;
@@ -21,7 +21,7 @@ static fpsz_t full_pages_object_size[PAGE_SMSIZE_END - PAGE_SMSIZE_START];
 
 static fpsz_t *get_fpsz(char *smallpage)
 {
-    uintptr_t pagenum = (((char *)smallpage) - stm_object_pages) / 4096;
+    uintptr_t pagenum = (((char *)smallpage) - stm_file_pages) / 4096;
     assert(PAGE_SMSIZE_START <= pagenum && pagenum < PAGE_SMSIZE_END);
     return &full_pages_object_size[pagenum - PAGE_SMSIZE_START];
 }
@@ -46,6 +46,7 @@ static int gmfp_lock = 0;
 
 static void grab_more_free_pages_for_small_allocations(void)
 {
+    dprintf(("grab_more_free_pages_for_small_allocation()\n"));
     /* Grab GCPAGE_NUM_PAGES pages out of the top addresses.  Use the
        lock of pages.c to prevent any remapping from occurring under our
        feet.
@@ -59,7 +60,7 @@ static void grab_more_free_pages_for_small_allocations(void)
             goto out_of_memory;
 
         uninitialized_page_stop -= decrease_by;
-        first_small_uniform_loc = uninitialized_page_stop - stm_object_pages;
+        first_small_uniform_loc = uninitialized_page_stop - stm_file_pages;
 
         /* XXX: */
         /* char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL; */
@@ -150,7 +151,7 @@ static char *_allocate_small_slowpath(uint64_t size)
 }
 
 __attribute__((always_inline))
-static inline char *allocate_outside_nursery_small(uint64_t size)
+static inline stm_char *allocate_outside_nursery_small(uint64_t size)
 {
     OPT_ASSERT((size & 7) == 0);
     OPT_ASSERT(16 <= size && size <= GC_LAST_SMALL_SIZE);
@@ -161,16 +162,28 @@ static inline char *allocate_outside_nursery_small(uint64_t size)
     struct small_free_loc_s *result = *fl;
 
     if (UNLIKELY(result == NULL))
-        return _allocate_small_slowpath(size);
+        return (stm_char*)
+            (_allocate_small_slowpath(size) - stm_file_pages + END_NURSERY_PAGE * 4096UL);
 
     *fl = result->next;
-    return (char *)result;
+    return (stm_char*)
+        ((char *)result - stm_file_pages + END_NURSERY_PAGE * 4096UL);
 }
 
 object_t *_stm_allocate_old_small(ssize_t size_rounded_up)
 {
-    char *p = allocate_outside_nursery_small(size_rounded_up);
-    return (object_t *)(p - stm_object_pages);
+    stm_char *p = allocate_outside_nursery_small(size_rounded_up);
+    memset(stm_object_pages + (uintptr_t)p, 0, size_rounded_up);
+
+    object_t *o = (object_t *)p;
+    o->stm_flags = GCFLAG_WRITE_BARRIER;
+
+    dprintf(("allocate_old_small(%lu): %p, seg=%d, page=%lu\n",
+             size_rounded_up, p,
+             get_segment_of_linear_address(stm_object_pages + (uintptr_t)p),
+             (uintptr_t)p / 4096UL));
+
+    return o;
 }
 
 /************************************************************/
@@ -178,8 +191,11 @@ object_t *_stm_allocate_old_small(ssize_t size_rounded_up)
 static inline bool _smallmalloc_sweep_keep(char *p)
 {
 #ifdef STM_TESTS
-    if (_stm_smallmalloc_keep != NULL)
-        return _stm_smallmalloc_keep(p);
+    if (_stm_smallmalloc_keep != NULL) {
+        // test wants a TLPREFIXd address
+        return _stm_smallmalloc_keep(
+            p - stm_file_pages + (char*)(END_NURSERY_PAGE * 4096UL));
+    }
 #endif
     abort();
     //return smallmalloc_keep_object_at(p);

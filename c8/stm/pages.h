@@ -62,6 +62,10 @@ static inline uintptr_t get_file_page_of(uintptr_t pagenum)
     return pagenum - PAGE_FLAG_START;
 }
 
+static inline uintptr_t get_page_of_file_page(uintptr_t file_page)
+{
+    return file_page + END_NURSERY_PAGE;
+}
 
 static inline uint8_t get_page_status_in(long segnum, uintptr_t pagenum)
 {

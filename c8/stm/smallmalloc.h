@@ -54,7 +54,7 @@ struct small_malloc_data_s {
 
 /* Functions
  */
-static inline char *allocate_outside_nursery_small(uint64_t size)
+static inline stm_char *allocate_outside_nursery_small(uint64_t size)
      __attribute__((always_inline));
 
 void _stm_smallmalloc_sweep(void);

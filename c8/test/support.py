@@ -34,6 +34,7 @@ typedef struct {
 } stm_thread_local_t;
 
 char *stm_object_pages;
+char *stm_file_pages;
 
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
