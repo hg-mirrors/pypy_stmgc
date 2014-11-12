@@ -45,6 +45,19 @@ static inline struct list_s *list_append2(struct list_s *lst,
     return lst;
 }
 
+static inline struct list_s *list_append3(struct list_s *lst, uintptr_t item0,
+                                          uintptr_t item1, uintptr_t item2)
+{
+    uintptr_t index = lst->count;
+    lst->count += 3;
+    if (UNLIKELY(index + 2 > lst->last_allocated))
+        lst = _list_grow(lst, index + 2);
+    lst->items[index + 0] = item0;
+    lst->items[index + 1] = item1;
+    lst->items[index + 2] = item2;
+    return lst;
+}
+
 
 static inline void list_clear(struct list_s *lst)
 {

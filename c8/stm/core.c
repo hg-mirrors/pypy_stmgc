@@ -2,8 +2,6 @@
 # error "must be compiled via stmgc.c"
 #endif
 
-#include <signal.h>
-
 
 #ifdef NDEBUG
 #define EVENTUALLY(condition)    {/* nothing */}
@@ -19,231 +17,440 @@
     }
 #endif
 
+/* General helper: copies objects into our own segment, from some
+   source described by a range of 'struct stm_undo_s'.  Maybe later
+   we could specialize this function to avoid the checks in the
+   inner loop.
+*/
+static void import_objects(
+        int from_segnum,            /* or -1: from undo->backup,
+                                       or -2: from undo->backup if not modified */
+        uintptr_t pagenum,          /* or -1: "all accessible" */
+        struct stm_undo_s *undo,
+        struct stm_undo_s *end)
+{
+    char *src_segment_base = (from_segnum >= 0 ? get_segment_base(from_segnum)
+                                               : NULL);
+
+    assert(IMPLY(from_segnum >= 0, get_priv_segment(from_segnum)->modification_lock));
+    assert(STM_PSEGMENT->modification_lock);
+
+    for (; undo < end; undo++) {
+        object_t *obj = undo->object;
+        stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
+        uintptr_t current_page_num = ((uintptr_t)oslice) / 4096;
+
+        if (pagenum == -1) {
+            if (get_page_status_in(STM_SEGMENT->segment_num,
+                                   current_page_num) == PAGE_NO_ACCESS)
+                continue;
+        }
+        else {
+            if (current_page_num != pagenum)
+                continue;
+        }
+
+        if (from_segnum == -2 && _stm_was_read(obj) && (obj->stm_flags & GCFLAG_WB_EXECUTED)) {
+            /* called from stm_validate():
+                > if not was_read(), we certainly didn't modify
+                > if not WB_EXECUTED, we may have read from the obj in a different page but
+                  did not modify it (should not occur right now, but future proof!)
+               only the WB_EXECUTED alone is not enough, since we may have imported from a
+               segment's private page (which had the flag set) */
+            assert(IMPLY(_stm_was_read(obj), (obj->stm_flags & GCFLAG_WB_EXECUTED))); /* for now */
+            continue;           /* only copy unmodified */
+        }
+
+        dprintf(("import slice seg=%d obj=%p off=%lu sz=%d pg=%lu\n",
+                 from_segnum, obj, SLICE_OFFSET(undo->slice),
+                 SLICE_SIZE(undo->slice), current_page_num));
+        char *src, *dst;
+        if (src_segment_base != NULL)
+            src = REAL_ADDRESS(src_segment_base, oslice);
+        else
+            src = undo->backup + SLICE_OFFSET(undo->slice);
+        dst = REAL_ADDRESS(STM_SEGMENT->segment_base, oslice);
+        memcpy(dst, src, SLICE_SIZE(undo->slice));
+
+        if (src_segment_base == NULL) {
+            /* backups never should have WB_EXECUTED */
+            assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
+        }
+    }
+}
+
+
+/* ############# signal handler ############# */
+
+static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum,
+                                      bool only_if_not_modified)
+{
+    /* looks at all bk copies of objects overlapping page 'pagenum' and
+       copies the part in 'pagenum' back to the current segment */
+    dprintf(("copy_bk_objs_in_page_from(%d, %ld, %d)\n",
+             from_segnum, (long)pagenum, only_if_not_modified));
+
+    struct list_s *list = get_priv_segment(from_segnum)->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+
+    import_objects(only_if_not_modified ? -2 : -1,
+                   pagenum, undo, end);
+}
+
+static void go_to_the_past(uintptr_t pagenum,
+                           struct stm_commit_log_entry_s *from,
+                           struct stm_commit_log_entry_s *to)
+{
+    assert(STM_PSEGMENT->modification_lock);
+    assert(from->rev_num >= to->rev_num);
+    /* walk BACKWARDS the commit log and update the page 'pagenum',
+       initially at revision 'from', until we reach the revision 'to'. */
+
+    /* XXXXXXX Recursive algo for now, fix this! */
+    if (from != to) {
+        struct stm_commit_log_entry_s *cl = to->next;
+        go_to_the_past(pagenum, from, cl);
+
+        struct stm_undo_s *undo = cl->written;
+        struct stm_undo_s *end = cl->written + cl->written_count;
+
+        import_objects(-1, pagenum, undo, end);
+    }
+}
+
+
+
+static void handle_segfault_in_page(uintptr_t pagenum)
+{
+    /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
+       and validates to newest revision */
+
+    dprintf(("handle_segfault_in_page(%lu), seg %d\n", pagenum, STM_SEGMENT->segment_num));
+
+    /* XXX: bad, but no deadlocks: */
+    acquire_all_privatization_locks();
+
+    long i;
+    int my_segnum = STM_SEGMENT->segment_num;
+
+    assert(get_page_status_in(my_segnum, pagenum) == PAGE_NO_ACCESS);
+
+    /* find who has the most recent revision of our page */
+    int shared_page_holder = -1;
+    int shared_ref_count = 0;
+    int copy_from_segnum = -1;
+    uint64_t most_recent_rev = 0;
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        if (i == my_segnum)
+            continue;
+
+        if (get_page_status_in(i, pagenum) == PAGE_SHARED) {
+            /* mostly for debugging now: */
+            shared_page_holder = i;
+            shared_ref_count++;
+        }
+
+        struct stm_commit_log_entry_s *log_entry;
+        log_entry = get_priv_segment(i)->last_commit_log_entry;
+        if (get_page_status_in(i, pagenum) != PAGE_NO_ACCESS
+            && (copy_from_segnum == -1 || log_entry->rev_num > most_recent_rev)) {
+            copy_from_segnum = i;
+            most_recent_rev = log_entry->rev_num;
+        }
+    }
+    OPT_ASSERT(shared_page_holder != -1);
+    OPT_ASSERT(copy_from_segnum != -1 && copy_from_segnum != my_segnum);
+
+    /* XXX: for now, we don't try to get the single shared page. We simply
+       regard it as private for its holder. */
+    /* this assert should be true for now... */
+    assert(shared_ref_count == 1);
+
+    /* make our page private */
+    page_privatize_in(my_segnum, pagenum);
+    assert(get_page_status_in(my_segnum, pagenum) == PAGE_PRIVATE);
+
+    /* before copying anything, acquire modification locks from our and
+       the other segment */
+    uint64_t to_lock = (1UL << copy_from_segnum)| (1UL << my_segnum);
+    acquire_modification_lock_set(to_lock);
+    pagecopy((char*)(get_virt_page_of(my_segnum, pagenum) * 4096UL),
+             (char*)(get_virt_page_of(copy_from_segnum, pagenum) * 4096UL));
+
+    /* if there were modifications in the page, revert them. */
+    copy_bk_objs_in_page_from(copy_from_segnum, pagenum, false);
+
+    /* we need to go from 'src_version' to 'target_version'.  This
+       might need a walk into the past. */
+    struct stm_commit_log_entry_s *src_version, *target_version;
+    src_version = get_priv_segment(copy_from_segnum)->last_commit_log_entry;
+    target_version = STM_PSEGMENT->last_commit_log_entry;
+
+
+    dprintf(("handle_segfault_in_page: rev %lu to rev %lu\n",
+             src_version->rev_num, target_version->rev_num));
+    /* adapt revision of page to our revision:
+       if our rev is higher than the page we copy from, everything
+       is fine as we never read/modified the page anyway
+     */
+    if (src_version->rev_num > target_version->rev_num)
+        go_to_the_past(pagenum, src_version, target_version);
+
+    release_modification_lock_set(to_lock);
+    release_all_privatization_locks();
+}
+
+static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
+{
+    int saved_errno = errno;
+    char *addr = siginfo->si_addr;
+    dprintf(("si_addr: %p\n", addr));
+    if (addr == NULL || addr < stm_object_pages ||
+        addr >= stm_object_pages+TOTAL_MEMORY) {
+        /* actual segfault, unrelated to stmgc */
+        fprintf(stderr, "Segmentation fault: accessing %p\n", addr);
+        abort();
+    }
+
+    int segnum = get_segment_of_linear_address(addr);
+    if (segnum != STM_SEGMENT->segment_num) {
+        fprintf(stderr, "Segmentation fault: accessing %p (seg %d) from"
+                        " seg %d\n", addr, STM_SEGMENT->segment_num, segnum);
+        abort();
+    }
+    dprintf(("-> segment: %d\n", segnum));
+
+    char *seg_base = STM_SEGMENT->segment_base;
+    uintptr_t pagenum = ((char*)addr - seg_base) / 4096UL;
+    if (pagenum < END_NURSERY_PAGE) {
+        fprintf(stderr, "Segmentation fault: accessing %p (seg %d "
+                        "page %lu)\n", addr, segnum, pagenum);
+        abort();
+    }
+
+    handle_segfault_in_page(pagenum);
+
+    errno = saved_errno;
+    /* now return and retry */
+}
+
 /* ############# commit log ############# */
 
 
 void _dbg_print_commit_log()
 {
-    volatile struct stm_commit_log_entry_s *cl;
-    cl = (volatile struct stm_commit_log_entry_s *)&commit_log_root;
+    struct stm_commit_log_entry_s *cl = &commit_log_root;
 
-    fprintf(stderr, "root (%p, %d)\n", cl->next, cl->segment_num);
+    fprintf(stderr, "commit log:\n");
     while ((cl = cl->next)) {
-        if ((uintptr_t)cl == -1) {
-            fprintf(stderr, "INEVITABLE\n");
+        if (cl == INEV_RUNNING) {
+            fprintf(stderr, "  INEVITABLE\n");
             return;
         }
-        size_t i = 0;
-        fprintf(stderr, "  elem (%p, %d)\n", cl->next, cl->segment_num);
-        object_t *obj;
-        while ((obj = cl->written[i])) {
-            fprintf(stderr, "-> %p\n", obj);
-            i++;
-        };
+        fprintf(stderr, "  entry at %p: seg %d, rev %lu\n", cl, cl->segment_num, cl->rev_num);
+        struct stm_undo_s *undo = cl->written;
+        struct stm_undo_s *end = undo + cl->written_count;
+        for (; undo < end; undo++) {
+            fprintf(stderr, "    obj %p, size %d, ofs %lu: ", undo->object,
+                    SLICE_SIZE(undo->slice), SLICE_OFFSET(undo->slice));
+            /* long i; */
+            /* for (i=0; i<SLICE_SIZE(undo->slice); i += 8) */
+            /*     fprintf(stderr, " 0x%016lx", *(long *)(undo->backup + i)); */
+            fprintf(stderr, "\n");
+        }
     }
 }
 
-static void _update_obj_from(int from_seg, object_t *obj)
+static void reset_modified_from_backup_copies(int segment_num);  /* forward */
+
+static void _stm_validate(void *free_if_abort)
 {
-    /* during validation this looks up the obj in the
-       from_seg (backup or normal) and copies the version
-       over the current segment's one */
-    size_t obj_size;
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    uintptr_t pagenum = (uintptr_t)obj / 4096UL;
-
-    OPT_ASSERT(!is_shared_log_page(pagenum));
-    assert(is_private_log_page_in(STM_SEGMENT->segment_num, pagenum));
-    assert(is_private_log_page_in(from_seg, pagenum));
-
-    /* look the obj up in the other segment's modified_old_objects to
-       get its backup copy: */
-    acquire_modified_objs_lock(from_seg);
-
-    wlog_t *item;
-    struct tree_s *tree = get_priv_segment(from_seg)->modified_old_objects;
-    TREE_FIND(tree, (uintptr_t)obj, item, goto not_found);
-
-    obj_size = stmcb_size_rounded_up((struct object_s*)item->val);
-    memcpy(realobj, (char*)item->val, obj_size);
-    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
-    release_modified_objs_lock(from_seg);
-    return;
-
- not_found:
-    /* copy from page directly (obj is unmodified) */
-    obj_size = stmcb_size_rounded_up(
-        (struct object_s*)REAL_ADDRESS(get_segment_base(from_seg), obj));
-    memcpy(realobj,
-           REAL_ADDRESS(get_segment_base(from_seg), obj),
-           obj_size);
-    obj->stm_flags |= GCFLAG_WRITE_BARRIER; /* may already be gone */
-    release_modified_objs_lock(from_seg);
-}
-
-void stm_validate(void *free_if_abort)
-{
+    dprintf(("_stm_validate(%p)\n", free_if_abort));
     /* go from last known entry in commit log to the
        most current one and apply all changes done
        by other transactions. Abort if we read one of
        the committed objs. */
+    struct stm_commit_log_entry_s *first_cl = STM_PSEGMENT->last_commit_log_entry;
+    struct stm_commit_log_entry_s *next_cl, *last_cl, *cl;
+    int my_segnum = STM_SEGMENT->segment_num;
+    /* Don't check this 'cl'. This entry is already checked */
+
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
-        assert((uintptr_t)STM_PSEGMENT->last_commit_log_entry->next == -1);
+        assert(first_cl->next == INEV_RUNNING);
         return;
     }
 
-    volatile struct stm_commit_log_entry_s *cl, *prev_cl;
-    cl = prev_cl = (volatile struct stm_commit_log_entry_s *)
-        STM_PSEGMENT->last_commit_log_entry;
-
-    bool needs_abort = false;
-    /* Don't check 'cl'. This entry is already checked */
-    while ((cl = cl->next)) {
-        if ((uintptr_t)cl == -1) {
-            /* there is an inevitable transaction running */
+    /* Find the set of segments we need to copy from and lock them: */
+    uint64_t segments_to_lock = 1UL << my_segnum;
+    cl = first_cl;
+    while ((next_cl = cl->next) != NULL) {
+        if (next_cl == INEV_RUNNING) {
 #if STM_TESTS
-            free(free_if_abort);
+            if (free_if_abort != (void *)-1)
+                free(free_if_abort);
             stm_abort_transaction();
 #endif
-            cl = prev_cl;
-            _stm_collectable_safe_point();
-            continue;
+            /* only validate entries up to INEV */
+            break;
         }
-        prev_cl = cl;
+        assert(next_cl->rev_num > cl->rev_num);
+        cl = next_cl;
 
-        OPT_ASSERT(cl->segment_num >= 0 && cl->segment_num < NB_SEGMENTS);
+        if (cl->written_count) {
+            segments_to_lock |= (1UL << cl->segment_num);
+        }
+    }
+    last_cl = cl;
+    acquire_modification_lock_set(segments_to_lock);
 
-        object_t *obj;
-        size_t i = 0;
-        while ((obj = cl->written[i])) {
-            _update_obj_from(cl->segment_num, obj);
 
-            if (_stm_was_read(obj)) {
-                needs_abort = true;
+    /* import objects from first_cl to last_cl: */
+    bool needs_abort = false;
+    if (first_cl != last_cl) {
+        uint64_t segment_really_copied_from = 0UL;
 
-                /* if we wrote this obj, we need to free its backup and
-                   remove it from modified_old_objects because
-                   we would otherwise overwrite the updated obj on abort */
-                acquire_modified_objs_lock(STM_SEGMENT->segment_num);
-                wlog_t *item;
-                struct tree_s *tree = STM_PSEGMENT->modified_old_objects;
-                TREE_FIND(tree, (uintptr_t)obj, item, goto not_found);
-
-                free((void*)item->val);
-                TREE_FIND_DELETE(tree, item);
-
-            not_found:
-                /* nothing todo */
-                release_modified_objs_lock(STM_SEGMENT->segment_num);
+        cl = first_cl;
+        while ((cl = cl->next) != NULL) {
+            if (!needs_abort) {
+                struct stm_undo_s *undo = cl->written;
+                struct stm_undo_s *end = cl->written + cl->written_count;
+                for (; undo < end; undo++) {
+                    if (_stm_was_read(undo->object)) {
+                        /* first reset all modified objects from the backup
+                           copies as soon as the first conflict is detected;
+                           then we will proceed below to update our segment from
+                           the old (but unmodified) version to the newer version.
+                        */
+                        reset_modified_from_backup_copies(my_segnum);
+                        needs_abort = true;
+                        break;
+                    }
+                }
             }
 
-            i++;
-        };
+            if (cl->written_count) {
+                struct stm_undo_s *undo = cl->written;
+                struct stm_undo_s *end = cl->written + cl->written_count;
 
-        /* last fully validated entry */
-        STM_PSEGMENT->last_commit_log_entry = (struct stm_commit_log_entry_s *)cl;
+                segment_really_copied_from |= (1UL << cl->segment_num);
+                import_objects(cl->segment_num, -1, undo, end);
+            }
+
+            /* last fully validated entry */
+            STM_PSEGMENT->last_commit_log_entry = cl;
+            if (cl == last_cl)
+                break;
+        }
+        assert(cl == last_cl);
+
+        OPT_ASSERT(segment_really_copied_from < (1 << NB_SEGMENTS));
+        int segnum;
+        for (segnum = 0; segnum < NB_SEGMENTS; segnum++) {
+            if (segment_really_copied_from & (1UL << segnum)) {
+                /* here we can actually have our own modified version, so
+                   make sure to only copy things that are not modified in our
+                   segment... (if we do not abort) */
+                copy_bk_objs_in_page_from(
+                    segnum, -1,     /* any page */
+                    !needs_abort);  /* if we abort, we still want to copy everything */
+            }
+        }
     }
 
+    /* done with modifications */
+    release_modification_lock_set(segments_to_lock);
+
     if (needs_abort) {
-        free(free_if_abort);
+        if (free_if_abort != (void *)-1)
+            free(free_if_abort);
+        /* pages may be inconsistent */
+
         stm_abort_transaction();
     }
 }
 
-static struct stm_commit_log_entry_s *_create_commit_log_entry()
+static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 {
     /* puts all modified_old_objects in a new commit log entry */
 
     // we don't need the privatization lock, as we are only
     // reading from modified_old_objs and nobody but us can change it
-    struct tree_s *tree = STM_PSEGMENT->modified_old_objects;
-    size_t count = tree_count(tree);
-    size_t byte_len = sizeof(struct stm_commit_log_entry_s) + (count + 1) * sizeof(object_t*);
+    struct list_s *list = STM_PSEGMENT->modified_old_objects;
+    OPT_ASSERT((list_count(list) % 3) == 0);
+    size_t count = list_count(list) / 3;
+    size_t byte_len = sizeof(struct stm_commit_log_entry_s) +
+        count * sizeof(struct stm_undo_s);
     struct stm_commit_log_entry_s *result = malloc(byte_len);
 
     result->next = NULL;
     result->segment_num = STM_SEGMENT->segment_num;
-
-    int i = 0;
-    wlog_t *item;
-    TREE_LOOP_FORWARD(tree, item); {
-        result->written[i] = (object_t*)item->addr;
-        i++;
-    } TREE_LOOP_END;
-
-    OPT_ASSERT(count == i);
-    result->written[count] = NULL;
-
+    result->rev_num = -1;       /* invalid */
+    result->written_count = count;
+    memcpy(result->written, list->items, count * sizeof(struct stm_undo_s));
     return result;
 }
 
-static void _validate_and_add_to_commit_log()
+static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 {
-    struct stm_commit_log_entry_s *new;
-    volatile struct stm_commit_log_entry_s **to;
+    struct stm_commit_log_entry_s *old;
+
+    while (1) {
+        _stm_validate(/* free_if_abort =*/ new);
+
+        /* try to attach to commit log: */
+        old = STM_PSEGMENT->last_commit_log_entry;
+        if (old->next == NULL) {
+            if (new != INEV_RUNNING) /* INEVITABLE */
+                new->rev_num = old->rev_num + 1;
+
+            if (__sync_bool_compare_and_swap(&old->next, NULL, new))
+                break;   /* success! */
+        } else if (old->next == INEV_RUNNING) {
+            /* we failed because there is an INEV transaction running */
+            usleep(10);
+        }
+
+        /* check for requested safe point. otherwise an INEV transaction
+           may try to commit but cannot because of the busy-loop here. */
+        _stm_collectable_safe_point();
+    }
+}
+
+static void _validate_and_turn_inevitable(void)
+{
+    _validate_and_attach((struct stm_commit_log_entry_s *)INEV_RUNNING);
+}
+
+static void _validate_and_add_to_commit_log(void)
+{
+    struct stm_commit_log_entry_s *old, *new;
 
     new = _create_commit_log_entry();
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
-        OPT_ASSERT((uintptr_t)STM_PSEGMENT->last_commit_log_entry->next == -1);
+        old = STM_PSEGMENT->last_commit_log_entry;
+        new->rev_num = old->rev_num + 1;
+        OPT_ASSERT(old->next == INEV_RUNNING);
 
-        to = &(STM_PSEGMENT->last_commit_log_entry->next);
-        bool yes = __sync_bool_compare_and_swap(to, (void*)-1, new);
+        bool yes = __sync_bool_compare_and_swap(&old->next, INEV_RUNNING, new);
         OPT_ASSERT(yes);
-        return;
+    }
+    else {
+        _validate_and_attach(new);
     }
 
-    /* regular transaction: */
-    do {
-        stm_validate(new);
-
-        /* try attaching to commit log: */
-        to = &(STM_PSEGMENT->last_commit_log_entry->next);
-    } while (!__sync_bool_compare_and_swap(to, NULL, new));
-}
-
-static void _validate_and_turn_inevitable()
-{
-    struct stm_commit_log_entry_s *new;
-    volatile struct stm_commit_log_entry_s **to;
-
-    new = (struct stm_commit_log_entry_s*)-1;
-    do {
-        stm_validate(NULL);
-
-        /* try attaching to commit log: */
-        to = &(STM_PSEGMENT->last_commit_log_entry->next);
-    } while (!__sync_bool_compare_and_swap(to, NULL, new));
+    acquire_modification_lock(STM_SEGMENT->segment_num);
+    list_clear(STM_PSEGMENT->modified_old_objects);
+    STM_PSEGMENT->last_commit_log_entry = new;
+    release_modification_lock(STM_SEGMENT->segment_num);
 }
 
 /* ############# STM ############# */
-
-void _privatize_shared_page(uintptr_t pagenum)
+void stm_validate()
 {
-    /* privatize pages of obj for our segment iff previously
-       the pages were fully shared. */
-#ifndef NDEBUG
-    long l;
-    for (l = 0; l < NB_SEGMENTS; l++) {
-        assert(get_priv_segment(l)->privatization_lock);
-    }
-#endif
-
-    uintptr_t i;
-    int my_segnum = STM_SEGMENT->segment_num;
-
-    assert(is_shared_log_page(pagenum));
-    char *src = (char*)(get_virt_page_of(0, pagenum) * 4096UL);
-
-    for (i = 1; i < NB_SEGMENTS; i++) {
-        assert(!is_private_log_page_in(i, pagenum));
-
-        page_privatize_in(i, pagenum, src);
-    }
-    set_page_private_in(0, pagenum);
-
-    OPT_ASSERT(is_private_log_page_in(my_segnum, pagenum));
-    assert(!is_shared_log_page(pagenum));
+    _stm_validate(NULL);
 }
+
 
 void _stm_write_slowpath(object_t *obj)
 {
@@ -268,50 +475,116 @@ void _stm_write_slowpath(object_t *obj)
     /* add to read set: */
     stm_read(obj);
 
-    /* create backup copy: */
+    if (obj->stm_flags & GCFLAG_WB_EXECUTED) {
+        /* already executed WB once in this transaction. do GC
+           part again: */
+        dprintf(("write_slowpath-fast(%p)\n", obj));
+        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+        return;
+    }
+
+    /* create backup copy (this may cause several page faults
+       XXX: do backup later and maybe allow for having NO_ACCESS
+       pages around anyway (kind of card marking)): */
     struct object_s *bk_obj = malloc(obj_size);
     memcpy(bk_obj, realobj, obj_size);
+    assert(!(bk_obj->stm_flags & GCFLAG_WB_EXECUTED));
 
-    /* if there are shared pages, privatize them */
-    uintptr_t page = first_page;
+    dprintf(("write_slowpath(%p): sz=%lu, bk=%p\n", obj, obj_size, bk_obj));
+ retry:
+    /* privatize pages: */
+    /* XXX don't always acquire all locks... */
+    acquire_all_privatization_locks();
+
+    uintptr_t page;
     for (page = first_page; page <= end_page; page++) {
-        if (UNLIKELY(is_shared_log_page(page))) {
-            long i;
-            for (i = 0; i < NB_SEGMENTS; i++) {
-                acquire_privatization_lock(i);
-            }
-            if (is_shared_log_page(page))
-                _privatize_shared_page(page);
-            for (i = NB_SEGMENTS-1; i >= 0; i--) {
-                release_privatization_lock(i);
+        /* check if our page is private or we are the only shared-page holder */
+        switch (get_page_status_in(my_segnum, page)) {
+
+        case PAGE_PRIVATE:
+            continue;
+
+        case PAGE_NO_ACCESS:
+            /* happens if there is a concurrent WB between us making the backup
+               and acquiring the locks */
+            release_all_privatization_locks();
+
+            volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
+            *dummy;            /* force segfault */
+
+            goto retry;
+
+        case PAGE_SHARED:
+            break;
+
+        default:
+            assert(0);
+        }
+        /* make sure all the others are NO_ACCESS
+           choosing to make us PRIVATE is harder because then nobody must ever
+           update the shared page in stm_validate() except if it is the sole
+           reader of it. But then we don't actually know which revision the page is at. */
+        /* XXX this is a temporary solution I suppose */
+        int i;
+        for (i = 0; i < NB_SEGMENTS; i++) {
+            if (i == my_segnum)
+                continue;
+
+            if (get_page_status_in(i, page) == PAGE_SHARED) {
+                /* xxx: unmap? */
+                set_page_status_in(i, page, PAGE_NO_ACCESS);
+                mprotect((char*)(get_virt_page_of(i, page) * 4096UL), 4096UL, PROT_NONE);
+                dprintf(("NO_ACCESS in seg %d page %lu\n", i, page));
             }
         }
     }
-    /* pages not shared anymore. but we still may have
-       only a read protected page ourselves: */
-
-    acquire_privatization_lock(my_segnum);
-    OPT_ASSERT(is_private_log_page_in(my_segnum, first_page));
-
-    /* remove the WRITE_BARRIER flag */
-    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-
-    /* also add it to the GC list for minor collections */
-    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
-
-    /* done fiddling with protection and privatization */
-    release_privatization_lock(my_segnum);
+    /* all pages are either private or we were the first to write to a shared
+       page and therefore got it as our private one */
 
     /* phew, now add the obj to the write-set and register the
        backup copy. */
-    /* XXX: possibly slow check; try overflow objs again? */
-    if (!tree_contains(STM_PSEGMENT->modified_old_objects, (uintptr_t)obj)) {
-        acquire_modified_objs_lock(my_segnum);
-        tree_insert(STM_PSEGMENT->modified_old_objects,
-                    (uintptr_t)obj, (uintptr_t)bk_obj);
-        release_modified_objs_lock(my_segnum);
-    }
+    /* XXX: we should not be here at all fiddling with page status
+       if 'obj' is merely an overflow object.  FIX ME, likely by copying
+       the overflow number logic from c7. */
 
+    acquire_modification_lock(STM_SEGMENT->segment_num);
+    uintptr_t slice_sz;
+    uintptr_t in_page_offset = (uintptr_t)obj % 4096UL;
+    uintptr_t remaining_obj_sz = obj_size;
+    for (page = first_page; page <= end_page; page++) {
+        /* XXX Maybe also use mprotect() again to mark pages of the object as read-only, and
+           only stick it into modified_old_objects page-by-page?  Maybe it's
+           possible to do card-marking that way, too. */
+        OPT_ASSERT(remaining_obj_sz);
+
+        slice_sz = remaining_obj_sz;
+        if (in_page_offset + slice_sz > 4096UL) {
+            /* not over page boundaries */
+            slice_sz = 4096UL - in_page_offset;
+        }
+
+        STM_PSEGMENT->modified_old_objects = list_append3(
+            STM_PSEGMENT->modified_old_objects,
+            (uintptr_t)obj,     /* obj */
+            (uintptr_t)bk_obj,  /* bk_addr */
+            NEW_SLICE(obj_size - remaining_obj_sz, slice_sz));
+
+        remaining_obj_sz -= slice_sz;
+        in_page_offset = (in_page_offset + slice_sz) % 4096UL; /* mostly 0 */
+    }
+    OPT_ASSERT(remaining_obj_sz == 0);
+
+    release_modification_lock(STM_SEGMENT->segment_num);
+    /* done fiddling with protection and privatization */
+    release_all_privatization_locks();
+
+    /* remove the WRITE_BARRIER flag and add WB_EXECUTED */
+    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+    obj->stm_flags |= GCFLAG_WB_EXECUTED;
+
+    /* also add it to the GC list for minor collections */
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
 }
 
 static void reset_transaction_read_version(void)
@@ -324,7 +597,7 @@ static void reset_transaction_read_version(void)
              (long)(NB_READMARKER_PAGES * 4096UL)));
     if (mmap(readmarkers, NB_READMARKER_PAGES * 4096UL,
              PROT_READ | PROT_WRITE,
-             MAP_FIXED | MAP_PAGES_FLAGS, -1, 0) != readmarkers) {
+             MAP_FIXED | MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0) != readmarkers) {
         /* fall-back */
 #if STM_TESTS
         stm_fatalerror("reset_transaction_read_version: %m");
@@ -334,15 +607,24 @@ static void reset_transaction_read_version(void)
     STM_SEGMENT->transaction_read_version = 1;
 }
 
+static void reset_wb_executed_flags(void)
+{
+    struct list_s *list = STM_PSEGMENT->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+
+    for (; undo < end; undo++) {
+        object_t *obj = undo->object;
+        obj->stm_flags &= ~GCFLAG_WB_EXECUTED;
+    }
+}
+
 
 static void _stm_start_transaction(stm_thread_local_t *tl)
 {
     assert(!_stm_in_transaction(tl));
 
-  retry:
-
-    if (!acquire_thread_segment(tl))
-        goto retry;
+    while (!acquire_thread_segment(tl)) {}
     /* GS invalid before this point! */
 
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
@@ -355,7 +637,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
 
     enter_safe_point_if_requested();
-    dprintf(("start_transaction\n"));
+    dprintf(("> start_transaction\n"));
 
     s_mutex_unlock();
 
@@ -365,7 +647,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
         reset_transaction_read_version();
     }
 
-    assert(tree_is_cleared(STM_PSEGMENT->modified_old_objects));
+    assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
     assert(tree_is_cleared(STM_PSEGMENT->nursery_objects_shadows));
@@ -374,7 +656,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
 
     check_nursery_at_transaction_start();
 
-    stm_validate(NULL);
+    stm_validate();
 }
 
 long stm_start_transaction(stm_thread_local_t *tl)
@@ -422,35 +704,42 @@ static void _finish_transaction()
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 }
 
+static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
+{
+#ifndef NDEBUG
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+    for (; undo < end; undo++) {
+        object_t *obj = undo->object;
+        char *dst = REAL_ADDRESS(segbase, obj);
+        assert(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
+        assert(!(((struct object_s *)dst)->stm_flags & GCFLAG_WB_EXECUTED));
+    }
+#endif
+}
+
 void stm_commit_transaction(void)
 {
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
-    dprintf(("stm_commit_transaction()\n"));
+    dprintf(("> stm_commit_transaction()\n"));
     minor_collection(1);
+
+    reset_wb_executed_flags();
+
+    /* minor_collection() above should have set again all WRITE_BARRIER flags.
+       Check that again here for the objects that are about to be copied into
+       the commit log. */
+    check_all_write_barrier_flags(STM_SEGMENT->segment_base,
+                                  STM_PSEGMENT->modified_old_objects);
 
     _validate_and_add_to_commit_log();
 
-    /* clear WRITE_BARRIER flags, free all backup copies,
-       and clear the tree: */
-    acquire_modified_objs_lock(STM_SEGMENT->segment_num);
-
-    struct tree_s *tree = STM_PSEGMENT->modified_old_objects;
-    wlog_t *item;
-    TREE_LOOP_FORWARD(tree, item); {
-        object_t *obj = (object_t*)item->addr;
-        struct object_s* bk_obj = (struct object_s *)item->val;
-        free(bk_obj);
-        obj->stm_flags |= GCFLAG_WRITE_BARRIER;
-    } TREE_LOOP_END;
-    tree_clear(tree);
-
-    release_modified_objs_lock(STM_SEGMENT->segment_num);
-
     invoke_and_clear_user_callbacks(0);   /* for commit */
 
+    /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
     enter_safe_point_if_requested();
     assert(STM_SEGMENT->nursery_end == NURSERY_END);
@@ -468,35 +757,42 @@ void stm_commit_transaction(void)
     s_mutex_unlock();
 }
 
-void reset_modified_from_backup_copies(int segment_num)
+static void reset_modified_from_backup_copies(int segment_num)
 {
 #pragma push_macro("STM_PSEGMENT")
 #pragma push_macro("STM_SEGMENT")
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
-    acquire_modified_objs_lock(segment_num);
+    assert(get_priv_segment(segment_num)->modification_lock);
 
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
-    struct tree_s *tree = pseg->modified_old_objects;
-    wlog_t *item;
-    TREE_LOOP_FORWARD(tree, item); {
-        object_t *obj = (object_t*)item->addr;
-        struct object_s* bk_obj = (struct object_s *)item->val;
-        size_t obj_size;
+    struct list_s *list = pseg->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
-        obj_size = stmcb_size_rounded_up(bk_obj);
+    for (; undo < end; undo++) {
+        object_t *obj = undo->object;
+        char *dst = REAL_ADDRESS(pseg->pub.segment_base, obj);
 
-        memcpy(REAL_ADDRESS(pseg->pub.segment_base, obj),
-               bk_obj, obj_size);
-        assert(obj->stm_flags & GCFLAG_WRITE_BARRIER); /* not written */
+        memcpy(dst + SLICE_OFFSET(undo->slice),
+               undo->backup + SLICE_OFFSET(undo->slice),
+               SLICE_SIZE(undo->slice));
 
-        free(bk_obj);
-    } TREE_LOOP_END;
+        size_t obj_size = stmcb_size_rounded_up((struct object_s*)undo->backup);
+        dprintf(("reset_modified_from_backup_copies(%d): obj=%p off=%lu bk=%p obj_sz=%lu\n",
+                 segment_num, obj, SLICE_OFFSET(undo->slice), undo->backup, obj_size));
 
-    tree_clear(tree);
+        if (obj_size - SLICE_OFFSET(undo->slice) <= 4096UL) {
+            /* only free bk copy once (last slice): */
+            free(undo->backup);
+            dprintf(("-> free(%p)\n", undo->backup));
+        }
+    }
 
-    release_modified_objs_lock(segment_num);
+    /* check that all objects have the GCFLAG_WRITE_BARRIER afterwards */
+    check_all_write_barrier_flags(pseg->pub.segment_base, list);
 
+    list_clear(list);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
@@ -521,7 +817,9 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     long bytes_in_nursery = throw_away_nursery(pseg);
 
+    acquire_modification_lock(segment_num);
     reset_modified_from_backup_copies(segment_num);
+    release_modification_lock(segment_num);
 
     stm_thread_local_t *tl = pseg->pub.running_thread;
 #ifdef STM_NO_AUTOMATIC_SETJMP
@@ -638,10 +936,35 @@ static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
     assert(frag_size > 0);
     assert(frag_size + ((uintptr_t)frag & 4095) <= 4096);
 
-    /* if the page of the fragment is fully shared, nothing to do */
+    /* if the page of the fragment is fully shared, nothing to do:
+       |S|N|N|N| */
+
+    /* nobody must change the page mapping until we flush */
     assert(STM_PSEGMENT->privatization_lock);
-    if (is_shared_log_page((uintptr_t)frag / 4096))
+
+    int my_segnum = STM_SEGMENT->segment_num;
+    uintptr_t pagenum = (uintptr_t)frag / 4096;
+    bool fully_shared = false;
+
+    if (get_page_status_in(my_segnum, pagenum) == PAGE_SHARED) {
+        fully_shared = true;
+        int i;
+        for (i = 0; fully_shared && i < NB_SEGMENTS; i++) {
+            if (i == my_segnum)
+                continue;
+
+            /* XXX: works if never all pages use SHARED page */
+            if (get_page_status_in(i, pagenum) != PAGE_NO_ACCESS) {
+                fully_shared = false;
+                break;
+            }
+        }
+    }
+
+    if (fully_shared)
         return;                 /* nothing to do */
+
+    /* e.g. |P|S|N|P| */
 
     /* Enqueue this object (or fragemnt of object) */
     if (STM_PSEGMENT->sq_len == SYNC_QUEUE_SIZE)
@@ -686,7 +1009,7 @@ static void synchronize_object_enqueue(object_t *obj)
 
 static void synchronize_objects_flush(void)
 {
-
+    /* XXX: not sure this applies anymore.  */
     /* Do a full memory barrier.  We must make sure that other
        CPUs see the changes we did to the shared page ("S", in
        synchronize_object_enqueue()) before we check the other segments
@@ -697,21 +1020,24 @@ static void synchronize_objects_flush(void)
        and copies the page; but it risks doing so before seeing the "S"
        writes.
     */
-    /* XXX: not sure this applies anymore.  */
     long j = STM_PSEGMENT->sq_len;
     if (j == 0)
         return;
     STM_PSEGMENT->sq_len = 0;
 
+    dprintf(("synchronize_objects_flush(): %ld fragments\n", j));
+
     __sync_synchronize();
+    assert(STM_PSEGMENT->privatization_lock);
 
     long i, myself = STM_SEGMENT->segment_num;
     do {
         --j;
         stm_char *frag = STM_PSEGMENT->sq_fragments[j];
         uintptr_t page = ((uintptr_t)frag) / 4096UL;
-        if (is_shared_log_page(page))
-            continue;
+        /* XXX: necessary? */
+        /* if (is_shared_log_page(page)) */
+        /*     continue; */
 
         ssize_t frag_size = STM_PSEGMENT->sq_fragsizes[j];
 
@@ -720,11 +1046,11 @@ static void synchronize_objects_flush(void)
             if (i == myself)
                 continue;
 
-            char *dst = REAL_ADDRESS(get_segment_base(i), frag);
-            if (is_private_log_page_in(i, page))
+            if (get_page_status_in(i, page) != PAGE_NO_ACCESS) {
+                /* shared or private, but never segfault */
+                char *dst = REAL_ADDRESS(get_segment_base(i), frag);
                 memcpy(dst, src, frag_size);
-            else
-                EVENTUALLY(memcmp(dst, src, frag_size) == 0);  /* same page */
+            }
         }
     } while (j > 0);
 }

@@ -183,6 +183,8 @@ static void collect_oldrefs_to_nursery(void)
         uintptr_t obj_sync_now = list_pop_item(lst);
         object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE);
 
+        assert(!_is_in_nursery(obj));
+
         _collect_now(obj);
 
         if (obj_sync_now & FLAG_SYNC_LARGE) {

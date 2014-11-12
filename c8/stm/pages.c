@@ -1,8 +1,8 @@
 #ifndef _STM_CORE_H_
 # error "must be compiled via stmgc.c"
 #endif
-#include <signal.h>
 
+#include <unistd.h>
 /************************************************************/
 
 static void setup_pages(void)
@@ -11,83 +11,56 @@ static void setup_pages(void)
 
 static void teardown_pages(void)
 {
-    memset(pages_privatized, 0, sizeof(pages_privatized));
+    memset(pages_status, 0, sizeof(pages_status));
 }
 
 /************************************************************/
 
-static void d_remap_file_pages(char *addr, size_t size, ssize_t pgoff)
-{
-    dprintf(("remap_file_pages: 0x%lx bytes: (seg%ld %p) --> (seg%ld %p)\n",
-             (long)size,
-             (long)((addr - stm_object_pages) / 4096UL) / NB_PAGES,
-             (void *)((addr - stm_object_pages) % (4096UL * NB_PAGES)),
-             (long)pgoff / NB_PAGES,
-             (void *)((pgoff % NB_PAGES) * 4096UL)));
-    assert(size % 4096 == 0);
-    assert(size <= TOTAL_MEMORY);
-    assert(((uintptr_t)addr) % 4096 == 0);
-    assert(addr >= stm_object_pages);
-    assert(addr <= stm_object_pages + TOTAL_MEMORY - size);
-    assert(pgoff >= 0);
-    assert(pgoff <= (TOTAL_MEMORY - size) / 4096UL);
-
-    /* assert remappings follow the rule that page N in one segment
-       can only be remapped to page N in another segment */
-    assert(IMPLY(((addr - stm_object_pages) / 4096UL) != TMP_COPY_PAGE,
-                 ((addr - stm_object_pages) / 4096UL - pgoff) % NB_PAGES == 0));
-
-#ifdef USE_REMAP_FILE_PAGES
-    int res = remap_file_pages(addr, size, 0, pgoff, 0);
-    if (UNLIKELY(res < 0))
-        stm_fatalerror("remap_file_pages: %m");
-#else
-    char *res = mmap(addr, size,
-                     PROT_READ | PROT_WRITE,
-                     (MAP_PAGES_FLAGS & ~MAP_ANONYMOUS) | MAP_FIXED,
-                     stm_object_pages_fd, pgoff * 4096UL);
-    if (UNLIKELY(res != addr))
-        stm_fatalerror("mmap (remapping page): %m");
-#endif
-}
-
-
-static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
+static void pages_initialize_shared_for(long segnum, uintptr_t pagenum, uintptr_t count)
 {
     /* call remap_file_pages() to make all pages in the range(pagenum,
-       pagenum+count) refer to the same physical range of pages from
-       segment 0. */
-    dprintf(("pages_initialize_shared: 0x%ld - 0x%ld\n", pagenum,
-             pagenum + count));
-#ifndef NDEBUG
-    long l;
-    for (l = 0; l < NB_SEGMENTS; l++) {
-        assert(get_priv_segment(l)->privatization_lock);
-    }
-#endif
+       pagenum+count) PAGE_SHARED in segnum, and PAGE_NO_ACCESS in other segments
+       initialize to |S|N|N|N| */
+
+    dprintf(("pages_initialize_shared: 0x%ld - 0x%ld\n", pagenum, pagenum + count));
+
+    assert(all_privatization_locks_acquired());
+
     assert(pagenum < NB_PAGES);
     if (count == 0)
         return;
+
+    /* already shared after setup.c (also for the other count-1 pages) */
+    assert(get_page_status_in(segnum, pagenum) == PAGE_SHARED);
+
+    /* make other segments NO_ACCESS: */
     uintptr_t i;
-    for (i = 1; i < NB_SEGMENTS; i++) {
-        char *segment_base = get_segment_base(i);
-        d_remap_file_pages(segment_base + pagenum * 4096UL,
-                           count * 4096UL, pagenum);
-    }
-
     for (i = 0; i < NB_SEGMENTS; i++) {
-        uintptr_t amount = count;
-        while (amount-->0) {
-            volatile struct page_shared_s *ps2 = (volatile struct page_shared_s *)
-                &pages_privatized[pagenum + amount - PAGE_FLAG_START];
+        if (i != segnum) {
+            char *segment_base = get_segment_base(i);
+            mprotect(segment_base + pagenum * 4096UL,
+                     count * 4096UL, PROT_NONE);
 
-            ps2->by_segment = 0; /* not private */
+            /* char *result = mmap( */
+            /*     segment_base + pagenum * 4096UL, */
+            /*     count * 4096UL, */
+            /*     PROT_NONE, */
+            /*     MAP_FIXED|MAP_NORESERVE|MAP_PRIVATE|MAP_ANONYMOUS, */
+            /*     -1, 0); */
+            /* if (result == MAP_FAILED) */
+            /*     stm_fatalerror("pages_initialize_shared failed (mmap): %m"); */
+
+
+            long amount = count;
+            while (amount-->0) {
+                set_page_status_in(i, pagenum + amount, PAGE_NO_ACCESS);
+            }
         }
     }
 }
 
 
-static void page_privatize_in(int segnum, uintptr_t pagenum, char *initialize_from)
+static void page_privatize_in(int segnum, uintptr_t pagenum)
 {
 #ifndef NDEBUG
     long l;
@@ -95,34 +68,19 @@ static void page_privatize_in(int segnum, uintptr_t pagenum, char *initialize_fr
         assert(get_priv_segment(l)->privatization_lock);
     }
 #endif
-
-    /* check this thread's 'pages_privatized' bit */
-    uint64_t bitmask = 1UL << segnum;
-    volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
-        &pages_privatized[pagenum - PAGE_FLAG_START];
-    if (ps->by_segment & bitmask) {
-        /* the page is already privatized; nothing to do */
-        return;
-    }
-
+    assert(get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS);
     dprintf(("page_privatize(%lu) in seg:%d\n", pagenum, segnum));
 
-    /* add this thread's 'pages_privatized' bit */
-    ps->by_segment |= bitmask;
+    char *addr = (char*)(get_virt_page_of(segnum, pagenum) * 4096UL);
+    char *result = mmap(
+        addr, 4096UL, PROT_READ | PROT_WRITE,
+        MAP_FIXED | MAP_PRIVATE | MAP_NORESERVE,
+        stm_object_pages_fd, get_file_page_of(pagenum) * 4096UL);
+    if (result == MAP_FAILED)
+        stm_fatalerror("page_privatize_in failed (mmap): %m");
 
-    /* "unmaps" the page to make the address space location correspond
-       again to its underlying file offset (XXX later we should again
-       attempt to group together many calls to d_remap_file_pages() in
-       succession) */
-    uintptr_t pagenum_in_file = NB_PAGES * segnum + pagenum;
-    char *tmp_page = stm_object_pages + TMP_COPY_PAGE * 4096UL;
-    /* first remap to TMP_PAGE, then copy stuff there (to the underlying
-       file page), then remap this file-page hopefully atomically to the
-       segnum's virtual page */
-    d_remap_file_pages(tmp_page, 4096, pagenum_in_file);
-    pagecopy(tmp_page, initialize_from);
-    write_fence();
+    set_page_status_in(segnum, pagenum, PAGE_PRIVATE);
 
-    char *new_page = stm_object_pages + pagenum_in_file * 4096UL;
-    d_remap_file_pages(new_page, 4096, pagenum_in_file);
+    volatile char *dummy = REAL_ADDRESS(get_segment_base(segnum), pagenum*4096UL);
+    *dummy = *dummy;            /* force copy-on-write from shared page */
 }
