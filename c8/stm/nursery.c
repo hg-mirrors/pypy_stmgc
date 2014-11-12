@@ -94,13 +94,11 @@ static void minor_trace_if_young(object_t **pobj)
         if (size > GC_LAST_SMALL_SIZE) {
             /* case 1: object is not small enough.
                Ask gcpage.c for an allocation via largemalloc. */
-            char *allocated = allocate_outside_nursery_large(size);
-            nobj = (object_t *)(allocated - stm_object_pages);
+            nobj = (object_t *)allocate_outside_nursery_large(size);
         }
         else {
             /* case "small enough" */
-            char *allocated = allocate_outside_nursery_small(size);
-            nobj = (object_t *)(allocated - stm_object_pages);
+            nobj = (object_t *)allocate_outside_nursery_small(size);
         }
 
         /* copy the object */
@@ -334,8 +332,7 @@ object_t *_stm_allocate_external(ssize_t size_rounded_up)
     /*     stm_collect(0); */
     /* } */
 
-    char *result = allocate_outside_nursery_large(size_rounded_up);
-    object_t *o = (object_t *)(result - stm_object_pages);
+    object_t *o = (object_t *)allocate_outside_nursery_large(size_rounded_up);
 
     tree_insert(STM_PSEGMENT->young_outside_nursery, (uintptr_t)o, 0);
 
@@ -387,8 +384,7 @@ static object_t *allocate_shadow(object_t *obj)
     size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
 
     /* always gets outside as a large object for now */
-    char *allocated = allocate_outside_nursery_large(size);
-    object_t *nobj = (object_t *)(allocated - stm_object_pages);
+    object_t *nobj = (object_t *)allocate_outside_nursery_large(size);
 
     /* Initialize the shadow enough to be considered a valid gc object.
        If the original object stays alive at the next minor collection,

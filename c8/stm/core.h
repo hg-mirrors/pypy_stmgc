@@ -150,7 +150,10 @@ static struct stm_commit_log_entry_s commit_log_root = {NULL, -1, 0, 0};
 static
 #endif
        char *stm_object_pages;
-static char *stm_file_pages;
+#ifndef STM_TESTS
+static
+#endif
+       char *stm_file_pages;
 static int stm_object_pages_fd;
 static stm_thread_local_t *stm_all_thread_locals = NULL;
 

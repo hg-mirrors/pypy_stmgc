@@ -12,7 +12,7 @@ class TestSmallMalloc(BaseTest):
         BaseTest.setup_method(self, method)
         @ffi.callback("bool(char *)")
         def keep(data):
-            p = ffi.cast("object_t *", data - lib.stm_object_pages)
+            p = ffi.cast("object_t *", data)
             self.has_been_asked_for.append(p)
             return p in self.keep_me
         lib._stm_smallmalloc_keep = keep
