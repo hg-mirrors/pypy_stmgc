@@ -35,6 +35,7 @@ static void import_objects(
     assert(IMPLY(from_segnum >= 0, get_priv_segment(from_segnum)->modification_lock));
     assert(STM_PSEGMENT->modification_lock);
 
+    DEBUG_EXPECT_SEGFAULT(false);
     for (; undo < end; undo++) {
         object_t *obj = undo->object;
         stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
@@ -61,6 +62,11 @@ static void import_objects(
             continue;           /* only copy unmodified */
         }
 
+        /* XXX: if the next assert is always true, we should never get a segfault
+           in this function at all. So the DEBUG_EXPECT_SEGFAULT is correct. */
+        assert((get_page_status_in(STM_SEGMENT->segment_num,
+                                   current_page_num) != PAGE_NO_ACCESS));
+
         dprintf(("import slice seg=%d obj=%p off=%lu sz=%d pg=%lu\n",
                  from_segnum, obj, SLICE_OFFSET(undo->slice),
                  SLICE_SIZE(undo->slice), current_page_num));
@@ -77,6 +83,7 @@ static void import_objects(
             assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
         }
     }
+    DEBUG_EXPECT_SEGFAULT(true);
 }
 
 
@@ -203,6 +210,8 @@ static void handle_segfault_in_page(uintptr_t pagenum)
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
+    assert(_stm_segfault_expected);
+
     int saved_errno = errno;
     char *addr = siginfo->si_addr;
     dprintf(("si_addr: %p\n", addr));
@@ -229,7 +238,9 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
         abort();
     }
 
+    DEBUG_EXPECT_SEGFAULT(false);
     handle_segfault_in_page(pagenum);
+    DEBUG_EXPECT_SEGFAULT(true);
 
     errno = saved_errno;
     /* now return and retry */
@@ -548,6 +559,8 @@ void _stm_write_slowpath(object_t *obj)
        if 'obj' is merely an overflow object.  FIX ME, likely by copying
        the overflow number logic from c7. */
 
+    DEBUG_EXPECT_SEGFAULT(false);
+
     acquire_modification_lock(STM_SEGMENT->segment_num);
     uintptr_t slice_sz;
     uintptr_t in_page_offset = (uintptr_t)obj % 4096UL;
@@ -575,13 +588,15 @@ void _stm_write_slowpath(object_t *obj)
     }
     OPT_ASSERT(remaining_obj_sz == 0);
 
-    release_modification_lock(STM_SEGMENT->segment_num);
-    /* done fiddling with protection and privatization */
-    release_all_privatization_locks();
-
     /* remove the WRITE_BARRIER flag and add WB_EXECUTED */
     obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
     obj->stm_flags |= GCFLAG_WB_EXECUTED;
+
+    DEBUG_EXPECT_SEGFAULT(true);
+
+    release_modification_lock(STM_SEGMENT->segment_num);
+    /* done fiddling with protection and privatization */
+    release_all_privatization_locks();
 
     /* also add it to the GC list for minor collections */
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
@@ -939,30 +954,32 @@ static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
     /* if the page of the fragment is fully shared, nothing to do:
        |S|N|N|N| */
 
-    /* nobody must change the page mapping until we flush */
-    assert(STM_PSEGMENT->privatization_lock);
+    /* XXXXX: re-enable the following if completely sure that we always
+       copy the shared page when we privatize correctly. */
+    /* /\* nobody must change the page mapping until we flush *\/ */
+    /* assert(STM_PSEGMENT->privatization_lock); */
 
-    int my_segnum = STM_SEGMENT->segment_num;
-    uintptr_t pagenum = (uintptr_t)frag / 4096;
-    bool fully_shared = false;
+    /* int my_segnum = STM_SEGMENT->segment_num; */
+    /* uintptr_t pagenum = (uintptr_t)frag / 4096; */
+    /* bool fully_shared = false; */
 
-    if (get_page_status_in(my_segnum, pagenum) == PAGE_SHARED) {
-        fully_shared = true;
-        int i;
-        for (i = 0; fully_shared && i < NB_SEGMENTS; i++) {
-            if (i == my_segnum)
-                continue;
+    /* if (get_page_status_in(my_segnum, pagenum) == PAGE_SHARED) { */
+    /*     fully_shared = true; */
+    /*     int i; */
+    /*     for (i = 0; fully_shared && i < NB_SEGMENTS; i++) { */
+    /*         if (i == my_segnum) */
+    /*             continue; */
 
-            /* XXX: works if never all pages use SHARED page */
-            if (get_page_status_in(i, pagenum) != PAGE_NO_ACCESS) {
-                fully_shared = false;
-                break;
-            }
-        }
-    }
+    /*         /\* XXX: works if never all pages use SHARED page *\/ */
+    /*         if (get_page_status_in(i, pagenum) != PAGE_NO_ACCESS) { */
+    /*             fully_shared = false; */
+    /*             break; */
+    /*         } */
+    /*     } */
+    /* } */
 
-    if (fully_shared)
-        return;                 /* nothing to do */
+    /* if (fully_shared) */
+    /*     return;                 /\* nothing to do *\/ */
 
     /* e.g. |P|S|N|P| */
 
@@ -1030,6 +1047,7 @@ static void synchronize_objects_flush(void)
 
     __sync_synchronize();
     assert(STM_PSEGMENT->privatization_lock);
+    DEBUG_EXPECT_SEGFAULT(false);
 
     long i, myself = STM_SEGMENT->segment_num;
     do {
@@ -1054,4 +1072,6 @@ static void synchronize_objects_flush(void)
             }
         }
     } while (j > 0);
+
+    DEBUG_EXPECT_SEGFAULT(true);
 }
