@@ -5,9 +5,8 @@
 
 static void setup_gcpage(void)
 {
-    /* XXXXXXX should use stm_file_pages, no? */
-    uninitialized_page_start = stm_file_pages;
-    uninitialized_page_stop  = stm_file_pages + NB_SHARED_PAGES * 4096UL;
+    //uninitialized_page_start = stm_file_pages;
+    //uninitialized_page_stop  = stm_file_pages + NB_SHARED_PAGES * 4096UL;
 }
 
 static void teardown_gcpage(void)

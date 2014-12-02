@@ -3,20 +3,6 @@
 #endif
 
 
-#ifdef NDEBUG
-#define EVENTUALLY(condition)    {/* nothing */}
-#else
-#define EVENTUALLY(condition)                                   \
-    {                                                           \
-        if (!(condition)) {                                     \
-            acquire_privatization_lock(STM_SEGMENT->segment_num);\
-            if (!(condition))                                   \
-                stm_fatalerror("fails: " #condition);           \
-            release_privatization_lock(STM_SEGMENT->segment_num);\
-        }                                                       \
-    }
-#endif
-
 /* General helper: copies objects into our own segment, from some
    source described by a range of 'struct stm_undo_s'.  Maybe later
    we could specialize this function to avoid the checks in the
@@ -280,7 +266,7 @@ static void _stm_validate(void *free_if_abort)
     dprintf(("_stm_validate(%p)\n", free_if_abort));
     /* go from last known entry in commit log to the
        most current one and apply all changes done
-       by other transactions. Abort if we read one of
+       by other transactions. Abort if we have read one of
        the committed objs. */
     struct stm_commit_log_entry_s *first_cl = STM_PSEGMENT->last_commit_log_entry;
     struct stm_commit_log_entry_s *next_cl, *last_cl, *cl;
@@ -346,6 +332,10 @@ static void _stm_validate(void *free_if_abort)
 
                 segment_really_copied_from |= (1UL << cl->segment_num);
                 import_objects(cl->segment_num, -1, undo, end);
+
+                copy_bk_objs_in_page_from(
+                    segnum, -1,     /* any page */
+                    !needs_abort);  /* if we abort, we still want to copy everything */
             }
 
             /* last fully validated entry */
@@ -355,18 +345,15 @@ static void _stm_validate(void *free_if_abort)
         }
         assert(cl == last_cl);
 
-        OPT_ASSERT(segment_really_copied_from < (1 << NB_SEGMENTS));
-        int segnum;
-        for (segnum = 0; segnum < NB_SEGMENTS; segnum++) {
-            if (segment_really_copied_from & (1UL << segnum)) {
-                /* here we can actually have our own modified version, so
-                   make sure to only copy things that are not modified in our
-                   segment... (if we do not abort) */
-                copy_bk_objs_in_page_from(
-                    segnum, -1,     /* any page */
-                    !needs_abort);  /* if we abort, we still want to copy everything */
-            }
-        }
+        /* OPT_ASSERT(segment_really_copied_from <= ((1UL << NB_SEGMENTS) - 1)); */
+        /* int segnum; */
+        /* for (segnum = 0; segnum < NB_SEGMENTS; segnum++) { */
+        /*     if (segment_really_copied_from & (1UL << segnum)) { */
+        /*         /\* here we can actually have our own modified version, so */
+        /*            make sure to only copy things that are not modified in our */
+        /*            segment... (if we do not abort) *\/ */
+        /*     } */
+        /* } */
     }
 
     /* done with modifications */
@@ -654,7 +641,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     enter_safe_point_if_requested();
     dprintf(("> start_transaction\n"));
 
-    s_mutex_unlock();
+    s_mutex_unlock();   // XXX it's probably possible to not acquire this here
 
     uint8_t old_rv = STM_SEGMENT->transaction_read_version;
     STM_SEGMENT->transaction_read_version = old_rv + 1;
