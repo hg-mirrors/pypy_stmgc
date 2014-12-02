@@ -7,56 +7,14 @@
 
 static void setup_mmap(char *reason)
 {
-    char name[] = "/__stmgc_c8__";
-
-    /* Create the big shared memory object, and immediately unlink it.
-       There is a small window where if this process is killed the
-       object is left around.  It doesn't seem possible to do anything
-       about it...
-    */
-    stm_object_pages_fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
-    shm_unlink(name);
-
-    if (stm_object_pages_fd == -1)
-        stm_fatalerror("%s failed (stm_open): %m", reason);
-
-    if (ftruncate(stm_object_pages_fd, NB_SHARED_PAGES * 4096UL) != 0)
-        stm_fatalerror("%s failed (ftruncate): %m", reason);
-
-    stm_file_pages = mmap(NULL, NB_SHARED_PAGES * 4096UL,
-                          PROT_READ | PROT_WRITE,
-                          MAP_SHARED | MAP_NORESERVE,
-                          stm_object_pages_fd, 0);
-
-    if (stm_file_pages == MAP_FAILED)
-        stm_fatalerror("%s failed (mmap): %m", reason);
-
-
     /* reserve the whole virtual memory space of the program for
-       all segments: */
-    stm_object_pages = mmap(NULL, TOTAL_MEMORY,
-                            PROT_READ | PROT_WRITE,
+       all segments: (for now in one big block, but later could be
+       allocated per-segment) */
+    stm_object_pages = mmap(NULL, TOTAL_MEMORY, PROT_NONE,
                             MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS,
                             -1, 0);
     if (stm_object_pages == MAP_FAILED)
         stm_fatalerror("%s failed (mmap): %m", reason);
-
-    /* remap the shared part of the segments to the file pages */
-    long l;
-    for (l = 0; l < NB_SEGMENTS; l++) {
-        char *result = mmap(
-            stm_object_pages + (l * NB_PAGES + END_NURSERY_PAGE) * 4096UL, /* addr */
-            NB_SHARED_PAGES * 4096UL, /* len */
-            PROT_READ | PROT_WRITE,
-            MAP_FIXED | MAP_SHARED | MAP_NORESERVE,
-            stm_object_pages_fd, 0); /* file & offset */
-        if (result == MAP_FAILED)
-            stm_fatalerror("%s failed (mmap): %m", reason);
-    }
-}
-static void close_fd_mmap(int map_fd)
-{
-    close(map_fd);
 }
 
 static void setup_protection_settings(void)
@@ -65,17 +23,13 @@ static void setup_protection_settings(void)
     for (i = 0; i < NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
 
-        /* In each segment, the first page is where TLPREFIX'ed
-           NULL accesses land.  We mprotect it so that accesses fail. */
-        mprotect(segment_base, 4096, PROT_NONE);
+        /* In each segment, the second page is where STM_SEGMENT lands. */
+        mprotect(segment_base + 4096, 4096, PROT_READ | PROT_WRITE);
 
-        /* Pages in range(2, FIRST_READMARKER_PAGE) are never used */
-        if (FIRST_READMARKER_PAGE > 2)
-            mprotect(segment_base + 2 * 4096,
-                     (FIRST_READMARKER_PAGE - 2) * 4096UL,
-                     PROT_NONE);
-
-        /* STM_SEGMENT-TL is in page 1 */
+        /* Make the read marker pages accessible, as well as the nursery. */
+        mprotect(segment_base + FIRST_READMARKER_PAGE * 4096,
+                 (NB_READMARKER_PAGES + NB_NURSERY_PAGES) * 4096,
+                 PROT_READ | PROT_WRITE);
     }
 }
 
@@ -184,7 +138,6 @@ void stm_teardown(void)
     stm_object_pages = NULL;
     commit_log_root.next = NULL; /* xxx:free them */
     commit_log_root.segment_num = -1;
-    close_fd_mmap(stm_object_pages_fd);
 
     teardown_sync();
     teardown_gcpage();

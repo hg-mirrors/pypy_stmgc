@@ -73,7 +73,7 @@ struct stm_priv_segment_info_s {
     struct tree_s *young_outside_nursery;
     struct tree_s *nursery_objects_shadows;
 
-    uint8_t privatization_lock;
+    uint8_t privatization_lock;  // XXX KILL
 
     uint8_t safe_point;
     uint8_t transaction_state;

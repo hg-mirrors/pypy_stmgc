@@ -16,71 +16,26 @@ static void teardown_pages(void)
 
 /************************************************************/
 
-static void pages_initialize_shared_for(long segnum, uintptr_t pagenum, uintptr_t count)
+
+static void page_mark_accessible(long segnum, uintptr_t pagenum)
 {
-    /* call remap_file_pages() to make all pages in the range(pagenum,
-       pagenum+count) PAGE_SHARED in segnum, and PAGE_NO_ACCESS in other segments
-       initialize to |S|N|N|N| */
+    assert(get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS);
+    dprintf(("page_mark_accessible(%lu) in seg:%ld\n", pagenum, segnum));
 
-    dprintf(("pages_initialize_shared: 0x%ld - 0x%ld\n", pagenum, pagenum + count));
+    mprotect(get_virtual_page(segnum, pagenum), 4096, PROT_READ | PROT_WRITE);
 
-    assert(all_privatization_locks_acquired());
-
-    assert(pagenum < NB_PAGES);
-    if (count == 0)
-        return;
-
-    /* already shared after setup.c (also for the other count-1 pages) */
-    assert(get_page_status_in(segnum, pagenum) == PAGE_SHARED);
-
-    /* make other segments NO_ACCESS: */
-    uintptr_t i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        if (i != segnum) {
-            char *segment_base = get_segment_base(i);
-            mprotect(segment_base + pagenum * 4096UL,
-                     count * 4096UL, PROT_NONE);
-
-            /* char *result = mmap( */
-            /*     segment_base + pagenum * 4096UL, */
-            /*     count * 4096UL, */
-            /*     PROT_NONE, */
-            /*     MAP_FIXED|MAP_NORESERVE|MAP_PRIVATE|MAP_ANONYMOUS, */
-            /*     -1, 0); */
-            /* if (result == MAP_FAILED) */
-            /*     stm_fatalerror("pages_initialize_shared failed (mmap): %m"); */
-
-
-            long amount = count;
-            while (amount-->0) {
-                set_page_status_in(i, pagenum + amount, PAGE_NO_ACCESS);
-            }
-        }
-    }
+    /* set this flag *after* we un-protected it, because XXX later */
+    set_page_status_in(segnum, pagenum, PAGE_ACCESSIBLE);
 }
 
-
-static void page_privatize_in(int segnum, uintptr_t pagenum)
+static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
 {
-#ifndef NDEBUG
-    long l;
-    for (l = 0; l < NB_SEGMENTS; l++) {
-        assert(get_priv_segment(l)->privatization_lock);
-    }
-#endif
-    assert(get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS);
-    dprintf(("page_privatize(%lu) in seg:%d\n", pagenum, segnum));
+    assert(get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE);
+    dprintf(("page_mark_inaccessible(%lu) in seg:%ld\n", pagenum, segnum));
 
-    char *addr = (char*)(get_virt_page_of(segnum, pagenum) * 4096UL);
-    char *result = mmap(
-        addr, 4096UL, PROT_READ | PROT_WRITE,
-        MAP_FIXED | MAP_PRIVATE | MAP_NORESERVE,
-        stm_object_pages_fd, get_file_page_of(pagenum) * 4096UL);
-    if (result == MAP_FAILED)
-        stm_fatalerror("page_privatize_in failed (mmap): %m");
+    set_page_status_in(segnum, pagenum, PAGE_ACCESSIBLE);
 
-    set_page_status_in(segnum, pagenum, PAGE_PRIVATE);
-
-    volatile char *dummy = REAL_ADDRESS(get_segment_base(segnum), pagenum*4096UL);
-    *dummy = *dummy;            /* force copy-on-write from shared page */
+    char *addr = get_virtual_page(segnum, pagenum);
+    madvise(get_virtual_page(segnum, pagenum), 4096, MADV_DONTNEED);
+    mprotect(addr, 4096, PROT_NONE);
 }

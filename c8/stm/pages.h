@@ -3,90 +3,61 @@
       logical page
   We have virtual pages: one virtual address can point in some
       virtual page. We have NB_SEGMENTS virtual pages per logical page.
-  We have file pages: they correspond mostly to physical memory pages
-      used for mmap/remap_file_pages
 
-  A logical page is SHARED iff all NB_SEGMENTS virtual pages point to
-  one file page, and thus to the same logical page.
-
-  A logical page becomes PRIVATE if one virtual page still maps to the
-  original file page, and all others turn read protected.
-   -> only one can modify it.
-
-  A logical page can also be "PRIVATE IN A SEGMENT", referring to
-  the virtual page of the segment having its own file page backing.
-  It also implies the logical page is not read protected.
+  Each virtual page is either accessible, or PAGE_NO_ACCESS (and then
+  has no underlying memory).
 */
 
 #define PAGE_FLAG_START   END_NURSERY_PAGE
 #define PAGE_FLAG_END     NB_PAGES
-/* == NB_SHARED_PAGES */
 
 struct page_shared_s {
-#if NB_SEGMENTS <= 4
+#if NB_SEGMENTS <= 8
     uint8_t by_segment;
-#elif NB_SEGMENTS <= 8
-    uint16_t by_segment;
 #elif NB_SEGMENTS <= 16
-    uint32_t by_segment;
+    uint16_t by_segment;
 #elif NB_SEGMENTS <= 32
+    uint32_t by_segment;
+#elif NB_SEGMENTS <= 64
     uint64_t by_segment;
 #else
-#   error "NB_SEGMENTS > 32 not supported right now"
+#   error "NB_SEGMENTS > 64 not supported right now"
 #endif
 };
 
 enum {
-    PAGE_SHARED = 0,
-    PAGE_PRIVATE = 1,
-    PAGE_NO_ACCESS = 2,
+    PAGE_NO_ACCESS = 0,
+    PAGE_ACCESSIBLE = 1
 };
 
-static struct page_shared_s pages_status[NB_SHARED_PAGES];
+static struct page_shared_s pages_status[PAGE_FLAG_END - PAGE_FLAG_START];
 
-static void pages_initialize_shared_for(long segnum, uintptr_t pagenum, uintptr_t count);
-static void page_privatize_in(int segnum, uintptr_t pagenum);
-
-
+static void page_mark_accessible(long segnum, uintptr_t pagenum);
+static void page_mark_inaccessible(long segnum, uintptr_t pagenum);
 
 
-static inline uintptr_t get_virt_page_of(long segnum, uintptr_t pagenum)
+static inline char *get_virtual_page(long segnum, uintptr_t pagenum)
 {
     /* logical page -> virtual page */
-    return (uintptr_t)get_segment_base(segnum) / 4096UL + pagenum;
+    return get_segment_base(segnum) + pagenum * 4096;
 }
 
-static inline uintptr_t get_file_page_of(uintptr_t pagenum)
+static inline bool get_page_status_in(long segnum, uintptr_t pagenum)
 {
-    /* logical page -> file page */
-    return pagenum - PAGE_FLAG_START;
-}
-
-static inline uintptr_t get_page_of_file_page(uintptr_t file_page)
-{
-    return file_page + END_NURSERY_PAGE;
-}
-
-static inline uint8_t get_page_status_in(long segnum, uintptr_t pagenum)
-{
-    int seg_shift = segnum * 2;
-    OPT_ASSERT(seg_shift < 8 * sizeof(struct page_shared_s));
+    OPT_ASSERT(segnum < 8 * sizeof(struct page_shared_s));
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
-        &pages_status[get_file_page_of(pagenum)];
+        &pages_status[pagenum - PAGE_FLAG_START];
 
-    return (ps->by_segment >> seg_shift) & 3;
+    return (ps->by_segment >> segnum) & 1;
 }
 
-static inline void set_page_status_in(long segnum, uintptr_t pagenum, uint8_t status)
+static inline void set_page_status_in(long segnum, uintptr_t pagenum,
+                                      bool status)
 {
-    OPT_ASSERT(status < 3);
-
-    int seg_shift = segnum * 2;
-    OPT_ASSERT(seg_shift < 8 * sizeof(struct page_shared_s));
+    OPT_ASSERT(segnum < 8 * sizeof(struct page_shared_s));
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
-        &pages_status[get_file_page_of(pagenum)];
+        &pages_status[pagenum - PAGE_FLAG_START];
 
     assert(status != get_page_status_in(segnum, pagenum));
-    ps->by_segment &= ~(3UL << seg_shift); /* clear */
-    ps->by_segment |= status << seg_shift; /* set */
+    __sync_fetch_and_xor(&ps->by_segment, 1UL << segnum); /* invert the flag */
 }
