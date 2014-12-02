@@ -3,20 +3,6 @@
 #endif
 
 
-#ifdef NDEBUG
-#define EVENTUALLY(condition)    {/* nothing */}
-#else
-#define EVENTUALLY(condition)                                   \
-    {                                                           \
-        if (!(condition)) {                                     \
-            acquire_privatization_lock(STM_SEGMENT->segment_num);\
-            if (!(condition))                                   \
-                stm_fatalerror("fails: " #condition);           \
-            release_privatization_lock(STM_SEGMENT->segment_num);\
-        }                                                       \
-    }
-#endif
-
 /* General helper: copies objects into our own segment, from some
    source described by a range of 'struct stm_undo_s'.  Maybe later
    we could specialize this function to avoid the checks in the
@@ -346,6 +332,13 @@ static void _stm_validate(void *free_if_abort)
 
                 segment_really_copied_from |= (1UL << cl->segment_num);
                 import_objects(cl->segment_num, -1, undo, end);
+
+                /* here we can actually have our own modified version, so
+                   make sure to only copy things that are not modified in our
+                   segment... (if we do not abort) */
+                copy_bk_objs_in_page_from
+                    (cl->segment_num, -1,     /* any page */
+                     !needs_abort);  /* if we abort, we still want to copy everything */
             }
 
             /* last fully validated entry */
@@ -355,18 +348,19 @@ static void _stm_validate(void *free_if_abort)
         }
         assert(cl == last_cl);
 
-        OPT_ASSERT(segment_really_copied_from < (1 << NB_SEGMENTS));
-        int segnum;
-        for (segnum = 0; segnum < NB_SEGMENTS; segnum++) {
-            if (segment_really_copied_from & (1UL << segnum)) {
-                /* here we can actually have our own modified version, so
-                   make sure to only copy things that are not modified in our
-                   segment... (if we do not abort) */
-                copy_bk_objs_in_page_from(
-                    segnum, -1,     /* any page */
-                    !needs_abort);  /* if we abort, we still want to copy everything */
-            }
-        }
+        /* XXX: this optimization fails in test_basic.py, bug3 */
+        /* OPT_ASSERT(segment_really_copied_from < (1 << NB_SEGMENTS)); */
+        /* int segnum; */
+        /* for (segnum = 0; segnum < NB_SEGMENTS; segnum++) { */
+        /*     if (segment_really_copied_from & (1UL << segnum)) { */
+        /*         /\* here we can actually have our own modified version, so */
+        /*            make sure to only copy things that are not modified in our */
+        /*            segment... (if we do not abort) *\/ */
+        /*         copy_bk_objs_in_page_from( */
+        /*             segnum, -1,     /\* any page *\/ */
+        /*             !needs_abort);  /\* if we abort, we still want to copy everything *\/ */
+        /*     } */
+        /* } */
     }
 
     /* done with modifications */
@@ -503,6 +497,7 @@ void _stm_write_slowpath(object_t *obj)
     assert(!(bk_obj->stm_flags & GCFLAG_WB_EXECUTED));
 
     dprintf(("write_slowpath(%p): sz=%lu, bk=%p\n", obj, obj_size, bk_obj));
+
  retry:
     /* privatize pages: */
     /* XXX don't always acquire all locks... */
@@ -552,6 +547,7 @@ void _stm_write_slowpath(object_t *obj)
     }
     /* all pages are either private or we were the first to write to a shared
        page and therefore got it as our private one */
+
 
     /* phew, now add the obj to the write-set and register the
        backup copy. */
