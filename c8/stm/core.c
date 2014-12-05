@@ -278,86 +278,107 @@ static void _stm_validate(void *free_if_abort)
         return;
     }
 
-    /* Find the set of segments we need to copy from and lock them: */
-    uint64_t segments_to_lock = 1UL << my_segnum;
-    cl = first_cl;
-    while ((next_cl = cl->next) != NULL) {
-        if (next_cl == INEV_RUNNING) {
-#if STM_TESTS
-            if (free_if_abort != (void *)-1)
-                free(free_if_abort);
-            stm_abort_transaction();
-#endif
-            /* only validate entries up to INEV */
-            break;
-        }
-        assert(next_cl->rev_num > cl->rev_num);
-        cl = next_cl;
-
-        if (cl->written_count) {
-            segments_to_lock |= (1UL << cl->segment_num);
-        }
-    }
-    last_cl = cl;
-    acquire_modification_lock_set(segments_to_lock);
-
-
-    /* import objects from first_cl to last_cl: */
     bool needs_abort = false;
-    if (first_cl != last_cl) {
-        uint64_t segment_really_copied_from = 0UL;
+    
+    while(1) {
+        /* retry IF: */
+        /* if at the time of "HERE" (s.b.) there happen to be
+           more commits (and bk copies) then it could be that
+           copy_bk_objs_in_page_from (s.b.) reads a bk copy that
+           is itself more recent than last_cl. This is fixed
+           by re-validating. */
+        first_cl = STM_PSEGMENT->last_commit_log_entry;
+        if (first_cl->next == NULL)
+            break;
 
+        /* Find the set of segments we need to copy from and lock them: */
+        uint64_t segments_to_lock = 1UL << my_segnum;
         cl = first_cl;
-        while ((cl = cl->next) != NULL) {
-            if (!needs_abort) {
-                struct stm_undo_s *undo = cl->written;
-                struct stm_undo_s *end = cl->written + cl->written_count;
-                for (; undo < end; undo++) {
-                    if (_stm_was_read(undo->object)) {
-                        /* first reset all modified objects from the backup
-                           copies as soon as the first conflict is detected;
-                           then we will proceed below to update our segment from
-                           the old (but unmodified) version to the newer version.
-                        */
-                        reset_modified_from_backup_copies(my_segnum);
-                        needs_abort = true;
-                        break;
-                    }
-                }
+        while ((next_cl = cl->next) != NULL) {
+            if (next_cl == INEV_RUNNING) {
+#if STM_TESTS
+                if (free_if_abort != (void *)-1)
+                    free(free_if_abort);
+                stm_abort_transaction();
+#endif
+                /* only validate entries up to INEV */
+                break;
             }
+            assert(next_cl->rev_num > cl->rev_num);
+            cl = next_cl;
 
             if (cl->written_count) {
-                struct stm_undo_s *undo = cl->written;
-                struct stm_undo_s *end = cl->written + cl->written_count;
-
-                segment_really_copied_from |= (1UL << cl->segment_num);
-                import_objects(cl->segment_num, -1, undo, end);
-
-                copy_bk_objs_in_page_from(
-                    segnum, -1,     /* any page */
-                    !needs_abort);  /* if we abort, we still want to copy everything */
+                segments_to_lock |= (1UL << cl->segment_num);
             }
-
-            /* last fully validated entry */
-            STM_PSEGMENT->last_commit_log_entry = cl;
-            if (cl == last_cl)
-                break;
         }
-        assert(cl == last_cl);
+        last_cl = cl;
+        /* HERE */
+        acquire_modification_lock_set(segments_to_lock);
 
-        /* OPT_ASSERT(segment_really_copied_from <= ((1UL << NB_SEGMENTS) - 1)); */
-        /* int segnum; */
-        /* for (segnum = 0; segnum < NB_SEGMENTS; segnum++) { */
-        /*     if (segment_really_copied_from & (1UL << segnum)) { */
-        /*         /\* here we can actually have our own modified version, so */
-        /*            make sure to only copy things that are not modified in our */
-        /*            segment... (if we do not abort) *\/ */
-        /*     } */
-        /* } */
+
+        /* import objects from first_cl to last_cl: */
+        if (first_cl != last_cl) {
+            uint64_t segment_really_copied_from = 0UL;
+
+            cl = first_cl;
+            while ((cl = cl->next) != NULL) {
+                if (!needs_abort) {
+                    struct stm_undo_s *undo = cl->written;
+                    struct stm_undo_s *end = cl->written + cl->written_count;
+                    for (; undo < end; undo++) {
+                        if (_stm_was_read(undo->object)) {
+                            /* first reset all modified objects from the backup
+                               copies as soon as the first conflict is detected;
+                               then we will proceed below to update our segment from
+                               the old (but unmodified) version to the newer version.
+                            */
+                            reset_modified_from_backup_copies(my_segnum);
+                            needs_abort = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (cl->written_count) {
+                    struct stm_undo_s *undo = cl->written;
+                    struct stm_undo_s *end = cl->written + cl->written_count;
+
+                    segment_really_copied_from |= (1UL << cl->segment_num);
+                    import_objects(cl->segment_num, -1, undo, end);
+
+                    /* here we can actually have our own modified version, so
+                       make sure to only copy things that are not modified in our
+                       segment... (if we do not abort) */
+                    copy_bk_objs_in_page_from
+                        (cl->segment_num, -1,     /* any page */
+                         !needs_abort);  /* if we abort, we still want to copy everything */
+                }
+
+                /* last fully validated entry */
+                STM_PSEGMENT->last_commit_log_entry = cl;
+                if (cl == last_cl)
+                    break;
+            }
+            assert(cl == last_cl);
+
+            /* XXX: this optimization fails in test_basic.py, bug3 */
+            /* OPT_ASSERT(segment_really_copied_from < (1 << NB_SEGMENTS)); */
+            /* int segnum; */
+            /* for (segnum = 0; segnum < NB_SEGMENTS; segnum++) { */
+            /*     if (segment_really_copied_from & (1UL << segnum)) { */
+            /*         /\* here we can actually have our own modified version, so */
+            /*            make sure to only copy things that are not modified in our */
+            /*            segment... (if we do not abort) *\/ */
+            /*         copy_bk_objs_in_page_from( */
+            /*             segnum, -1,     /\* any page *\/ */
+            /*             !needs_abort);  /\* if we abort, we still want to copy everything *\/ */
+            /*     } */
+            /* } */
+        }
+
+        /* done with modifications */
+        release_modification_lock_set(segments_to_lock);
     }
-
-    /* done with modifications */
-    release_modification_lock_set(segments_to_lock);
 
     if (needs_abort) {
         if (free_if_abort != (void *)-1)
@@ -490,6 +511,7 @@ void _stm_write_slowpath(object_t *obj)
     assert(!(bk_obj->stm_flags & GCFLAG_WB_EXECUTED));
 
     dprintf(("write_slowpath(%p): sz=%lu, bk=%p\n", obj, obj_size, bk_obj));
+
  retry:
     /* privatize pages: */
     /* XXX don't always acquire all locks... */
@@ -539,6 +561,7 @@ void _stm_write_slowpath(object_t *obj)
     }
     /* all pages are either private or we were the first to write to a shared
        page and therefore got it as our private one */
+
 
     /* phew, now add the obj to the write-set and register the
        backup copy. */
