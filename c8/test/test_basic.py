@@ -811,6 +811,38 @@ class TestBasic(BaseTest):
 
         assert stm_get_char(lp_char_5, 384 - 1) == 'o'
 
+    def test_bug3(self):
+        lp_char_5 = stm_allocate_old(384)
+
+        for i in range(NB_SEGMENTS):
+            self.start_transaction()
+            stm_set_char(lp_char_5, '\0', HDR, False)
+            self.commit_transaction()
+            
+        #
+        self.switch(2)
+        self.start_transaction()
+        stm_set_char(lp_char_5, 'i', HDR, False)
+        self.commit_transaction()
+
+        self.start_transaction()
+        stm_set_char(lp_char_5, 'x', HDR, False)
+
+        #
+        self.switch(1)
+        self.start_transaction()
+        stm_set_char(lp_char_5, 'a', HDR, False)
+        self.commit_transaction()
+
+        #
+        self.switch(0)
+        self.start_transaction()
+        assert stm_get_char(lp_char_5, HDR) == 'a'
+
+        #
+        py.test.raises(Conflict, self.switch, 2)
+
+        
     def test_repeated_wb(self):
         lp_char_5 = stm_allocate_old(384)
 
