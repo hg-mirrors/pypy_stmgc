@@ -151,7 +151,6 @@ static char *stm_object_pages;
 #else
 char *stm_object_pages;
 #endif
-static int stm_object_pages_fd;
 static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 
