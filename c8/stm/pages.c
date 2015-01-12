@@ -34,7 +34,7 @@ static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
     assert(get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE);
     dprintf(("page_mark_inaccessible(%lu) in seg:%ld\n", pagenum, segnum));
 
-    set_page_status_in(segnum, pagenum, PAGE_ACCESSIBLE);
+    set_page_status_in(segnum, pagenum, PAGE_NO_ACCESS);
 
     char *addr = get_virtual_page(segnum, pagenum);
     madvise(get_virtual_page(segnum, pagenum), 4096, MADV_DONTNEED);
