@@ -6,6 +6,14 @@
 
   Each virtual page is either accessible, or PAGE_NO_ACCESS (and then
   has no underlying memory).
+
+  TODO: one way to save memory is to re-share pages during major GC.
+  The pages are mapped MAP_PRIVATE in all segments. We could use an
+  extra segment that is mapped SHARED to underlying file pages so
+  we can map PRIVATE pages from segments to it. The idea is that
+  a major GC first validates all segments (incl. the extra seg.),
+  then re-maps all PRIVATE, unmodified pages to the SHARED (unmodified)
+  page. Thus, we get "free" copy-on-write supported by the kernel.
 */
 
 #define PAGE_FLAG_START   END_NURSERY_PAGE
