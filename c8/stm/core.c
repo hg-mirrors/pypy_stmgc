@@ -130,19 +130,11 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     assert(get_page_status_in(my_segnum, pagenum) == PAGE_NO_ACCESS);
 
     /* find who has the most recent revision of our page */
-    int shared_page_holder = -1;
-    int shared_ref_count = 0;
     int copy_from_segnum = -1;
     uint64_t most_recent_rev = 0;
     for (i = 0; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
-
-        if (get_page_status_in(i, pagenum) == PAGE_SHARED) {
-            /* mostly for debugging now: */
-            shared_page_holder = i;
-            shared_ref_count++;
-        }
 
         struct stm_commit_log_entry_s *log_entry;
         log_entry = get_priv_segment(i)->last_commit_log_entry;
@@ -152,17 +144,11 @@ static void handle_segfault_in_page(uintptr_t pagenum)
             most_recent_rev = log_entry->rev_num;
         }
     }
-    OPT_ASSERT(shared_page_holder != -1);
     OPT_ASSERT(copy_from_segnum != -1 && copy_from_segnum != my_segnum);
 
-    /* XXX: for now, we don't try to get the single shared page. We simply
-       regard it as private for its holder. */
-    /* this assert should be true for now... */
-    assert(shared_ref_count == 1);
-
     /* make our page private */
-    page_privatize_in(my_segnum, pagenum);
-    assert(get_page_status_in(my_segnum, pagenum) == PAGE_PRIVATE);
+    page_mark_accessible(my_segnum, pagenum);
+    assert(get_page_status_in(my_segnum, pagenum) == PAGE_ACCESSIBLE);
 
     /* before copying anything, acquire modification locks from our and
        the other segment */
@@ -279,7 +265,7 @@ static void _stm_validate(void *free_if_abort)
     }
 
     bool needs_abort = false;
-    
+
     while(1) {
         /* retry IF: */
         /* if at the time of "HERE" (s.b.) there happen to be

@@ -5,8 +5,8 @@
 
 static void setup_gcpage(void)
 {
-    //uninitialized_page_start = stm_file_pages;
-    //uninitialized_page_stop  = stm_file_pages + NB_SHARED_PAGES * 4096UL;
+    uninitialized_page_start = stm_object_pages + END_NURSERY_PAGE * 4096UL;
+    uninitialized_page_stop  = uninitialized_page_start + NB_SHARED_PAGES * 4096UL;
 }
 
 static void teardown_gcpage(void)
@@ -15,15 +15,17 @@ static void teardown_gcpage(void)
 
 static void setup_N_pages(char *pages_addr, uint64_t num)
 {
-    /* initialize to |S|N|N|N| */
+    /* initialize to |N|P|N|N| */
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
         acquire_privatization_lock(i);
     }
-    pages_initialize_shared_for(
-        STM_SEGMENT->segment_num,
-        get_page_of_file_page((pages_addr - stm_file_pages) / 4096UL),
-        num);
+
+    uintptr_t p = (pages_addr - stm_object_pages) / 4096UL;
+    while (num-->0) {
+        page_mark_accessible(STM_SEGMENT->segment_num, p + num);
+    }
+
     for (i = NB_SEGMENTS-1; i >= 0; i--) {
         release_privatization_lock(i);
     }
@@ -58,7 +60,7 @@ static stm_char *allocate_outside_nursery_large(uint64_t size)
              (uintptr_t)addr / 4096UL + END_NURSERY_PAGE));
 
     spinlock_release(lock_growth_large);
-    return (stm_char*)(addr - stm_file_pages + END_NURSERY_PAGE * 4096UL);
+    return (stm_char*)(addr - stm_object_pages);
 }
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)

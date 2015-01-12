@@ -21,7 +21,7 @@ static fpsz_t full_pages_object_size[PAGE_SMSIZE_END - PAGE_SMSIZE_START];
 
 static fpsz_t *get_fpsz(char *smallpage)
 {
-    uintptr_t pagenum = (((char *)smallpage) - stm_file_pages) / 4096;
+    uintptr_t pagenum = (((char *)smallpage) - END_NURSERY_PAGE * 4096UL - stm_object_pages) / 4096;
     assert(PAGE_SMSIZE_START <= pagenum && pagenum < PAGE_SMSIZE_END);
     return &full_pages_object_size[pagenum - PAGE_SMSIZE_START];
 }
@@ -60,7 +60,7 @@ static void grab_more_free_pages_for_small_allocations(void)
             goto out_of_memory;
 
         uninitialized_page_stop -= decrease_by;
-        first_small_uniform_loc = uninitialized_page_stop - stm_file_pages + END_NURSERY_PAGE * 4096UL;
+        first_small_uniform_loc = uninitialized_page_stop - stm_object_pages;
 
         /* XXX: */
         /* char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL; */
@@ -163,11 +163,11 @@ static inline stm_char *allocate_outside_nursery_small(uint64_t size)
 
     if (UNLIKELY(result == NULL))
         return (stm_char*)
-            (_allocate_small_slowpath(size) - stm_file_pages + END_NURSERY_PAGE * 4096UL);
+            (_allocate_small_slowpath(size) - stm_object_pages);
 
     *fl = result->next;
     return (stm_char*)
-        ((char *)result - stm_file_pages + END_NURSERY_PAGE * 4096UL);
+        ((char *)result - stm_object_pages);
 }
 
 object_t *_stm_allocate_old_small(ssize_t size_rounded_up)
@@ -193,8 +193,7 @@ static inline bool _smallmalloc_sweep_keep(char *p)
 #ifdef STM_TESTS
     if (_stm_smallmalloc_keep != NULL) {
         // test wants a TLPREFIXd address
-        return _stm_smallmalloc_keep(
-            p - stm_file_pages + (char*)(END_NURSERY_PAGE * 4096UL));
+        return _stm_smallmalloc_keep((char*)(p - stm_object_pages));
     }
 #endif
     abort();
