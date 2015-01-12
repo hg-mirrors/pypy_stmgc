@@ -70,7 +70,6 @@ void stm_setup(void)
 
     assert(stm_object_pages_fd);
     assert(stm_object_pages);
-    assert(stm_file_pages);
 
     setup_protection_settings();
     setup_signal_handler();
