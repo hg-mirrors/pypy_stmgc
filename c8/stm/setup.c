@@ -68,7 +68,6 @@ void stm_setup(void)
 
     setup_mmap("initial stm_object_pages mmap()");
 
-    assert(stm_object_pages_fd);
     assert(stm_object_pages);
 
     setup_protection_settings();

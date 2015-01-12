@@ -154,8 +154,8 @@ static void handle_segfault_in_page(uintptr_t pagenum)
        the other segment */
     uint64_t to_lock = (1UL << copy_from_segnum)| (1UL << my_segnum);
     acquire_modification_lock_set(to_lock);
-    pagecopy((char*)(get_virt_page_of(my_segnum, pagenum) * 4096UL),
-             (char*)(get_virt_page_of(copy_from_segnum, pagenum) * 4096UL));
+    pagecopy(get_virtual_page(my_segnum, pagenum),
+             get_virtual_page(copy_from_segnum, pagenum));
 
     /* if there were modifications in the page, revert them. */
     copy_bk_objs_in_page_from(copy_from_segnum, pagenum, false);
@@ -505,13 +505,10 @@ void _stm_write_slowpath(object_t *obj)
 
     uintptr_t page;
     for (page = first_page; page <= end_page; page++) {
-        /* check if our page is private or we are the only shared-page holder */
-        switch (get_page_status_in(my_segnum, page)) {
-
-        case PAGE_PRIVATE:
-            continue;
-
-        case PAGE_NO_ACCESS:
+        if (get_page_status_in(my_segnum, page) == PAGE_NO_ACCESS) {
+            /* should not happen right now, since we do not make other
+               segment's pages NO_ACCESS anymore (later maybe in GC safe points) */
+            abort();
             /* happens if there is a concurrent WB between us making the backup
                and acquiring the locks */
             release_all_privatization_locks();
@@ -520,34 +517,10 @@ void _stm_write_slowpath(object_t *obj)
             *dummy;            /* force segfault */
 
             goto retry;
-
-        case PAGE_SHARED:
-            break;
-
-        default:
-            assert(0);
-        }
-        /* make sure all the others are NO_ACCESS
-           choosing to make us PRIVATE is harder because then nobody must ever
-           update the shared page in stm_validate() except if it is the sole
-           reader of it. But then we don't actually know which revision the page is at. */
-        /* XXX this is a temporary solution I suppose */
-        int i;
-        for (i = 0; i < NB_SEGMENTS; i++) {
-            if (i == my_segnum)
-                continue;
-
-            if (get_page_status_in(i, page) == PAGE_SHARED) {
-                /* xxx: unmap? */
-                set_page_status_in(i, page, PAGE_NO_ACCESS);
-                mprotect((char*)(get_virt_page_of(i, page) * 4096UL), 4096UL, PROT_NONE);
-                dprintf(("NO_ACCESS in seg %d page %lu\n", i, page));
-            }
         }
     }
-    /* all pages are either private or we were the first to write to a shared
-       page and therefore got it as our private one */
-
+    /* all pages are private to us and we hold the privatization_locks so
+       we are allowed to modify them */
 
     /* phew, now add the obj to the write-set and register the
        backup copy. */

@@ -28,6 +28,7 @@ static void page_mark_accessible(long segnum, uintptr_t pagenum)
     set_page_status_in(segnum, pagenum, PAGE_ACCESSIBLE);
 }
 
+__attribute__((unused))
 static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
 {
     assert(get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE);
