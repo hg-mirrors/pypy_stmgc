@@ -132,7 +132,7 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     /* find who has the most recent revision of our page */
     int copy_from_segnum = -1;
     uint64_t most_recent_rev = 0;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
 
@@ -350,7 +350,7 @@ static void _stm_validate(void *free_if_abort)
             /* XXX: this optimization fails in test_basic.py, bug3 */
             /* OPT_ASSERT(segment_really_copied_from < (1 << NB_SEGMENTS)); */
             /* int segnum; */
-            /* for (segnum = 0; segnum < NB_SEGMENTS; segnum++) { */
+            /* for (segnum = 1; segnum < NB_SEGMENTS; segnum++) { */
             /*     if (segment_really_copied_from & (1UL << segnum)) { */
             /*         /\* here we can actually have our own modified version, so */
             /*            make sure to only copy things that are not modified in our */
@@ -1030,6 +1030,7 @@ static void synchronize_objects_flush(void)
         ssize_t frag_size = STM_PSEGMENT->sq_fragsizes[j];
 
         char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, frag);
+        /* XXX: including the sharing segment? */
         for (i = 0; i < NB_SEGMENTS; i++) {
             if (i == myself)
                 continue;

@@ -284,7 +284,7 @@ void _stm_smallmalloc_sweep(void)
         small_page_lists[szword] = NULL;
 
         /* process the pages that the various segments are busy filling */
-        for (i = 0; i < NB_SEGMENTS; i++) {
+        for (i = 1; i < NB_SEGMENTS; i++) {
             struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
             struct small_free_loc_s **fl =
                     &pseg->small_malloc_data.loc_free[szword];

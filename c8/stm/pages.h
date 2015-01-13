@@ -50,6 +50,11 @@ static inline char *get_virtual_page(long segnum, uintptr_t pagenum)
     return get_segment_base(segnum) + pagenum * 4096;
 }
 
+static inline char *get_virtual_address(long segnum, object_t *obj)
+{
+    return get_segment_base(segnum) + (uintptr_t)obj;
+}
+
 static inline bool get_page_status_in(long segnum, uintptr_t pagenum)
 {
     OPT_ASSERT(segnum < 8 * sizeof(struct page_shared_s));

@@ -74,6 +74,7 @@ void stm_setup(void)
     setup_signal_handler();
 
     long i;
+    /* including seg0 */
     for (i = 0; i < NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
 
@@ -195,22 +196,21 @@ void stm_register_thread_local(stm_thread_local_t *tl)
     if (stm_all_thread_locals == NULL) {
         stm_all_thread_locals = tl->next = tl->prev = tl;
         num = 0;
-    }
-    else {
+    } else {
         tl->next = stm_all_thread_locals;
         tl->prev = stm_all_thread_locals->prev;
         stm_all_thread_locals->prev->next = tl;
         stm_all_thread_locals->prev = tl;
-        num = (tl->prev->associated_segment_num + 1) % NB_SEGMENTS;
+        num = (tl->prev->associated_segment_num) % (NB_SEGMENTS-1);
     }
 
     /* assign numbers consecutively, but that's for tests; we could also
        assign the same number to all of them and they would get their own
        numbers automatically. */
-    tl->associated_segment_num = num;
+    tl->associated_segment_num = num + 1;
     *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);
-    set_gs_register(get_segment_base(num));
+    set_gs_register(get_segment_base(num + 1));
     s_mutex_unlock();
 
     DEBUG_EXPECT_SEGFAULT(true);

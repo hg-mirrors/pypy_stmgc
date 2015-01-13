@@ -18,8 +18,10 @@ static void setup_nursery(void)
     assert(_STM_FAST_ALLOC <= NURSERY_SIZE);
     _stm_nursery_start = NURSERY_START;
 
-    long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    long i = 0;
+    get_segment(i)->nursery_current = (stm_char *)-1;
+    get_segment(i)->nursery_end = -1;
+    for (i = 1; i < NB_SEGMENTS; i++) {
         get_segment(i)->nursery_current = (stm_char *)NURSERY_START;
         get_segment(i)->nursery_end = NURSERY_END;
     }
@@ -91,14 +93,13 @@ static void minor_trace_if_young(object_t **pobj)
         realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         size = stmcb_size_rounded_up((struct object_s *)realobj);
 
-        if (true /*size > GC_LAST_SMALL_SIZE*/) {
+        if (true || size > GC_LAST_SMALL_SIZE) {
             /* case 1: object is not small enough.
                Ask gcpage.c for an allocation via largemalloc. */
             nobj = (object_t *)allocate_outside_nursery_large(size);
         }
         else {
             /* case "small enough" */
-            abort();
             nobj = (object_t *)allocate_outside_nursery_small(size);
         }
 

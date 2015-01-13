@@ -15,7 +15,7 @@ char *_stm_real_address(object_t *o)
 
 char *_stm_get_segment_base(long index)
 {
-    return get_segment_base(index);
+    return get_segment_base(index+1);
 }
 
 struct stm_priv_segment_info_s *_stm_segment(void)
