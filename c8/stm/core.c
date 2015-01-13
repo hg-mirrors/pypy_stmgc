@@ -274,7 +274,7 @@ static void _stm_validate(void *free_if_abort)
            is itself more recent than last_cl. This is fixed
            by re-validating. */
         first_cl = STM_PSEGMENT->last_commit_log_entry;
-        if (first_cl->next == NULL)
+        if (first_cl->next == NULL || first_cl->next == INEV_RUNNING)
             break;
 
         /* Find the set of segments we need to copy from and lock them: */
