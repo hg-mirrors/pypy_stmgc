@@ -87,6 +87,7 @@ static void grab_more_free_pages_for_small_allocations(void)
 
 static char *_allocate_small_slowpath(uint64_t size)
 {
+    dprintf(("_allocate_small_slowpath(%lu)\n", size));
     long n = size / 8;
     struct small_free_loc_s *smallpage;
     struct small_free_loc_s *TLPREFIX *fl =

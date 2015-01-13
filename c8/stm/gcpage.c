@@ -22,6 +22,7 @@ static void setup_N_pages(char *pages_addr, uint64_t num)
     }
 
     uintptr_t p = (pages_addr - stm_object_pages) / 4096UL;
+    dprintf(("setup_N_pages(%p, %lu): pagenum %lu\n", pages_addr, num, p));
     while (num-->0) {
         page_mark_accessible(STM_SEGMENT->segment_num, p + num);
     }
