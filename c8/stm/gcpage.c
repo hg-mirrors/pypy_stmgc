@@ -63,10 +63,9 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
     /* only for tests xxx but stm_setup_prebuilt() uses this now too */
     stm_char *p = allocate_outside_nursery_large(size_rounded_up);
-    /* hardcode segment 1 */
-    memset(get_virtual_address(STM_SEGMENT->segment_num, (object_t *)p), 0, size_rounded_up);
-
     object_t *o = (object_t *)p;
+
+    memset(get_virtual_address(STM_SEGMENT->segment_num, o), 0, size_rounded_up);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
 
     dprintf(("allocate_old(%lu): %p, seg=%d, page=%lu\n",
