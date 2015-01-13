@@ -67,11 +67,14 @@ static void grab_more_free_pages_for_small_allocations(void)
         /* if (!_stm_largemalloc_resize_arena(uninitialized_page_stop - base)) */
         /*     goto out_of_memory; */
 
-        setup_N_pages(uninitialized_page_stop, GCPAGE_NUM_PAGES);
 
         char *p = uninitialized_page_stop;
         long i;
         for (i = 0; i < GCPAGE_NUM_PAGES; i++) {
+            /* accessible in seg0: */
+            page_mark_accessible(0, (p - stm_object_pages) / 4096UL);
+
+            /* add to free_uniform_pages list */
             ((struct small_free_loc_s *)p)->nextpage = free_uniform_pages;
             free_uniform_pages = (struct small_free_loc_s *)p;
             p += 4096;
@@ -119,6 +122,10 @@ static char *_allocate_small_slowpath(uint64_t size)
                                                    smallpage,
                                                    smallpage->nextpage)))
             goto retry;
+
+        /* make page accessible in our segment too: */
+        page_mark_accessible(STM_SEGMENT->segment_num,
+                             ((char*)smallpage - stm_object_pages) / 4096UL);
 
         /* Succeeded: we have a page in 'smallpage', which is not
            initialized so far, apart from the 'nextpage' field read
@@ -174,9 +181,9 @@ static inline stm_char *allocate_outside_nursery_small(uint64_t size)
 object_t *_stm_allocate_old_small(ssize_t size_rounded_up)
 {
     stm_char *p = allocate_outside_nursery_small(size_rounded_up);
-    memset(stm_object_pages + (uintptr_t)p, 0, size_rounded_up);
-
     object_t *o = (object_t *)p;
+
+    memset(get_virtual_address(STM_SEGMENT->segment_num, o), 0, size_rounded_up);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
 
     dprintf(("allocate_old_small(%lu): %p, seg=%d, page=%lu\n",
@@ -244,6 +251,17 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
         }
         else if (!_smallmalloc_sweep_keep(p)) {
             /* the location should be freed now */
+            //dprintf(("free small obj %p\n", (object_t*)(p - stm_object_pages)));
+#ifdef STM_TESTS
+            /* fill location with 0xdd in all segs except seg0 */
+            int j;
+            object_t *obj = (object_t*)(p - stm_object_pages);
+            uintptr_t page = (baseptr - stm_object_pages) / 4096UL;
+            for (j = 1; j < NB_SEGMENTS; j++)
+                if (get_page_status_in(j, page) == PAGE_ACCESSIBLE)
+                    memset(get_virtual_address(j, obj), 0xdd, szword*8);
+#endif
+
             if (flprev == NULL) {
                 flprev = (struct small_free_loc_s *)p;
                 flprev->next = fl;
@@ -262,6 +280,14 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
         }
     }
     if (!any_object_remaining) {
+        /* give page back to free_uniform_pages and thus make it
+           inaccessible from all other segments again (except seg0) */
+        uintptr_t page = (baseptr - stm_object_pages) / 4096UL;
+        for (i = 1; i < NB_SEGMENTS; i++) {
+            if (get_page_status_in(i, page) == PAGE_ACCESSIBLE)
+                page_mark_inaccessible(i, page);
+        }
+
         ((struct small_free_loc_s *)baseptr)->nextpage = free_uniform_pages;
         free_uniform_pages = (struct small_free_loc_s *)baseptr;
     }

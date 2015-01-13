@@ -52,7 +52,7 @@ static inline char *get_virtual_page(long segnum, uintptr_t pagenum)
 
 static inline char *get_virtual_address(long segnum, object_t *obj)
 {
-    return get_segment_base(segnum) + (uintptr_t)obj;
+    return REAL_ADDRESS(get_segment_base(segnum), obj);
 }
 
 static inline bool get_page_status_in(long segnum, uintptr_t pagenum)
