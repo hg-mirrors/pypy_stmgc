@@ -13,7 +13,7 @@ static union {
         pthread_mutex_t global_mutex;
         pthread_cond_t cond[_C_TOTAL];
         /* some additional pieces of global state follow */
-        uint8_t in_use1[NB_SEGMENTS];   /* 1 if running a pthread */
+        uint8_t in_use1[NB_SEGMENTS];   /* 1 if running a pthread, idx=0 unused */
     };
     char reserved[192];
 } sync_ctl __attribute__((aligned(64)));
@@ -110,28 +110,29 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
     assert(_has_mutex());
     assert(_is_tl_registered(tl));
 
-    int num = tl->associated_segment_num;
-    if (sync_ctl.in_use1[num] == 0) {
+    int num = tl->associated_segment_num - 1; // 0..NB_SEG-1
+    OPT_ASSERT(num >= 0);
+    if (sync_ctl.in_use1[num+1] == 0) {
         /* fast-path: we can get the same segment number than the one
            we had before.  The value stored in GS is still valid. */
 #ifdef STM_TESTS
         /* that can be optimized away, except during tests, because
            they use only one thread */
-        set_gs_register(get_segment_base(num));
+        set_gs_register(get_segment_base(num+1));
 #endif
-        dprintf(("acquired same segment: %d\n", num));
+        dprintf(("acquired same segment: %d\n", num+1));
         goto got_num;
     }
     /* Look for the next free segment.  If there is none, wait for
        the condition variable. */
     int retries;
-    for (retries = 0; retries < NB_SEGMENTS; retries++) {
-        num = num % NB_SEGMENTS;
-        if (sync_ctl.in_use1[num] == 0) {
+    for (retries = 0; retries < NB_SEGMENTS-1; retries++) {
+        num = (num+1) % (NB_SEGMENTS-1);
+        if (sync_ctl.in_use1[num+1] == 0) {
             /* we're getting 'num', a different number. */
-            dprintf(("acquired different segment: %d->%d\n", tl->associated_segment_num, num));
-            tl->associated_segment_num = num;
-            set_gs_register(get_segment_base(num));
+            dprintf(("acquired different segment: %d->%d\n", tl->associated_segment_num, num+1));
+            tl->associated_segment_num = num+1;
+            set_gs_register(get_segment_base(num+1));
             goto got_num;
         }
     }
@@ -142,8 +143,9 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
     /* Return false to the caller, which will call us again */
     return false;
  got_num:
-    sync_ctl.in_use1[num] = 1;
-    assert(STM_SEGMENT->segment_num == num);
+    OPT_ASSERT(num >= 0 && num < NB_SEGMENTS-1);
+    sync_ctl.in_use1[num+1] = 1;
+    assert(STM_SEGMENT->segment_num == num+1);
     assert(STM_SEGMENT->running_thread == NULL);
     STM_SEGMENT->running_thread = tl;
     return true;
@@ -171,7 +173,7 @@ static bool _seems_to_be_running_transaction(void)
 bool _stm_in_transaction(stm_thread_local_t *tl)
 {
     int num = tl->associated_segment_num;
-    assert(0 <= num && num < NB_SEGMENTS);
+    assert(1 <= num && num < NB_SEGMENTS);
     return get_segment(num)->running_thread == tl;
 }
 
@@ -184,7 +186,7 @@ void _stm_test_switch(stm_thread_local_t *tl)
 
 void _stm_test_switch_segment(int segnum)
 {
-    set_gs_register(get_segment_base(segnum));
+    set_gs_register(get_segment_base(segnum+1));
 }
 
 #if STM_TESTS
@@ -219,7 +221,7 @@ static void signal_everybody_to_pause_running(void)
     assert(_has_mutex());
 
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i < NB_SEGMENTS; i++) {
         if (get_segment(i)->nursery_end == NURSERY_END)
             get_segment(i)->nursery_end = NSE_SIGPAUSE;
     }
@@ -235,7 +237,7 @@ static inline long count_other_threads_sp_running(void)
     long result = 0;
     int my_num = STM_SEGMENT->segment_num;
 
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i < NB_SEGMENTS; i++) {
         if (i != my_num && get_priv_segment(i)->safe_point == SP_RUNNING) {
             assert(get_segment(i)->nursery_end <= _STM_NSE_SIGNAL_MAX);
             result++;
@@ -252,7 +254,7 @@ static void remove_requests_for_safe_point(void)
     assert((_safe_points_requested = false, 1));
 
     long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 1; i < NB_SEGMENTS; i++) {
         assert(get_segment(i)->nursery_end != NURSERY_END);
         if (get_segment(i)->nursery_end == NSE_SIGPAUSE)
             get_segment(i)->nursery_end = NURSERY_END;

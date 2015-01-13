@@ -1,4 +1,3 @@
-import os
 import cffi, weakref
 from common import parent_dir, source_files
 

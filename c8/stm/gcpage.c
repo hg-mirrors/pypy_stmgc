@@ -16,10 +16,7 @@ static void teardown_gcpage(void)
 static void setup_N_pages(char *pages_addr, uint64_t num)
 {
     /* initialize to |N|P|N|N| */
-    long i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        acquire_privatization_lock(i);
-    }
+    acquire_all_privatization_locks();
 
     uintptr_t p = (pages_addr - stm_object_pages) / 4096UL;
     dprintf(("setup_N_pages(%p, %lu): pagenum %lu\n", pages_addr, num, p));
@@ -27,9 +24,7 @@ static void setup_N_pages(char *pages_addr, uint64_t num)
         page_mark_accessible(STM_SEGMENT->segment_num, p + num);
     }
 
-    for (i = NB_SEGMENTS-1; i >= 0; i--) {
-        release_privatization_lock(i);
-    }
+    release_all_privatization_locks();
 }
 
 
@@ -68,7 +63,8 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
     /* only for tests xxx but stm_setup_prebuilt() uses this now too */
     stm_char *p = allocate_outside_nursery_large(size_rounded_up);
-    memset(stm_object_pages + (uintptr_t)p, 0, size_rounded_up);
+    /* hardcode segment 1 */
+    memset(get_virtual_address(STM_SEGMENT->segment_num, (object_t *)p), 0, size_rounded_up);
 
     object_t *o = (object_t *)p;
     o->stm_flags = GCFLAG_WRITE_BARRIER;
