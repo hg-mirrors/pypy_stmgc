@@ -57,6 +57,9 @@ static inline char *get_virtual_address(long segnum, object_t *obj)
 
 static inline bool get_page_status_in(long segnum, uintptr_t pagenum)
 {
+    /* reading page status requires "read"-lock: */
+    assert(STM_PSEGMENT->privatization_lock);
+
     OPT_ASSERT(segnum < 8 * sizeof(struct page_shared_s));
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_status[pagenum - PAGE_FLAG_START];
@@ -67,6 +70,9 @@ static inline bool get_page_status_in(long segnum, uintptr_t pagenum)
 static inline void set_page_status_in(long segnum, uintptr_t pagenum,
                                       bool status)
 {
+    /* writing page status requires "write"-lock: */
+    assert(all_privatization_locks_acquired());
+
     OPT_ASSERT(segnum < 8 * sizeof(struct page_shared_s));
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_status[pagenum - PAGE_FLAG_START];

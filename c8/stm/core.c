@@ -299,6 +299,8 @@ static void _stm_validate(void *free_if_abort)
         }
         last_cl = cl;
         /* HERE */
+
+        acquire_privatization_lock(STM_SEGMENT->segment_num);
         acquire_modification_lock_set(segments_to_lock);
 
 
@@ -330,6 +332,7 @@ static void _stm_validate(void *free_if_abort)
                     struct stm_undo_s *end = cl->written + cl->written_count;
 
                     segment_really_copied_from |= (1UL << cl->segment_num);
+
                     import_objects(cl->segment_num, -1, undo, end);
 
                     /* here we can actually have our own modified version, so
@@ -364,6 +367,7 @@ static void _stm_validate(void *free_if_abort)
 
         /* done with modifications */
         release_modification_lock_set(segments_to_lock);
+        release_privatization_lock(STM_SEGMENT->segment_num);
     }
 
     if (needs_abort) {

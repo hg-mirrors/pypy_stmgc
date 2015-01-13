@@ -13,7 +13,7 @@ static void teardown_gcpage(void)
 {
 }
 
-static void setup_N_pages(char *pages_addr, uint64_t num)
+static void setup_N_pages(char *pages_addr, long num)
 {
     /* initialize to |N|P|N|N| */
     acquire_all_privatization_locks();
@@ -21,6 +21,7 @@ static void setup_N_pages(char *pages_addr, uint64_t num)
     uintptr_t p = (pages_addr - stm_object_pages) / 4096UL;
     dprintf(("setup_N_pages(%p, %lu): pagenum %lu\n", pages_addr, num, p));
     while (num-->0) {
+        /* XXX: page_range_mark_accessible() */
         page_mark_accessible(STM_SEGMENT->segment_num, p + num);
     }
 
@@ -52,8 +53,8 @@ static stm_char *allocate_outside_nursery_large(uint64_t size)
     }
 
     dprintf(("allocate_outside_nursery_large(%lu): %p, page=%lu\n",
-             size, addr,
-             (uintptr_t)addr / 4096UL + END_NURSERY_PAGE));
+             size, (char*)(addr - stm_object_pages),
+             (uintptr_t)(addr - stm_object_pages) / 4096UL));
 
     spinlock_release(lock_growth_large);
     return (stm_char*)(addr - stm_object_pages);
