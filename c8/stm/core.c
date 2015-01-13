@@ -197,7 +197,7 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
     int segnum = get_segment_of_linear_address(addr);
     if (segnum != STM_SEGMENT->segment_num) {
         fprintf(stderr, "Segmentation fault: accessing %p (seg %d) from"
-                        " seg %d\n", addr, STM_SEGMENT->segment_num, segnum);
+                " seg %d\n", addr, segnum, STM_SEGMENT->segment_num);
         abort();
     }
     dprintf(("-> segment: %d\n", segnum));
