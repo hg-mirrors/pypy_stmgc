@@ -67,6 +67,10 @@ static void grab_more_free_pages_for_small_allocations(void)
         /* if (!_stm_largemalloc_resize_arena(uninitialized_page_stop - base)) */
         /*     goto out_of_memory; */
 
+        /* lock acquiring not necessary because the affected pages don't
+           need privatization protection. (but there is an assert right
+           now to enforce that XXXXXX) */
+        acquire_all_privatization_locks();
 
         char *p = uninitialized_page_stop;
         long i;
@@ -79,6 +83,7 @@ static void grab_more_free_pages_for_small_allocations(void)
             free_uniform_pages = (struct small_free_loc_s *)p;
             p += 4096;
         }
+        release_all_privatization_locks();
     }
 
     spinlock_release(gmfp_lock);
@@ -123,9 +128,16 @@ static char *_allocate_small_slowpath(uint64_t size)
                                                    smallpage->nextpage)))
             goto retry;
 
+
+
+        /* lock acquiring not necessary because the affected pages don't
+           need privatization protection. (but there is an assert right
+           now to enforce that XXXXXX) */
+        acquire_all_privatization_locks();
         /* make page accessible in our segment too: */
         page_mark_accessible(STM_SEGMENT->segment_num,
                              ((char*)smallpage - stm_object_pages) / 4096UL);
+        release_all_privatization_locks();
 
         /* Succeeded: we have a page in 'smallpage', which is not
            initialized so far, apart from the 'nextpage' field read

@@ -10,10 +10,10 @@
 #include "stmgc.h"
 
 #define NUMTHREADS 3
-#define STEPS_PER_THREAD 500
-#define THREAD_STARTS 1000 // how many restarts of threads
+#define STEPS_PER_THREAD 50000
+#define THREAD_STARTS 100 // how many restarts of threads
 #define PREBUILT_ROOTS 3
-#define FORKS 3
+#define FORKS 0
 
 #define ACTIVE_ROOTS_SET_SIZE 100 // max num of roots created/alive in one transaction
 #define MAX_ROOTS_ON_SS 1000 // max on shadow stack
@@ -232,11 +232,13 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
         break;
     case 3: // allocate fresh 'p'
         pushed = push_roots();
-        size_t sizes[4] = {sizeof(struct node_s),
-                           sizeof(struct node_s) + (get_rand(100000) & ~15),
-                           sizeof(struct node_s) + 4096,
-                           sizeof(struct node_s) + 4096*70};
-        size_t size = sizes[get_rand(4)];
+        size_t sizes[] = {
+            sizeof(struct node_s), sizeof(struct node_s)+16,
+            sizeof(struct node_s), sizeof(struct node_s)+16,
+            sizeof(struct node_s)+32, sizeof(struct node_s)+48,
+            sizeof(struct node_s)+32, sizeof(struct node_s)+48,
+            sizeof(struct node_s) + (get_rand(100000) & ~15)};
+        size_t size = sizes[get_rand(sizeof(sizes) / sizeof(size_t))];
         p = stm_allocate(size);
         ((nodeptr_t)p)->sig = SIGNATURE;
         ((nodeptr_t)p)->my_size = size;
@@ -352,7 +354,7 @@ void frame_loop()
     /* "interpreter main loop": this is one "application-frame" */
     while (td.steps_left-->0 && get_rand(10) != 0) {
         if (td.steps_left % 8 == 0)
-            fprintf(stdout, "#");
+            fprintf(stderr, "#");
 
         assert(p == NULL || ((nodeptr_t)p)->sig == SIGNATURE);
 

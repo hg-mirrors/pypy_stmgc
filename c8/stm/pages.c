@@ -22,7 +22,11 @@ static void page_mark_accessible(long segnum, uintptr_t pagenum)
     assert(get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS);
     dprintf(("page_mark_accessible(%lu) in seg:%ld\n", pagenum, segnum));
 
-    mprotect(get_virtual_page(segnum, pagenum), 4096, PROT_READ | PROT_WRITE);
+    dprintf(("RW(seg%ld, page%lu)\n", segnum, pagenum));
+    if (mprotect(get_virtual_page(segnum, pagenum), 4096, PROT_READ | PROT_WRITE)) {
+        perror("mprotect");
+        stm_fatalerror("mprotect failed! Consider running 'sysctl vm.max_map_count=16777216'");
+    }
 
     /* set this flag *after* we un-protected it, because XXX later */
     set_page_status_in(segnum, pagenum, PAGE_ACCESSIBLE);
@@ -36,7 +40,11 @@ static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
 
     set_page_status_in(segnum, pagenum, PAGE_NO_ACCESS);
 
+    dprintf(("NONE(seg%ld, page%lu)\n", segnum, pagenum));
     char *addr = get_virtual_page(segnum, pagenum);
-    madvise(get_virtual_page(segnum, pagenum), 4096, MADV_DONTNEED);
-    mprotect(addr, 4096, PROT_NONE);
+    madvise(addr, 4096, MADV_DONTNEED);
+    if (mprotect(addr, 4096, PROT_NONE)) {
+        perror("mprotect");
+        stm_fatalerror("mprotect failed! Consider running 'sysctl vm.max_map_count=16777216'");
+    }
 }
