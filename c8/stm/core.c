@@ -274,8 +274,11 @@ static void _stm_validate(void *free_if_abort)
            is itself more recent than last_cl. This is fixed
            by re-validating. */
         first_cl = STM_PSEGMENT->last_commit_log_entry;
-        if (first_cl->next == NULL || first_cl->next == INEV_RUNNING)
+        if (first_cl->next == NULL)
             break;
+
+        if (first_cl->next == INEV_RUNNING)
+            _stm_collectable_safe_point();     /* otherwise, we may deadlock */
 
         /* Find the set of segments we need to copy from and lock them: */
         uint64_t segments_to_lock = 1UL << my_segnum;
@@ -298,6 +301,7 @@ static void _stm_validate(void *free_if_abort)
             }
         }
         last_cl = cl;
+
         /* HERE */
 
         acquire_privatization_lock(STM_SEGMENT->segment_num);
