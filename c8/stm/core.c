@@ -144,11 +144,18 @@ static void handle_segfault_in_page(uintptr_t pagenum)
             most_recent_rev = log_entry->rev_num;
         }
     }
-    OPT_ASSERT(copy_from_segnum != -1 && copy_from_segnum != my_segnum);
+    OPT_ASSERT(copy_from_segnum != my_segnum);
 
-    /* make our page private */
+    /* make our page write-ready */
     page_mark_accessible(my_segnum, pagenum);
-    assert(get_page_status_in(my_segnum, pagenum) == PAGE_ACCESSIBLE);
+
+    if (copy_from_segnum == -1) {
+        /* this page is only accessible in the sharing segment so far (new
+           allocation). We can thus simply mark it accessible here and
+           not care about its contents so far. */
+        release_all_privatization_locks();
+        return;
+    }
 
     /* before copying anything, acquire modification locks from our and
        the other segment */

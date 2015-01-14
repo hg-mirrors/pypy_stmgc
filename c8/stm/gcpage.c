@@ -2,27 +2,47 @@
 # error "must be compiled via stmgc.c"
 #endif
 
+static struct list_s *testing_prebuilt_objs = NULL;
+static struct tree_s *tree_prebuilt_objs = NULL;     /* XXX refactor */
+
 
 static void setup_gcpage(void)
 {
+    char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL;
+    uintptr_t length = (NB_PAGES - END_NURSERY_PAGE) * 4096UL;
+    _stm_largemalloc_init_arena(base, length);
+
     uninitialized_page_start = stm_object_pages + END_NURSERY_PAGE * 4096UL;
     uninitialized_page_stop  = uninitialized_page_start + NB_SHARED_PAGES * 4096UL;
 }
 
 static void teardown_gcpage(void)
 {
+    LIST_FREE(testing_prebuilt_objs);
+    if (tree_prebuilt_objs != NULL) {
+        tree_free(tree_prebuilt_objs);
+        tree_prebuilt_objs = NULL;
+    }
 }
+
+
 
 static void setup_N_pages(char *pages_addr, long num)
 {
-    /* initialize to |N|P|N|N| */
+    /* make pages accessible in sharing segment only (pages already
+       PROT_READ/WRITE (see setup.c), but not marked accessible as page
+       status). */
+
+    /* lock acquiring maybe not necessary because the affected pages don't
+       need privatization protection. (but there is an assert right
+       now to enforce that XXXXXX) */
     acquire_all_privatization_locks();
 
     uintptr_t p = (pages_addr - stm_object_pages) / 4096UL;
     dprintf(("setup_N_pages(%p, %lu): pagenum %lu\n", pages_addr, num, p));
     while (num-->0) {
         /* XXX: page_range_mark_accessible() */
-        page_mark_accessible(STM_SEGMENT->segment_num, p + num);
+        page_mark_accessible(0, p + num);
     }
 
     release_all_privatization_locks();
@@ -33,14 +53,23 @@ static int lock_growth_large = 0;
 
 static stm_char *allocate_outside_nursery_large(uint64_t size)
 {
-    /* XXX: real allocation */
+    /* Allocate the object with largemalloc.c from the lower addresses. */
+    char *addr = _stm_large_malloc(size);
+    if (addr == NULL)
+        stm_fatalerror("not enough memory!");
+
+    if (LIKELY(addr + size <= uninitialized_page_start))
+        return (stm_char*)(addr - stm_object_pages);
+
+
+    /* uncommon case: need to initialize some more pages */
     spinlock_acquire(lock_growth_large);
-    char *addr = uninitialized_page_start;
 
     char *start = uninitialized_page_start;
-    if (addr + size > start) {  /* XXX: always for now */
+    if (addr + size > start) {
         uintptr_t npages;
-        npages = (addr + size - start) / 4096UL + 1;
+        npages = (addr + size - start) / 4096UL;
+        npages += GCPAGE_NUM_PAGES;
         if (uninitialized_page_stop - start < npages * 4096UL) {
             stm_fatalerror("out of memory!");   /* XXX */
         }

@@ -79,6 +79,16 @@ void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
 void _push_obj_to_other_segments(object_t *obj);
 
+void _stm_largemalloc_init_arena(char *data_start, size_t data_size);
+int _stm_largemalloc_resize_arena(size_t new_size);
+char *_stm_largemalloc_data_start(void);
+char *_stm_large_malloc(size_t request_size);
+void _stm_large_free(char *data);
+void _stm_large_dump(void);
+bool (*_stm_largemalloc_keep)(char *data);
+void _stm_largemalloc_sweep(void);
+
+
 char *stm_object_pages;
 char *stm_file_pages;
 object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
