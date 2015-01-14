@@ -81,6 +81,15 @@ object_t * _get_ptr(object_t *obj, int n);
 void stm_collect(long level);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
+void _stm_largemalloc_init_arena(char *data_start, size_t data_size);
+int _stm_largemalloc_resize_arena(size_t new_size);
+char *_stm_largemalloc_data_start(void);
+char *_stm_large_malloc(size_t request_size);
+void _stm_large_free(char *data);
+void _stm_large_dump(void);
+bool (*_stm_largemalloc_keep)(char *data);
+void _stm_largemalloc_sweep(void);
+
 
 long stm_identityhash(object_t *obj);
 long stm_id(object_t *obj);

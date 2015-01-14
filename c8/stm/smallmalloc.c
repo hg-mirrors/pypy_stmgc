@@ -67,23 +67,17 @@ static void grab_more_free_pages_for_small_allocations(void)
         /* if (!_stm_largemalloc_resize_arena(uninitialized_page_stop - base)) */
         /*     goto out_of_memory; */
 
-        /* lock acquiring not necessary because the affected pages don't
-           need privatization protection. (but there is an assert right
-           now to enforce that XXXXXX) */
-        acquire_all_privatization_locks();
+        /* make writable in sharing seg */
+        setup_N_pages(uninitialized_page_stop, GCPAGE_NUM_PAGES);
 
         char *p = uninitialized_page_stop;
         long i;
         for (i = 0; i < GCPAGE_NUM_PAGES; i++) {
-            /* accessible in seg0: */
-            page_mark_accessible(0, (p - stm_object_pages) / 4096UL);
-
             /* add to free_uniform_pages list */
             ((struct small_free_loc_s *)p)->nextpage = free_uniform_pages;
             free_uniform_pages = (struct small_free_loc_s *)p;
             p += 4096;
         }
-        release_all_privatization_locks();
     }
 
     spinlock_release(gmfp_lock);
@@ -127,17 +121,6 @@ static char *_allocate_small_slowpath(uint64_t size)
                                                    smallpage,
                                                    smallpage->nextpage)))
             goto retry;
-
-
-
-        /* lock acquiring not necessary because the affected pages don't
-           need privatization protection. (but there is an assert right
-           now to enforce that XXXXXX) */
-        acquire_all_privatization_locks();
-        /* make page accessible in our segment too: */
-        page_mark_accessible(STM_SEGMENT->segment_num,
-                             ((char*)smallpage - stm_object_pages) / 4096UL);
-        release_all_privatization_locks();
 
         /* Succeeded: we have a page in 'smallpage', which is not
            initialized so far, apart from the 'nextpage' field read
@@ -315,6 +298,7 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
 
 void _stm_smallmalloc_sweep(void)
 {
+    acquire_all_privatization_locks(); /* should be done outside, but tests... */
     long i, szword;
     for (szword = 2; szword < GC_N_SMALL_REQUESTS; szword++) {
         struct small_free_loc_s *page = small_page_lists[szword];
@@ -362,4 +346,5 @@ void _stm_smallmalloc_sweep(void)
             sweep_small_page(pageptr, NULL, sz);
         }
     }
+    release_all_privatization_locks();
 }

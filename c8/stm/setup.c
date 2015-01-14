@@ -31,6 +31,11 @@ static void setup_protection_settings(void)
                  (NB_READMARKER_PAGES + NB_NURSERY_PAGES) * 4096,
                  PROT_READ | PROT_WRITE);
     }
+
+    /* make the sharing segment writable for the memory allocator: */
+    mprotect(stm_object_pages + END_NURSERY_PAGE * 4096UL,
+             (NB_PAGES - END_NURSERY_PAGE) * 4096UL,
+             PROT_READ | PROT_WRITE);
 }
 
 
