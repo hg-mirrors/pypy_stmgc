@@ -64,8 +64,8 @@ static void import_objects(
         dst = REAL_ADDRESS(STM_SEGMENT->segment_base, oslice);
         memcpy(dst, src, SLICE_SIZE(undo->slice));
 
-        if (src_segment_base == NULL) {
-            /* backups never should have WB_EXECUTED */
+        if (src_segment_base == NULL && SLICE_OFFSET(undo->slice) == 0) {
+            /* check that restored obj doesn't have WB_EXECUTED */
             assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
         }
     }
