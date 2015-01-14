@@ -60,7 +60,7 @@ static void import_objects(
         if (src_segment_base != NULL)
             src = REAL_ADDRESS(src_segment_base, oslice);
         else
-            src = undo->backup + SLICE_OFFSET(undo->slice);
+            src = undo->backup;
         dst = REAL_ADDRESS(STM_SEGMENT->segment_base, oslice);
         memcpy(dst, src, SLICE_SIZE(undo->slice));
 
@@ -504,14 +504,8 @@ void _stm_write_slowpath(object_t *obj)
         return;
     }
 
-    /* create backup copy (this may cause several page faults
-       XXX: do backup later and maybe allow for having NO_ACCESS
-       pages around anyway (kind of card marking)): */
-    struct object_s *bk_obj = malloc(obj_size);
-    memcpy(bk_obj, realobj, obj_size);
-    assert(!(bk_obj->stm_flags & GCFLAG_WB_EXECUTED));
-
-    dprintf(("write_slowpath(%p): sz=%lu, bk=%p\n", obj, obj_size, bk_obj));
+    assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
+    dprintf(("write_slowpath(%p): sz=%lu\n", obj, obj_size));
 
  retry:
     /* privatize pages: */
@@ -521,11 +515,7 @@ void _stm_write_slowpath(object_t *obj)
     uintptr_t page;
     for (page = first_page; page <= end_page; page++) {
         if (get_page_status_in(my_segnum, page) == PAGE_NO_ACCESS) {
-            /* should not happen right now, since we do not make other
-               segment's pages NO_ACCESS anymore (later maybe in GC safe points) */
-            abort();
-            /* happens if there is a concurrent WB between us making the backup
-               and acquiring the locks */
+            /* XXX: slow? */
             release_all_privatization_locks();
 
             volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
@@ -561,11 +551,17 @@ void _stm_write_slowpath(object_t *obj)
             slice_sz = 4096UL - in_page_offset;
         }
 
+        size_t slice_off = obj_size - remaining_obj_sz;
+
+        /* make backup slice: */
+        char *bk_slice = malloc(slice_sz);
+        memcpy(bk_slice, realobj + slice_off, slice_sz);
+
         STM_PSEGMENT->modified_old_objects = list_append3(
             STM_PSEGMENT->modified_old_objects,
             (uintptr_t)obj,     /* obj */
-            (uintptr_t)bk_obj,  /* bk_addr */
-            NEW_SLICE(obj_size - remaining_obj_sz, slice_sz));
+            (uintptr_t)bk_slice,  /* bk_addr */
+            NEW_SLICE(slice_off, slice_sz));
 
         remaining_obj_sz -= slice_sz;
         in_page_offset = (in_page_offset + slice_sz) % 4096UL; /* mostly 0 */
@@ -774,18 +770,13 @@ static void reset_modified_from_backup_copies(int segment_num)
         char *dst = REAL_ADDRESS(pseg->pub.segment_base, obj);
 
         memcpy(dst + SLICE_OFFSET(undo->slice),
-               undo->backup + SLICE_OFFSET(undo->slice),
+               undo->backup,
                SLICE_SIZE(undo->slice));
 
-        size_t obj_size = stmcb_size_rounded_up((struct object_s*)undo->backup);
-        dprintf(("reset_modified_from_backup_copies(%d): obj=%p off=%lu bk=%p obj_sz=%lu\n",
-                 segment_num, obj, SLICE_OFFSET(undo->slice), undo->backup, obj_size));
+        dprintf(("reset_modified_from_backup_copies(%d): obj=%p off=%lu bk=%p\n",
+                 segment_num, obj, SLICE_OFFSET(undo->slice), undo->backup));
 
-        if (obj_size - SLICE_OFFSET(undo->slice) <= 4096UL) {
-            /* only free bk copy once (last slice): */
-            free(undo->backup);
-            dprintf(("-> free(%p)\n", undo->backup));
-        }
+        free(undo->backup);
     }
 
     /* check that all objects have the GCFLAG_WRITE_BARRIER afterwards */
