@@ -99,4 +99,9 @@ object_t *_stm_next_last_cl_entry()
         return NULL;
     return _last_cl_entry->written[_last_cl_entry_index++].object;
 }
+
+uint64_t _stm_total_allocated(void)
+{
+    return increment_total_allocated(0);
+}
 #endif

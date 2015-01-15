@@ -352,6 +352,7 @@ char *_stm_large_malloc(size_t request_size)
     }
     mscan->size = request_size;
     mscan->prev_size = BOTH_CHUNKS_USED;
+    increment_total_allocated(request_size + LARGE_MALLOC_OVERHEAD);
 #ifndef NDEBUG
     memset((char *)&mscan->d, 0xda, request_size);
 #endif
@@ -367,6 +368,7 @@ static void _large_free(mchunk_t *chunk)
     assert(chunk->prev_size != THIS_CHUNK_FREE);
 
     /* 'size' is at least MIN_ALLOC_SIZE */
+    increment_total_allocated(-(chunk->size + LARGE_MALLOC_OVERHEAD));
 
 #ifndef NDEBUG
     {
