@@ -67,35 +67,56 @@ class TestGCPage(BaseTest):
         stm_minor_collect()
         new = self.pop_root()
 
-        assert stm_get_private_page(stm_get_obj_pages(new)[0]) == 0
+        pages = stm_get_obj_pages(new)
+        assert stm_is_accessible_page(pages[0]) == True
         assert stm_get_flags(new) & GCFLAG_WRITE_BARRIER
 
-        stm_write(new)
+        stm_set_char(new, 'x')
         assert not (stm_get_flags(new) & GCFLAG_WRITE_BARRIER)
 
         self.commit_transaction()
-        assert stm_get_private_page(stm_get_obj_pages(new)[0]) == 0
+
+        #######
+
+        assert stm_is_accessible_page(pages[0]) == True
         assert stm_get_flags(new) & GCFLAG_WRITE_BARRIER
 
         self.start_transaction()
+        assert stm_get_char(new) == 'x'
         newer = stm_allocate(16)
         self.push_root(newer)
         stm_minor_collect()
         newer = self.pop_root()
-        # 'new' is still in shared_page and committed
-        assert stm_get_private_page(stm_get_obj_pages(new)[0]) == 0
+        pageser = stm_get_obj_pages(newer)
+
         assert stm_get_flags(new) & GCFLAG_WRITE_BARRIER
-        # 'newer' is now part of the SHARED page with 'new', but
-        # uncommitted, so no privatization has to take place:
-        assert stm_get_obj_pages(new) == stm_get_obj_pages(newer)
+        # same page as committed obj
+        assert pages == pageser
         assert stm_get_flags(newer) & GCFLAG_WRITE_BARRIER
-        stm_write(newer) # does not privatize
+
+        stm_set_char(newer, 'y')
         assert not (stm_get_flags(newer) & GCFLAG_WRITE_BARRIER)
-        assert stm_get_private_page(stm_get_obj_pages(newer)[0]) == 0
         self.commit_transaction()
 
-        assert stm_get_private_page(stm_get_obj_pages(newer)[0]) == 0
-        assert stm_get_flags(newer) & GCFLAG_WRITE_BARRIER
+        #####################
+
+        self.switch(1)
+
+        self.start_transaction()
+        assert stm_is_accessible_page(pages[0]) == False
+        assert stm_get_char(new) == 'x'
+        assert stm_get_char(newer) == 'y'
+        assert stm_is_accessible_page(pages[0]) == True
+
+        another = stm_allocate(16)
+        self.push_root(another)
+        stm_minor_collect()
+        another = self.pop_root()
+        # segment has its own small-obj-pages:
+        assert stm_get_obj_pages(another) != pages
+
+        self.commit_transaction()
+
 
     def test_major_collection(self):
         self.start_transaction()
