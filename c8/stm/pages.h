@@ -43,6 +43,8 @@ static struct page_shared_s pages_status[PAGE_FLAG_END - PAGE_FLAG_START];
 static void page_mark_accessible(long segnum, uintptr_t pagenum);
 static void page_mark_inaccessible(long segnum, uintptr_t pagenum);
 
+static uint64_t increment_total_allocated(ssize_t add_or_remove);
+
 
 static inline char *get_virtual_page(long segnum, uintptr_t pagenum)
 {
