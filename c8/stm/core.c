@@ -189,7 +189,7 @@ static void handle_segfault_in_page(uintptr_t pagenum)
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
-    assert(_stm_segfault_expected);
+    assert(_stm_segfault_expected > 0);
 
     int saved_errno = errno;
     char *addr = siginfo->si_addr;
@@ -1033,19 +1033,14 @@ static void synchronize_objects_flush(void)
         --j;
         stm_char *frag = STM_PSEGMENT->sq_fragments[j];
         uintptr_t page = ((uintptr_t)frag) / 4096UL;
-        /* XXX: necessary? */
-        /* if (is_shared_log_page(page)) */
-        /*     continue; */
-
         ssize_t frag_size = STM_PSEGMENT->sq_fragsizes[j];
 
         char *src = REAL_ADDRESS(STM_SEGMENT->segment_base, frag);
-        /* XXX: including the sharing segment? */
         for (i = 0; i < NB_SEGMENTS; i++) {
             if (i == myself)
                 continue;
 
-            if (get_page_status_in(i, page) != PAGE_NO_ACCESS) {
+            if (i == 0 || (get_page_status_in(i, page) != PAGE_NO_ACCESS)) {
                 /* shared or private, but never segfault */
                 char *dst = REAL_ADDRESS(get_segment_base(i), frag);
                 memcpy(dst, src, frag_size);

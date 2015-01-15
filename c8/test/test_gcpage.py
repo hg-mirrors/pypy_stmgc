@@ -126,7 +126,8 @@ class TestGCPage(BaseTest):
         stm_minor_collect()
         assert lib._stm_total_allocated() == 5000 + LMO
 
-        self.pop_root()
+        new = self.pop_root()
+        assert not is_in_nursery(new)
         stm_minor_collect()
         assert lib._stm_total_allocated() == 5000 + LMO
 

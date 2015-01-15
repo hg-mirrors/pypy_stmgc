@@ -137,7 +137,7 @@ static void major_collection_if_requested(void)
    certain segment if there exist modifications there.
    All other segments' versions should be identical to seg0's
    version and thus don't need tracing. */
-static struct list_s *mark_objects_to_trace;
+static struct list_s *marked_objects_to_trace;
 
 /* we use the sharing seg0's pages for the GCFLAG_VISITED flag */
 
@@ -181,142 +181,218 @@ static inline bool mark_visited_test_and_clear(object_t *obj)
 
 /************************************************************/
 
-/* static void mark_and_trace(object_t *obj, char *segment_base) */
-/* { */
-/*     assert(list_is_empty(mark_objects_to_trace)); */
+static inline void mark_record_trace(object_t **pobj)
+{
+    /* takes a normal pointer to a thread-local pointer to an object */
+    object_t *obj = *pobj;
 
-/*     while (1) { */
-/*         /\* trace into the object (the version from 'segment_base') *\/ */
-/*         struct object_s *realobj = */
-/*             (struct object_s *)REAL_ADDRESS(segment_base, obj); */
-/*         stmcb_trace(realobj, &mark_record_trace); */
+    /* Note: this obj might be visited already, but from a different
+       segment.  We ignore this case and skip re-visiting the object
+       anyway.  The idea is that such an object is old (not from the
+       current transaction), otherwise it would not be possible to see
+       it in two segments; and moreover it is not modified, otherwise
+       mark_trace() would have been called on two different segments
+       already.  That means that this object is identical in all
+       segments and only needs visiting once.  (It may actually be in a
+       shared page, or maybe not.)
+    */
+    if (obj == NULL || mark_visited_test_and_set(obj))
+        return;    /* already visited this object */
 
-/*         if (list_is_empty(mark_objects_to_trace)) */
-/*             break; */
-
-/*         obj = (object_t *)list_pop_item(mark_objects_to_trace); */
-/*     } */
-/* } */
-
-/* static inline void mark_visit_object(object_t *obj, char *segment_base) */
-/* { */
-/*     /\* if already visited, don't trace *\/ */
-/*     if (obj == NULL || mark_visited_test_and_set(obj)) */
-/*         return; */
-/*     mark_and_trace(obj, segment_base); */
-/* } */
-
-/* static void *mark_visit_objects_from_ss(void *_, const void *slice, size_t size) */
-/* { */
-/*     const struct stm_shadowentry_s *p, *end; */
-/*     p = (const struct stm_shadowentry_s *)slice; */
-/*     end = (const struct stm_shadowentry_s *)(slice + size); */
-/*     for (; p < end; p++) */
-/*         if ((((uintptr_t)p->ss) & 3) == 0) */
-/*             mark_visit_object(p->ss, stm_object_pages); */
-/*     return NULL; */
-/* } */
-
-/* static void assert_obj_accessible_in(long segnum, object_t *obj) */
-/* { */
-/* #ifndef NDEBUG */
-/*     uintptr_t page = (uintptr_t)item / 4096UL; */
-/*     assert(get_page_status_in(segnum, page) == PAGE_ACCESSIBLE); */
-
-/*     struct object_s *realobj = */
-/*         (struct object_s *)REAL_ADDRESS(get_segment_base(segnum), obj); */
-
-/*     size_t obj_size = stmcb_size_rounded_up(realobj); */
-/*     uintptr_t count = obj_size / 4096UL + 1; */
-/*     while (count--> 0) { */
-/*         assert(get_page_status_in(segnum, page) == PAGE_ACCESSIBLE); */
-/*         page++; */
-/*     } */
-/* #endif */
-/* } */
+    LIST_APPEND(marked_objects_to_trace, obj);
+}
 
 
-/* static void mark_visit_from_modified_objects(void) */
-/* { */
-/*     /\* look for modified objects in segments and mark all of them */
-/*        for further tracing (XXX: don't if we are going to share */
-/*        some of the pages) *\/ */
+static void mark_and_trace(object_t *obj, char *segment_base)
+{
+    /* mark the obj and trace all reachable objs from it */
 
-/*     long i; */
-/*     for (i = 1; i < NB_SEGMENTS; i++) { */
-/*         char *base = get_segment_base(i); */
+    assert(list_is_empty(marked_objects_to_trace));
 
-/*         LIST_FOREACH_R( */
-/*             get_priv_segment(i)->modified_old_objects, */
-/*             object_t * /\*item*\/, */
-/*             ({ */
-/*                 /\* All modified objs have all pages accessible for now. */
-/*                    This is because we create a backup of the whole obj */
-/*                    and thus make all pages accessible. *\/ */
-/*                 assert_obj_accessible_in(i, item); */
+    while (1) {
+        /* trace into the object (the version from 'segment_base') */
+        struct object_s *realobj =
+            (struct object_s *)REAL_ADDRESS(segment_base, obj);
+        stmcb_trace(realobj, &mark_record_trace);
 
-/*                 mark_visited_test_and_set(item); */
-/*                 mark_and_trace(item, base);              /\* private version *\/ */
-/*             })); */
-/*     } */
-/* } */
+        if (list_is_empty(marked_objects_to_trace))
+            break;
 
-/* static void mark_visit_from_roots(void) */
-/* { */
-/*     if (testing_prebuilt_objs != NULL) { */
-/*         LIST_FOREACH_R(testing_prebuilt_objs, object_t * /\*item*\/, */
-/*                        mark_visit_object(item, stm_object_pages)); */
-/*     } */
+        obj = (object_t *)list_pop_item(marked_objects_to_trace);
+    }
+}
 
-/*     stm_thread_local_t *tl = stm_all_thread_locals; */
-/*     do { */
-/*         /\* If 'tl' is currently running, its 'associated_segment_num' */
-/*            field is the segment number.  If not, then the */
-/*            field is still some correct segment number, and it doesn't */
-/*            matter which one we pick. *\/ */
-/*         char *segment_base = get_segment_base(tl->associated_segment_num); */
+static inline void mark_visit_object(object_t *obj, char *segment_base)
+{
+    /* if already visited, don't trace */
+    if (obj == NULL || mark_visited_test_and_set(obj))
+        return;
+    mark_and_trace(obj, segment_base);
+}
 
-/*         struct stm_shadowentry_s *current = tl->shadowstack; */
-/*         struct stm_shadowentry_s *base = tl->shadowstack_base; */
-/*         while (current-- != base) { */
-/*             if ((((uintptr_t)current->ss) & 3) == 0) */
-/*                 mark_visit_object(current->ss, segment_base); */
-/*         } */
-/*         mark_visit_object(tl->thread_local_obj, segment_base); */
+static void *mark_visit_objects_from_ss(void *_, const void *slice, size_t size)
+{
+    const struct stm_shadowentry_s *p, *end;
+    p = (const struct stm_shadowentry_s *)slice;
+    end = (const struct stm_shadowentry_s *)(slice + size);
+    for (; p < end; p++)
+        if ((((uintptr_t)p->ss) & 3) == 0)
+            mark_visit_object(p->ss, stm_object_pages); // seg0
+    return NULL;
+}
 
-/*         tl = tl->next; */
-/*     } while (tl != stm_all_thread_locals); */
+static void assert_obj_accessible_in(long segnum, object_t *obj)
+{
+#ifndef NDEBUG
+    uintptr_t page = (uintptr_t)obj / 4096UL;
+    assert(get_page_status_in(segnum, page) == PAGE_ACCESSIBLE);
 
-/*     long i; */
-/*     for (i = 1; i <= NB_SEGMENTS; i++) { */
-/*         if (get_priv_segment(i)->transaction_state != TS_NONE) { */
-/*             mark_visit_object( */
-/*                 get_priv_segment(i)->threadlocal_at_start_of_transaction, */
-/*                 get_segment_base(i)); */
-/*             stm_rewind_jmp_enum_shadowstack( */
-/*                 get_segment(i)->running_thread, */
-/*                 mark_visit_objects_from_ss); */
-/*         } */
-/*     } */
-/* } */
+    struct object_s *realobj =
+        (struct object_s *)REAL_ADDRESS(get_segment_base(segnum), obj);
+
+    size_t obj_size = stmcb_size_rounded_up(realobj);
+    uintptr_t count = obj_size / 4096UL + 1;
+    while (count--> 0) {
+        assert(get_page_status_in(segnum, page) == PAGE_ACCESSIBLE);
+        page++;
+    }
+#endif
+}
+
+
+static void mark_visit_from_modified_objects(void)
+{
+    /* look for modified objects in segments and mark all of them
+       for further tracing (XXX: don't if we are going to share
+       some of the pages) */
+
+    long i;
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        char *base = get_segment_base(i);
+
+        LIST_FOREACH_R(
+            get_priv_segment(i)->modified_old_objects,
+            object_t * /*item*/,
+            ({
+                /* All modified objs have all pages accessible for now.
+                   This is because we create a backup of the whole obj
+                   and thus make all pages accessible. */
+                assert_obj_accessible_in(i, item);
+
+                mark_visited_test_and_set(item);
+                mark_and_trace(item, stm_object_pages);  /* shared, committed version */
+                mark_and_trace(item, base);          /* private, modified version */
+            }));
+    }
+}
+
+static void mark_visit_from_roots(void)
+{
+    if (testing_prebuilt_objs != NULL) {
+        LIST_FOREACH_R(testing_prebuilt_objs, object_t * /*item*/,
+                       mark_visit_object(item, stm_object_pages)); // seg0
+    }
+
+    stm_thread_local_t *tl = stm_all_thread_locals;
+    do {
+        /* look at all objs on the shadow stack (they are old but may
+           be uncommitted so far, so only exist in the associated_segment_num).
+
+           However, since we just executed a minor collection, they were
+           all synced to the sharing seg0. Thus we can trace them there.
+
+           If they were again modified since then, they were traced
+           by mark_visit_from_modified_object() already.
+        */
+        struct stm_shadowentry_s *current = tl->shadowstack;
+        struct stm_shadowentry_s *base = tl->shadowstack_base;
+        while (current-- != base) {
+            if ((((uintptr_t)current->ss) & 3) == 0)
+                mark_visit_object(current->ss, stm_object_pages);
+        }
+
+        tl = tl->next;
+    } while (tl != stm_all_thread_locals);
+
+    /* also visit all objs in the rewind-shadowstack */
+    long i;
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        if (get_priv_segment(i)->transaction_state != TS_NONE) {
+            stm_rewind_jmp_enum_shadowstack(
+                get_segment(i)->running_thread,
+                mark_visit_objects_from_ss);
+        }
+    }
+}
+
+
+static void clean_up_segment_lists(void)
+{
+#pragma push_macro("STM_PSEGMENT")
+#pragma push_macro("STM_SEGMENT")
+#undef STM_PSEGMENT
+#undef STM_SEGMENT
+
+    long i;
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+        struct list_s *lst;
+
+        /* 'objects_pointing_to_nursery' should be empty, but isn't
+           necessarily because it also lists objects that have been
+           written to but don't actually point to the nursery.  Clear
+           it up and set GCFLAG_WRITE_BARRIER again on the objects.
+           This is the case for transactions where
+               MINOR_NOTHING_TO_DO() == true
+           but they still did write-barriers on objects
+        */
+        lst = pseg->objects_pointing_to_nursery;
+        if (!list_is_empty(lst)) {
+            abort(); // check that there is a test
+            LIST_FOREACH_R(lst, object_t* /*item*/,
+                ({
+                    struct object_s *realobj = (struct object_s *)
+                        REAL_ADDRESS(pseg->pub.segment_base, (uintptr_t)item);
+
+                    assert(realobj->stm_flags & GCFLAG_WB_EXECUTED);
+                    assert(!(realobj->stm_flags & GCFLAG_WRITE_BARRIER));
+
+                    realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
+                }));
+            list_clear(lst);
+        } else {
+            /* if here MINOR_NOTHING_TO_DO() was true before, it's like
+               we "didn't do a collection" at all. So nothing to do on
+               modified_old_objs. */
+        }
+    }
+#pragma pop_macro("STM_SEGMENT")
+#pragma pop_macro("STM_PSEGMENT")
+}
 
 static inline bool largemalloc_keep_object_at(char *data)
 {
-    /* /\* this is called by _stm_largemalloc_sweep() *\/ */
-    /* object_t *obj = (object_t *)(data - stm_object_pages); */
-    /* if (!mark_visited_test_and_clear(obj)) { */
-    /*     /\* This is actually needed in order to avoid random write-read */
-    /*        conflicts with objects read and freed long in the past. */
-    /*        It is probably rare enough, but still, we want to avoid any */
-    /*        false conflict. (test_random hits it sometimes) *\/ */
-    /*     long i; */
-    /*     for (i = 1; i <= NB_SEGMENTS; i++) { */
-    /*         ((struct stm_read_marker_s *) */
-    /*          (get_segment_base(i) + (((uintptr_t)obj) >> 4)))->rm = 0; */
-    /*     } */
-    /*     return false; */
-    /* } */
+    /* this is called by _stm_largemalloc_sweep() */
+    object_t *obj = (object_t *)(data - stm_object_pages);
+    dprintf(("keep obj %p ? -> %d\n", obj, mark_visited_test(obj)));
+    if (!mark_visited_test_and_clear(obj)) {
+        /* This is actually needed in order to avoid random write-read
+           conflicts with objects read and freed long in the past.
+           It is probably rare enough, but still, we want to avoid any
+           false conflict. (test_random hits it sometimes) */
+        long i;
+        for (i = 1; i < NB_SEGMENTS; i++) {
+            /* reset read marker */
+            *((char *)(get_segment_base(i) + (((uintptr_t)obj) >> 4))) = 0;
+        }
+        return false;
+    }
     return true;
+}
+
+static void sweep_large_objects(void)
+{
+    _stm_largemalloc_sweep();
 }
 
 static void major_collection_now_at_safe_point(void)
@@ -337,16 +413,16 @@ static void major_collection_now_at_safe_point(void)
     DEBUG_EXPECT_SEGFAULT(false);
 
     /* marking */
-    /* LIST_CREATE(mark_objects_to_trace); */
-    /* mark_visit_from_modified_objects(); */
-    /* mark_visit_from_roots(); */
-    /* LIST_FREE(mark_objects_to_trace); */
+    LIST_CREATE(marked_objects_to_trace);
+    mark_visit_from_modified_objects();
+    mark_visit_from_roots();
+    LIST_FREE(marked_objects_to_trace);
 
     /* /\* cleanup *\/ */
-    /* clean_up_segment_lists(); */
+    clean_up_segment_lists();
 
     /* /\* sweeping *\/ */
-    /* sweep_large_objects(); */
+    sweep_large_objects();
     /* //sweep_uniform_pages(); */
 
     dprintf((" | used after collection:  %ld\n",
