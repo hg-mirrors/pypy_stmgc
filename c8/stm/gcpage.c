@@ -270,19 +270,19 @@ static void mark_visit_from_modified_objects(void)
     for (i = 1; i < NB_SEGMENTS; i++) {
         char *base = get_segment_base(i);
 
-        LIST_FOREACH_R(
-            get_priv_segment(i)->modified_old_objects,
-            object_t * /*item*/,
-            ({
-                /* All modified objs have all pages accessible for now.
-                   This is because we create a backup of the whole obj
-                   and thus make all pages accessible. */
-                assert_obj_accessible_in(i, item);
+        struct list_s *lst = get_priv_segment(i)->modified_old_objects;
+        long j, count = list_count(lst);
+        for (j = 0; j < count; j += 3) {
+            object_t *item = (object_t*)list_item(lst, j);
+            /* All modified objs have all pages accessible for now.
+               This is because we create a backup of the whole obj
+               and thus make all pages accessible. */
+            assert_obj_accessible_in(i, item);
 
-                mark_visited_test_and_set(item);
-                mark_and_trace(item, stm_object_pages);  /* shared, committed version */
-                mark_and_trace(item, base);          /* private, modified version */
-            }));
+            mark_visited_test_and_set(item);
+            mark_and_trace(item, stm_object_pages);  /* shared, committed version */
+            mark_and_trace(item, base);          /* private, modified version */
+        }
     }
 }
 
@@ -374,7 +374,7 @@ static inline bool largemalloc_keep_object_at(char *data)
 {
     /* this is called by _stm_largemalloc_sweep() */
     object_t *obj = (object_t *)(data - stm_object_pages);
-    dprintf(("keep obj %p ? -> %d\n", obj, mark_visited_test(obj)));
+    //dprintf(("keep obj %p ? -> %d\n", obj, mark_visited_test(obj)));
     if (!mark_visited_test_and_clear(obj)) {
         /* This is actually needed in order to avoid random write-read
            conflicts with objects read and freed long in the past.
