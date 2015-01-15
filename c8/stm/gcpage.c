@@ -104,3 +104,258 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
              (uintptr_t)p / 4096UL));
     return o;
 }
+
+
+/************************************************************/
+
+
+static void major_collection_if_requested(void)
+{
+    assert(!_has_mutex());
+    if (!is_major_collection_requested())
+        return;
+
+    s_mutex_lock();
+
+    if (is_major_collection_requested()) {   /* if still true */
+
+        synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
+
+        if (is_major_collection_requested()) {   /* if *still* true */
+            major_collection_now_at_safe_point();
+        }
+
+    }
+
+    s_mutex_unlock();
+}
+
+
+/************************************************************/
+
+/* objects to trace are traced in the sharing seg0 or in a
+   certain segment if there exist modifications there.
+   All other segments' versions should be identical to seg0's
+   version and thus don't need tracing. */
+static struct list_s *mark_objects_to_trace;
+
+/* we use the sharing seg0's pages for the GCFLAG_VISITED flag */
+
+static inline struct object_s *mark_loc(object_t *obj)
+{
+    /* uses the memory in seg0 for marking: */
+    struct object_s *result = (struct object_s*)REAL_ADDRESS(stm_object_pages, obj);
+    return result;
+}
+
+static inline bool mark_visited_test(object_t *obj)
+{
+    struct object_s *realobj = mark_loc(obj);
+    return !!(realobj->stm_flags & GCFLAG_VISITED);
+}
+
+static inline bool mark_visited_test_and_set(object_t *obj)
+{
+    struct object_s *realobj = mark_loc(obj);
+    if (realobj->stm_flags & GCFLAG_VISITED) {
+        return true;
+    }
+    else {
+        realobj->stm_flags |= GCFLAG_VISITED;
+        return false;
+    }
+}
+
+static inline bool mark_visited_test_and_clear(object_t *obj)
+{
+    struct object_s *realobj = mark_loc(obj);
+    if (realobj->stm_flags & GCFLAG_VISITED) {
+        realobj->stm_flags &= ~GCFLAG_VISITED;
+        return true;
+    }
+    else {
+        return false;
+    }
+}
+
+
+/************************************************************/
+
+/* static void mark_and_trace(object_t *obj, char *segment_base) */
+/* { */
+/*     assert(list_is_empty(mark_objects_to_trace)); */
+
+/*     while (1) { */
+/*         /\* trace into the object (the version from 'segment_base') *\/ */
+/*         struct object_s *realobj = */
+/*             (struct object_s *)REAL_ADDRESS(segment_base, obj); */
+/*         stmcb_trace(realobj, &mark_record_trace); */
+
+/*         if (list_is_empty(mark_objects_to_trace)) */
+/*             break; */
+
+/*         obj = (object_t *)list_pop_item(mark_objects_to_trace); */
+/*     } */
+/* } */
+
+/* static inline void mark_visit_object(object_t *obj, char *segment_base) */
+/* { */
+/*     /\* if already visited, don't trace *\/ */
+/*     if (obj == NULL || mark_visited_test_and_set(obj)) */
+/*         return; */
+/*     mark_and_trace(obj, segment_base); */
+/* } */
+
+/* static void *mark_visit_objects_from_ss(void *_, const void *slice, size_t size) */
+/* { */
+/*     const struct stm_shadowentry_s *p, *end; */
+/*     p = (const struct stm_shadowentry_s *)slice; */
+/*     end = (const struct stm_shadowentry_s *)(slice + size); */
+/*     for (; p < end; p++) */
+/*         if ((((uintptr_t)p->ss) & 3) == 0) */
+/*             mark_visit_object(p->ss, stm_object_pages); */
+/*     return NULL; */
+/* } */
+
+/* static void assert_obj_accessible_in(long segnum, object_t *obj) */
+/* { */
+/* #ifndef NDEBUG */
+/*     uintptr_t page = (uintptr_t)item / 4096UL; */
+/*     assert(get_page_status_in(segnum, page) == PAGE_ACCESSIBLE); */
+
+/*     struct object_s *realobj = */
+/*         (struct object_s *)REAL_ADDRESS(get_segment_base(segnum), obj); */
+
+/*     size_t obj_size = stmcb_size_rounded_up(realobj); */
+/*     uintptr_t count = obj_size / 4096UL + 1; */
+/*     while (count--> 0) { */
+/*         assert(get_page_status_in(segnum, page) == PAGE_ACCESSIBLE); */
+/*         page++; */
+/*     } */
+/* #endif */
+/* } */
+
+
+/* static void mark_visit_from_modified_objects(void) */
+/* { */
+/*     /\* look for modified objects in segments and mark all of them */
+/*        for further tracing (XXX: don't if we are going to share */
+/*        some of the pages) *\/ */
+
+/*     long i; */
+/*     for (i = 1; i < NB_SEGMENTS; i++) { */
+/*         char *base = get_segment_base(i); */
+
+/*         LIST_FOREACH_R( */
+/*             get_priv_segment(i)->modified_old_objects, */
+/*             object_t * /\*item*\/, */
+/*             ({ */
+/*                 /\* All modified objs have all pages accessible for now. */
+/*                    This is because we create a backup of the whole obj */
+/*                    and thus make all pages accessible. *\/ */
+/*                 assert_obj_accessible_in(i, item); */
+
+/*                 mark_visited_test_and_set(item); */
+/*                 mark_and_trace(item, base);              /\* private version *\/ */
+/*             })); */
+/*     } */
+/* } */
+
+/* static void mark_visit_from_roots(void) */
+/* { */
+/*     if (testing_prebuilt_objs != NULL) { */
+/*         LIST_FOREACH_R(testing_prebuilt_objs, object_t * /\*item*\/, */
+/*                        mark_visit_object(item, stm_object_pages)); */
+/*     } */
+
+/*     stm_thread_local_t *tl = stm_all_thread_locals; */
+/*     do { */
+/*         /\* If 'tl' is currently running, its 'associated_segment_num' */
+/*            field is the segment number.  If not, then the */
+/*            field is still some correct segment number, and it doesn't */
+/*            matter which one we pick. *\/ */
+/*         char *segment_base = get_segment_base(tl->associated_segment_num); */
+
+/*         struct stm_shadowentry_s *current = tl->shadowstack; */
+/*         struct stm_shadowentry_s *base = tl->shadowstack_base; */
+/*         while (current-- != base) { */
+/*             if ((((uintptr_t)current->ss) & 3) == 0) */
+/*                 mark_visit_object(current->ss, segment_base); */
+/*         } */
+/*         mark_visit_object(tl->thread_local_obj, segment_base); */
+
+/*         tl = tl->next; */
+/*     } while (tl != stm_all_thread_locals); */
+
+/*     long i; */
+/*     for (i = 1; i <= NB_SEGMENTS; i++) { */
+/*         if (get_priv_segment(i)->transaction_state != TS_NONE) { */
+/*             mark_visit_object( */
+/*                 get_priv_segment(i)->threadlocal_at_start_of_transaction, */
+/*                 get_segment_base(i)); */
+/*             stm_rewind_jmp_enum_shadowstack( */
+/*                 get_segment(i)->running_thread, */
+/*                 mark_visit_objects_from_ss); */
+/*         } */
+/*     } */
+/* } */
+
+static inline bool largemalloc_keep_object_at(char *data)
+{
+    /* /\* this is called by _stm_largemalloc_sweep() *\/ */
+    /* object_t *obj = (object_t *)(data - stm_object_pages); */
+    /* if (!mark_visited_test_and_clear(obj)) { */
+    /*     /\* This is actually needed in order to avoid random write-read */
+    /*        conflicts with objects read and freed long in the past. */
+    /*        It is probably rare enough, but still, we want to avoid any */
+    /*        false conflict. (test_random hits it sometimes) *\/ */
+    /*     long i; */
+    /*     for (i = 1; i <= NB_SEGMENTS; i++) { */
+    /*         ((struct stm_read_marker_s *) */
+    /*          (get_segment_base(i) + (((uintptr_t)obj) >> 4)))->rm = 0; */
+    /*     } */
+    /*     return false; */
+    /* } */
+    return true;
+}
+
+static void major_collection_now_at_safe_point(void)
+{
+    dprintf(("\n"));
+    dprintf((" .----- major collection -----------------------\n"));
+    assert(_has_mutex());
+
+    /* first, force a minor collection in each of the other segments */
+    major_do_validation_and_minor_collections();
+
+    dprintf((" | used before collection: %ld\n",
+             (long)pages_ctl.total_allocated));
+
+    /* only necessary because of assert that fails otherwise (XXX) */
+    acquire_all_privatization_locks();
+
+    DEBUG_EXPECT_SEGFAULT(false);
+
+    /* marking */
+    /* LIST_CREATE(mark_objects_to_trace); */
+    /* mark_visit_from_modified_objects(); */
+    /* mark_visit_from_roots(); */
+    /* LIST_FREE(mark_objects_to_trace); */
+
+    /* /\* cleanup *\/ */
+    /* clean_up_segment_lists(); */
+
+    /* /\* sweeping *\/ */
+    /* sweep_large_objects(); */
+    /* //sweep_uniform_pages(); */
+
+    dprintf((" | used after collection:  %ld\n",
+             (long)pages_ctl.total_allocated));
+    dprintf((" `----------------------------------------------\n"));
+
+    reset_major_collection_requested();
+
+    DEBUG_EXPECT_SEGFAULT(true);
+
+    release_all_privatization_locks();
+}

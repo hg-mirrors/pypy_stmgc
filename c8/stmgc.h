@@ -59,7 +59,8 @@ typedef struct stm_thread_local_s {
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
 #define _STM_FAST_ALLOC           (66*1024)
-#define _STM_NSE_SIGNAL_MAX               1
+#define _STM_NSE_SIGNAL_ABORT             1
+#define _STM_NSE_SIGNAL_MAX               2
 
 void _stm_write_slowpath(object_t *);
 object_t *_stm_allocate_slowpath(ssize_t);
