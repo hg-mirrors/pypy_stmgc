@@ -16,3 +16,8 @@ static void setup_gcpage(void);
 static void teardown_gcpage(void);
 static void setup_N_pages(char *pages_addr, long num);
 static stm_char *allocate_outside_nursery_large(uint64_t size);
+
+
+static void major_collection_if_requested(void);
+static void major_collection_now_at_safe_point(void);
+static bool largemalloc_keep_object_at(char *data);   /* for largemalloc.c */

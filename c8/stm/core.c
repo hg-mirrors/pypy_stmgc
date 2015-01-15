@@ -254,9 +254,11 @@ void _dbg_print_commit_log()
 
 static void reset_modified_from_backup_copies(int segment_num);  /* forward */
 
-static void _stm_validate(void *free_if_abort)
+static bool _stm_validate()
 {
-    dprintf(("_stm_validate(%p)\n", free_if_abort));
+    /* returns true if we reached a valid state, or false if
+       we need to abort now */
+    dprintf(("_stm_validate()\n"));
     /* go from last known entry in commit log to the
        most current one and apply all changes done
        by other transactions. Abort if we have read one of
@@ -268,7 +270,7 @@ static void _stm_validate(void *free_if_abort)
 
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         assert(first_cl->next == INEV_RUNNING);
-        return;
+        return true;
     }
 
     bool needs_abort = false;
@@ -284,8 +286,14 @@ static void _stm_validate(void *free_if_abort)
         if (first_cl->next == NULL)
             break;
 
-        if (first_cl->next == INEV_RUNNING)
-            _stm_collectable_safe_point();     /* otherwise, we may deadlock */
+        if (first_cl->next == INEV_RUNNING) {
+#if STM_TESTS
+            stm_abort_transaction();
+#endif
+            /* need to reach safe point if an INEV transaction
+               is waiting for us, otherwise deadlock */
+            break;
+        }
 
         /* Find the set of segments we need to copy from and lock them: */
         uint64_t segments_to_lock = 1UL << my_segnum;
@@ -293,8 +301,6 @@ static void _stm_validate(void *free_if_abort)
         while ((next_cl = cl->next) != NULL) {
             if (next_cl == INEV_RUNNING) {
 #if STM_TESTS
-                if (free_if_abort != (void *)-1)
-                    free(free_if_abort);
                 stm_abort_transaction();
 #endif
                 /* only validate entries up to INEV */
@@ -381,13 +387,7 @@ static void _stm_validate(void *free_if_abort)
         release_privatization_lock(STM_SEGMENT->segment_num);
     }
 
-    if (needs_abort) {
-        if (free_if_abort != (void *)-1)
-            free(free_if_abort);
-        /* pages may be inconsistent */
-
-        stm_abort_transaction();
-    }
+    return !needs_abort;
 }
 
 static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
@@ -416,7 +416,10 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
     struct stm_commit_log_entry_s *old;
 
     while (1) {
-        _stm_validate(/* free_if_abort =*/ new);
+        if (!_stm_validate()) {
+            free(new);
+            stm_abort_transaction();
+        }
 
         /* try to attach to commit log: */
         old = STM_PSEGMENT->last_commit_log_entry;
@@ -468,7 +471,8 @@ static void _validate_and_add_to_commit_log(void)
 /* ############# STM ############# */
 void stm_validate()
 {
-    _stm_validate(NULL);
+    if (!_stm_validate())
+        stm_abort_transaction();
 }
 
 
@@ -829,7 +833,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
         stm_rewind_jmp_restore_shadowstack(tl);
     assert(tl->shadowstack == pseg->shadowstack_at_start_of_transaction);
 #endif
-tl->last_abort__bytes_in_nursery = bytes_in_nursery;
+    tl->last_abort__bytes_in_nursery = bytes_in_nursery;
 
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")

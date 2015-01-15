@@ -60,6 +60,7 @@ class TestGCPage(BaseTest):
         assert ([stm_is_accessible_page(p) for p in pages]
                 == [True, True])
 
+
     def test_partial_alloced_pages(self):
         self.start_transaction()
         new = stm_allocate(16)

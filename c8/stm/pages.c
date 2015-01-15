@@ -34,6 +34,29 @@ static uint64_t increment_total_allocated(ssize_t add_or_remove)
     return ta;
 }
 
+static bool is_major_collection_requested(void)
+{
+    return pages_ctl.major_collection_requested;
+}
+
+static void force_major_collection_request(void)
+{
+    pages_ctl.major_collection_requested = true;
+}
+
+static void reset_major_collection_requested(void)
+{
+    assert(_has_mutex());
+
+    uint64_t next_bound = (uint64_t)((double)pages_ctl.total_allocated *
+                                     GC_MAJOR_COLLECT);
+    if (next_bound < GC_MIN)
+        next_bound = GC_MIN;
+
+    pages_ctl.total_allocated_bound = next_bound;
+    pages_ctl.major_collection_requested = false;
+}
+
 
 /************************************************************/
 

@@ -588,8 +588,7 @@ static inline bool _largemalloc_sweep_keep(mchunk_t *chunk)
     if (_stm_largemalloc_keep != NULL)
         return _stm_largemalloc_keep((char *)&chunk->d);
 #endif
-    return true;
-    //XXX:    return largemalloc_keep_object_at((char *)&chunk->d);
+    return largemalloc_keep_object_at((char *)&chunk->d);
 }
 
 void _stm_largemalloc_sweep(void)

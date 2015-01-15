@@ -18,10 +18,8 @@ static void setup_nursery(void)
     assert(_STM_FAST_ALLOC <= NURSERY_SIZE);
     _stm_nursery_start = NURSERY_START;
 
-    long i = 0;
-    get_segment(i)->nursery_current = (stm_char *)-1;
-    get_segment(i)->nursery_end = -1;
-    for (i = 1; i < NB_SEGMENTS; i++) {
+    long i;
+    for (i = 0; i < NB_SEGMENTS; i++) {
         get_segment(i)->nursery_current = (stm_char *)NURSERY_START;
         get_segment(i)->nursery_end = NURSERY_END;
     }
@@ -292,10 +290,10 @@ static void minor_collection(bool commit)
 void stm_collect(long level)
 {
     if (level > 0)
-        abort();
+        force_major_collection_request();
 
     minor_collection(/*commit=*/ false);
-    /* XXX: major_collection_if_requested(); */
+    major_collection_if_requested();
 }
 
 
@@ -379,6 +377,52 @@ static void check_nursery_at_transaction_start(void)
     assert_memset_zero(REAL_ADDRESS(STM_SEGMENT->segment_base,
                                     STM_SEGMENT->nursery_current),
                        NURSERY_END - _stm_nursery_start);
+}
+
+
+static void major_do_validation_and_minor_collections(void)
+{
+    int original_num = STM_SEGMENT->segment_num;
+    long i;
+
+    /* including the sharing seg0 */
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        set_gs_register(get_segment_base(i));
+
+        if (!_stm_validate()) {
+            /* tell it to abort when continuing */
+            STM_PSEGMENT->pub.nursery_end = NSE_SIGABORT;
+            assert(must_abort());
+
+            dprintf(("abort data structures\n"));
+            abort_data_structures_from_segment_num(i);
+            continue;
+        }
+
+
+        if (MINOR_NOTHING_TO_DO(STM_PSEGMENT))  /*TS_NONE segments have NOTHING_TO_DO*/
+            continue;
+
+        assert(STM_PSEGMENT->transaction_state != TS_NONE);
+        assert(STM_PSEGMENT->safe_point != SP_RUNNING);
+        assert(STM_PSEGMENT->safe_point != SP_NO_TRANSACTION);
+
+
+        /* Other segments that will abort immediately after resuming: we
+           have to ignore them, not try to collect them anyway!
+           Collecting might fail due to invalid state.
+        */
+        if (!must_abort()) {
+            _do_minor_collection(/*commit=*/ false);
+            assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
+        }
+        else {
+            dprintf(("abort data structures\n"));
+            abort_data_structures_from_segment_num(i);
+        }
+    }
+
+    set_gs_register(get_segment_base(original_num));
 }
 
 

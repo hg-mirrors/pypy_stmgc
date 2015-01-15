@@ -38,6 +38,7 @@ enum /* stm_flags */ {
     GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
     GCFLAG_HAS_SHADOW = 0x02,
     GCFLAG_WB_EXECUTED = 0x04,
+    GCFLAG_VISITED = 0x05,
 };
 
 
@@ -190,7 +191,7 @@ static void synchronize_object_enqueue(object_t *obj);
 static void synchronize_objects_flush(void);
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
-static void _stm_validate(void *free_if_abort);
+static bool _stm_validate();
 
 static inline void _duck(void) {
     /* put a call to _duck() between two instructions that set 0 into
