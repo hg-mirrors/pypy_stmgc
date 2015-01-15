@@ -1,6 +1,6 @@
 
-/* Granularity when grabbing more unused pages: take 50 at a time */
-#define GCPAGE_NUM_PAGES   50
+/* Granularity when grabbing more unused pages: take 20 at a time */
+#define GCPAGE_NUM_PAGES   20
 
 static char *uninitialized_page_start;   /* within segment 0 */
 static char *uninitialized_page_stop;
