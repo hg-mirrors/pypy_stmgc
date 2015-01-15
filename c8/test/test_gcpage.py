@@ -176,6 +176,8 @@ class TestGCPage(BaseTest):
         assert lib._stm_total_allocated() == 5000 + LMO
         stm_set_char(x, 'B')
         stm_set_char(x, 'b', 4999)
+
+        py.test.skip("we don't account for private pages right now")
         assert lib._stm_total_allocated() == 5000 + LMO + 2 * 4096  # 2 pages
         stm_major_collect()
 
@@ -219,12 +221,15 @@ class TestGCPage(BaseTest):
         self.push_root(x)
         self.commit_transaction()
         x = self.pop_root()
+        assert not is_in_nursery(x)
         #
         self.switch(1 - invert)
         self.start_transaction()
         self.push_root(x)
         stm_set_char(x, 'A')
         stm_major_collect()
+
+        py.test.skip("we don't account for private pages right now")
         assert lib._stm_total_allocated() == 5000 + LMO + 2 * 4096  # 2 pages
         self.commit_transaction()
         #
@@ -236,6 +241,7 @@ class TestGCPage(BaseTest):
         self.test_reshare_if_no_longer_modified_0(invert=1)
 
     def test_threadlocal_at_start_of_transaction(self):
+        py.test.skip("no threadlocal right now")
         self.start_transaction()
         x = stm_allocate(16)
         stm_set_char(x, 'L')
