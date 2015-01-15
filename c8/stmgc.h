@@ -74,6 +74,8 @@ char *_stm_real_address(object_t *o);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 
+bool _stm_is_accessible_page(uintptr_t pagenum);
+
 long stm_can_move(object_t *obj);
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);

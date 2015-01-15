@@ -581,7 +581,7 @@ class TestRandom(BaseTest):
             op_minor_collect,
             #op_major_collect,
         ]
-        for _ in range(1000):
+        for _ in range(2000):
             # make sure we are in a transaction:
             curr_thread = op_switch_thread(ex, global_state, curr_thread)
 
@@ -618,6 +618,6 @@ class TestRandom(BaseTest):
         test_fun.__name__ = 'test_random_%d' % seed
         return test_fun
 
-    for _seed in range(5000, 5400):
+    for _seed in range(5000, 5200):
         _fn = _make_fun(_seed)
         locals()[_fn.__name__] = _fn
