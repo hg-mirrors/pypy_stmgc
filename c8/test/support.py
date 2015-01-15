@@ -64,6 +64,7 @@ long stm_can_move(object_t *obj);
 char *_stm_real_address(object_t *o);
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
+bool _stm_is_accessible_page(uintptr_t pagenum);
 
 void clear_jmpbuf(stm_thread_local_t *tl);
 long _check_start_transaction(stm_thread_local_t *tl);
@@ -428,8 +429,8 @@ def stm_minor_collect():
 def stm_major_collect():
     lib.stm_collect(1)
 
-def stm_get_private_page(pagenum):
-    return lib._stm_get_private_page(pagenum)
+def stm_is_accessible_page(pagenum):
+    return lib._stm_is_accessible_page(pagenum)
 
 def stm_get_obj_size(o):
     res = lib._checked_stmcb_size_rounded_up(stm_get_real_address(o))
