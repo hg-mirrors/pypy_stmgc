@@ -9,7 +9,7 @@ static struct tree_s *tree_prebuilt_objs = NULL;     /* XXX refactor */
 static void setup_gcpage(void)
 {
     char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL;
-    uintptr_t length = (NB_PAGES - END_NURSERY_PAGE) * 4096UL;
+    uintptr_t length = NB_SHARED_PAGES * 4096UL;
     _stm_largemalloc_init_arena(base, length);
 
     uninitialized_page_start = stm_object_pages + END_NURSERY_PAGE * 4096UL;
