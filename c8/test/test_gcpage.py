@@ -289,3 +289,23 @@ class TestGCPage(BaseTest):
         stm_major_collect()
         assert lib._stm_total_allocated() == 64 + LMO # large malloc'd
         self.commit_transaction()
+
+    def test_bug(self):
+        lp_ref_4 = stm_allocate_old_refs(50)
+        #
+        self.start_transaction()
+        stm_set_ref(lp_ref_4, 0, ffi.NULL, False)
+        #
+        self.switch(1)
+        self.start_transaction()
+        self.become_inevitable()
+        #
+        py.test.raises(Conflict, self.switch, 0)
+        #
+        self.switch(1)
+
+        stm_set_ref(lp_ref_4, 0, ffi.NULL, False)
+
+        self.commit_transaction()
+        self.start_transaction()
+        stm_major_collect()

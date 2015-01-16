@@ -216,7 +216,7 @@ static inline bool all_privatization_locks_acquired()
 {
 #ifndef NDEBUG
     long l;
-    for (l = 1; l < NB_SEGMENTS; l++) {
+    for (l = 0; l < NB_SEGMENTS; l++) {
         if (!get_priv_segment(l)->privatization_lock)
             return false;
     }
@@ -228,8 +228,9 @@ static inline bool all_privatization_locks_acquired()
 
 static inline void acquire_all_privatization_locks()
 {
+    /* XXX: don't do for the sharing seg0 */
     long l;
-    for (l = 1; l < NB_SEGMENTS; l++) {
+    for (l = 0; l < NB_SEGMENTS; l++) {
         acquire_privatization_lock(l);
     }
 }
@@ -237,7 +238,7 @@ static inline void acquire_all_privatization_locks()
 static inline void release_all_privatization_locks()
 {
     long l;
-    for (l = NB_SEGMENTS-1; l >= 1; l--) {
+    for (l = NB_SEGMENTS-1; l >= 0; l--) {
         release_privatization_lock(l);
     }
 }
@@ -269,7 +270,7 @@ static inline void acquire_modification_lock_set(uint64_t seg_set)
 
     /* acquire locks in global order */
     int i;
-    for (i = 1; i < NB_SEGMENTS; i++) {
+    for (i = 0; i < NB_SEGMENTS; i++) {
         if ((seg_set & (1 << i)) == 0)
             continue;
 
@@ -283,7 +284,7 @@ static inline void release_modification_lock_set(uint64_t seg_set)
     OPT_ASSERT(seg_set < (1 << NB_SEGMENTS));
 
     int i;
-    for (i = 1; i < NB_SEGMENTS; i++) {
+    for (i = 0; i < NB_SEGMENTS; i++) {
         if ((seg_set & (1 << i)) == 0)
             continue;
 

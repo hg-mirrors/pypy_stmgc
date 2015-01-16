@@ -359,7 +359,6 @@ static void clean_up_segment_lists(void)
         */
         lst = pseg->objects_pointing_to_nursery;
         if (!list_is_empty(lst)) {
-            abort(); // check that there is a test
             LIST_FOREACH_R(lst, object_t* /*item*/,
                 ({
                     struct object_s *realobj = (struct object_s *)

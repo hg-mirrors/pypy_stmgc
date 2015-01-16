@@ -298,9 +298,6 @@ static bool _stm_validate()
         cl = first_cl;
         while ((next_cl = cl->next) != NULL) {
             if (next_cl == INEV_RUNNING) {
-#if STM_TESTS
-                stm_abort_transaction();
-#endif
                 /* only validate entries up to INEV */
                 break;
             }
@@ -337,6 +334,8 @@ static bool _stm_validate()
                             */
                             reset_modified_from_backup_copies(my_segnum);
                             needs_abort = true;
+
+                            dprintf(("_stm_validate() failed for obj %p\n", undo->object));
                             break;
                         }
                     }
@@ -419,6 +418,14 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
             stm_abort_transaction();
         }
 
+#if STM_TESTS
+        if (STM_PSEGMENT->transaction_state != TS_INEVITABLE
+            && STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
+            /* abort for tests... */
+            stm_abort_transaction();
+        }
+#endif
+
         /* try to attach to commit log: */
         old = STM_PSEGMENT->last_commit_log_entry;
         if (old->next == NULL) {
@@ -479,7 +486,6 @@ void stm_validate()
         stm_abort_transaction();
     }
 #endif
-
 }
 
 
