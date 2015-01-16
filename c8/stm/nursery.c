@@ -391,7 +391,17 @@ static void major_do_validation_and_minor_collections(void)
     for (i = 0; i < NB_SEGMENTS; i++) {
         set_gs_register(get_segment_base(i));
 
+        assert(!must_abort());
         if (!_stm_validate()) {
+            assert(i != 0);     /* sharing seg0 should never need an abort */
+
+            if (STM_PSEGMENT->transaction_state == TS_NONE) {
+                /* we found a segment that has stale read-marker data and thus
+                   is in conflict with committed objs. Since it is not running
+                   currently, it's fine to ignore it. */
+                continue;
+            }
+
             /* tell it to abort when continuing */
             STM_PSEGMENT->pub.nursery_end = NSE_SIGABORT;
             assert(must_abort());
