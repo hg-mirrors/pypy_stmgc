@@ -328,3 +328,18 @@ class TestGCPage(BaseTest):
         stm_major_collect()
         #
         py.test.raises(Conflict, self.switch, 1)
+
+    def test_small_major_collection(self):
+        self.start_transaction()
+        new = stm_allocate(16)
+        self.push_root(new)
+        stm_minor_collect()
+        assert lib._stm_total_allocated() == 16
+
+        new = self.pop_root()
+        assert not is_in_nursery(new)
+        stm_minor_collect()
+        assert lib._stm_total_allocated() == 16
+
+        stm_major_collect()
+        assert lib._stm_total_allocated() == 0
