@@ -51,7 +51,8 @@ class TestSmallMalloc(BaseTest):
             # allocate a page's worth of objs
             page0 = [stm_allocate_old_small(16) for i in range(0, 4096, 16)]
             assert len(set(map(pageof, page0))) == 1, "all in the same page"
-            tid = lib._get_type_id(page0[0]) # 58
+            tid = lib._get_type_id(page0[0])
+            assert tid == 58, "current way to do it"
 
             # repeatedly free a subset until no objs are left in that page
             while len(page0) > 0:
@@ -59,6 +60,8 @@ class TestSmallMalloc(BaseTest):
                 self.keep_me = set(random.sample(page0, len(page0) // 2))
                 self.has_been_asked_for = []
                 lib._stm_smallmalloc_sweep()
+
+                print len(page0), len(self.has_been_asked_for)
                 assert sorted(page0) == self.has_been_asked_for, "all objs were observed"
 
                 # get list of objs that were not freed
