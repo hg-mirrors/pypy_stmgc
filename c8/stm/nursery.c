@@ -391,7 +391,6 @@ static void major_do_validation_and_minor_collections(void)
     for (i = 0; i < NB_SEGMENTS; i++) {
         set_gs_register(get_segment_base(i));
 
-        assert(!must_abort());
         if (!_stm_validate()) {
             assert(i != 0);     /* sharing seg0 should never need an abort */
 

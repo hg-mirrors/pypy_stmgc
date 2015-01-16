@@ -848,6 +848,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
 #endif
     tl->last_abort__bytes_in_nursery = bytes_in_nursery;
 
+    list_clear(pseg->objects_pointing_to_nursery);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
