@@ -169,6 +169,8 @@ static inline stm_char *allocate_outside_nursery_small(uint64_t size)
             (_allocate_small_slowpath(size) - stm_object_pages);
 
     *fl = result->next;
+    dprintf(("allocate_outside_nursery_small(%lu): %p\n",
+             size, (char*)((char *)result - stm_object_pages)));
     return (stm_char*)
         ((char *)result - stm_object_pages);
 }
@@ -178,7 +180,9 @@ object_t *_stm_allocate_old_small(ssize_t size_rounded_up)
     stm_char *p = allocate_outside_nursery_small(size_rounded_up);
     object_t *o = (object_t *)p;
 
-    memset(get_virtual_address(STM_SEGMENT->segment_num, o), 0, size_rounded_up);
+    // sharing seg0 needs to be current:
+    assert(STM_SEGMENT->segment_num == 0);
+    memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
 
     dprintf(("allocate_old_small(%lu): %p, seg=%d, page=%lu\n",

@@ -58,8 +58,13 @@ static stm_char *allocate_outside_nursery_large(uint64_t size)
     if (addr == NULL)
         stm_fatalerror("not enough memory!");
 
-    if (LIKELY(addr + size <= uninitialized_page_start))
+    if (LIKELY(addr + size <= uninitialized_page_start)) {
+        dprintf(("allocate_outside_nursery_large(%lu): %p, page=%lu\n",
+                 size, (char*)(addr - stm_object_pages),
+                 (uintptr_t)(addr - stm_object_pages) / 4096UL));
+
         return (stm_char*)(addr - stm_object_pages);
+    }
 
 
     /* uncommon case: need to initialize some more pages */
@@ -95,8 +100,14 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
     stm_char *p = allocate_outside_nursery_large(size_rounded_up);
     object_t *o = (object_t *)p;
 
-    memset(get_virtual_address(STM_SEGMENT->segment_num, o), 0, size_rounded_up);
+    // sharing seg0 needs to be current:
+    assert(STM_SEGMENT->segment_num == 0);
+    memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
+
+    if (testing_prebuilt_objs == NULL)
+        testing_prebuilt_objs = list_create();
+    LIST_APPEND(testing_prebuilt_objs, o);
 
     dprintf(("allocate_old(%lu): %p, seg=%d, page=%lu\n",
              size_rounded_up, p,
@@ -374,7 +385,7 @@ static inline bool largemalloc_keep_object_at(char *data)
 {
     /* this is called by _stm_largemalloc_sweep() */
     object_t *obj = (object_t *)(data - stm_object_pages);
-    //dprintf(("keep obj %p ? -> %d\n", obj, mark_visited_test(obj)));
+    dprintf(("keep obj %p ? -> %d\n", obj, mark_visited_test(obj)));
     if (!mark_visited_test_and_clear(obj)) {
         /* This is actually needed in order to avoid random write-read
            conflicts with objects read and freed long in the past.

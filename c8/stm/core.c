@@ -151,8 +151,9 @@ static void handle_segfault_in_page(uintptr_t pagenum)
 
     if (copy_from_segnum == -1) {
         /* this page is only accessible in the sharing segment so far (new
-           allocation). We can thus simply mark it accessible here and
-           not care about its contents so far. */
+           allocation). We can thus simply mark it accessible here. */
+        pagecopy(get_virtual_page(my_segnum, pagenum),
+                 get_virtual_page(0, pagenum));
         release_all_privatization_locks();
         return;
     }
@@ -287,9 +288,6 @@ static bool _stm_validate()
             break;
 
         if (first_cl->next == INEV_RUNNING) {
-#if STM_TESTS
-            stm_abort_transaction();
-#endif
             /* need to reach safe point if an INEV transaction
                is waiting for us, otherwise deadlock */
             break;
@@ -473,6 +471,15 @@ void stm_validate()
 {
     if (!_stm_validate())
         stm_abort_transaction();
+
+#if STM_TESTS
+    if (STM_PSEGMENT->transaction_state != TS_INEVITABLE
+        && STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
+        /* abort for tests... */
+        stm_abort_transaction();
+    }
+#endif
+
 }
 
 
@@ -1043,6 +1050,7 @@ static void synchronize_objects_flush(void)
             if (i == 0 || (get_page_status_in(i, page) != PAGE_NO_ACCESS)) {
                 /* shared or private, but never segfault */
                 char *dst = REAL_ADDRESS(get_segment_base(i), frag);
+                dprintf(("-> flush %p to seg %lu\n", frag, i));
                 memcpy(dst, src, frag_size);
             }
         }

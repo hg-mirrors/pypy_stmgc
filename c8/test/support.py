@@ -497,8 +497,8 @@ class BaseTest(object):
         self.tls = [_allocate_thread_local() for i in range(self.NB_THREADS)]
         self.current_thread = 0
         # force-switch back to segment 0 so that when we do something
-        # outside of transactions before the test, it happens in seg0
-        self.switch_to_segment(0)
+        # outside of transactions before the test, it happens in sharing seg0
+        lib._stm_test_switch_segment(-1)
 
     def teardown_method(self, meth):
         lib.stmcb_expand_marker = ffi.NULL

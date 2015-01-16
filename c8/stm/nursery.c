@@ -78,14 +78,16 @@ static void minor_trace_if_young(object_t **pobj)
                 *pobj = pforwarded_array[1];    /* already moved */
                 return;
             }
-            else {
-                /* really has a shadow */
-                nobj = find_existing_shadow(obj);
-                obj->stm_flags &= ~GCFLAG_HAS_SHADOW;
-                realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-                size = stmcb_size_rounded_up((struct object_s *)realobj);
-                goto copy_large_object;
-            }
+
+            /* really has a shadow */
+            nobj = find_existing_shadow(obj);
+            obj->stm_flags &= ~GCFLAG_HAS_SHADOW;
+            realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+            size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+            dprintf(("has_shadow(%p): %p, sz:%lu\n",
+                     obj, nobj, size));
+            goto copy_large_object;
         }
 
         realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
@@ -454,6 +456,8 @@ static object_t *allocate_shadow(object_t *obj)
 
     tree_insert(STM_PSEGMENT->nursery_objects_shadows,
                 (uintptr_t)obj, (uintptr_t)nobj);
+
+    dprintf(("allocate_shadow(%p): %p\n", obj, nobj));
     return nobj;
 }
 

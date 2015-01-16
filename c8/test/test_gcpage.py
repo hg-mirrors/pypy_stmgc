@@ -281,3 +281,11 @@ class TestGCPage(BaseTest):
         p1 = self.pop_root()
         assert stm_get_char(p1) == 'o'
         assert stm_get_char(p2) == 't'
+
+    def test_keepalive_prebuilt(self):
+        stm_allocate_old(64)
+        self.start_transaction()
+        assert lib._stm_total_allocated() == 64 + LMO # large malloc'd
+        stm_major_collect()
+        assert lib._stm_total_allocated() == 64 + LMO # large malloc'd
+        self.commit_transaction()
