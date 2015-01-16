@@ -63,7 +63,7 @@ static void reset_major_collection_requested(void)
 
 static void page_mark_accessible(long segnum, uintptr_t pagenum)
 {
-    assert(get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS);
+    assert(segnum==0 || get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS);
     dprintf(("page_mark_accessible(%lu) in seg:%ld\n", pagenum, segnum));
 
     dprintf(("RW(seg%ld, page%lu)\n", segnum, pagenum));
@@ -82,7 +82,7 @@ static void page_mark_accessible(long segnum, uintptr_t pagenum)
 __attribute__((unused))
 static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
 {
-    assert(get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE);
+    assert(segnum==0 || get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE);
     dprintf(("page_mark_inaccessible(%lu) in seg:%ld\n", pagenum, segnum));
 
     set_page_status_in(segnum, pagenum, PAGE_NO_ACCESS);

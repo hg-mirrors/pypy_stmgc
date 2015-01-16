@@ -11,7 +11,7 @@ class Exec(object):
         self.executed = []
 
     def do(self, cmd):
-        color = ">> \033[%dm" % (31 + (self.thread_num + 5) % 6)
+        color = ">> \033[%dm" % (31 + (self.thread_num + 6) % 6)
         print >> sys.stderr, color + cmd + "\033[0m"
         self.executed.append(cmd)
         exec cmd in globals(), self.content
@@ -579,7 +579,7 @@ class TestRandom(BaseTest):
             op_assert_size,
             op_assert_modified,
             op_minor_collect,
-            #op_major_collect,
+            op_major_collect,
         ]
         for _ in range(2000):
             # make sure we are in a transaction:
