@@ -183,7 +183,7 @@ object_t *_stm_allocate_old_small(ssize_t size_rounded_up)
     memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
 
-    dprintf(("allocate_old_small(%lu): %p, seg=%d, page=%lu\n",
+    dprintf(("_stm_allocate_old_small(%lu): %p, seg=%d, page=%lu\n",
              size_rounded_up, p,
              get_segment_of_linear_address(stm_object_pages + (uintptr_t)p),
              (uintptr_t)p / 4096UL));
@@ -201,7 +201,7 @@ static inline bool _smallmalloc_sweep_keep(char *p)
         return _stm_smallmalloc_keep((char*)(p - stm_object_pages));
     }
 #endif
-    abort();
+    return true;
     //return smallmalloc_keep_object_at(p);
 }
 
@@ -248,7 +248,6 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
         }
         else if (!_smallmalloc_sweep_keep(p)) {
             /* the location should be freed now */
-            //dprintf(("free small obj %p\n", (object_t*)(p - stm_object_pages)));
 #ifdef STM_TESTS
             /* fill location with 0xdd in all segs except seg0 */
             int j;
@@ -258,6 +257,7 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
                 if (get_page_status_in(j, page) == PAGE_ACCESSIBLE)
                     memset(get_virtual_address(j, obj), 0xdd, szword*8);
 #endif
+            //dprintf(("free small %p : %lu\n", (char*)(p - stm_object_pages), szword*8));
 
             if (flprev == NULL) {
                 flprev = (struct small_free_loc_s *)p;
@@ -273,6 +273,7 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
             any_object_dying = true;
         }
         else {
+            //dprintf(("keep small %p : %lu\n", (char*)(p - stm_object_pages), szword*8));
             any_object_remaining = true;
         }
     }
@@ -308,7 +309,8 @@ void _stm_smallmalloc_sweep(void)
         small_page_lists[szword] = NULL;
 
         /* process the pages that the various segments are busy filling */
-        for (i = 1; i < NB_SEGMENTS; i++) {
+        /* including sharing seg0 for old-malloced things */
+        for (i = 0; i < NB_SEGMENTS; i++) {
             struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
             struct small_free_loc_s **fl =
                     &pseg->small_malloc_data.loc_free[szword];
