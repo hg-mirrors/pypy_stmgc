@@ -309,3 +309,22 @@ class TestGCPage(BaseTest):
         self.commit_transaction()
         self.start_transaction()
         stm_major_collect()
+
+    def test_bug2(self):
+        lp_ref_4 = stm_allocate_old(16)
+        #
+        self.start_transaction()
+        stm_set_char(lp_ref_4, 'x')
+        #
+        self.switch(1)
+        self.start_transaction()
+        stm_set_char(lp_ref_4, 'y')
+        #
+        self.switch(0)
+        self.commit_transaction()
+        self.start_transaction()
+        stm_major_collect()
+        stm_major_collect()
+        stm_major_collect()
+        #
+        py.test.raises(Conflict, self.switch, 1)
