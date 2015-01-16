@@ -220,10 +220,15 @@ static void mark_and_trace(object_t *obj, char *segment_base)
 
     assert(list_is_empty(marked_objects_to_trace));
 
+    /* trace into the object (the version from 'segment_base') */
+    struct object_s *realobj =
+        (struct object_s *)REAL_ADDRESS(segment_base, obj);
+    stmcb_trace(realobj, &mark_record_trace);
+
+    /* trace all references found in sharing seg0 (should always be
+       up-to-date and not cause segfaults) */
     while (1) {
-        /* trace into the object (the version from 'segment_base') */
-        struct object_s *realobj =
-            (struct object_s *)REAL_ADDRESS(segment_base, obj);
+        realobj = (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
         stmcb_trace(realobj, &mark_record_trace);
 
         if (list_is_empty(marked_objects_to_trace))
