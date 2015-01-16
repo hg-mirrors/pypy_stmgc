@@ -49,6 +49,25 @@ class TestLargeMalloc(BaseTest):
         #
         lib._stm_large_dump()
 
+    def test_random_sweep(self):
+        @ffi.callback("bool(char *)")
+        def keep(data):
+            print "keep?", data, data not in to_free
+            return data not in to_free
+        lib._stm_largemalloc_keep = keep
+
+        OBJS = 6
+        FREE = 2
+        random.seed(12)
+        for _ in range(100):
+            allocd = {lib._stm_large_malloc(64) for _ in range(OBJS)}
+            while allocd:
+                to_free = set(random.sample(allocd, min(FREE, len(allocd))))
+                print "allocd", allocd, "free", to_free
+                lib._stm_largemalloc_sweep()
+                allocd -= to_free
+
+
     def test_overflow_1(self):
         d = lib._stm_large_malloc(self.size - 32)
         assert ra(d) == self.rawmem + 16

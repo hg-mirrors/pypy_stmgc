@@ -32,7 +32,7 @@ typedef struct ulist_s {
 typedef struct malloc_chunk {
     size_t prev_size;     /* - if the previous chunk is free: size of its data
                              - otherwise, if this chunk is free: 1
-                             - otherwise, 0. */
+                             - otherwise, 0. both chunks used */
     size_t size;          /* size of the data in this chunk */
 
     dlist_t d;            /* if free: a doubly-linked list 'largebins' */
@@ -393,6 +393,7 @@ static void _large_free(mchunk_t *chunk)
 
         /* unlink the following chunk */
         unlink_chunk(mscan);
+
 #ifndef NDEBUG
         mscan->prev_size = (size_t)-258;  /* 0xfffffffffffffefe */
         mscan->size = (size_t)-515;       /* 0xfffffffffffffdfd */
