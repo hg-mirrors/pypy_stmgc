@@ -45,7 +45,7 @@ void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
     abort();
 }
 void stmcb_commit_soon(void) { }
-
+long stmcb_obj_supports_cards(struct object_s *obj) {return 0;}
 
 
 
