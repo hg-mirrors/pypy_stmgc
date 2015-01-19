@@ -270,7 +270,9 @@ static bool _stm_validate()
     /* Don't check this 'cl'. This entry is already checked */
 
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
-        assert(first_cl->next == INEV_RUNNING);
+        //assert(first_cl->next == INEV_RUNNING);
+        /* the above assert may fail when running a major collection
+           while the commit of the inevitable transaction is in progress */
         return true;
     }
 
