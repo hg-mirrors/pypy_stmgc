@@ -331,7 +331,8 @@ class TestGCPage(BaseTest):
 
     def test_small_major_collection(self):
         self.start_transaction()
-        new = stm_allocate(16)
+        new = stm_allocate(16) # small
+        assert lib._stm_total_allocated() == 0
         self.push_root(new)
         stm_minor_collect()
         assert lib._stm_total_allocated() == 16

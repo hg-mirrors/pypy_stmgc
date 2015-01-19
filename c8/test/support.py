@@ -116,7 +116,7 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
 object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
 bool (*_stm_smallmalloc_keep)(char *data);
-void _stm_smallmalloc_sweep(void);
+void _stm_smallmalloc_sweep_test(void);
 
 """)
 
@@ -290,7 +290,6 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
         visit(ref);
     }
 }
-
 
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),

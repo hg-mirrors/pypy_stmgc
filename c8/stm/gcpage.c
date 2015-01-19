@@ -410,6 +410,34 @@ static void sweep_large_objects(void)
     _stm_largemalloc_sweep();
 }
 
+static inline bool smallmalloc_keep_object_at(char *data)
+{
+    /* XXX: identical to largemalloc_keep_object_at()? */
+    /* this is called by _stm_smallmalloc_sweep() */
+    object_t *obj = (object_t *)(data - stm_object_pages);
+    dprintf(("keep small obj %p ? -> %d\n", obj, mark_visited_test(obj)));
+    if (!mark_visited_test_and_clear(obj)) {
+        /* This is actually needed in order to avoid random write-read
+           conflicts with objects read and freed long in the past.
+           It is probably rare enough, but still, we want to avoid any
+           false conflict. (test_random hits it sometimes) */
+        long i;
+        for (i = 1; i < NB_SEGMENTS; i++) {
+            /* reset read marker */
+            *((char *)(get_segment_base(i) + (((uintptr_t)obj) >> 4))) = 0;
+        }
+        return false;
+    }
+    return true;
+}
+
+static void sweep_small_objects(void)
+{
+    _stm_smallmalloc_sweep();
+}
+
+
+
 static void major_collection_now_at_safe_point(void)
 {
     dprintf(("\n"));
@@ -438,7 +466,7 @@ static void major_collection_now_at_safe_point(void)
 
     /* /\* sweeping *\/ */
     sweep_large_objects();
-    /* //sweep_uniform_pages(); */
+    sweep_small_objects();
 
     dprintf((" | used after collection:  %ld\n",
              (long)pages_ctl.total_allocated));

@@ -22,7 +22,9 @@ static fpsz_t full_pages_object_size[PAGE_SMSIZE_END - PAGE_SMSIZE_START];
 static fpsz_t *get_fpsz(char *smallpage)
 {
     uintptr_t pagenum = (((char *)smallpage) - END_NURSERY_PAGE * 4096UL - stm_object_pages) / 4096;
-    assert(PAGE_SMSIZE_START <= pagenum && pagenum < PAGE_SMSIZE_END);
+    /* <= PAGE_SMSIZE_END because we may ask for it when there is no
+       page with smallobjs yet and uninit_page_stop == NB_PAGES... */
+    assert(PAGE_SMSIZE_START <= pagenum && pagenum <= PAGE_SMSIZE_END);
     return &full_pages_object_size[pagenum - PAGE_SMSIZE_START];
 }
 
@@ -162,6 +164,8 @@ static inline stm_char *allocate_outside_nursery_small(uint64_t size)
 
     struct small_free_loc_s *result = *fl;
 
+    increment_total_allocated(size);
+
     if (UNLIKELY(result == NULL))
         return (stm_char*)
             (_allocate_small_slowpath(size) - stm_object_pages);
@@ -201,8 +205,7 @@ static inline bool _smallmalloc_sweep_keep(char *p)
         return _stm_smallmalloc_keep((char*)(p - stm_object_pages));
     }
 #endif
-    return true;
-    //return smallmalloc_keep_object_at(p);
+    return smallmalloc_keep_object_at(p);
 }
 
 void check_order_inside_small_page(struct small_free_loc_s *page)
@@ -248,6 +251,7 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
         }
         else if (!_smallmalloc_sweep_keep(p)) {
             /* the location should be freed now */
+            increment_total_allocated(-szword*8);
 #ifdef STM_TESTS
             /* fill location with 0xdd in all segs except seg0 */
             int j;
@@ -301,7 +305,6 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
 
 void _stm_smallmalloc_sweep(void)
 {
-    acquire_all_privatization_locks(); /* should be done outside, but tests... */
     long i, szword;
     for (szword = 2; szword < GC_N_SMALL_REQUESTS; szword++) {
         struct small_free_loc_s *page = small_page_lists[szword];
@@ -350,5 +353,4 @@ void _stm_smallmalloc_sweep(void)
             sweep_small_page(pageptr, NULL, sz);
         }
     }
-    release_all_privatization_locks();
 }
