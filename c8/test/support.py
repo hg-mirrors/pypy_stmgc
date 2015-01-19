@@ -121,7 +121,8 @@ void _stm_smallmalloc_sweep_test(void);
 """)
 
 
-GC_N_SMALL_REQUESTS = 36      # from gcpage.c
+GC_N_SMALL_REQUESTS = 36      # from smallmalloc.h
+GC_LAST_SMALL_SIZE  =   (8 * (GC_N_SMALL_REQUESTS - 1))
 LARGE_MALLOC_OVERHEAD = 16    # from largemalloc.h
 
 lib = ffi.verify(r'''
