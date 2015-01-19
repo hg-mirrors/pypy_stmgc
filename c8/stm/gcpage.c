@@ -326,6 +326,7 @@ static void mark_visit_from_roots(void)
             if ((((uintptr_t)current->ss) & 3) == 0)
                 mark_visit_object(current->ss, stm_object_pages);
         }
+        mark_visit_object(tl->thread_local_obj, stm_object_pages);
 
         tl = tl->next;
     } while (tl != stm_all_thread_locals);
@@ -334,6 +335,9 @@ static void mark_visit_from_roots(void)
     long i;
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (get_priv_segment(i)->transaction_state != TS_NONE) {
+            mark_visit_object(
+                get_priv_segment(i)->threadlocal_at_start_of_transaction,
+                stm_object_pages);
             stm_rewind_jmp_enum_shadowstack(
                 get_segment(i)->running_thread,
                 mark_visit_objects_from_ss);

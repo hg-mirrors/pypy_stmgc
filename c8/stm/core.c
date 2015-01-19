@@ -650,6 +650,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     STM_PSEGMENT->running_pthread = pthread_self();
 #endif
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
+    STM_PSEGMENT->threadlocal_at_start_of_transaction = tl->thread_local_obj;
 
     enter_safe_point_if_requested();
     dprintf(("> start_transaction\n"));
@@ -849,6 +850,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
         stm_rewind_jmp_restore_shadowstack(tl);
     assert(tl->shadowstack == pseg->shadowstack_at_start_of_transaction);
 #endif
+    tl->thread_local_obj = pseg->threadlocal_at_start_of_transaction;
     tl->last_abort__bytes_in_nursery = bytes_in_nursery;
 
     list_clear(pseg->objects_pointing_to_nursery);
