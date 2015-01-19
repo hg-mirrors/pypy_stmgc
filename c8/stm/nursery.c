@@ -156,6 +156,8 @@ static void collect_roots_in_nursery(void)
             /* it is an odd-valued marker, ignore */
         }
     }
+
+    minor_trace_if_young(&tl->thread_local_obj);
 }
 
 

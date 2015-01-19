@@ -241,7 +241,6 @@ class TestGCPage(BaseTest):
         self.test_reshare_if_no_longer_modified_0(invert=1)
 
     def test_threadlocal_at_start_of_transaction(self):
-        py.test.skip("no threadlocal right now")
         self.start_transaction()
         x = stm_allocate(16)
         stm_set_char(x, 'L')
@@ -262,6 +261,7 @@ class TestGCPage(BaseTest):
 
         self.start_transaction()
         assert stm_get_char(self.get_thread_local_obj()) == 'L'
+        self.commit_transaction()
 
     def test_marker_1(self):
         self.start_transaction()
