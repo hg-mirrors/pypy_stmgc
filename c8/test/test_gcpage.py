@@ -344,3 +344,51 @@ class TestGCPage(BaseTest):
 
         stm_major_collect()
         assert lib._stm_total_allocated() == 0
+
+    def test_mixed_major_collections(self):
+        import random
+        obj_sizes = [16, 48, 1024, 1000*8]
+
+        self.start_transaction()
+        random.seed(123)
+
+        # allocate objs:
+        allocated = 0
+        NOBJS = 100
+        for _ in range(NOBJS):
+            osize = random.choice(obj_sizes)
+            is_small = osize <= GC_LAST_SMALL_SIZE
+            if is_small:
+                allocated += osize
+            else:
+                allocated += osize + LMO
+
+            o = stm_allocate(osize)
+            self.push_root(o)
+
+            # sometimes do a minor collection:
+            if random.random() > 0.95:
+                stm_minor_collect()
+                assert lib._stm_total_allocated() == allocated
+
+        stm_minor_collect()
+        assert lib._stm_total_allocated() == allocated
+        # -> all objs old
+
+        objs = set()
+        for _ in range(NOBJS):
+            objs.add(self.pop_root())
+
+        # do major collections while always saving less
+        # and less objs
+        while objs:
+            objs = random.sample(objs, len(objs) // 2)
+            for o in objs:
+                self.push_root(o)
+            stm_major_collect()
+            for o in objs:
+                self.pop_root()
+
+        assert lib._stm_total_allocated() == 0
+
+        self.commit_transaction()
