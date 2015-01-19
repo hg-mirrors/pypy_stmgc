@@ -9,6 +9,7 @@ class TestLightFinalizer(BaseTest):
         #
         @ffi.callback("void(object_t *)")
         def light_finalizer(obj):
+            assert stm_get_obj_size(obj) == 48
             segnum = lib.current_segment_num()
             tlnum = '?'
             for n, tl in enumerate(self.tls):
@@ -19,6 +20,10 @@ class TestLightFinalizer(BaseTest):
         self.light_finalizers_called = []
         lib.stmcb_light_finalizer = light_finalizer
         self._light_finalizer_keepalive = light_finalizer
+
+    def teardown_method(self, meth):
+        lib.stmcb_light_finalizer = ffi.NULL
+        BaseTest.teardown_method(self, meth)
 
     def expect_finalized(self, objs, from_tlnum=None):
         assert [obj for (obj, tlnum) in self.light_finalizers_called] == objs
@@ -48,6 +53,15 @@ class TestLightFinalizer(BaseTest):
         self.push_root(lp1)       # stays alive
         self.commit_transaction()
         self.expect_finalized([])
+
+    def test_young_light_finalizer_aborts(self):
+        self.start_transaction()
+        lp1 = stm_allocate(48)
+        lib.stm_enable_light_finalizer(lp1)
+        self.expect_finalized([])
+        self.abort_transaction()
+        self.start_transaction()
+        self.expect_finalized([lp1], from_tlnum=0)
 
     def test_old_light_finalizer(self):
         self.start_transaction()
@@ -99,15 +113,47 @@ class TestLightFinalizer(BaseTest):
         stm_major_collect()
         self.expect_finalized([lp1], from_tlnum=1)
 
+    def test_old_light_finalizer_aborts(self):
+        self.start_transaction()
+        lp1 = stm_allocate(48)
+        lib.stm_enable_light_finalizer(lp1)
+        self.push_root(lp1)
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        self.expect_finalized([])
+        self.abort_transaction()
+        self.expect_finalized([])
+
+    def test_overflow_light_finalizer_aborts(self):
+        self.start_transaction()
+        lp1 = stm_allocate(48)
+        lib.stm_enable_light_finalizer(lp1)
+        self.push_root(lp1)
+        stm_minor_collect()
+        lp1 = self.pop_root()
+        self.push_root(lp1)
+        self.expect_finalized([])
+        self.abort_transaction()
+        self.expect_finalized([lp1], from_tlnum=0)
+
 
 class TestRegularFinalizer(BaseTest):
+    expect_content_character = None
+    run_major_collect_in_finalizer = False
 
     def setup_method(self, meth):
         BaseTest.setup_method(self, meth)
         #
         @ffi.callback("void(object_t *)")
         def finalizer(obj):
+            print "finalizing!", obj
+            assert stm_get_obj_size(obj) in [16, 32, 48, 56]
+            if self.expect_content_character is not None:
+                assert stm_get_char(obj) == self.expect_content_character
             self.finalizers_called.append(obj)
+            if self.run_major_collect_in_finalizer:
+                stm_major_collect()
         self.finalizers_called = []
         lib.stmcb_finalizer = finalizer
         self._finalizer_keepalive = finalizer
@@ -137,6 +183,21 @@ class TestRegularFinalizer(BaseTest):
         stm_major_collect()
         self.expect_finalized([lp1, lp2, lp3])
 
+    def test_finalizer_from_other_thread(self):
+        self.start_transaction()
+        lp1 = stm_allocate_with_finalizer(48)
+        stm_set_char(lp1, 'H')
+        self.expect_content_character = 'H'
+        print lp1
+        #
+        self.switch(1)
+        self.start_transaction()
+        stm_major_collect()
+        self.expect_finalized([])      # marked as dead, but wrong thread
+        #
+        self.switch(0)
+        self.expect_finalized([lp1])   # now it has been finalized
+
     def test_finalizer_ordering(self):
         self.start_transaction()
         lp1 = stm_allocate_with_finalizer_refs(1)
@@ -148,7 +209,7 @@ class TestRegularFinalizer(BaseTest):
         stm_major_collect()
         self.expect_finalized([lp3])
 
-    def test_finalizer_extra_transation(self):
+    def test_finalizer_extra_transaction(self):
         self.start_transaction()
         lp1 = stm_allocate_with_finalizer(32)
         print lp1
@@ -182,3 +243,12 @@ class TestRegularFinalizer(BaseTest):
         stm_major_collect()
         self.switch(0)
         self.expect_finalized([lp2, lp1])
+
+    def test_run_major_collect_in_finalizer(self):
+        self.run_major_collect_in_finalizer = True
+        self.start_transaction()
+        lp1 = stm_allocate_with_finalizer(32)
+        lp2 = stm_allocate_with_finalizer(32)
+        lp3 = stm_allocate_with_finalizer(32)
+        print lp1, lp2, lp3
+        stm_major_collect()
