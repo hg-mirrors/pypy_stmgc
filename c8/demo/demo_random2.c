@@ -463,7 +463,7 @@ void setup_globals()
         .next = NULL
     };
 
-    stm_start_inevitable_transaction(&stm_thread_local);
+    //stm_start_inevitable_transaction(&stm_thread_local);
     for (i = 0; i < PREBUILT_ROOTS; i++) {
         void* new_templ = malloc(sizeof(struct node_s));
         memcpy(new_templ, &prebuilt_template, sizeof(struct node_s));
@@ -476,7 +476,7 @@ void setup_globals()
             ((nodeptr_t)prebuilt_roots[i])->my_hash = hash;
         }
     }
-    stm_commit_transaction();
+    //stm_commit_transaction();
 }
 
 int main(void)
@@ -495,10 +495,11 @@ int main(void)
 
 
     stm_setup();
+    setup_globals();
+
     stm_register_thread_local(&stm_thread_local);
     stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
 
-    setup_globals();
 
     int thread_starts = NUMTHREADS * THREAD_STARTS;
     for (i = 0; i < NUMTHREADS; i++) {

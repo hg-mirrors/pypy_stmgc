@@ -118,6 +118,8 @@ void stm_setup(void)
     setup_nursery();
     setup_gcpage();
     setup_pages();
+
+    set_gs_register(get_segment_base(0));
 }
 
 void stm_teardown(void)
