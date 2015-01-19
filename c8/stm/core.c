@@ -414,7 +414,8 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 
     while (1) {
         if (!_stm_validate()) {
-            free(new);
+            if (new != INEV_RUNNING)
+                free(new);
             stm_abort_transaction();
         }
 
