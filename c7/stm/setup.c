@@ -22,8 +22,8 @@ static void close_fd_mmap(int ignored)
 static char *setup_mmap(char *reason, int *map_fd)
 {
     char name[128];
-    sprintf(name, "/stmgc-c7-bigmem-%ld-%.18e",
-            (long)getpid(), get_stm_time());
+    sprintf(name, "/stmgc-c7-bigmem-%ld",
+            (long)getpid());
 
     /* Create the big shared memory object, and immediately unlink it.
        There is a small window where if this process is killed the
@@ -113,7 +113,7 @@ void stm_setup(void)
 
         /* Initialize STM_PSEGMENT */
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
-        assert(1 <= i && i < 255);   /* 255 is WL_VISITED in gcpage.c */
+        assert(1 <= i && i < 253);   /* 253 is WL_FINALIZ_ORDER_1 in gcpage.c */
         pr->write_lock_num = i;
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
@@ -128,6 +128,8 @@ void stm_setup(void)
         pr->nursery_objects_shadows = tree_create();
         pr->callbacks_on_commit_and_abort[0] = tree_create();
         pr->callbacks_on_commit_and_abort[1] = tree_create();
+        pr->young_objects_with_light_finalizers = list_create();
+        pr->old_objects_with_light_finalizers = list_create();
         pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * i;
         highest_overflow_number = pr->overflow_number;
         pr->pub.transaction_read_version = 0xff;
@@ -147,6 +149,7 @@ void stm_setup(void)
     setup_gcpage();
     setup_pages();
     setup_forksupport();
+    setup_finalizer();
 }
 
 void stm_teardown(void)
@@ -169,12 +172,15 @@ void stm_teardown(void)
         tree_free(pr->nursery_objects_shadows);
         tree_free(pr->callbacks_on_commit_and_abort[0]);
         tree_free(pr->callbacks_on_commit_and_abort[1]);
+        list_free(pr->young_objects_with_light_finalizers);
+        list_free(pr->old_objects_with_light_finalizers);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);
     stm_object_pages = NULL;
     close_fd_mmap(stm_object_pages_fd);
 
+    teardown_finalizer();
     teardown_core();
     teardown_sync();
     teardown_gcpage();
@@ -225,6 +231,8 @@ static pthread_t *_get_cpth(stm_thread_local_t *tl)
     return (pthread_t *)(tl->creating_pthread);
 }
 
+static int thread_local_counters = 0;
+
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
     int num;
@@ -241,14 +249,13 @@ void stm_register_thread_local(stm_thread_local_t *tl)
         num = tl->prev->associated_segment_num;
     }
     tl->thread_local_obj = NULL;
-    tl->_timing_cur_state = STM_TIME_OUTSIDE_TRANSACTION;
-    tl->_timing_cur_start = get_stm_time();
 
     /* assign numbers consecutively, but that's for tests; we could also
        assign the same number to all of them and they would get their own
        numbers automatically. */
     num = (num % NB_SEGMENTS) + 1;
     tl->associated_segment_num = num;
+    tl->thread_local_counter = ++thread_local_counters;
     *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num));

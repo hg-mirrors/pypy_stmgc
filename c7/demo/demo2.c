@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <time.h>
 
 #ifdef USE_HTM
 #  include "../../htm-c7/stmgc.h"
@@ -59,12 +60,25 @@ void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
 }
 void stmcb_commit_soon() {}
 
-static void expand_marker(char *base, uintptr_t odd_number,
-                          object_t *following_object,
-                          char *outputbuf, size_t outputbufsize)
+static void timing_event(stm_thread_local_t *tl, /* the local thread */
+                         enum stm_event_e event,
+                         stm_loc_marker_t *markers)
 {
-    assert(following_object == NULL);
-    snprintf(outputbuf, outputbufsize, "<%p %lu>", base, odd_number);
+    static char *event_names[] = { STM_EVENT_NAMES };
+
+    char buf[1024], *p;
+    struct timespec tp;
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+
+    p = buf;
+    p += sprintf(p, "{%.9f} %p %s", tp.tv_sec + 0.000000001 * tp.tv_nsec,
+                 tl, event_names[event]);
+    if (markers != NULL) {
+        p += sprintf(p, ", markers: %lu, %lu",
+                     markers[0].odd_number, markers[1].odd_number);
+    }
+    sprintf(p, "\n");
+    fputs(buf, stderr);
 }
 
 
@@ -107,18 +121,6 @@ nodeptr_t swap_nodes(nodeptr_t initial)
     assert(initial != NULL);
 
     stm_start_transaction(&stm_thread_local);
-
-    if (stm_thread_local.longest_marker_state != 0) {
-        fprintf(stderr, "[%p] marker %d for %.6f seconds:\n",
-                &stm_thread_local,
-                stm_thread_local.longest_marker_state,
-                stm_thread_local.longest_marker_time);
-        fprintf(stderr, "\tself:\t\"%s\"\n\tother:\t\"%s\"\n",
-                stm_thread_local.longest_marker_self,
-                stm_thread_local.longest_marker_other);
-        stm_thread_local.longest_marker_state = 0;
-        stm_thread_local.longest_marker_time = 0.0;
-    }
 
     nodeptr_t prev = initial;
     stm_read((objptr_t)prev);
@@ -223,7 +225,6 @@ static sem_t done;
 
 void unregister_thread_local(void)
 {
-    stm_flush_timing(&stm_thread_local, 1);
     stm_unregister_thread_local(&stm_thread_local);
 }
 
@@ -295,9 +296,15 @@ int main(void)
 
     stm_setup();
     stm_register_thread_local(&stm_thread_local);
-    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
-    stmcb_expand_marker = expand_marker;
 
+    /* check that we can use stm_start_inevitable_transaction() without
+       any rjbuf on the stack */
+    stm_start_inevitable_transaction(&stm_thread_local);
+    stm_commit_transaction();
+
+
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
+    stmcb_timing_event = timing_event;
 
     setup_list();
 

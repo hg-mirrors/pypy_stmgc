@@ -1,0 +1,79 @@
+Goal
+======
+
+The goal is to have dictionaries where a read-write or write-write
+conflict does not cause aborts if they occur with keys that have
+different 64-bit hashes.
+
+(We might prefer the condition to be "on different keys even in case of
+hash collision", but that's hard to achieve in general: for Python
+dicts, "to be equal" involves calling the __eq__() method of objects.)
+
+We distinguish between reading a value associated to a key, and only
+checking that the key is in the dictionary.  It makes a difference if
+a concurrent transaction writes to the value.
+
+Some operations on a dict (particularly len() and __nonzero__()) involve
+the global state of the dict, and thus cause conflict with any write
+that adds or removes keys.  They should not cause conflicts with reads,
+or with writes that only change existing values.
+
+In theory, we might refine this to: a len() only conflicts with a
+different transaction whose net effect is to change the length (adding 3
+keys and removing 3 other keys is fine); and a __nonzero__() only
+conflicts with a transaction whose net effect is to change the dict from
+empty to non-empty or vice-versa.
+
+Iterating over the keys of a dict doesn't have to conflict with other
+transactions that only change existing values.  Iterating over the
+values or the items conflict with other transactions doing any write at
+all.
+
+
+Model
+=======
+
+We can use the following idea to give a theoretical model of the
+above:
+
+Let H = {0, ... 2**64-1} be the set of possible hashes.  A dictionary is
+an array of length 2**64, where each item contains a "line" of zero or
+more key/value pairs.  We have STM read and write markers as follows:
+
+* for every key/value pair, we have two markers (a read and a write) on
+  the "value";
+
+* for every line (i.e. for every possible hash value), we also have two
+  markers (a read and a write) on the line itself.
+
+Then:
+
+* Reading or writing the value associated with an existing key accesses
+  the read marker of the line, and the read or write marker of that
+  particular value.
+
+* Checking for the presence of a key only accesses the read marker of
+  the line.
+
+* Creating a new key accesses the write marker of the line (the write
+  marker of the newly added value is not relevant then, because other
+  transactions won't be able to access the line anyway).
+
+* Deleting a key also accesses the write marker of the line.  (We cannot
+  do it by pretending the write the value NULL, so accessing only the
+  write marker of the value, because then it wouldn't conflict with
+  another transaction that checks for the presence of the key by
+  accessing only the read marker of the line.)
+
+* Global operations, like getting the list of keys, work by mass-marking
+  all the lines in H (all 2**64 of them, so obviously it needs to be
+  special-cased in the implementation).  More precisely, len(), keys(),
+  clear(), etc., set all the lines' read markers; clear() additionally
+  sets all the non-empty lines' write markers (so that it doesn't conflict
+  with another transaction checking that some different key is not in the
+  dict).
+
+* We have an additional pair of markers (read and write) for the 'empty'
+  flag.  It is read whenever we check 'bool(dict)'.  It is written only
+  when we are about to commit and the emptiness state changed in this
+  transaction.

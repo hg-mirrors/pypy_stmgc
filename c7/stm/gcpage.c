@@ -141,7 +141,7 @@ static void major_collection_if_requested(void)
 
     if (is_major_collection_requested()) {   /* if still true */
 
-        int oldstate = change_timing_state(STM_TIME_MAJOR_GC);
+        timing_event(STM_SEGMENT->running_thread, STM_GC_MAJOR_START);
 
         synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
 
@@ -149,10 +149,11 @@ static void major_collection_if_requested(void)
             major_collection_now_at_safe_point();
         }
 
-        change_timing_state(oldstate);
+        timing_event(STM_SEGMENT->running_thread, STM_GC_MAJOR_DONE);
     }
 
     s_mutex_unlock();
+    exec_local_finalizers();
 }
 
 
@@ -161,7 +162,11 @@ static void major_collection_if_requested(void)
 
 static struct list_s *mark_objects_to_trace;
 
-#define WL_VISITED   255
+#define WL_FINALIZ_ORDER_1    253
+#define WL_FINALIZ_ORDER_2    254
+#define WL_FINALIZ_ORDER_3    WL_VISITED
+
+#define WL_VISITED            255
 
 
 static inline uintptr_t mark_loc(object_t *obj)
@@ -446,9 +451,9 @@ static void mark_visit_from_markers(void)
         for (i = list_count(lst); i > 0; i -= 2) {
             mark_visit_object((object_t *)list_item(lst, i - 1), base);
         }
-        if (get_priv_segment(j)->marker_inev[1]) {
-            uintptr_t marker_inev_obj = get_priv_segment(j)->marker_inev[1];
-            mark_visit_object((object_t *)marker_inev_obj, base);
+        if (get_priv_segment(j)->marker_inev.segment_base) {
+            object_t *marker_inev_obj = get_priv_segment(j)->marker_inev.object;
+            mark_visit_object(marker_inev_obj, base);
         }
     }
 }
@@ -626,8 +631,14 @@ static void major_collection_now_at_safe_point(void)
     mark_visit_from_roots();
     LIST_FREE(mark_objects_to_trace);
 
-    /* weakrefs: */
+    /* finalizer support: will mark as WL_VISITED all objects with a
+       finalizer and all objects reachable from there, and also moves
+       some objects from 'objects_with_finalizers' to 'run_finalizers'. */
+    deal_with_objects_with_finalizers();
+
+    /* weakrefs and old light finalizers */
     stm_visit_old_weakrefs();
+    deal_with_old_objects_with_finalizers();
 
     /* cleanup */
     clean_up_segment_lists();
