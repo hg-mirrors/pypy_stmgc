@@ -1,0 +1,21 @@
+
+
+(defun create-tree (n)
+   (if (== n 0) 1 (cons (create-tree (- n 1)) (create-tree (- n 1))))
+)
+
+(defun walk-tree (tree)
+   (if (pair? tree)
+      (+ (walk-tree (car tree)) (walk-tree (cdr tree)))
+	  1
+   )
+)
+
+(defun lookup-tree ()
+   (walk-tree (create-tree 10))
+)
+
+(setq n 0)
+(while (< n 1000)
+   (transaction lookup-tree)
+   (setq n (+ n 1)))
