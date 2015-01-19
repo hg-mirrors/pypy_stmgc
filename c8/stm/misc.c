@@ -104,4 +104,13 @@ uint64_t _stm_total_allocated(void)
 {
     return increment_total_allocated(0);
 }
+
+
+void _stm_smallmalloc_sweep_test()
+{
+    acquire_all_privatization_locks();
+    _stm_smallmalloc_sweep();
+    release_all_privatization_locks();
+}
+
 #endif

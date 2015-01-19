@@ -40,10 +40,13 @@ class TestSmallMalloc(BaseTest):
             assert p == seen[0]
             seen.pop(0)
 
+    def test_sweep_trivial(self):
+        lib._stm_smallmalloc_sweep_test()
+
     def test_sweep_freeing_simple(self):
         p1 = stm_allocate_old_small(16)
         self.has_been_asked_for = []
-        lib._stm_smallmalloc_sweep()
+        lib._stm_smallmalloc_sweep_test()
         assert p1 in self.has_been_asked_for
 
     def test_sweep_freeing_random_subset(self):
@@ -59,7 +62,7 @@ class TestSmallMalloc(BaseTest):
                 # keep half of them around
                 self.keep_me = set(random.sample(page0, len(page0) // 2))
                 self.has_been_asked_for = []
-                lib._stm_smallmalloc_sweep()
+                lib._stm_smallmalloc_sweep_test()
 
                 print len(page0), len(self.has_been_asked_for)
                 assert sorted(page0) == self.has_been_asked_for, "all objs were observed"
@@ -84,6 +87,6 @@ class TestSmallMalloc(BaseTest):
         page0 = [stm_allocate_old_small(16) for i in range(0, 4096, 16)]
         tid = lib._get_type_id(page0[0])
         self.keep_me = set(page0)
-        lib._stm_smallmalloc_sweep()
+        lib._stm_smallmalloc_sweep_test()
         for p in page0:
             assert lib._get_type_id(p) == tid
