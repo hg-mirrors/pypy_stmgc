@@ -187,7 +187,6 @@ void *run_thread(void *thread_id)
 
     }
 
-    stm_flush_timing(&stm_thread_local, 1);
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     stm_unregister_thread_local(&stm_thread_local);
 
