@@ -1,3 +1,22 @@
+Apply these patches to llvm, svn revision 201645,
+which you get from:
+
+ svn co http://llvm.org/svn/llvm-project/llvm/trunk llvm -r 201645
+ cd llvm/tools
+ svn co http://llvm.org/svn/llvm-project/cfe/trunk clang -r 201645
+ cd ../..
+ cd llvm/projects
+ svn co http://llvm.org/svn/llvm-project/compiler-rt/trunk compiler-rt -r 201645
+ cd ../..
+ cd llvm
+ patch -p0 < ~/.../c7/llvmfix/...diff
+ # ^^^ repeat that line for all patches in this directory
+ cd ..
+ mkdir llvm-build
+ cd llvm-build
+ ../llvm/configure      # requires gcc >= 4.7!
+ make
+
 
 no-introduce-bogus-cast-in-combine.diff
 
