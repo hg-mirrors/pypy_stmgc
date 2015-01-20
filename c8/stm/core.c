@@ -481,14 +481,6 @@ void stm_validate()
 {
     if (!_stm_validate())
         stm_abort_transaction();
-
-#if STM_TESTS
-    if (STM_PSEGMENT->transaction_state != TS_INEVITABLE
-        && STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
-        /* abort for tests... */
-        stm_abort_transaction();
-    }
-#endif
 }
 
 

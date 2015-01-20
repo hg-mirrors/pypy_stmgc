@@ -300,7 +300,8 @@ class TestGCPage(BaseTest):
         self.start_transaction()
         self.become_inevitable()
         #
-        py.test.raises(Conflict, self.switch, 0)
+        self.switch(0)
+        py.test.raises(Conflict, self.commit_transaction)
         #
         self.switch(1)
 
