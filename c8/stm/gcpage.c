@@ -227,14 +227,11 @@ static void mark_and_trace(object_t *obj, char *segment_base)
 
     /* trace all references found in sharing seg0 (should always be
        up-to-date and not cause segfaults) */
-    while (1) {
+    while (!list_is_empty(marked_objects_to_trace)) {
+        obj = (object_t *)list_pop_item(marked_objects_to_trace);
+
         realobj = (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
         stmcb_trace(realobj, &mark_record_trace);
-
-        if (list_is_empty(marked_objects_to_trace))
-            break;
-
-        obj = (object_t *)list_pop_item(marked_objects_to_trace);
     }
 }
 
@@ -283,23 +280,53 @@ static void mark_visit_from_modified_objects(void)
        some of the pages) */
 
     long i;
+    struct list_s *uniques = list_create();
     for (i = 1; i < NB_SEGMENTS; i++) {
         char *base = get_segment_base(i);
+        OPT_ASSERT(list_is_empty(uniques));
 
+        /* the list of modified_old_objs can be huge and contain a lot
+           of duplicated (same obj, different slice) entries. It seems
+           worth it to build a new list without duplicates.
+           The reason is that newly created objs, when moved out of the
+           nursery, don't have WB_EXECUTED flag. Thus we execute waaay
+           too many write barriers per transaction and add them all
+           to this list (and the commit log). XXXXX */
         struct list_s *lst = get_priv_segment(i)->modified_old_objects;
-        long j, count = list_count(lst);
-        for (j = 0; j < count; j += 3) {
-            object_t *item = (object_t*)list_item(lst, j);
-            /* All modified objs have all pages accessible for now.
-               This is because we create a backup of the whole obj
-               and thus make all pages accessible. */
-            assert_obj_accessible_in(i, item);
 
-            mark_visited_test_and_set(item);
-            mark_and_trace(item, stm_object_pages);  /* shared, committed version */
-            mark_and_trace(item, base);          /* private, modified version */
+        struct stm_undo_s *undo = (struct stm_undo_s *)lst->items;
+        struct stm_undo_s *end = (struct stm_undo_s *)(lst->items + lst->count);
+        for (; undo < end; undo++) {
+            object_t *obj = undo->object;
+            struct object_s *dst = (struct object_s*)REAL_ADDRESS(base, obj);
+
+            if (!(dst->stm_flags & GCFLAG_VISITED)) {
+                LIST_APPEND(uniques, obj);
+                dst->stm_flags |= GCFLAG_VISITED;
+            }
         }
+
+
+        LIST_FOREACH_R(uniques, object_t*,
+           ({
+               /* clear the VISITED flags again and actually visit them */
+               struct object_s *dst = (struct object_s*)REAL_ADDRESS(base, item);
+               dst->stm_flags &= ~GCFLAG_VISITED;
+
+               /* All modified objs have all pages accessible for now.
+                  This is because we create a backup of the whole obj
+                  and thus make all pages accessible. */
+               assert_obj_accessible_in(i, item);
+
+               if (!mark_visited_test_and_set(item))
+                   mark_and_trace(item, stm_object_pages);  /* shared, committed version */
+               mark_and_trace(item, base);          /* private, modified version */
+           }));
+
+
+        list_clear(uniques);
     }
+    LIST_FREE(uniques);
 }
 
 static void mark_visit_from_roots(void)
