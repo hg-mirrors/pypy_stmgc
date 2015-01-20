@@ -158,7 +158,7 @@ uint64_t _stm_total_allocated(void);
    The best is to use typedefs like above.
 
    The object_s part contains some fields reserved for the STM library.
-   Right now this is only one byte.
+   Right now this is only four bytes.
 */
 
 struct object_s {
