@@ -250,7 +250,7 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
                    in this segment) */
                 *((char *)(pseg->pub.segment_base + (((uintptr_t)obj) >> 4))) = 0;
 
-                /* XXX: _stm_large_free(stm_object_pages + item->addr); */
+                _stm_large_free(stm_object_pages + item->addr);
             } TREE_LOOP_END;
         }
 
@@ -332,13 +332,13 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 
 object_t *_stm_allocate_external(ssize_t size_rounded_up)
 {
-    /* /\* first, force a collection if needed *\/ */
-    /* if (is_major_collection_requested()) { */
-    /*     /\* use stm_collect() with level 0: if another thread does a major GC */
-    /*        in-between, is_major_collection_requested() will become false */
-    /*        again, and we'll avoid doing yet another one afterwards. *\/ */
-    /*     stm_collect(0); */
-    /* } */
+    /* first, force a collection if needed */
+    if (is_major_collection_requested()) {
+        /* use stm_collect() with level 0: if another thread does a major GC
+           in-between, is_major_collection_requested() will become false
+           again, and we'll avoid doing yet another one afterwards. */
+        stm_collect(0);
+    }
 
     object_t *o = (object_t *)allocate_outside_nursery_large(size_rounded_up);
 
