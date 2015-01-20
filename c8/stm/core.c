@@ -410,9 +410,18 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
     return result;
 }
 
+
+static void reset_wb_executed_flags(void);
+static void readd_wb_executed_flags(void);
+static void check_all_write_barrier_flags(char *segbase, struct list_s *list);
+
 static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 {
     struct stm_commit_log_entry_s *old;
+
+    OPT_ASSERT(new != NULL);
+    /* we are attaching a real CL entry: */
+    bool is_commit = new != INEV_RUNNING;
 
     while (1) {
         if (!_stm_validate()) {
@@ -429,6 +438,16 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
         }
 #endif
 
+        if (is_commit) {
+            /* we must not remove the WB_EXECUTED flags before validation as
+               it is part of a condition in import_objects() called by
+               copy_bk_objs_in_page_from to not overwrite our modifications.
+               So we do it here: */
+            reset_wb_executed_flags();
+            check_all_write_barrier_flags(STM_SEGMENT->segment_base,
+                                          STM_PSEGMENT->modified_old_objects);
+        }
+
         /* try to attach to commit log: */
         old = STM_PSEGMENT->last_commit_log_entry;
         if (old->next == NULL) {
@@ -441,6 +460,15 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
             /* we failed because there is an INEV transaction running */
             usleep(10);
         }
+
+        if (is_commit) {
+            /* XXX: unfortunately, if we failed to attach our CL entry,
+               we have to re-add the WB_EXECUTED flags before we try to
+               validate again because of said condition (s.a) */
+            readd_wb_executed_flags();
+        }
+
+        dprintf(("_validate_and_attach(%p) failed, enter safepoint\n", new));
 
         /* check for requested safe point. otherwise an INEV transaction
            may try to commit but cannot because of the busy-loop here. */
@@ -462,6 +490,11 @@ static void _validate_and_add_to_commit_log(void)
         old = STM_PSEGMENT->last_commit_log_entry;
         new->rev_num = old->rev_num + 1;
         OPT_ASSERT(old->next == INEV_RUNNING);
+
+        /* WB_EXECUTED must be removed before we attach */
+        reset_wb_executed_flags();
+        check_all_write_barrier_flags(STM_SEGMENT->segment_base,
+                                      STM_PSEGMENT->modified_old_objects);
 
         bool yes = __sync_bool_compare_and_swap(&old->next, INEV_RUNNING, new);
         OPT_ASSERT(yes);
@@ -616,6 +649,7 @@ static void reset_transaction_read_version(void)
 
 static void reset_wb_executed_flags(void)
 {
+    dprintf(("reset_wb_executed_flags()\n"));
     struct list_s *list = STM_PSEGMENT->modified_old_objects;
     struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
@@ -625,6 +659,21 @@ static void reset_wb_executed_flags(void)
         obj->stm_flags &= ~GCFLAG_WB_EXECUTED;
     }
 }
+
+static void readd_wb_executed_flags(void)
+{
+    dprintf(("readd_wb_executed_flags()\n"));
+    struct list_s *list = STM_PSEGMENT->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+
+    for (; undo < end; undo++) {
+        object_t *obj = undo->object;
+        obj->stm_flags |= GCFLAG_WB_EXECUTED;
+    }
+}
+
+
 
 
 static void _stm_start_transaction(stm_thread_local_t *tl)
@@ -719,9 +768,9 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
     for (; undo < end; undo++) {
         object_t *obj = undo->object;
-        char *dst = REAL_ADDRESS(segbase, obj);
-        assert(((struct object_s *)dst)->stm_flags & GCFLAG_WRITE_BARRIER);
-        assert(!(((struct object_s *)dst)->stm_flags & GCFLAG_WB_EXECUTED));
+        struct object_s *dst = (struct object_s*)REAL_ADDRESS(segbase, obj);
+        assert(dst->stm_flags & GCFLAG_WRITE_BARRIER);
+        assert(!(dst->stm_flags & GCFLAG_WB_EXECUTED));
     }
 #endif
 }
@@ -734,14 +783,6 @@ void stm_commit_transaction(void)
 
     dprintf(("> stm_commit_transaction()\n"));
     minor_collection(1);
-
-    reset_wb_executed_flags();
-
-    /* minor_collection() above should have set again all WRITE_BARRIER flags.
-       Check that again here for the objects that are about to be copied into
-       the commit log. */
-    check_all_write_barrier_flags(STM_SEGMENT->segment_base,
-                                  STM_PSEGMENT->modified_old_objects);
 
     _validate_and_add_to_commit_log();
 
@@ -941,37 +982,9 @@ static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
     assert(frag_size > 0);
     assert(frag_size + ((uintptr_t)frag & 4095) <= 4096);
 
-    /* if the page of the fragment is fully shared, nothing to do:
-       |S|N|N|N| */
-
-    /* XXXXX: re-enable the following if completely sure that we always
-       copy the shared page when we privatize correctly. */
-    /* /\* nobody must change the page mapping until we flush *\/ */
-    /* assert(STM_PSEGMENT->privatization_lock); */
-
-    /* int my_segnum = STM_SEGMENT->segment_num; */
-    /* uintptr_t pagenum = (uintptr_t)frag / 4096; */
-    /* bool fully_shared = false; */
-
-    /* if (get_page_status_in(my_segnum, pagenum) == PAGE_SHARED) { */
-    /*     fully_shared = true; */
-    /*     int i; */
-    /*     for (i = 0; fully_shared && i < NB_SEGMENTS; i++) { */
-    /*         if (i == my_segnum) */
-    /*             continue; */
-
-    /*         /\* XXX: works if never all pages use SHARED page *\/ */
-    /*         if (get_page_status_in(i, pagenum) != PAGE_NO_ACCESS) { */
-    /*             fully_shared = false; */
-    /*             break; */
-    /*         } */
-    /*     } */
-    /* } */
-
-    /* if (fully_shared) */
-    /*     return;                 /\* nothing to do *\/ */
-
-    /* e.g. |P|S|N|P| */
+    /* XXX: is it possible to just add to the queue iff the pages
+       of the fragment need syncing to other segments? (keep privatization
+       lock until the "flush") */
 
     /* Enqueue this object (or fragemnt of object) */
     if (STM_PSEGMENT->sq_len == SYNC_QUEUE_SIZE)
@@ -1017,17 +1030,6 @@ static void synchronize_object_enqueue(object_t *obj)
 
 static void synchronize_objects_flush(void)
 {
-    /* XXX: not sure this applies anymore.  */
-    /* Do a full memory barrier.  We must make sure that other
-       CPUs see the changes we did to the shared page ("S", in
-       synchronize_object_enqueue()) before we check the other segments
-       with is_private_page() (below).  Otherwise, we risk the
-       following: this CPU writes "S" but the writes are not visible yet;
-       then it checks is_private_page() and gets false, and does nothing
-       more; just afterwards another CPU sets its own private_page bit
-       and copies the page; but it risks doing so before seeing the "S"
-       writes.
-    */
     long j = STM_PSEGMENT->sq_len;
     if (j == 0)
         return;
@@ -1035,7 +1037,6 @@ static void synchronize_objects_flush(void)
 
     dprintf(("synchronize_objects_flush(): %ld fragments\n", j));
 
-    __sync_synchronize();
     assert(STM_PSEGMENT->privatization_lock);
     DEBUG_EXPECT_SEGFAULT(false);
 
@@ -1051,10 +1052,10 @@ static void synchronize_objects_flush(void)
             if (i == myself)
                 continue;
 
-            if (i == 0 || (get_page_status_in(i, page) != PAGE_NO_ACCESS)) {
+            if (get_page_status_in(i, page) != PAGE_NO_ACCESS) {
                 /* shared or private, but never segfault */
                 char *dst = REAL_ADDRESS(get_segment_base(i), frag);
-                dprintf(("-> flush %p to seg %lu\n", frag, i));
+                dprintf(("-> flush %p to seg %lu, sz=%lu\n", frag, i, frag_size));
                 memcpy(dst, src, frag_size);
             }
         }
