@@ -818,7 +818,7 @@ class TestBasic(BaseTest):
             self.start_transaction()
             stm_set_char(lp_char_5, '\0', HDR, False)
             self.commit_transaction()
-            
+
         #
         self.switch(2)
         self.start_transaction()
@@ -842,7 +842,7 @@ class TestBasic(BaseTest):
         #
         py.test.raises(Conflict, self.switch, 2)
 
-        
+
     def test_repeated_wb(self):
         lp_char_5 = stm_allocate_old(384)
 
@@ -859,3 +859,43 @@ class TestBasic(BaseTest):
 
         self.check_char_everywhere(lp_char_5, '\0', offset=HDR)
         self.check_char_everywhere(lp_char_5, '\0', offset=384-1)
+
+    def test_bug4(self):
+        o = stm_allocate_old(16)
+        p = stm_allocate_old(32) # not the same page
+        self.start_transaction()
+        stm_set_char(o, 'x')
+        stm_set_char(p, 'x')
+        self.commit_transaction()
+
+        self.switch(2, False)
+        self.start_transaction()
+        # make both objs accessible
+        stm_get_char(o)
+        stm_get_char(p)
+        self.commit_transaction()
+        self.start_transaction()
+
+        self.switch(0, False)
+        self.start_transaction()
+        stm_set_char(p, 'y')
+        self.commit_transaction() # commit new p
+
+        self.start_transaction()
+        stm_set_char(o, 'f')
+        # o has backup copy
+        # this segment is the same as the one that
+        #   committed o and p last
+
+        self.switch(2, False)
+        # now we write o in version 'x'
+        assert stm_get_char(o) == 'x'
+        stm_set_char(o, 'c')
+        self.commit_transaction()
+        # o should now have 'c' and not be overwritten with 'f'
+
+        self.start_transaction()
+        assert stm_get_char(o) == 'c'
+        self.commit_transaction()
+
+        py.test.raises(Conflict, self.switch, 0)

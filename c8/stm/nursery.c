@@ -103,6 +103,8 @@ static void minor_trace_if_young(object_t **pobj)
             nobj = (object_t *)allocate_outside_nursery_small(size);
         }
 
+        dprintf(("move %p -> %p\n", obj, nobj));
+
         /* copy the object */
     copy_large_object:;
         char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
