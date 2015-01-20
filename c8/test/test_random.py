@@ -349,7 +349,8 @@ def op_abort_transaction(ex, global_state, thread_state):
 
 def op_become_inevitable(ex, global_state, thread_state):
     trs = thread_state.transaction_state
-    global_state.check_if_can_become_inevitable(trs)
+    if not trs.check_must_abort():
+        global_state.check_if_can_become_inevitable(trs)
 
     thread_state.push_roots(ex)
     ex.do(raising_call(trs.check_must_abort(),
@@ -426,18 +427,13 @@ def op_write(ex, global_state, thread_state):
         v = ord(global_state.rnd.choice("abcdefghijklmnop"))
     assert trs.write_root(r, v) is not None
     #
-    aborts = trs.check_must_abort()
-    if aborts:
-        thread_state.abort_transaction()
     offset = global_state.get_root_size(r) + " - 1"
     if is_ref:
-        ex.do(raising_call(aborts, "stm_set_ref", r, offset, v, try_cards))
-        if not aborts:
-            ex.do(raising_call(False, "stm_set_ref", r, "0", v, try_cards))
+        ex.do(raising_call(False, "stm_set_ref", r, offset, v, try_cards))
+        ex.do(raising_call(False, "stm_set_ref", r, "0", v, try_cards))
     else:
-        ex.do(raising_call(aborts, "stm_set_char", r, repr(chr(v)), offset, try_cards))
-        if not aborts:
-            ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR", try_cards))
+        ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), offset, try_cards))
+        ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR", try_cards))
 
 def op_read(ex, global_state, thread_state):
     r = thread_state.get_random_root()
@@ -509,8 +505,6 @@ def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
         ex.do('#')
         #
         trs = new_thread_state.transaction_state
-        if trs and not trs.check_must_abort():
-            global_state.check_if_can_become_inevitable(trs)
         conflicts = trs and trs.check_must_abort()
         ex.thread_num = new_thread_state.num
         #
@@ -568,28 +562,28 @@ class TestRandom(BaseTest):
 
         # random steps:
         possible_actions = [
-            op_allocate,
-            op_allocate_ref, op_allocate_ref,
-            op_write, op_write, op_write,
-            op_read, op_read, op_read, op_read, op_read, op_read, op_read, op_read,
-            op_commit_transaction,
-            op_abort_transaction,
-            op_forget_root,
-            op_become_inevitable,
-            op_assert_size,
-            op_assert_modified,
-            op_minor_collect,
-            op_major_collect,
+            [op_read,]*100,
+            [op_write,]*70,
+            [op_allocate,]*25,
+            [op_allocate_ref]*30,
+            [op_commit_transaction,]*10,
+            [op_abort_transaction,],
+            [op_forget_root]*10,
+            [op_become_inevitable]*2,
+            [op_assert_size]*20,
+            [op_assert_modified]*10,
+            [op_minor_collect]*5,
+            [op_major_collect],
         ]
+        possible_actions = [item for sublist in possible_actions for item in sublist]
+        print possible_actions
         for _ in range(2000):
             # make sure we are in a transaction:
             curr_thread = op_switch_thread(ex, global_state, curr_thread)
 
-            if (global_state.is_inevitable_transaction_running()
-                and curr_thread.transaction_state is None):
-                continue        # don't bother trying to start a transaction
-
             if curr_thread.transaction_state is None:
+                if global_state.is_inevitable_transaction_running():
+                    continue # don't bother trying to start a transaction
                 op_start_transaction(ex, global_state, curr_thread)
                 assert curr_thread.transaction_state is not None
 
