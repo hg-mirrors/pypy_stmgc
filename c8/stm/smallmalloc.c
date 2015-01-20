@@ -74,8 +74,17 @@ static void grab_more_free_pages_for_small_allocations(void)
         long i;
         for (i = 0; i < GCPAGE_NUM_PAGES; i++) {
             /* add to free_uniform_pages list */
-            ((struct small_free_loc_s *)p)->nextpage = free_uniform_pages;
-            free_uniform_pages = (struct small_free_loc_s *)p;
+            struct small_free_loc_s *to_add = (struct small_free_loc_s *)p;
+
+        retry:
+            to_add->nextpage = free_uniform_pages;
+            if (UNLIKELY(!__sync_bool_compare_and_swap(
+                             &free_uniform_pages,
+                             to_add->nextpage,
+                             to_add))) {
+                goto retry;
+            }
+
             p += 4096;
         }
     }
