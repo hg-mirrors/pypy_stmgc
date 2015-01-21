@@ -125,8 +125,15 @@ static void minor_trace_if_young(object_t **pobj)
         /* a young object outside the nursery */
         nobj = obj;
         tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)nobj);
-
         nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
+    }
+
+    /* if this is not during commit, we will add them to the new_objects
+       list and push them to other segments on commit. Thus we can add
+       the WB_EXECUTED flag so that they don't end up in modified_old_objects */
+    assert(!(nobj->stm_flags & GCFLAG_WB_EXECUTED));
+    if (!STM_PSEGMENT->minor_collect_will_commit_now) {
+        nobj->stm_flags |= GCFLAG_WB_EXECUTED;
     }
 
     /* Must trace the object later */
@@ -192,20 +199,31 @@ static void collect_oldrefs_to_nursery(void)
         _collect_now(obj);
 
         if (obj_sync_now & FLAG_SYNC_LARGE) {
-            /* this is a newly allocated object. We must synchronize it
-               to other segments (after we added WRITE_BARRIER). */
-            acquire_privatization_lock(STM_SEGMENT->segment_num);
-            synchronize_object_enqueue(obj);
-            release_privatization_lock(STM_SEGMENT->segment_num);
+            /* this is a newly allocated obj in this transaction. We must
+               either synchronize the object to other segments now, or
+               add the object to new_objects list */
+            if (STM_PSEGMENT->minor_collect_will_commit_now) {
+                acquire_privatization_lock(STM_SEGMENT->segment_num);
+                synchronize_object_enqueue(obj);
+                release_privatization_lock(STM_SEGMENT->segment_num);
+            } else {
+                LIST_APPEND(STM_PSEGMENT->new_objects, obj);
+            }
         }
 
         /* the list could have moved while appending */
         lst = STM_PSEGMENT->objects_pointing_to_nursery;
     }
 
-    acquire_privatization_lock(STM_SEGMENT->segment_num);
-    synchronize_objects_flush();
-    release_privatization_lock(STM_SEGMENT->segment_num);
+    /* flush all new objects to other segments now */
+    if (STM_PSEGMENT->minor_collect_will_commit_now) {
+        acquire_privatization_lock(STM_SEGMENT->segment_num);
+        synchronize_objects_flush();
+        release_privatization_lock(STM_SEGMENT->segment_num);
+    } else {
+        /* nothing in the queue when not committing */
+        assert(STM_PSEGMENT->sq_len == 0);
+    }
 }
 
 
@@ -272,6 +290,8 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 static void _do_minor_collection(bool commit)
 {
     dprintf(("minor_collection commit=%d\n", (int)commit));
+
+    STM_PSEGMENT->minor_collect_will_commit_now = commit;
 
     collect_roots_in_nursery();
 

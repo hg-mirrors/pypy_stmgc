@@ -192,6 +192,14 @@ static inline bool mark_visited_test_and_clear(object_t *obj)
 
 /************************************************************/
 
+
+static bool is_new_object(object_t *obj)
+{
+    struct object_s *realobj = (struct object_s*)REAL_ADDRESS(stm_object_pages, obj); /* seg0 */
+    return realobj->stm_flags & GCFLAG_WB_EXECUTED;
+}
+
+
 static inline void mark_record_trace(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
@@ -226,11 +234,12 @@ static void mark_and_trace(object_t *obj, char *segment_base)
     stmcb_trace(realobj, &mark_record_trace);
 
     /* trace all references found in sharing seg0 (should always be
-       up-to-date and not cause segfaults) */
+       up-to-date and not cause segfaults, except for new objs) */
     while (!list_is_empty(marked_objects_to_trace)) {
         obj = (object_t *)list_pop_item(marked_objects_to_trace);
 
-        realobj = (struct object_s *)REAL_ADDRESS(stm_object_pages, obj);
+        char *base = is_new_object(obj) ? segment_base : stm_object_pages;
+        realobj = (struct object_s *)REAL_ADDRESS(base, obj);
         stmcb_trace(realobj, &mark_record_trace);
     }
 }
@@ -243,14 +252,31 @@ static inline void mark_visit_object(object_t *obj, char *segment_base)
     mark_and_trace(obj, segment_base);
 }
 
+
+static void mark_visit_possibly_new_object(char *segment_base, object_t *obj)
+{
+    /* if newly allocated object, we trace in segment_base, otherwise in
+       the sharing seg0 */
+    if (obj == NULL)
+        return;
+
+    if (is_new_object(obj)) {
+        mark_visit_object(obj, segment_base);
+    } else {
+        mark_visit_object(obj, stm_object_pages);
+    }
+}
+
 static void *mark_visit_objects_from_ss(void *_, const void *slice, size_t size)
 {
     const struct stm_shadowentry_s *p, *end;
     p = (const struct stm_shadowentry_s *)slice;
     end = (const struct stm_shadowentry_s *)(slice + size);
     for (; p < end; p++)
-        if ((((uintptr_t)p->ss) & 3) == 0)
+        if ((((uintptr_t)p->ss) & 3) == 0) {
+            assert(!is_new_object(p->ss));
             mark_visit_object(p->ss, stm_object_pages); // seg0
+        }
     return NULL;
 }
 
@@ -273,6 +299,7 @@ static void assert_obj_accessible_in(long segnum, object_t *obj)
 }
 
 
+
 static void mark_visit_from_modified_objects(void)
 {
     /* look for modified objects in segments and mark all of them
@@ -280,53 +307,29 @@ static void mark_visit_from_modified_objects(void)
        some of the pages) */
 
     long i;
-    struct list_s *uniques = list_create();
     for (i = 1; i < NB_SEGMENTS; i++) {
         char *base = get_segment_base(i);
-        OPT_ASSERT(list_is_empty(uniques));
 
-        /* the list of modified_old_objs can be huge and contain a lot
-           of duplicated (same obj, different slice) entries. It seems
-           worth it to build a new list without duplicates.
-           The reason is that newly created objs, when moved out of the
-           nursery, don't have WB_EXECUTED flag. Thus we execute waaay
-           too many write barriers per transaction and add them all
-           to this list (and the commit log). XXXXX */
         struct list_s *lst = get_priv_segment(i)->modified_old_objects;
-
-        struct stm_undo_s *undo = (struct stm_undo_s *)lst->items;
+        struct stm_undo_s *modified = (struct stm_undo_s *)lst->items;
         struct stm_undo_s *end = (struct stm_undo_s *)(lst->items + lst->count);
-        for (; undo < end; undo++) {
-            object_t *obj = undo->object;
-            struct object_s *dst = (struct object_s*)REAL_ADDRESS(base, obj);
 
-            if (!(dst->stm_flags & GCFLAG_VISITED)) {
-                LIST_APPEND(uniques, obj);
-                dst->stm_flags |= GCFLAG_VISITED;
+        for (; modified < end; modified++) {
+            object_t *obj = modified->object;
+            /* All modified objs have all pages accessible for now.
+               This is because we create a backup of the whole obj
+               and thus make all pages accessible. */
+            assert_obj_accessible_in(i, obj);
+
+            assert(!is_new_object(obj)); /* should never be in that list */
+
+            if (!mark_visited_test_and_set(obj)) {
+                /* trace shared, committed version */
+                mark_and_trace(obj, stm_object_pages);
             }
+            mark_and_trace(obj, base);   /* private, modified version */
         }
-
-
-        LIST_FOREACH_R(uniques, object_t*,
-           ({
-               /* clear the VISITED flags again and actually visit them */
-               struct object_s *dst = (struct object_s*)REAL_ADDRESS(base, item);
-               dst->stm_flags &= ~GCFLAG_VISITED;
-
-               /* All modified objs have all pages accessible for now.
-                  This is because we create a backup of the whole obj
-                  and thus make all pages accessible. */
-               assert_obj_accessible_in(i, item);
-
-               if (!mark_visited_test_and_set(item))
-                   mark_and_trace(item, stm_object_pages);  /* shared, committed version */
-               mark_and_trace(item, base);          /* private, modified version */
-           }));
-
-
-        list_clear(uniques);
     }
-    LIST_FREE(uniques);
 }
 
 static void mark_visit_from_roots(void)
@@ -341,19 +344,29 @@ static void mark_visit_from_roots(void)
         /* look at all objs on the shadow stack (they are old but may
            be uncommitted so far, so only exist in the associated_segment_num).
 
-           However, since we just executed a minor collection, they were
+           IF they are uncommitted new objs, trace in the actual segment,
+           otherwise, since we just executed a minor collection, they were
            all synced to the sharing seg0. Thus we can trace them there.
 
            If they were again modified since then, they were traced
            by mark_visit_from_modified_object() already.
         */
+
+        /* only for new, uncommitted objects:
+           If 'tl' is currently running, its 'associated_segment_num'
+           field is the segment number that contains the correct
+           version of its overflowed objects. */
+        char *segment_base = get_segment_base(tl->associated_segment_num);
+
         struct stm_shadowentry_s *current = tl->shadowstack;
         struct stm_shadowentry_s *base = tl->shadowstack_base;
         while (current-- != base) {
-            if ((((uintptr_t)current->ss) & 3) == 0)
-                mark_visit_object(current->ss, stm_object_pages);
+            if ((((uintptr_t)current->ss) & 3) == 0) {
+                mark_visit_possibly_new_object(segment_base, current->ss);
+            }
         }
-        mark_visit_object(tl->thread_local_obj, stm_object_pages);
+
+        mark_visit_possibly_new_object(segment_base, tl->thread_local_obj);
 
         tl = tl->next;
     } while (tl != stm_all_thread_locals);
@@ -362,14 +375,55 @@ static void mark_visit_from_roots(void)
     long i;
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (get_priv_segment(i)->transaction_state != TS_NONE) {
-            mark_visit_object(
-                get_priv_segment(i)->threadlocal_at_start_of_transaction,
-                stm_object_pages);
+            mark_visit_possibly_new_object(
+                get_segment_base(i),
+                get_priv_segment(i)->threadlocal_at_start_of_transaction);
+
             stm_rewind_jmp_enum_shadowstack(
                 get_segment(i)->running_thread,
                 mark_visit_objects_from_ss);
         }
     }
+}
+
+static void ready_new_objects(void)
+{
+#pragma push_macro("STM_PSEGMENT")
+#pragma push_macro("STM_SEGMENT")
+#undef STM_PSEGMENT
+#undef STM_SEGMENT
+    /* objs in new_objects only have garbage in the sharing seg0,
+       since it is used to mark objs as visited, we must make
+       sure the flag is cleared at the start of a major collection.
+       (XXX: ^^^ may be optional if we have the part below)
+
+       Also, we need to be able to recognize these objects in order
+       to only trace them in the segment they are valid in. So we
+       also make sure to set WB_EXECUTED in the sharing seg0. No
+       other objs than new_objects have WB_EXECUTED in seg0 (since
+       there can only be committed versions there).
+    */
+
+    long i;
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+        struct list_s *lst = pseg->new_objects;
+
+        LIST_FOREACH_R(lst, object_t* /*item*/,
+            ({
+                struct object_s *realobj;
+                /* WB_EXECUTED always set in this segment */
+                assert(realobj = (struct object_s*)REAL_ADDRESS(pseg->pub.segment_base, item));
+                assert(realobj->stm_flags & GCFLAG_WB_EXECUTED);
+
+                /* clear VISITED and ensure WB_EXECUTED in seg0 */
+                mark_visited_test_and_clear(item);
+                realobj = (struct object_s*)REAL_ADDRESS(stm_object_pages, item);
+                realobj->stm_flags |= GCFLAG_WB_EXECUTED;
+            }));
+    }
+#pragma pop_macro("STM_SEGMENT")
+#pragma pop_macro("STM_PSEGMENT")
 }
 
 
@@ -410,6 +464,16 @@ static void clean_up_segment_lists(void)
             /* if here MINOR_NOTHING_TO_DO() was true before, it's like
                we "didn't do a collection" at all. So nothing to do on
                modified_old_objs. */
+        }
+
+        /* remove from new_objects all objects that die */
+        lst = pseg->new_objects;
+        uintptr_t n = list_count(lst);
+        while (n-- > 0) {
+            object_t *obj = (object_t *)list_item(lst, n);
+            if (!mark_visited_test(obj)) {
+                list_set_item(lst, n, list_pop_item(lst));
+            }
         }
     }
 #pragma pop_macro("STM_SEGMENT")
@@ -485,6 +549,8 @@ static void major_collection_now_at_safe_point(void)
     acquire_all_privatization_locks();
 
     DEBUG_EXPECT_SEGFAULT(false);
+
+    ready_new_objects();
 
     /* marking */
     LIST_CREATE(marked_objects_to_trace);
