@@ -10,7 +10,7 @@
 
 (defun big_transactions ()
   (setq n 0)
-  (while (< n 20000)
+  (while (< n 2000)
     (transaction increment)
     (setq n (+ n 1))
     )

@@ -19,7 +19,7 @@
   (setq y (get lst 1))
   (setq z (get lst 2))
   (setq w (get lst 3))
-  
+
   (setq t (^ x (<< x 11)))
   (setq x y)
   (setq y z)
@@ -55,14 +55,14 @@
         (set shared (+ (get shared) 1))
       (set private (+ (get private) 1))
       )
-    
+
     (setq i (+ i 1))
     )
   )
 
 
 
-(setq N 1000)
+(setq N 5000)
 ;; CONFL_IF_BELOW / RAND_MAX == ratio of conflicting transactions
 ;;                              to non conflicting ones
 (setq RAND_MAX 8)
@@ -95,4 +95,3 @@
 (run-transactions)
 (print (quote run-time-diff:) (- (time) timer))
 (print (quote shared) (get shared))
-
