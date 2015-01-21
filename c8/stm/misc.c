@@ -41,6 +41,19 @@ bool _stm_was_written(object_t *obj)
     return (obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) == 0;
 }
 
+long _stm_count_cl_entries()
+{
+    struct stm_commit_log_entry_s *cl = &commit_log_root;
+
+    long count = 0;
+    while ((cl = cl->next)) {
+        if (cl == INEV_RUNNING)
+            break;
+        count++;
+    }
+    return count;
+}
+
 
 #ifdef STM_TESTS
 bool _stm_is_accessible_page(uintptr_t pagenum)

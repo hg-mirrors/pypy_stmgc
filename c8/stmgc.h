@@ -113,6 +113,7 @@ object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
 object_t *_stm_next_last_cl_entry();
 void _stm_start_enum_last_cl_entry();
+long _stm_count_cl_entries();
 
 uint64_t _stm_total_allocated(void);
 #endif
