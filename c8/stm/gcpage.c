@@ -574,4 +574,11 @@ static void major_collection_now_at_safe_point(void)
     DEBUG_EXPECT_SEGFAULT(true);
 
     release_all_privatization_locks();
+
+    /* if major_do_validation_and_minor_collections() decided that we
+       must abort, do it now. The others are in safe-points that will
+       abort if they need to. */
+    dprintf(("must abort?:%d\n", (int)must_abort()));
+    if (must_abort())
+        abort_with_mutex();
 }
