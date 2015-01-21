@@ -8,10 +8,12 @@ class Exec(object):
     def __init__(self, test):
         self.content = {'self': test}
         self.thread_num = 0
+        self.executed = []
 
     def do(self, cmd):
-        color = "\033[%dm" % (31 + self.thread_num % 6)
+        color = ">> \033[%dm" % (31 + (self.thread_num + 6) % 6)
         print >> sys.stderr, color + cmd + "\033[0m"
+        self.executed.append(cmd)
         exec cmd in globals(), self.content
 
 
@@ -298,6 +300,7 @@ class GlobalState(object):
 
             confl_set = other_trs.read_set & trs.write_set
             if confl_set:
+                assert not other_trs.inevitable
                 # trs wins!
                 other_trs.set_must_abort(objs_in_conflict=confl_set)
                 assert not trs.check_must_abort()
@@ -346,7 +349,8 @@ def op_abort_transaction(ex, global_state, thread_state):
 
 def op_become_inevitable(ex, global_state, thread_state):
     trs = thread_state.transaction_state
-    global_state.check_if_can_become_inevitable(trs)
+    if not trs.check_must_abort():
+        global_state.check_if_can_become_inevitable(trs)
 
     thread_state.push_roots(ex)
     ex.do(raising_call(trs.check_must_abort(),
@@ -361,7 +365,7 @@ def op_become_inevitable(ex, global_state, thread_state):
 
 def op_allocate(ex, global_state, thread_state):
     size = global_state.rnd.choice([
-        "16",
+        "16", "48", "288",
         str(4096+16),
         str(80*1024+16),
         #"SOME_MEDIUM_SIZE+16",
@@ -398,9 +402,19 @@ def op_minor_collect(ex, global_state, thread_state):
 
 def op_major_collect(ex, global_state, thread_state):
     thread_state.push_roots(ex)
-    ex.do('stm_major_collect()')
-    thread_state.pop_roots(ex)
-    thread_state.reload_roots(ex)
+
+    # check if we have to abort after the major gc
+    trs = thread_state.transaction_state
+    conflicts = trs.check_must_abort()
+    if conflicts:
+        ex.do("# objs_in_conflict=%s" % trs.objs_in_conflict)
+    ex.do(raising_call(conflicts, 'stm_major_collect'))
+
+    if conflicts:
+        thread_state.abort_transaction()
+    else:
+        thread_state.pop_roots(ex)
+        thread_state.reload_roots(ex)
 
 
 def op_forget_root(ex, global_state, thread_state):
@@ -423,18 +437,13 @@ def op_write(ex, global_state, thread_state):
         v = ord(global_state.rnd.choice("abcdefghijklmnop"))
     assert trs.write_root(r, v) is not None
     #
-    aborts = trs.check_must_abort()
-    if aborts:
-        thread_state.abort_transaction()
     offset = global_state.get_root_size(r) + " - 1"
     if is_ref:
-        ex.do(raising_call(aborts, "stm_set_ref", r, offset, v, try_cards))
-        if not aborts:
-            ex.do(raising_call(False, "stm_set_ref", r, "0", v, try_cards))
+        ex.do(raising_call(False, "stm_set_ref", r, offset, v, try_cards))
+        ex.do(raising_call(False, "stm_set_ref", r, "0", v, try_cards))
     else:
-        ex.do(raising_call(aborts, "stm_set_char", r, repr(chr(v)), offset, try_cards))
-        if not aborts:
-            ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR", try_cards))
+        ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), offset, try_cards))
+        ex.do(raising_call(False, "stm_set_char", r, repr(chr(v)), "HDR", try_cards))
 
 def op_read(ex, global_state, thread_state):
     r = thread_state.get_random_root()
@@ -497,7 +506,8 @@ def op_assert_modified(ex, global_state, thread_state):
 
 def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
     if new_thread_state is None:
-        new_thread_state = global_state.rnd.choice(global_state.thread_states)
+        new_thread_state = global_state.rnd.choice(
+            global_state.thread_states + [thread_state] * 10) # more likely not switch
 
     if new_thread_state != thread_state:
         if thread_state.transaction_state:
@@ -505,14 +515,14 @@ def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
         ex.do('#')
         #
         trs = new_thread_state.transaction_state
-        if trs is not None and not trs.inevitable:
-            if global_state.is_inevitable_transaction_running():
-                trs.set_must_abort()
-        conflicts = trs is not None and trs.check_must_abort()
+        conflicts = trs and trs.check_must_abort()
         ex.thread_num = new_thread_state.num
         #
+        if conflicts:
+            ex.do("# objs_in_conflict=%s" % trs.objs_in_conflict)
         ex.do(raising_call(conflicts,
                            "self.switch", new_thread_state.num))
+
         if conflicts:
             new_thread_state.abort_transaction()
         elif trs:
@@ -535,7 +545,7 @@ class TestRandom(BaseTest):
     def test_fixed_16_bytes_objects(self, seed=1010):
         rnd = random.Random(seed)
 
-        N_OBJECTS = 3
+        N_OBJECTS = 4
         N_THREADS = self.NB_THREADS
         ex = Exec(self)
         ex.do("################################################################\n"*10)
@@ -562,28 +572,28 @@ class TestRandom(BaseTest):
 
         # random steps:
         possible_actions = [
-            op_allocate,
-            op_allocate_ref, op_allocate_ref,
-            op_write, op_write, op_write,
-            op_read, op_read, op_read, op_read, op_read, op_read, op_read, op_read,
-            op_commit_transaction,
-            op_abort_transaction,
-            op_forget_root,
-            op_become_inevitable,
-            op_assert_size,
-            op_assert_modified,
-            op_minor_collect,
-            #op_major_collect,
+            [op_read,]*100,
+            [op_write,]*70,
+            [op_allocate,]*10,
+            [op_allocate_ref]*10,
+            [op_commit_transaction,]*6,
+            [op_abort_transaction,],
+            [op_forget_root]*10,
+            [op_become_inevitable],
+            [op_assert_size]*20,
+            [op_assert_modified]*10,
+            [op_minor_collect]*5,
+            [op_major_collect],
         ]
-        for _ in range(200):
+        possible_actions = [item for sublist in possible_actions for item in sublist]
+        print possible_actions
+        for _ in range(2000):
             # make sure we are in a transaction:
             curr_thread = op_switch_thread(ex, global_state, curr_thread)
 
-            if (global_state.is_inevitable_transaction_running()
-                and curr_thread.transaction_state is None):
-                continue        # don't bother trying to start a transaction
-
             if curr_thread.transaction_state is None:
+                if global_state.is_inevitable_transaction_running():
+                    continue # don't bother trying to start a transaction
                 op_start_transaction(ex, global_state, curr_thread)
                 assert curr_thread.transaction_state is not None
 

@@ -1,0 +1,10 @@
+
+
+(defun do_stuff (i)
+  (if (> (* i i) 10)
+    (print i)))
+
+(setq i 0)
+(while (< i 10)
+  (transaction do_stuff i)
+  (setq i (+ i 1)))

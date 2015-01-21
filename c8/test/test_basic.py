@@ -110,7 +110,8 @@ class TestBasic(BaseTest):
         #
         py.test.raises(Conflict, self.switch, 0) # detects rw conflict
 
-    def test_read_write_11(self):
+    @py.test.mark.parametrize("only_bk", [0, 1])
+    def test_read_write_11(self, only_bk):
         # test that stm_validate() and the SEGV-handler
         # always ensure up-to-date views of pages:
         lp1 = stm_allocate_old(16)
@@ -135,6 +136,10 @@ class TestBasic(BaseTest):
         self.commit_transaction()
         assert last_commit_log_entries() == [lp1] # commit 'x'
         #
+        if only_bk:
+            self.start_transaction()
+            stm_set_char(lp1, 'y') # 'x' is only in bk_copy
+        #
         #
         self.switch(2)
         self.start_transaction() # stm_validate()
@@ -145,8 +150,8 @@ class TestBasic(BaseTest):
         # is out-of-date because seg1 committed 'x'
         # (seg1 hasn't done stm_validate() since)
 
-
-    def test_read_write_12(self):
+    @py.test.mark.parametrize("only_bk", [0, 1])
+    def test_read_write_12(self, only_bk):
         # test that stm_validate() and the SEGV-handler
         # always ensure up-to-date views of pages:
         lp1 = stm_allocate_old(16)
@@ -167,6 +172,10 @@ class TestBasic(BaseTest):
         assert last_commit_log_entries() == [lp1]
         # '1' is committed
         #
+        if only_bk:
+            self.start_transaction()
+            stm_set_char(lp1, 'y') # '1' is only in bk_copy
+        #
         self.switch(2)
         self.start_transaction() # stm_validate()
         res = stm_get_char(lp1) # should be '1'
@@ -176,6 +185,185 @@ class TestBasic(BaseTest):
         # of segment 0 that didn't do stm_validate() and
         # therefore is still outdated.
         py.test.raises(Conflict, self.switch, 0)
+
+    @py.test.mark.parametrize("only_bk", [0, 1])
+    def test_read_write_13(self, only_bk):
+        # test that stm_validate() and the SEGV-handler
+        # always ensure up-to-date views of pages:
+        lp1 = stm_allocate_old(16)
+        stm_get_real_address(lp1)[HDR] = 'a' #setchar
+        #
+        self.start_transaction()
+        stm_set_char(lp1, '0') # shared->private
+        # prot_none in seg: 1,2,3
+        #
+        self.switch(1)
+        self.start_transaction()
+        stm_set_char(lp1, '1')
+        self.switch(2)
+        self.start_transaction()
+        # prot_none in seg: 2,3
+        #
+        self.switch(0)
+        self.commit_transaction()
+        assert last_commit_log_entries() == [lp1] # commit '0'
+        #
+        py.test.raises(Conflict, self.switch, 1)
+        self.start_transaction() # updates to '0'
+        stm_set_char(lp1, 'x')
+        self.commit_transaction()
+        assert last_commit_log_entries() == [lp1] # commit 'x'
+        #
+        if only_bk:
+            self.start_transaction()
+            stm_set_char(lp1, 'y') # 'x' is only in bk_copy
+        #
+        #
+        self.switch(2, validate=False) # NO stm_validate
+        res = stm_get_char(lp1) # SEGV -> should not validate and go back in time -> 'a'
+        py.test.raises(Conflict, self.commit_transaction) # 'a' is outdated, fail to commit
+        assert res == 'a'
+
+    @py.test.mark.parametrize("only_bk", [0, 1])
+    def test_read_write_14(self, only_bk):
+        lp1 = stm_allocate_old(16) # allocated in seg0
+        stm_get_real_address(lp1)[HDR] = 'a' #setchar
+        # S|P|P|P|P
+        #
+        # NO_ACCESS in all segments except seg0 (shared page holder)
+        #
+        #
+        self.switch(2)
+        self.start_transaction() # stm_validate()
+        #
+        self.switch(1) # with private page
+        self.start_transaction()
+        stm_set_char(lp1, 'C')
+        self.commit_transaction()
+        assert last_commit_log_entries() == [lp1] # commit 'C'
+        #
+        if only_bk:
+            self.start_transaction()
+            stm_set_char(lp1, 'y') # '1' is only in bk_copy
+        #
+        #
+        self.switch(2, validate=False)
+        res = stm_get_char(lp1) # should be 'a'
+        py.test.raises(Conflict, self.commit_transaction)
+        assert res == 'a'
+
+    @py.test.mark.parametrize("only_bk", [0, 1])
+    def test_read_write_15(self, only_bk):
+        lp1 = stm_allocate_old(16) # allocated in seg0
+        lp2 = stm_allocate_old(16) # allocated in seg0
+        stm_get_real_address(lp1)[HDR] = 'a' #setchar
+        stm_get_real_address(lp2)[HDR] = 'b' #setchar
+        # S|P|P|P|P
+        #
+        # NO_ACCESS in all segments except seg0 (shared page holder)
+        #
+        # all seg at R0
+        #
+        self.start_transaction()
+        #
+        self.switch(1) # with private page
+        self.start_transaction()
+        stm_set_char(lp2, 'C')
+        self.commit_transaction() # R1
+        assert last_commit_log_entries() == [lp2] # commit 'C'
+        if only_bk:
+            self.start_transaction()
+            stm_set_char(lp2, 'c') # R1.1
+        #
+        self.switch(2)
+        self.start_transaction()
+        stm_set_char(lp1, 'D')
+        self.commit_transaction()  # R2
+        assert last_commit_log_entries() == [lp1] # commit 'D'
+        if only_bk:
+            self.start_transaction()
+            stm_set_char(lp1, 'd') # R2.1
+        #
+        self.switch(3)
+        self.start_transaction() # stm_validate() -> R2
+        assert stm_get_char(lp1) == 'D'
+        assert stm_get_char(lp2) == 'C'
+        self.commit_transaction()
+        #
+
+
+    def test_read_write_16(self):
+        lp1 = stm_allocate_old(16) # allocated in seg0
+        lp2 = stm_allocate_old(16) # allocated in seg0
+        stm_get_real_address(lp1)[HDR] = 'a' #setchar
+        stm_get_real_address(lp2)[HDR] = 'b' #setchar
+        # S|P|P|P|P
+        #
+        # NO_ACCESS in all segments except seg0 (shared page holder)
+        #
+        # all seg at R0
+        #
+        self.start_transaction()
+        #
+        self.switch(1) # with private page
+        self.start_transaction()
+        stm_set_char(lp2, 'C')
+        self.commit_transaction() # R1
+        assert last_commit_log_entries() == [lp2] # commit 'C'
+        #
+        self.switch(2)
+        self.start_transaction()
+        stm_set_char(lp1, 'D')
+        self.commit_transaction()  # R2
+        assert last_commit_log_entries() == [lp1] # commit 'D'
+        #
+        self.switch(3)
+        self.start_transaction() # stm_validate() -> R2
+        assert stm_get_char(lp1) == 'D' # R2
+        #
+        self.switch(2)
+        self.start_transaction()
+        stm_set_char(lp1, 'I')
+        self.commit_transaction()  # R2
+        assert last_commit_log_entries() == [lp1] # commit 'I'
+        #
+        self.switch(1)
+        self.start_transaction()
+        stm_set_char(lp2, 'H')
+        self.commit_transaction() # R3
+        assert last_commit_log_entries() == [lp2] # commit 'H'
+        #
+        self.switch(3, validate=False) # R2 again
+        assert stm_get_char(lp1) == 'D' # R2
+        assert stm_get_char(lp2) == 'C' # R2
+        py.test.raises(Conflict, self.commit_transaction)
+        #
+
+    def test_read_write_17(self):
+        lp1 = stm_allocate_old(16) # allocated in seg0
+        stm_get_real_address(lp1)[HDR] = 'a' #setchar
+        # S|P|P|P|P
+        #
+        # NO_ACCESS in all segments except seg0 (shared page holder)
+        #
+        # all seg at R0
+        #
+        #
+        self.switch(1) # with private page
+        self.start_transaction()
+        stm_set_char(lp1, 'C')
+        self.commit_transaction() # R1
+        assert last_commit_log_entries() == [lp1] # commit 'C'
+        self.start_transaction()
+        stm_set_char(lp1, 'c') # bk_copy
+        #
+        self.switch(3, validate=False)
+        self.start_transaction() # validate
+        assert stm_get_char(lp1) == 'C' # R1
+        self.commit_transaction()
+        #
+
+
 
     def test_commit_fresh_objects(self):
         self.start_transaction()
@@ -543,3 +731,171 @@ class TestBasic(BaseTest):
         assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 56
         self.abort_transaction()
         assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 0
+
+    def test_abort_in_segfault_handler(self):
+        py.test.skip("not doing that anymore")
+        lp1 = stm_allocate_old(16)
+        lp2 = stm_allocate_old(16)
+
+        self.start_transaction()
+        stm_set_char(lp1, 'A')
+        stm_set_char(lp2, 'B')
+        self.commit_transaction()
+        # lp1 = S|N|N|N
+        # lp2 = S|N|N|N
+
+        self.switch(1)
+
+        self.start_transaction()
+        assert stm_get_char(lp1) == 'A'
+        # lp1 = S|P|N|N
+        # lp2 = S|N|N|N
+
+        self.switch(0)
+
+        self.start_transaction()
+        stm_set_char(lp1, 'C')
+        self.commit_transaction()
+        # lp1 = S|P|N|N
+        # lp2 = S|N|N|N
+
+        self.switch(1, validate=False)
+
+        # seg1 segfaults, validates, and aborts:
+        py.test.raises(Conflict, stm_get_char, lp2)
+
+    def test_bug(self):
+        lp_char_5 = stm_allocate_old(384)
+
+        self.start_transaction() # R1
+        stm_set_char(lp_char_5, 'i', 384 - 1, False)
+        stm_set_char(lp_char_5, 'i', HDR, False)
+        #
+        #
+        self.switch(3)
+        self.start_transaction()  # R1
+        self.commit_transaction() # R2
+
+        self.start_transaction()  # R2
+        stm_set_char(lp_char_5, 'o', 384 - 1, False) # bk_copy
+        stm_set_char(lp_char_5, 'o', HDR, False)
+        #
+        #
+        self.switch(0) # validate -> R2
+        assert stm_get_char(lp_char_5, 384 - 1) == 'i'
+
+    def test_bug2(self):
+        lp_char_5 = stm_allocate_old(384)
+
+        self.start_transaction() # R1
+        stm_set_char(lp_char_5, 'i', 384 - 1, False)
+        stm_set_char(lp_char_5, 'i', HDR, False)
+        #
+        self.switch(1)
+        self.start_transaction()
+        #
+        #
+        self.switch(3)
+        self.start_transaction()  # R1
+        stm_set_char(lp_char_5, 'o', 384 - 1, False) # bk_copy
+        stm_set_char(lp_char_5, 'o', HDR, False)
+        self.commit_transaction() # R2
+
+        self.start_transaction()  # R2
+        stm_set_char(lp_char_5, 'r', 384 - 1, False) # bk_copy
+        stm_set_char(lp_char_5, 'r', HDR, False)
+        #
+        py.test.raises(Conflict, self.switch, 0) # abort modified objs
+        #
+        self.switch(1) # validate -> R2
+
+        assert stm_get_char(lp_char_5, 384 - 1) == 'o'
+
+    def test_bug3(self):
+        lp_char_5 = stm_allocate_old(384)
+
+        for i in range(NB_SEGMENTS):
+            self.start_transaction()
+            stm_set_char(lp_char_5, '\0', HDR, False)
+            self.commit_transaction()
+
+        #
+        self.switch(2)
+        self.start_transaction()
+        stm_set_char(lp_char_5, 'i', HDR, False)
+        self.commit_transaction()
+
+        self.start_transaction()
+        stm_set_char(lp_char_5, 'x', HDR, False)
+
+        #
+        self.switch(1)
+        self.start_transaction()
+        stm_set_char(lp_char_5, 'a', HDR, False)
+        self.commit_transaction()
+
+        #
+        self.switch(0)
+        self.start_transaction()
+        assert stm_get_char(lp_char_5, HDR) == 'a'
+
+        #
+        py.test.raises(Conflict, self.switch, 2)
+
+
+    def test_repeated_wb(self):
+        lp_char_5 = stm_allocate_old(384)
+
+        self.start_transaction()
+        stm_set_char(lp_char_5, 'i', 384 - 1, False)
+        stm_set_char(lp_char_5, 'i', HDR, False)
+
+        stm_minor_collect()
+
+        stm_set_char(lp_char_5, 'j', 384 - 1, False)
+        stm_set_char(lp_char_5, 'j', HDR, False)
+
+        self.abort_transaction()
+
+        self.check_char_everywhere(lp_char_5, '\0', offset=HDR)
+        self.check_char_everywhere(lp_char_5, '\0', offset=384-1)
+
+    def test_bug4(self):
+        o = stm_allocate_old(16)
+        p = stm_allocate_old(32) # not the same page
+        self.start_transaction()
+        stm_set_char(o, 'x')
+        stm_set_char(p, 'x')
+        self.commit_transaction()
+
+        self.switch(2, False)
+        self.start_transaction()
+        # make both objs accessible
+        stm_get_char(o)
+        stm_get_char(p)
+        self.commit_transaction()
+        self.start_transaction()
+
+        self.switch(0, False)
+        self.start_transaction()
+        stm_set_char(p, 'y')
+        self.commit_transaction() # commit new p
+
+        self.start_transaction()
+        stm_set_char(o, 'f')
+        # o has backup copy
+        # this segment is the same as the one that
+        #   committed o and p last
+
+        self.switch(2, False)
+        # now we write o in version 'x'
+        assert stm_get_char(o) == 'x'
+        stm_set_char(o, 'c')
+        self.commit_transaction()
+        # o should now have 'c' and not be overwritten with 'f'
+
+        self.start_transaction()
+        assert stm_get_char(o) == 'c'
+        self.commit_transaction()
+
+        py.test.raises(Conflict, self.switch, 0)

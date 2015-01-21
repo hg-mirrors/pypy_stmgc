@@ -1,4 +1,3 @@
-import os
 import cffi, weakref
 from common import parent_dir, source_files
 
@@ -24,6 +23,7 @@ struct stm_shadowentry_s {
 typedef struct {
     rewind_jmp_thread rjthread;
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
+    object_t *thread_local_obj;
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
     long last_abort__bytes_in_nursery;
@@ -33,6 +33,9 @@ typedef struct {
     ...;
 } stm_thread_local_t;
 
+char *stm_object_pages;
+char *stm_file_pages;
+
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
@@ -41,13 +44,14 @@ void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
 void stm_unregister_thread_local(stm_thread_local_t *tl);
-void stm_validate(void *free_if_abort);
+void stm_validate();
 bool _check_stm_validate();
 
 object_t *stm_setup_prebuilt(object_t *);
 void _stm_start_safe_point(void);
 bool _check_stop_safe_point(void);
 
+ssize_t _checked_stmcb_size_rounded_up(struct object_s *obj);
 
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
@@ -61,6 +65,7 @@ long stm_can_move(object_t *obj);
 char *_stm_real_address(object_t *o);
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
+bool _stm_is_accessible_page(uintptr_t pagenum);
 
 void clear_jmpbuf(stm_thread_local_t *tl);
 long _check_start_transaction(stm_thread_local_t *tl);
@@ -75,9 +80,20 @@ uint32_t _get_type_id(object_t *obj);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
 
-void stm_collect(long level);
+/* void stm_collect(long level); */
+long _check_stm_collect(long level);
+uint64_t _stm_total_allocated(void);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
+void _stm_largemalloc_init_arena(char *data_start, size_t data_size);
+int _stm_largemalloc_resize_arena(size_t new_size);
+char *_stm_largemalloc_data_start(void);
+char *_stm_large_malloc(size_t request_size);
+void _stm_large_free(char *data);
+void _stm_large_dump(void);
+bool (*_stm_largemalloc_keep)(char *data);
+void _stm_largemalloc_sweep(void);
+
 
 long stm_identityhash(object_t *obj);
 long stm_id(object_t *obj);
@@ -100,10 +116,15 @@ void *memset(void *s, int c, size_t n);
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
 
+object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
+bool (*_stm_smallmalloc_keep)(char *data);
+void _stm_smallmalloc_sweep_test(void);
+
 """)
 
 
-GC_N_SMALL_REQUESTS = 36      # from gcpage.c
+GC_N_SMALL_REQUESTS = 36      # from smallmalloc.h
+GC_LAST_SMALL_SIZE  =   (8 * (GC_N_SMALL_REQUESTS - 1))
 LARGE_MALLOC_OVERHEAD = 16    # from largemalloc.h
 
 lib = ffi.verify(r'''
@@ -155,6 +176,10 @@ bool _check_commit_transaction(void) {
     CHECKED(stm_commit_transaction());
 }
 
+bool _check_stm_collect(long level) {
+    CHECKED(stm_collect(level));
+}
+
 long _check_start_transaction(stm_thread_local_t *tl) {
    void **jmpbuf = tl->rjthread.jmpbuf;                         \
     if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
@@ -165,6 +190,20 @@ long _check_start_transaction(stm_thread_local_t *tl) {
     clear_jmpbuf(tl);                                           \
     return 1;
 }
+
+ssize_t _checked_stmcb_size_rounded_up(struct object_s *obj)
+{
+    stm_thread_local_t *_tl = STM_SEGMENT->running_thread;      \
+    void **jmpbuf = _tl->rjthread.jmpbuf;                       \
+    if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
+        ssize_t res = stmcb_size_rounded_up(obj);
+        clear_jmpbuf(_tl);
+        return res;
+    }
+    clear_jmpbuf(_tl);
+    return 1;
+}
+
 
 bool _check_stop_safe_point(void) {
     CHECKED(_stm_stop_safe_point());
@@ -183,7 +222,7 @@ bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
 }
 
 bool _check_stm_validate(void) {
-    CHECKED(stm_validate(NULL));
+    CHECKED(stm_validate());
 }
 
 #undef CHECKED
@@ -259,7 +298,6 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     }
 }
 
-
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
                     ('STM_NO_AUTOMATIC_SETJMP', '1'),
@@ -270,7 +308,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
                     ],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0', '-Wall', '-ferror-limit=1'],
+     extra_compile_args=['-g', '-O0', '-Wall', '-Werror', '-ferror-limit=5'],
      extra_link_args=['-g', '-lrt'],
      force_generic_engine=True)
 
@@ -300,6 +338,12 @@ def stm_allocate_old(size):
 def stm_allocate_old_refs(n):
     o = lib._stm_allocate_old(HDR + n * WORD)
     tid = 421420 + n
+    lib._set_type_id(o, tid)
+    return o
+
+def stm_allocate_old_small(size):
+    o = lib._stm_allocate_old_small(size)
+    tid = 42 + size
     lib._set_type_id(o, tid)
     return o
 
@@ -387,16 +431,22 @@ def stm_stop_safe_point():
         raise Conflict()
 
 def stm_minor_collect():
-    lib.stm_collect(0)
+    assert not lib._check_stm_collect(0) # no conflict
 
 def stm_major_collect():
-    lib.stm_collect(1)
+    res = lib._check_stm_collect(1)
+    if res == 1:
+        raise Conflict()
+    return res
 
-def stm_get_private_page(pagenum):
-    return lib._stm_get_private_page(pagenum)
+def stm_is_accessible_page(pagenum):
+    return lib._stm_is_accessible_page(pagenum)
 
 def stm_get_obj_size(o):
-    return lib.stmcb_size_rounded_up(stm_get_real_address(o))
+    res = lib._checked_stmcb_size_rounded_up(stm_get_real_address(o))
+    if res == 1:
+        raise Conflict()
+    return res
 
 def stm_get_obj_pages(o):
     start = int(ffi.cast('uintptr_t', o))
@@ -456,8 +506,8 @@ class BaseTest(object):
         self.tls = [_allocate_thread_local() for i in range(self.NB_THREADS)]
         self.current_thread = 0
         # force-switch back to segment 0 so that when we do something
-        # outside of transactions before the test, it happens in seg0
-        self.switch_to_segment(0)
+        # outside of transactions before the test, it happens in sharing seg0
+        lib._stm_test_switch_segment(-1)
 
     def teardown_method(self, meth):
         lib.stmcb_expand_marker = ffi.NULL
@@ -511,7 +561,7 @@ class BaseTest(object):
         assert res   # abort_transaction() didn't abort!
         assert not lib._stm_in_transaction(tl)
 
-    def switch(self, thread_num):
+    def switch(self, thread_num, validate=True):
         assert thread_num != self.current_thread
         tl = self.tls[self.current_thread]
         if lib._stm_in_transaction(tl):
@@ -523,7 +573,8 @@ class BaseTest(object):
         if lib._stm_in_transaction(tl2):
             lib._stm_test_switch(tl2)
             stm_stop_safe_point() # can raise Conflict
-            stm_validate() # can raise Conflict
+            if validate:
+                stm_validate() # can raise Conflict
 
     def switch_to_segment(self, seg_num):
         lib._stm_test_switch_segment(seg_num)
@@ -551,10 +602,19 @@ class BaseTest(object):
         self.push_root(ffi.cast("object_t *", 8))
 
     def check_char_everywhere(self, obj, expected_content, offset=HDR):
-        for i in range(len(self.tls)):
+        for i in range(self.NB_THREADS):
+            if self.current_thread != i:
+                self.switch(i)
+            tl = self.tls[i]
+            if not lib._stm_in_transaction(tl):
+                self.start_transaction()
+
+            # check:
             addr = lib._stm_get_segment_base(i)
             content = addr[int(ffi.cast("uintptr_t", obj)) + offset]
             assert content == expected_content
+
+            self.abort_transaction()
 
     def get_thread_local_obj(self):
         tl = self.tls[self.current_thread]
