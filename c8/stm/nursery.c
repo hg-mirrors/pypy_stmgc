@@ -315,13 +315,19 @@ static void minor_collection(bool commit)
 
 void stm_collect(long level)
 {
-    if (level > 0) {
+    if (level > 0)
         force_major_collection_request();
-        minor_collection(/*commit=*/ false);
+
+    minor_collection(/*commit=*/ false);
+
+#ifdef STM_TESTS
+    /* tests don't want aborts in stm_allocate, thus
+       we only do major collections if explicitly requested */
+    if (level > 0)
         major_collection_if_requested();
-    } else {
-        minor_collection(/*commit=*/ false);
-    }
+#else
+    major_collection_if_requested();
+#endif
 }
 
 
