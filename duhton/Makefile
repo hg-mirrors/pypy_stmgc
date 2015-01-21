@@ -6,7 +6,7 @@ C7HEADERS = ../c7/stmgc.h ../c7/stm/*.h
 COMMON = -pthread -lrt -g -Wall
 
 
-all: duhton_debug duhton
+all: duhton_debug duhton duhton_release
 
 duhton: *.c *.h $(C7SOURCES) $(C7HEADERS)
 	clang $(COMMON) -O2 -o duhton *.c ../c7/stmgc.c

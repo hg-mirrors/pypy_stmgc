@@ -436,8 +436,8 @@ static void mark_visit_from_modified_objects(void)
             get_priv_segment(i)->modified_old_objects,
             object_t * /*item*/,
             ({
-                mark_visited_test_and_set(item);
-                mark_trace(item, stm_object_pages);  /* shared version */
+                if (!mark_visited_test_and_set(item))
+                    mark_trace(item, stm_object_pages);  /* shared version */
                 mark_trace(item, base);              /* private version */
             }));
     }

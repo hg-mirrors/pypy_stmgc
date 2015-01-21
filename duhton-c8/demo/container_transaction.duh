@@ -1,0 +1,20 @@
+
+(setq c (container 0))
+
+(defun g (thread n)
+    (set c (+ (get c) 1))
+    (if (> (get c) 20000)
+        (print (quote overflow) (get c))
+      (if (< n 10000)
+          (transaction f thread (+ n 1))
+        (if (< (get c) 20000)
+            (print (quote not-enough))
+          (print (quote ok))))))
+
+(defun f (thread n)
+    (print (quote <) thread n (quote >))
+    (g thread n))
+
+(transaction f (quote t1) 1)
+(transaction f (quote t2) 1)
+(transaction f (quote t3) 1)

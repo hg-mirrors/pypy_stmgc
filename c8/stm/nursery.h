@@ -1,9 +1,11 @@
 
 #define NSE_SIGPAUSE   _STM_NSE_SIGNAL_MAX
+#define NSE_SIGABORT   _STM_NSE_SIGNAL_ABORT
 
 static void minor_collection(bool commit);
 static void check_nursery_at_transaction_start(void);
 static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg);
+static void major_do_validation_and_minor_collections(void);
 
 static void assert_memset_zero(void *s, size_t n);
 

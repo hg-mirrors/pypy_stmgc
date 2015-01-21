@@ -47,11 +47,14 @@ long stm_can_move(object_t *obj)
 /************************************************************/
 static object_t *find_existing_shadow(object_t *obj);
 #define GCWORD_MOVED  ((object_t *) -1)
+#define FLAG_SYNC_LARGE       0x01
+
 
 static void minor_trace_if_young(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
     object_t *obj = *pobj;
+    uintptr_t nobj_sync_now;
     object_t *nobj;
     char *realobj;
     size_t size;
@@ -75,26 +78,39 @@ static void minor_trace_if_young(object_t **pobj)
                 *pobj = pforwarded_array[1];    /* already moved */
                 return;
             }
-            else {
-                /* really has a shadow */
-                nobj = find_existing_shadow(obj);
-                obj->stm_flags &= ~GCFLAG_HAS_SHADOW;
-                realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-                size = stmcb_size_rounded_up((struct object_s *)realobj);
-                goto copy_large_object;
-            }
+
+            /* really has a shadow */
+            nobj = find_existing_shadow(obj);
+            obj->stm_flags &= ~GCFLAG_HAS_SHADOW;
+            realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+            size = stmcb_size_rounded_up((struct object_s *)realobj);
+
+            dprintf(("has_shadow(%p): %p, sz:%lu\n",
+                     obj, nobj, size));
+            goto copy_large_object;
         }
 
         realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         size = stmcb_size_rounded_up((struct object_s *)realobj);
 
-        /* XXX: small objs */
-        char *allocated = allocate_outside_nursery_large(size);
-        nobj = (object_t *)(allocated - stm_object_pages);
+        if (size > GC_LAST_SMALL_SIZE) {
+            /* case 1: object is not small enough.
+               Ask gcpage.c for an allocation via largemalloc. */
+            nobj = (object_t *)allocate_outside_nursery_large(size);
+        }
+        else {
+            /* case "small enough" */
+            nobj = (object_t *)allocate_outside_nursery_small(size);
+        }
 
+        dprintf(("move %p -> %p\n", obj, nobj));
+
+        /* copy the object */
     copy_large_object:;
         char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
         memcpy(realnobj, realobj, size);
+
+        nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
 
         pforwarded_array[0] = GCWORD_MOVED;
         pforwarded_array[1] = nobj;
@@ -109,10 +125,19 @@ static void minor_trace_if_young(object_t **pobj)
         /* a young object outside the nursery */
         nobj = obj;
         tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)nobj);
+        nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
+    }
+
+    /* if this is not during commit, we will add them to the new_objects
+       list and push them to other segments on commit. Thus we can add
+       the WB_EXECUTED flag so that they don't end up in modified_old_objects */
+    assert(!(nobj->stm_flags & GCFLAG_WB_EXECUTED));
+    if (!STM_PSEGMENT->minor_collect_will_commit_now) {
+        nobj->stm_flags |= GCFLAG_WB_EXECUTED;
     }
 
     /* Must trace the object later */
-    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, (uintptr_t)nobj);
+    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
 }
 
 
@@ -140,6 +165,8 @@ static void collect_roots_in_nursery(void)
             /* it is an odd-valued marker, ignore */
         }
     }
+
+    minor_trace_if_young(&tl->thread_local_obj);
 }
 
 
@@ -164,12 +191,38 @@ static void collect_oldrefs_to_nursery(void)
     struct list_s *lst = STM_PSEGMENT->objects_pointing_to_nursery;
 
     while (!list_is_empty(lst)) {
-        object_t *obj = (object_t *)list_pop_item(lst);;
+        uintptr_t obj_sync_now = list_pop_item(lst);
+        object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE);
+
+        assert(!_is_in_nursery(obj));
 
         _collect_now(obj);
 
+        if (obj_sync_now & FLAG_SYNC_LARGE) {
+            /* this is a newly allocated obj in this transaction. We must
+               either synchronize the object to other segments now, or
+               add the object to new_objects list */
+            if (STM_PSEGMENT->minor_collect_will_commit_now) {
+                acquire_privatization_lock(STM_SEGMENT->segment_num);
+                synchronize_object_enqueue(obj);
+                release_privatization_lock(STM_SEGMENT->segment_num);
+            } else {
+                LIST_APPEND(STM_PSEGMENT->new_objects, obj);
+            }
+        }
+
         /* the list could have moved while appending */
         lst = STM_PSEGMENT->objects_pointing_to_nursery;
+    }
+
+    /* flush all new objects to other segments now */
+    if (STM_PSEGMENT->minor_collect_will_commit_now) {
+        acquire_privatization_lock(STM_SEGMENT->segment_num);
+        synchronize_objects_flush();
+        release_privatization_lock(STM_SEGMENT->segment_num);
+    } else {
+        /* nothing in the queue when not committing */
+        assert(STM_PSEGMENT->sq_len == 0);
     }
 }
 
@@ -215,7 +268,7 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
                    in this segment) */
                 *((char *)(pseg->pub.segment_base + (((uintptr_t)obj) >> 4))) = 0;
 
-                /* XXX: _stm_large_free(stm_object_pages + item->addr); */
+                _stm_large_free(stm_object_pages + item->addr);
             } TREE_LOOP_END;
         }
 
@@ -237,6 +290,8 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 static void _do_minor_collection(bool commit)
 {
     dprintf(("minor_collection commit=%d\n", (int)commit));
+
+    STM_PSEGMENT->minor_collect_will_commit_now = commit;
 
     collect_roots_in_nursery();
 
@@ -260,11 +315,13 @@ static void minor_collection(bool commit)
 
 void stm_collect(long level)
 {
-    if (level > 0)
-        abort();
-
-    minor_collection(/*commit=*/ false);
-    /* XXX: major_collection_if_requested(); */
+    if (level > 0) {
+        force_major_collection_request();
+        minor_collection(/*commit=*/ false);
+        major_collection_if_requested();
+    } else {
+        minor_collection(/*commit=*/ false);
+    }
 }
 
 
@@ -297,16 +354,19 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
 
 object_t *_stm_allocate_external(ssize_t size_rounded_up)
 {
-    /* /\* first, force a collection if needed *\/ */
-    /* if (is_major_collection_requested()) { */
-    /*     /\* use stm_collect() with level 0: if another thread does a major GC */
-    /*        in-between, is_major_collection_requested() will become false */
-    /*        again, and we'll avoid doing yet another one afterwards. *\/ */
-    /*     stm_collect(0); */
-    /* } */
+    /* first, force a collection if needed */
+    if (is_major_collection_requested()) {
+        /* use stm_collect() with level 0: if another thread does a major GC
+           in-between, is_major_collection_requested() will become false
+           again, and we'll avoid doing yet another one afterwards. */
+#ifndef STM_TESTS
+        /* during tests, we must not do a major collection during allocation.
+           The reason is that it may abort us and tests don't expect it. */
+        stm_collect(0);
+#endif
+    }
 
-    char *result = allocate_outside_nursery_large(size_rounded_up);
-    object_t *o = (object_t *)(result - stm_object_pages);
+    object_t *o = (object_t *)allocate_outside_nursery_large(size_rounded_up);
 
     tree_insert(STM_PSEGMENT->young_outside_nursery, (uintptr_t)o, 0);
 
@@ -352,14 +412,68 @@ static void check_nursery_at_transaction_start(void)
 }
 
 
+static void major_do_validation_and_minor_collections(void)
+{
+    int original_num = STM_SEGMENT->segment_num;
+    long i;
+
+    /* including the sharing seg0 */
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        set_gs_register(get_segment_base(i));
+
+        if (!_stm_validate()) {
+            assert(i != 0);     /* sharing seg0 should never need an abort */
+
+            if (STM_PSEGMENT->transaction_state == TS_NONE) {
+                /* we found a segment that has stale read-marker data and thus
+                   is in conflict with committed objs. Since it is not running
+                   currently, it's fine to ignore it. */
+                continue;
+            }
+
+            /* tell it to abort when continuing */
+            STM_PSEGMENT->pub.nursery_end = NSE_SIGABORT;
+            assert(must_abort());
+
+            dprintf(("abort data structures\n"));
+            abort_data_structures_from_segment_num(i);
+            continue;
+        }
+
+
+        if (MINOR_NOTHING_TO_DO(STM_PSEGMENT))  /*TS_NONE segments have NOTHING_TO_DO*/
+            continue;
+
+        assert(STM_PSEGMENT->transaction_state != TS_NONE);
+        assert(STM_PSEGMENT->safe_point != SP_RUNNING);
+        assert(STM_PSEGMENT->safe_point != SP_NO_TRANSACTION);
+
+
+        /* Other segments that will abort immediately after resuming: we
+           have to ignore them, not try to collect them anyway!
+           Collecting might fail due to invalid state.
+        */
+        if (!must_abort()) {
+            _do_minor_collection(/*commit=*/ false);
+            assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
+        }
+        else {
+            dprintf(("abort data structures\n"));
+            abort_data_structures_from_segment_num(i);
+        }
+    }
+
+    set_gs_register(get_segment_base(original_num));
+}
+
+
 static object_t *allocate_shadow(object_t *obj)
 {
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
 
-    /* always gets outside as a large object for now */
-    char *allocated = allocate_outside_nursery_large(size);
-    object_t *nobj = (object_t *)(allocated - stm_object_pages);
+    /* always gets outside as a large object for now (XXX?) */
+    object_t *nobj = (object_t *)allocate_outside_nursery_large(size);
 
     /* Initialize the shadow enough to be considered a valid gc object.
        If the original object stays alive at the next minor collection,
@@ -381,6 +495,8 @@ static object_t *allocate_shadow(object_t *obj)
 
     tree_insert(STM_PSEGMENT->nursery_objects_shadows,
                 (uintptr_t)obj, (uintptr_t)nobj);
+
+    dprintf(("allocate_shadow(%p): %p\n", obj, nobj));
     return nobj;
 }
 

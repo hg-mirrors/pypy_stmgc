@@ -48,6 +48,9 @@ typedef struct stm_thread_local_s {
     rewind_jmp_thread rjthread;
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
 
+    /* a generic optional thread-local object */
+    object_t *thread_local_obj;
+
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
     long last_abort__bytes_in_nursery;
@@ -59,7 +62,8 @@ typedef struct stm_thread_local_s {
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
 #define _STM_FAST_ALLOC           (66*1024)
-#define _STM_NSE_SIGNAL_MAX               1
+#define _STM_NSE_SIGNAL_ABORT             1
+#define _STM_NSE_SIGNAL_MAX               2
 
 void _stm_write_slowpath(object_t *);
 object_t *_stm_allocate_slowpath(ssize_t);
@@ -71,14 +75,31 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
 #include <stdbool.h>
-void stm_validate(void *free_if_abort);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
+
+bool _stm_is_accessible_page(uintptr_t pagenum);
 
 long stm_can_move(object_t *obj);
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
 void _push_obj_to_other_segments(object_t *obj);
+
+void _stm_largemalloc_init_arena(char *data_start, size_t data_size);
+int _stm_largemalloc_resize_arena(size_t new_size);
+char *_stm_largemalloc_data_start(void);
+char *_stm_large_malloc(size_t request_size);
+void _stm_large_free(char *data);
+void _stm_large_dump(void);
+bool (*_stm_largemalloc_keep)(char *data);
+void _stm_largemalloc_sweep(void);
+
+
+char *stm_object_pages;
+char *stm_file_pages;
+object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
+bool (*_stm_smallmalloc_keep)(char *data);
+void _stm_smallmalloc_sweep_test(void);
 
 void _stm_start_safe_point(void);
 void _stm_stop_safe_point(void);
@@ -92,6 +113,8 @@ object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
 object_t *_stm_next_last_cl_entry();
 void _stm_start_enum_last_cl_entry();
+
+uint64_t _stm_total_allocated(void);
 #endif
 
 /* ==================== HELPERS ==================== */
@@ -226,7 +249,29 @@ static inline void stm_become_inevitable(stm_thread_local_t *tl,
 }
 
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl, const char *msg);
+void stm_validate(void);
 
+
+/* dummies for now: */
+__attribute__((always_inline))
+static inline void stm_write_card(object_t *obj, uintptr_t index)
+{
+    stm_write(obj);
+}
+
+static inline object_t *stm_setup_prebuilt_weakref(object_t *pp)
+{
+    return stm_setup_prebuilt(pp);
+}
+
+static inline void stm_flush_timing(stm_thread_local_t *tl, int verbose) {}
 /* ==================== END ==================== */
+
+static void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,
+                            object_t *following_object,
+                            char *outputbuf, size_t outputbufsize);
+
+static void (*stmcb_debug_print)(const char *cause, double time,
+                          const char *marker);
 
 #endif

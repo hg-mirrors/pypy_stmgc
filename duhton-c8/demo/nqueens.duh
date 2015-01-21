@@ -1,0 +1,148 @@
+
+
+
+
+
+
+(defun abs (i)
+  (if (<= 0 i)
+      i
+    (- 0 i)))
+
+(defun clean_list (n)
+  (setq i n)
+  (setq res (list))
+  (while (> i 0)
+    (append res 0)
+    (setq i (- i 1))
+    )
+  res
+  )
+
+(defun copy_list (xs)
+  (setq res (list))
+  (setq idx 0)
+  (while (< idx (len xs))
+    (append res (get xs idx))
+    (setq idx (+ idx 1))
+    )
+  res
+  )
+
+
+(defun attacks (hist col i j)
+  (|| (== (get hist j) i)
+      (== (abs (- (get hist j) i))
+          (- col j)))
+  )
+
+(defun print_solution (hist n)
+  (print (quote solution) n)
+  (setq i 0)
+  (while (< i n)
+    (setq line (list))
+    (setq j 0)
+    (while (< j n)
+      (if (== j (get hist i))
+          (append line (quote Q))
+        (if (== 0 (% (+ i j) 2))
+            (append line (quote .))
+          (append line (quote ,))
+          )
+        )
+      (setq j (+ j 1))
+      )
+
+    (print line)
+    (setq i (+ i 1))
+    )
+  )
+
+(defun solve (n col hist count)
+  (if (== col n)
+      (progn
+        (set count (+ (get count) 1))
+        ;; (print_solution hist n)
+        )
+
+    ;; else
+    (setq i 0)
+    (while (< i n)
+      (setq j 0)
+      (while (&& (< j col)
+                 (not (attacks hist col i j)))
+        (setq j (+ j 1))
+        )
+
+      (if (>= j col)
+          (progn
+            (set hist col i)
+            (solve n (+ col 1) hist count)
+            ))
+      
+      (setq i (+ i 1))
+      )
+    )
+  )
+
+
+(defun solve_parallel (n col hist count)
+  (if (== col n)
+      (progn
+        (set count (+ (get count) 1))
+        ;; (print_solution hist n)
+        )
+
+    ;; else
+    (setq i 0)
+    (setq transaction-limit 1)
+    (if (== col transaction-limit)
+        (setq counts (list)))
+    
+    (while (< i n)
+      (setq j 0)
+      (while (&& (< j col)
+                 (not (attacks hist col i j)))
+        (setq j (+ j 1))
+        )
+
+      (if (>= j col)
+          (progn
+            (set hist col i)
+            (if (== col transaction-limit)
+                (progn
+                  (setq new_cont (container 0))
+                  (append counts new_cont)
+                  (transaction solve n (+ col 1) (copy_list hist) new_cont)
+                  )
+              (solve_parallel n (+ col 1) hist count)
+              )
+            )
+        )
+      ;; iterator
+      (setq i (+ i 1))
+      )
+    
+    (if (== col transaction-limit)
+        (progn
+          (run-transactions)
+          (setq i 0)
+          (while (< i (len counts))
+            (set count (+ (get count) (get (get counts i))))
+            (setq i (+ i 1))
+            )
+          )
+      )
+    )
+  )
+
+
+
+
+
+(setq count (container 0))
+
+(setq n 11)
+(solve_parallel n 0 (clean_list n) count)
+(print (quote solutions:) (get count))
+

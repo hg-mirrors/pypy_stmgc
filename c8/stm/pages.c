@@ -4,119 +4,97 @@
 
 #include <unistd.h>
 /************************************************************/
+struct {
+    volatile bool major_collection_requested;
+    uint64_t total_allocated;  /* keep track of how much memory we're
+                                  using, ignoring nurseries */
+    uint64_t total_allocated_bound;
+} pages_ctl;
+
 
 static void setup_pages(void)
 {
+    pages_ctl.total_allocated_bound = GC_MIN;
 }
 
 static void teardown_pages(void)
 {
-    memset(pages_privatized, 0, sizeof(pages_privatized));
+    memset(&pages_ctl, 0, sizeof(pages_ctl));
+    memset(pages_status, 0, sizeof(pages_status));
 }
+
+static uint64_t increment_total_allocated(ssize_t add_or_remove)
+{
+    uint64_t ta = __sync_add_and_fetch(&pages_ctl.total_allocated,
+                                       add_or_remove);
+
+    if (ta >= pages_ctl.total_allocated_bound)
+        pages_ctl.major_collection_requested = true;
+
+    return ta;
+}
+
+static bool is_major_collection_requested(void)
+{
+    return pages_ctl.major_collection_requested;
+}
+
+static void force_major_collection_request(void)
+{
+    pages_ctl.major_collection_requested = true;
+}
+
+static void reset_major_collection_requested(void)
+{
+    assert(_has_mutex());
+
+    uint64_t next_bound = (uint64_t)((double)pages_ctl.total_allocated *
+                                     GC_MAJOR_COLLECT);
+    if (next_bound < GC_MIN)
+        next_bound = GC_MIN;
+
+    pages_ctl.total_allocated_bound = next_bound;
+    pages_ctl.major_collection_requested = false;
+}
+
 
 /************************************************************/
 
-static void d_remap_file_pages(char *addr, size_t size, ssize_t pgoff)
+
+static void page_mark_accessible(long segnum, uintptr_t pagenum)
 {
-    dprintf(("remap_file_pages: 0x%lx bytes: (seg%ld %p) --> (seg%ld %p)\n",
-             (long)size,
-             (long)((addr - stm_object_pages) / 4096UL) / NB_PAGES,
-             (void *)((addr - stm_object_pages) % (4096UL * NB_PAGES)),
-             (long)pgoff / NB_PAGES,
-             (void *)((pgoff % NB_PAGES) * 4096UL)));
-    assert(size % 4096 == 0);
-    assert(size <= TOTAL_MEMORY);
-    assert(((uintptr_t)addr) % 4096 == 0);
-    assert(addr >= stm_object_pages);
-    assert(addr <= stm_object_pages + TOTAL_MEMORY - size);
-    assert(pgoff >= 0);
-    assert(pgoff <= (TOTAL_MEMORY - size) / 4096UL);
+    assert(segnum==0 || get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS);
+    dprintf(("page_mark_accessible(%lu) in seg:%ld\n", pagenum, segnum));
 
-    /* assert remappings follow the rule that page N in one segment
-       can only be remapped to page N in another segment */
-    assert(((addr - stm_object_pages) / 4096UL - pgoff) % NB_PAGES == 0);
+    dprintf(("RW(seg%ld, page%lu)\n", segnum, pagenum));
+    if (mprotect(get_virtual_page(segnum, pagenum), 4096, PROT_READ | PROT_WRITE)) {
+        perror("mprotect");
+        stm_fatalerror("mprotect failed! Consider running 'sysctl vm.max_map_count=16777216'");
+    }
 
-    char *res = mmap(addr, size,
-                     PROT_READ | PROT_WRITE,
-                     (MAP_PAGES_FLAGS & ~MAP_ANONYMOUS) | MAP_FIXED,
-                     stm_object_pages_fd, pgoff * 4096UL);
-    if (UNLIKELY(res != addr))
-        stm_fatalerror("mmap (remapping page): %m");
+    /* set this flag *after* we un-protected it, because XXX later */
+    set_page_status_in(segnum, pagenum, PAGE_ACCESSIBLE);
+
+    // XXX: maybe?
+    //increment_total_allocated(4096);
 }
 
-
-static void pages_initialize_shared(uintptr_t pagenum, uintptr_t count)
+__attribute__((unused))
+static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
 {
-    /* call remap_file_pages() to make all pages in the range(pagenum,
-       pagenum+count) refer to the same physical range of pages from
-       segment 0. */
-    dprintf(("pages_initialize_shared: 0x%ld - 0x%ld\n", pagenum,
-             pagenum + count));
-#ifndef NDEBUG
-    long l;
-    for (l = 0; l < NB_SEGMENTS; l++) {
-        assert(get_priv_segment(l)->privatization_lock);
-    }
-#endif
-    assert(pagenum < NB_PAGES);
-    if (count == 0)
-        return;
-    uintptr_t i;
-    for (i = 1; i < NB_SEGMENTS; i++) {
-        char *segment_base = get_segment_base(i);
-        d_remap_file_pages(segment_base + pagenum * 4096UL,
-                           count * 4096UL, pagenum);
+    assert(segnum==0 || get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE);
+    dprintf(("page_mark_inaccessible(%lu) in seg:%ld\n", pagenum, segnum));
+
+    set_page_status_in(segnum, pagenum, PAGE_NO_ACCESS);
+
+    dprintf(("NONE(seg%ld, page%lu)\n", segnum, pagenum));
+    char *addr = get_virtual_page(segnum, pagenum);
+    madvise(addr, 4096, MADV_DONTNEED);
+    if (mprotect(addr, 4096, PROT_NONE)) {
+        perror("mprotect");
+        stm_fatalerror("mprotect failed! Consider running 'sysctl vm.max_map_count=16777216'");
     }
 
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        uintptr_t amount = count;
-        while (amount-->0) {
-            volatile struct page_shared_s *ps2 = (volatile struct page_shared_s *)
-                &pages_privatized[pagenum + amount - PAGE_FLAG_START];
-
-            ps2->by_segment = 0; /* not private */
-        }
-    }
-}
-
-
-static void page_privatize_in(int segnum, uintptr_t pagenum, char *initialize_from)
-{
-#ifndef NDEBUG
-    long l;
-    for (l = 0; l < NB_SEGMENTS; l++) {
-        assert(get_priv_segment(l)->privatization_lock);
-    }
-#endif
-
-    /* check this thread's 'pages_privatized' bit */
-    uint64_t bitmask = 1UL << segnum;
-    volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
-        &pages_privatized[pagenum - PAGE_FLAG_START];
-    if (ps->by_segment & bitmask) {
-        /* the page is already privatized; nothing to do */
-        return;
-    }
-
-    dprintf(("page_privatize(%lu) in seg:%d\n", pagenum, segnum));
-
-    /* add this thread's 'pages_privatized' bit */
-    ps->by_segment |= bitmask;
-
-    /* "unmaps" the page to make the address space location correspond
-       again to its underlying file offset (XXX later we should again
-       attempt to group together many calls to d_remap_file_pages() in
-       succession) */
-    uintptr_t pagenum_in_file = NB_PAGES * segnum + pagenum;
-    char *new_page = stm_object_pages + pagenum_in_file * 4096UL;
-
-    /* first write to the file page directly: */
-    ssize_t written = pwrite(stm_object_pages_fd, initialize_from, 4096UL,
-                             pagenum_in_file * 4096UL);
-    if (written != 4096)
-        stm_fatalerror("pwrite didn't write the whole page: %zd", written);
-
-    /* now remap virtual page in segment to the new file page */
-    write_fence();
-    d_remap_file_pages(new_page, 4096, pagenum_in_file);
+    // XXX: maybe?
+    //increment_total_allocated(-4096);
 }
