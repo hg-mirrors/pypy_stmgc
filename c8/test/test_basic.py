@@ -33,12 +33,14 @@ class TestBasic(BaseTest):
         self.switch(1)
         self.start_transaction()
         self.commit_transaction()
-        assert last_commit_log_entries() == []
+        assert last_commit_log_entry_objs() == []
+        assert count_commit_log_entries() == 1
 
         self.switch(0)
 
         self.commit_transaction()
-        assert last_commit_log_entries() == []
+        assert last_commit_log_entry_objs() == []
+        assert count_commit_log_entries() == 2
 
     def test_simple_read(self):
         self.start_transaction()
@@ -46,7 +48,7 @@ class TestBasic(BaseTest):
         stm_read(lp1)
         assert stm_was_read(lp1)
         self.commit_transaction()
-        assert last_commit_log_entries() == []
+        assert last_commit_log_entry_objs() == []
 
     def test_simple_write(self):
         self.start_transaction()
@@ -57,7 +59,7 @@ class TestBasic(BaseTest):
         assert modified_old_objects() == []             # object not old
         assert objects_pointing_to_nursery() == []    # short transaction
         self.commit_transaction()
-        assert last_commit_log_entries() == []
+        assert last_commit_log_entry_objs() == []
 
     def test_allocate_old(self):
         lp1 = stm_allocate_old(16)
@@ -106,7 +108,7 @@ class TestBasic(BaseTest):
         #
         self.switch(1)
         self.commit_transaction()
-        assert last_commit_log_entries() == [lp1]
+        assert last_commit_log_entry_objs() == [lp1]
         #
         py.test.raises(Conflict, self.switch, 0) # detects rw conflict
 
@@ -128,13 +130,13 @@ class TestBasic(BaseTest):
         #
         self.switch(0)
         self.commit_transaction()
-        assert last_commit_log_entries() == [lp1] # commit '0'
+        assert last_commit_log_entry_objs() == [lp1] # commit '0'
         #
         py.test.raises(Conflict, self.switch, 1)
         self.start_transaction() # updates to '0'
         stm_set_char(lp1, 'x')
         self.commit_transaction()
-        assert last_commit_log_entries() == [lp1] # commit 'x'
+        assert last_commit_log_entry_objs() == [lp1] # commit 'x'
         #
         if only_bk:
             self.start_transaction()
@@ -169,7 +171,7 @@ class TestBasic(BaseTest):
         #
         self.switch(1)
         self.commit_transaction()
-        assert last_commit_log_entries() == [lp1]
+        assert last_commit_log_entry_objs() == [lp1]
         # '1' is committed
         #
         if only_bk:
@@ -206,13 +208,13 @@ class TestBasic(BaseTest):
         #
         self.switch(0)
         self.commit_transaction()
-        assert last_commit_log_entries() == [lp1] # commit '0'
+        assert last_commit_log_entry_objs() == [lp1] # commit '0'
         #
         py.test.raises(Conflict, self.switch, 1)
         self.start_transaction() # updates to '0'
         stm_set_char(lp1, 'x')
         self.commit_transaction()
-        assert last_commit_log_entries() == [lp1] # commit 'x'
+        assert last_commit_log_entry_objs() == [lp1] # commit 'x'
         #
         if only_bk:
             self.start_transaction()
@@ -240,7 +242,7 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_set_char(lp1, 'C')
         self.commit_transaction()
-        assert last_commit_log_entries() == [lp1] # commit 'C'
+        assert last_commit_log_entry_objs() == [lp1] # commit 'C'
         #
         if only_bk:
             self.start_transaction()
@@ -270,7 +272,7 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_set_char(lp2, 'C')
         self.commit_transaction() # R1
-        assert last_commit_log_entries() == [lp2] # commit 'C'
+        assert last_commit_log_entry_objs() == [lp2] # commit 'C'
         if only_bk:
             self.start_transaction()
             stm_set_char(lp2, 'c') # R1.1
@@ -279,7 +281,7 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_set_char(lp1, 'D')
         self.commit_transaction()  # R2
-        assert last_commit_log_entries() == [lp1] # commit 'D'
+        assert last_commit_log_entry_objs() == [lp1] # commit 'D'
         if only_bk:
             self.start_transaction()
             stm_set_char(lp1, 'd') # R2.1
@@ -309,13 +311,13 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_set_char(lp2, 'C')
         self.commit_transaction() # R1
-        assert last_commit_log_entries() == [lp2] # commit 'C'
+        assert last_commit_log_entry_objs() == [lp2] # commit 'C'
         #
         self.switch(2)
         self.start_transaction()
         stm_set_char(lp1, 'D')
         self.commit_transaction()  # R2
-        assert last_commit_log_entries() == [lp1] # commit 'D'
+        assert last_commit_log_entry_objs() == [lp1] # commit 'D'
         #
         self.switch(3)
         self.start_transaction() # stm_validate() -> R2
@@ -325,13 +327,13 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_set_char(lp1, 'I')
         self.commit_transaction()  # R2
-        assert last_commit_log_entries() == [lp1] # commit 'I'
+        assert last_commit_log_entry_objs() == [lp1] # commit 'I'
         #
         self.switch(1)
         self.start_transaction()
         stm_set_char(lp2, 'H')
         self.commit_transaction() # R3
-        assert last_commit_log_entries() == [lp2] # commit 'H'
+        assert last_commit_log_entry_objs() == [lp2] # commit 'H'
         #
         self.switch(3, validate=False) # R2 again
         assert stm_get_char(lp1) == 'D' # R2
@@ -353,7 +355,7 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_set_char(lp1, 'C')
         self.commit_transaction() # R1
-        assert last_commit_log_entries() == [lp1] # commit 'C'
+        assert last_commit_log_entry_objs() == [lp1] # commit 'C'
         self.start_transaction()
         stm_set_char(lp1, 'c') # bk_copy
         #
@@ -384,7 +386,7 @@ class TestBasic(BaseTest):
         assert (p2 - p1) % 4096 == 0
         assert stm_get_char(lp) == 'u'
         self.commit_transaction()
-        assert last_commit_log_entries() == [lp]
+        assert last_commit_log_entry_objs() == [lp]
 
     def test_commit_fresh_objects2(self):
         self.switch(1)

@@ -110,6 +110,7 @@ object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
 object_t *_stm_next_last_cl_entry();
 void _stm_start_enum_last_cl_entry();
+long _stm_count_cl_entries();
 
 void *memset(void *s, int c, size_t n);
 
@@ -435,6 +436,7 @@ def stm_minor_collect():
 
 def stm_major_collect():
     res = lib._check_stm_collect(1)
+    assert count_commit_log_entries() == 0
     if res == 1:
         raise Conflict()
     return res
@@ -474,7 +476,7 @@ def old_objects_with_cards():
         return None
     return map(lib._stm_enum_old_objects_with_cards, range(count))
 
-def last_commit_log_entries():
+def last_commit_log_entry_objs():
     lib._stm_start_enum_last_cl_entry()
     res = []
     obj = lib._stm_next_last_cl_entry()
@@ -482,6 +484,9 @@ def last_commit_log_entries():
         res.append(obj)
         obj = lib._stm_next_last_cl_entry()
     return res
+
+def count_commit_log_entries():
+    return lib._stm_count_cl_entries()
 
 
 

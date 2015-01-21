@@ -154,7 +154,7 @@ struct stm_commit_log_entry_s {
     size_t written_count;
     struct stm_undo_s written[];
 };
-static struct stm_commit_log_entry_s commit_log_root = {NULL, -1, 0, 0};
+static struct stm_commit_log_entry_s commit_log_root;
 
 
 #ifndef STM_TESTS

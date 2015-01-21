@@ -409,3 +409,26 @@ class TestGCPage(BaseTest):
 
         self.switch(1, False)
         py.test.raises(Conflict, stm_major_collect)
+
+
+    def test_cleaning_of_cl(self):
+        self.start_transaction()
+        stm_major_collect()
+        self.commit_transaction()
+
+        self.switch(1)
+        self.start_transaction()
+        self.commit_transaction()
+
+        self.switch(0)
+        self.start_transaction()
+        assert count_commit_log_entries() == 2
+        stm_major_collect()
+        assert count_commit_log_entries() == 0
+
+        stm_major_collect()
+
+        self.become_inevitable()
+        stm_major_collect()
+        stm_major_collect()
+        self.commit_transaction()

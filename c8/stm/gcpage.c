@@ -531,6 +531,52 @@ static void sweep_small_objects(void)
     _stm_smallmalloc_sweep();
 }
 
+static void clean_up_commit_log_entries()
+{
+    struct stm_commit_log_entry_s *cl, *next;
+
+#ifndef NDEBUG
+    /* check that all segments are at the same revision: */
+    cl = get_priv_segment(0)->last_commit_log_entry;
+    for (long i = 1; i < NB_SEGMENTS; i++) {
+        assert(get_priv_segment(i)->last_commit_log_entry == cl);
+    }
+#endif
+
+    /* if there is only one element, we don't have to do anything: */
+    cl = &commit_log_root;
+
+    if (cl->next == NULL || cl->next == INEV_RUNNING)
+        return;
+
+    bool was_inev = false;
+    uint64_t rev_num = -1;
+
+    next = cl->next;   /* guaranteed to exist */
+    do {
+        cl = next;
+        rev_num = cl->rev_num;
+
+        next = cl->next;
+        free(cl);
+        if (next == INEV_RUNNING) {
+            was_inev = true;
+            break;
+        }
+    } while (next != NULL);
+
+    /* set the commit_log_root to the last, common cl entry: */
+    commit_log_root.next = was_inev ? INEV_RUNNING : NULL;
+    commit_log_root.rev_num = rev_num;
+
+    /* update in all segments: */
+    for (long i = 0; i < NB_SEGMENTS; i++) {
+        get_priv_segment(i)->last_commit_log_entry = &commit_log_root;
+    }
+
+    assert(_stm_count_cl_entries() == 0);
+}
+
 
 
 static void major_collection_now_at_safe_point(void)
@@ -544,6 +590,12 @@ static void major_collection_now_at_safe_point(void)
 
     dprintf((" | used before collection: %ld\n",
              (long)pages_ctl.total_allocated));
+    dprintf((" | commit log entries before: %ld\n",
+             _stm_count_cl_entries()));
+
+    /* free all commit log entries. all segments are on the most recent
+       revision now. */
+    clean_up_commit_log_entries();
 
     /* only necessary because of assert that fails otherwise (XXX) */
     acquire_all_privatization_locks();
@@ -558,10 +610,10 @@ static void major_collection_now_at_safe_point(void)
     mark_visit_from_roots();
     LIST_FREE(marked_objects_to_trace);
 
-    /* /\* cleanup *\/ */
+    /* cleanup */
     clean_up_segment_lists();
 
-    /* /\* sweeping *\/ */
+    /* sweeping */
     sweep_large_objects();
     sweep_small_objects();
 

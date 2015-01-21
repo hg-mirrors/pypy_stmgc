@@ -78,6 +78,11 @@ void stm_setup(void)
     setup_protection_settings();
     setup_signal_handler();
 
+    commit_log_root.next = NULL;
+    commit_log_root.segment_num = -1;
+    commit_log_root.rev_num = 0;
+    commit_log_root.written_count = 0;
+
     long i;
     /* including seg0 */
     for (i = 0; i < NB_SEGMENTS; i++) {
@@ -128,6 +133,8 @@ void stm_teardown(void)
     /* This function is called during testing, but normal programs don't
        need to call it. */
     assert(!_has_mutex());
+
+    assert(commit_log_root.segment_num == -1);
 
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
