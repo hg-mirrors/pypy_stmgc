@@ -74,10 +74,19 @@ struct stm_priv_segment_info_s {
     struct tree_s *young_outside_nursery;
     struct tree_s *nursery_objects_shadows;
 
+    /* list of objects created in the current transaction and
+       that survived at least one minor collection. They need
+       to be synchronized to other segments on commit, but they
+       do not need to be in the commit log entry. */
+    struct list_s *new_objects;
+
     uint8_t privatization_lock;  // XXX KILL
 
     uint8_t safe_point;
     uint8_t transaction_state;
+
+    /* Temp for minor collection */
+    bool minor_collect_will_commit_now;
 
     struct tree_s *callbacks_on_commit_and_abort[2];
 
