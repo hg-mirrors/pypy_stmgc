@@ -788,6 +788,16 @@ static void push_new_objects_to_other_segments(void)
         }));
     synchronize_objects_flush();
     release_privatization_lock(STM_SEGMENT->segment_num);
+
+    /* we can as well clear the list here, since the
+       objects are only useful if the commit succeeds. And
+       we never do a major collection in-between.
+       They should also survive any page privatization happening
+       before the actual commit, since we always do a pagecopy
+       in handle_segfault_in_page() that also copies
+       unknown-to-the-segment/uncommitted things.
+    */
+    list_clear(STM_PSEGMENT->new_objects);
 }
 
 
@@ -801,7 +811,7 @@ void stm_commit_transaction(void)
     minor_collection(1);
 
     push_new_objects_to_other_segments();
-
+    /* push before validate. otherwise they are reachable too early */
     _validate_and_add_to_commit_log();
 
     invoke_and_clear_user_callbacks(0);   /* for commit */
