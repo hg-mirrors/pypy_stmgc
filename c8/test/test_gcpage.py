@@ -393,3 +393,19 @@ class TestGCPage(BaseTest):
         assert lib._stm_total_allocated() == 0
 
         self.commit_transaction()
+
+    def test_abort_thread_doing_major_gc(self):
+
+        o = stm_allocate_old(16)
+        self.start_transaction()
+        stm_set_char(o, 'a')
+
+        self.switch(1)
+        self.start_transaction()
+        stm_set_char(o, 'b')
+
+        self.switch(0)
+        self.commit_transaction()
+
+        self.switch(1, False)
+        py.test.raises(Conflict, stm_major_collect)

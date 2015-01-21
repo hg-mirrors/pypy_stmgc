@@ -315,11 +315,13 @@ static void minor_collection(bool commit)
 
 void stm_collect(long level)
 {
-    if (level > 0)
+    if (level > 0) {
         force_major_collection_request();
-
-    minor_collection(/*commit=*/ false);
-    major_collection_if_requested();
+        minor_collection(/*commit=*/ false);
+        major_collection_if_requested();
+    } else {
+        minor_collection(/*commit=*/ false);
+    }
 }
 
 
@@ -357,7 +359,11 @@ object_t *_stm_allocate_external(ssize_t size_rounded_up)
         /* use stm_collect() with level 0: if another thread does a major GC
            in-between, is_major_collection_requested() will become false
            again, and we'll avoid doing yet another one afterwards. */
+#ifndef STM_TESTS
+        /* during tests, we must not do a major collection during allocation.
+           The reason is that it may abort us and tests don't expect it. */
         stm_collect(0);
+#endif
     }
 
     object_t *o = (object_t *)allocate_outside_nursery_large(size_rounded_up);

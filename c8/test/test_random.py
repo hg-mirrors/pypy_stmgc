@@ -402,9 +402,19 @@ def op_minor_collect(ex, global_state, thread_state):
 
 def op_major_collect(ex, global_state, thread_state):
     thread_state.push_roots(ex)
-    ex.do('stm_major_collect()')
-    thread_state.pop_roots(ex)
-    thread_state.reload_roots(ex)
+
+    # check if we have to abort after the major gc
+    trs = thread_state.transaction_state
+    conflicts = trs.check_must_abort()
+    if conflicts:
+        ex.do("# objs_in_conflict=%s" % trs.objs_in_conflict)
+    ex.do(raising_call(conflicts, 'stm_major_collect'))
+
+    if conflicts:
+        thread_state.abort_transaction()
+    else:
+        thread_state.pop_roots(ex)
+        thread_state.reload_roots(ex)
 
 
 def op_forget_root(ex, global_state, thread_state):
@@ -497,7 +507,7 @@ def op_assert_modified(ex, global_state, thread_state):
 def op_switch_thread(ex, global_state, thread_state, new_thread_state=None):
     if new_thread_state is None:
         new_thread_state = global_state.rnd.choice(
-            global_state.thread_states + [thread_state] * 3) # more likely not switch
+            global_state.thread_states + [thread_state] * 10) # more likely not switch
 
     if new_thread_state != thread_state:
         if thread_state.transaction_state:
@@ -564,12 +574,12 @@ class TestRandom(BaseTest):
         possible_actions = [
             [op_read,]*100,
             [op_write,]*70,
-            [op_allocate,]*25,
-            [op_allocate_ref]*30,
-            [op_commit_transaction,]*10,
+            [op_allocate,]*10,
+            [op_allocate_ref]*10,
+            [op_commit_transaction,]*6,
             [op_abort_transaction,],
             [op_forget_root]*10,
-            [op_become_inevitable]*2,
+            [op_become_inevitable],
             [op_assert_size]*20,
             [op_assert_modified]*10,
             [op_minor_collect]*5,
