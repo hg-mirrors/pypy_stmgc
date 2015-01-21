@@ -80,7 +80,8 @@ uint32_t _get_type_id(object_t *obj);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
 
-void stm_collect(long level);
+/* void stm_collect(long level); */
+long _check_stm_collect(long level);
 uint64_t _stm_total_allocated(void);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
@@ -173,6 +174,10 @@ bool _checked_stm_write(object_t *object) {
 
 bool _check_commit_transaction(void) {
     CHECKED(stm_commit_transaction());
+}
+
+bool _check_stm_collect(long level) {
+    CHECKED(stm_collect(level));
 }
 
 long _check_start_transaction(stm_thread_local_t *tl) {
@@ -426,10 +431,13 @@ def stm_stop_safe_point():
         raise Conflict()
 
 def stm_minor_collect():
-    lib.stm_collect(0)
+    assert not lib._check_stm_collect(0) # no conflict
 
 def stm_major_collect():
-    lib.stm_collect(1)
+    res = lib._check_stm_collect(1)
+    if res == 1:
+        raise Conflict()
+    return res
 
 def stm_is_accessible_page(pagenum):
     return lib._stm_is_accessible_page(pagenum)
