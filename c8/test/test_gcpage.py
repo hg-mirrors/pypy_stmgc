@@ -3,6 +3,9 @@ import py
 
 
 LMO = LARGE_MALLOC_OVERHEAD
+CLEO = COMMIT_LOG_ENTRY_OVERHEAD
+CLEEO = COMMIT_LOG_ENTRY_ENTRY_OVERHEAD
+
 
 
 class TestGCPage(BaseTest):
@@ -134,6 +137,37 @@ class TestGCPage(BaseTest):
         stm_major_collect()
         assert lib._stm_total_allocated() == 0
 
+    def test_account_for_everything(self):
+        self.start_transaction()
+        self.commit_transaction()
+        assert lib._stm_total_allocated() == CLEO
+
+        self.start_transaction()
+        o = stm_allocate(5000)
+        self.push_root(o)
+        self.commit_transaction()
+        assert last_commit_log_entry_objs() == []
+        # 2 CLEs, 1 old object
+        assert lib._stm_total_allocated() == 2*CLEO + (5000 + LMO)
+
+        self.start_transaction()
+        o = self.pop_root()
+        stm_set_char(o, 'x')
+        self.push_root(o)
+        self.commit_transaction()
+        assert last_commit_log_entry_objs() == [o]*2
+        # 3 CLEs, 1 old object
+        # also, 2 slices of bk_copy and thus 2 CLE entries
+        assert lib._stm_total_allocated() == 3*CLEO + (5000+LMO) + (5000 + CLEEO*2)
+
+        self.start_transaction()
+        assert lib._stm_total_allocated() == 3*CLEO + (5000+LMO) + (5000 + CLEEO*2)
+        stm_major_collect()
+        # all CLE and CLE entries freed:
+        assert lib._stm_total_allocated() == (5000+LMO)
+        self.commit_transaction()
+
+
     def test_mark_recursive(self):
         def make_chain(sz):
             prev = ffi.cast("object_t *", ffi.NULL)
@@ -168,12 +202,12 @@ class TestGCPage(BaseTest):
         stm_set_char(x, 'a', 4999)
         self.push_root(x)
         self.commit_transaction()
-        assert lib._stm_total_allocated() == 5000 + LMO
+        assert lib._stm_total_allocated() == 5000 + LMO + CLEO
 
         self.start_transaction()
         x = self.pop_root()
         self.push_root(x)
-        assert lib._stm_total_allocated() == 5000 + LMO
+        assert lib._stm_total_allocated() == 5000 + LMO + CLEO
         stm_set_char(x, 'B')
         stm_set_char(x, 'b', 4999)
 
