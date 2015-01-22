@@ -484,7 +484,7 @@ static inline bool largemalloc_keep_object_at(char *data)
 {
     /* this is called by _stm_largemalloc_sweep() */
     object_t *obj = (object_t *)(data - stm_object_pages);
-    dprintf(("keep obj %p ? -> %d\n", obj, mark_visited_test(obj)));
+    //dprintf(("keep obj %p ? -> %d\n", obj, mark_visited_test(obj)));
     if (!mark_visited_test_and_clear(obj)) {
         /* This is actually needed in order to avoid random write-read
            conflicts with objects read and freed long in the past.
@@ -510,7 +510,7 @@ static inline bool smallmalloc_keep_object_at(char *data)
     /* XXX: identical to largemalloc_keep_object_at()? */
     /* this is called by _stm_smallmalloc_sweep() */
     object_t *obj = (object_t *)(data - stm_object_pages);
-    dprintf(("keep small obj %p ? -> %d\n", obj, mark_visited_test(obj)));
+    //dprintf(("keep small obj %p ? -> %d\n", obj, mark_visited_test(obj)));
     if (!mark_visited_test_and_clear(obj)) {
         /* This is actually needed in order to avoid random write-read
            conflicts with objects read and freed long in the past.
@@ -557,8 +557,14 @@ static void clean_up_commit_log_entries()
         cl = next;
         rev_num = cl->rev_num;
 
+        /* free bk copies of entries: */
+        long count = cl->written_count;
+        while (count-->0) {
+            free_bk(&cl->written[count]);
+        }
+
         next = cl->next;
-        free(cl);
+        free_cle(cl);
         if (next == INEV_RUNNING) {
             was_inev = true;
             break;
