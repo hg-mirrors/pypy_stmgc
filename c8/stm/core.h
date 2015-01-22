@@ -74,6 +74,16 @@ struct stm_priv_segment_info_s {
     struct tree_s *young_outside_nursery;
     struct tree_s *nursery_objects_shadows;
 
+    /* List of all young weakrefs to check in minor collections. These
+       are the only weakrefs that may point to young objects and never
+       contain NULL. */
+    struct list_s *young_weakrefs;
+
+    /* List of all old weakrefs to check in major collections. These
+       weakrefs never point to young objects and never contain NULL. */
+    struct list_s *old_weakrefs;
+
+
     /* list of objects created in the current transaction and
        that survived at least one minor collection. They need
        to be synchronized to other segments on commit, but they

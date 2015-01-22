@@ -297,6 +297,11 @@ static void _do_minor_collection(bool commit)
 
     collect_oldrefs_to_nursery();
 
+    /* now all surviving nursery objects have been moved out */
+    acquire_privatization_lock(STM_SEGMENT->segment_num);
+    stm_move_young_weakrefs();
+    release_privatization_lock(STM_SEGMENT->segment_num);
+
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
 
     throw_away_nursery(get_priv_segment(STM_SEGMENT->segment_num));
