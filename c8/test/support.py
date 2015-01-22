@@ -39,6 +39,7 @@ char *stm_file_pages;
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
+object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 
 void stm_setup(void);
 void stm_teardown(void);
@@ -48,6 +49,8 @@ void stm_validate();
 bool _check_stm_validate();
 
 object_t *stm_setup_prebuilt(object_t *);
+object_t *stm_setup_prebuilt_weakref(object_t *);
+
 void _stm_start_safe_point(void);
 bool _check_stop_safe_point(void);
 
@@ -79,6 +82,10 @@ void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
 void _set_ptr(object_t *obj, int n, object_t *v);
 object_t * _get_ptr(object_t *obj, int n);
+
+void _set_weakref(object_t *obj, object_t *v);
+object_t* _get_weakref(object_t *obj);
+
 
 /* void stm_collect(long level); */
 long _check_stm_collect(long level);
@@ -238,6 +245,20 @@ uint32_t _get_type_id(object_t *obj) {
     return ((myobj_t*)obj)->type_id;
 }
 
+#define WEAKREF_PTR(wr, sz)  ((object_t * TLPREFIX *)(((stm_char *)(wr)) + (sz) - sizeof(void*)))
+void _set_weakref(object_t *obj, object_t *v)
+{
+    char *realobj = _stm_real_address(obj);
+    ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+    *WEAKREF_PTR(obj, size) = v;
+}
+
+object_t * _get_weakref(object_t *obj)
+{
+    char *realobj = _stm_real_address(obj);
+    ssize_t size = stmcb_size_rounded_up((struct object_s *)realobj);
+    return *WEAKREF_PTR(obj, size);
+}
 
 void _set_ptr(object_t *obj, int n, object_t *v)
 {

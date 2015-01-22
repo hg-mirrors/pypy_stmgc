@@ -707,6 +707,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->new_objects));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
+    assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
     assert(tree_is_cleared(STM_PSEGMENT->nursery_objects_shadows));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[0]));
@@ -916,6 +917,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     list_clear(pseg->objects_pointing_to_nursery);
     list_clear(pseg->new_objects);
+    list_clear(pseg->young_weakrefs);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }

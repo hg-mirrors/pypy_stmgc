@@ -610,6 +610,9 @@ static void major_collection_now_at_safe_point(void)
     mark_visit_from_roots();
     LIST_FREE(marked_objects_to_trace);
 
+    /* weakrefs */
+    stm_visit_old_weakrefs();
+
     /* cleanup */
     clean_up_segment_lists();
 

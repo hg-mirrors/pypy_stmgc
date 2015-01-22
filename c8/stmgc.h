@@ -179,6 +179,9 @@ static inline object_t *stm_allocate(ssize_t size_rounded_up)
 }
 
 
+object_t *stm_allocate_weakref(ssize_t size_rounded_up);
+
+
 void stm_setup(void);
 void stm_teardown(void);
 
@@ -224,7 +227,7 @@ long stm_id(object_t *obj);
 void stm_set_prebuilt_identityhash(object_t *obj, long hash);
 
 object_t *stm_setup_prebuilt(object_t *);
-
+object_t *stm_setup_prebuilt_weakref(object_t *);
 
 long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
@@ -260,10 +263,6 @@ static inline void stm_write_card(object_t *obj, uintptr_t index)
     stm_write(obj);
 }
 
-static inline object_t *stm_setup_prebuilt_weakref(object_t *pp)
-{
-    return stm_setup_prebuilt(pp);
-}
 
 static inline void stm_flush_timing(stm_thread_local_t *tl, int verbose) {}
 /* ==================== END ==================== */
