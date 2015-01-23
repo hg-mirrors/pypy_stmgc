@@ -165,8 +165,10 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
             continue;
         if (remove_unread) {
             if (entry->object == NULL &&
-                   !_stm_was_read_by_anybody((object_t *)entry))
+                   !_stm_was_read_by_anybody((object_t *)entry)) {
+                dprintf(("  removing dead %p\n", entry));
                 continue;
+            }
         }
         _insert_clean(biggertable, entry);
         rc -= 6;
@@ -349,6 +351,7 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
            can never grow larger than the current table size. */
         assert(count <= table->mask + 1);
 
+        dprintf(("compact with %ld items:\n", num_entries_times_6 / 6));
         _stm_rehash_hashtable(hashtable, count, /*remove_unread=*/true);
     }
 
