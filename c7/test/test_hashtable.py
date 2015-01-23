@@ -216,7 +216,7 @@ class TestHashtable(BaseTestHashtable):
         #
         self.switch(1)
         self.start_transaction()
-        stm_write(lp1)
+        stm_write(lp1)            # force this page to be shared
         #
         self.switch(0)
         self.start_transaction()
@@ -228,7 +228,7 @@ class TestHashtable(BaseTestHashtable):
         self.push_root(h)
         #
         self.switch(1)            # in a different thread
-        stm_major_collect()
+        stm_major_collect()       # force a _stm_rehash_hashtable()
         #
         self.switch(0)            # back to the original thread
         h = self.pop_root()
