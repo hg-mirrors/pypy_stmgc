@@ -207,6 +207,35 @@ class TestHashtable(BaseTestHashtable):
         assert htget(h, 1) == lp1
         stm_major_collect()       # to get rid of the hashtable object
 
+    def test_major_collect_bug2(self):
+        self.start_transaction()
+        lp1 = stm_allocate(24)
+        self.push_root(lp1)
+        self.commit_transaction()
+        lp1 = self.pop_root()
+        #
+        self.switch(1)
+        self.start_transaction()
+        stm_write(lp1)
+        #
+        self.switch(0)
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        htset(h, 10, stm_allocate(32), tl0)
+        htset(h, 11, stm_allocate(32), tl0)
+        htset(h, 12, stm_allocate(32), tl0)
+        self.push_root(h)
+        #
+        self.switch(1)            # in a different thread
+        stm_major_collect()
+        #
+        self.switch(0)            # back to the original thread
+        h = self.pop_root()
+        assert htget(h, 10) != ffi.NULL
+        assert htget(h, 11) != ffi.NULL
+        assert htget(h, 12) != ffi.NULL
+
 
 class TestRandomHashtable(BaseTestHashtable):
 
@@ -329,7 +358,11 @@ class TestRandomHashtable(BaseTestHashtable):
         stm_major_collect()       # to get rid of the hashtable objects
 
     def test_random_multiple_threads(self):
-        import random
+        from random import randrange, Random
+        seed = randrange(0, 10000)
+        print "----------------------------------------- seed:", seed
+        random = Random(seed)
+        #
         self.start_transaction()
         self.exchange_threads()
         self.start_transaction()
@@ -351,7 +384,7 @@ class TestRandomHashtable(BaseTestHashtable):
 
             if r < 0.05:
                 h = self.allocate_hashtable()
-                print "allocate_hashtable ->", h
+                print "allocate_hashtable -> %r/%r" % (h, get_hashtable(h))
                 self.mirror[h] = {}
             elif r < 0.10:
                 print "stm_minor_collect"
@@ -369,7 +402,7 @@ class TestRandomHashtable(BaseTestHashtable):
                 if not self.mirror[h]: continue
                 key = random.choice(self.mirror[h].keys())
                 value = self.mirror[h][key]
-                print "htget(%r, %r) == %r" % (h, key, value)
+                print "htget(%r/%r, %r) == %r" % (h, get_hashtable(h), key, value)
                 self.push_roots()
                 self.push_root(value)
                 result = htget(h, key)
@@ -381,7 +414,7 @@ class TestRandomHashtable(BaseTestHashtable):
                 h = random.choice(self.mirror.keys())
                 key = random.randrange(0, 40)
                 if key in self.mirror[h]: continue
-                print "htget(%r, %r) == NULL" % (h, key)
+                print "htget(%r/%r, %r) == NULL" % (h, get_hashtable(h), key)
                 self.push_roots()
                 assert htget(h, key) == ffi.NULL
                 self.pop_roots()
@@ -398,7 +431,7 @@ class TestRandomHashtable(BaseTestHashtable):
                 h = random.choice(self.mirror.keys())
                 key = random.randrange(0, 32)
                 value = random.choice(self.values)
-                print "htset(%r, %r, %r)" % (h, key, value)
+                print "htset(%r/%r, %r, %r)" % (h, get_hashtable(h), key, value)
                 self.push_roots()
                 tl = self.tls[self.current_thread]
                 htset(h, key, value, tl)
