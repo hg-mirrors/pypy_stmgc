@@ -553,6 +553,13 @@ struct stm_hashtable_entry_s {
     object_t *object;
 };
 
+/* Bags, i.e. unordered lists. */
+typedef struct stm_bag_s stm_bag_t;
+stm_bag_t *stm_bag_create(void);
+void stm_bag_free(stm_bag_t *);
+void stm_bag_add(stm_bag_t *, object_t *);
+object_t *stm_bag_try_pop(stm_bag_t *);
+
 /* ==================== END ==================== */
 
 #endif
