@@ -218,3 +218,27 @@ static inline bool tree_contains(struct tree_s *tree, uintptr_t addr)
     TREE_FIND(*tree, addr, result, return false);
     return true;
 }
+
+/************************************************************/
+
+#define DEQUE_BLOCK_SIZE  31
+typedef unsigned char deque_idx_t;
+
+struct deque_block_s {
+    struct deque_block_s *next;
+    uintptr_t items[DEQUE_BLOCK_SIZE];
+};
+
+static inline struct deque_block_s *deque_new_block(void)
+{
+    struct deque_block_s *db = malloc(sizeof(struct deque_block_s));
+    if (db == NULL)
+        stm_fatalerror("out of memory in deque_new_block");   /* XXX */
+    db->next = NULL;
+    return db;
+}
+
+static inline void deque_free_block(struct deque_block_s *db)
+{
+    free(db);
+}
