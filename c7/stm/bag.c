@@ -41,23 +41,32 @@ is done with careful compare-and-swaps.
 */
 
 
-struct stm_bag_seg_s {
-    uintptr_t *deque_left, *deque_middle, *deque_right;
-    struct list_s *abort_list;
-    uint64_t start_time;    /* the transaction's unique_start_time */
-};
+typedef union {
+    struct {
+        uintptr_t *deque_left, *deque_middle, *deque_right;
+        struct list_s *abort_list;
+        uint64_t start_time;    /* the transaction's unique_start_time */
+    };
+    char alignment[64];   /* 64-bytes alignment, to prevent false sharing */
+} stm_bag_seg_t;
 
 struct stm_bag_s {
-    struct stm_bag_seg_s by_segment[STM_NB_SEGMENTS];
+    stm_bag_seg_t by_segment[STM_NB_SEGMENTS];
 };
 
 stm_bag_t *stm_bag_create(void)
 {
     int i;
-    stm_bag_t *bag = malloc(sizeof(stm_bag_t));
-    assert(bag);
+    stm_bag_t *bag;
+    void *mem;
+
+    assert(sizeof(stm_bag_seg_t) == 64);
+    if (posix_memalign(&mem, sizeof(stm_bag_seg_t), sizeof(stm_bag_t)) != 0)
+        stm_fatalerror("out of memory in stm_bag_create");   /* XXX */
+
+    bag = (stm_bag_t *)mem;
     for (i = 0; i < STM_NB_SEGMENTS; i++) {
-        struct stm_bag_seg_s *bs = &bag->by_segment[i];
+        stm_bag_seg_t *bs = &bag->by_segment[i];
         struct deque_block_s *block = deque_new_block();
         bs->deque_left = &block->items[0];
         bs->deque_middle = &block->items[0];
@@ -72,7 +81,7 @@ void stm_bag_free(stm_bag_t *bag)
 {
     int i;
     for (i = 0; i < STM_NB_SEGMENTS; i++) {
-        struct stm_bag_seg_s *bs = &bag->by_segment[i];
+        stm_bag_seg_t *bs = &bag->by_segment[i];
         struct deque_block_s *block = deque_block(bs->deque_left);
         while (block != NULL) {
             struct deque_block_s *nextblock = block->next;
@@ -84,7 +93,7 @@ void stm_bag_free(stm_bag_t *bag)
 
     s_mutex_lock();
     for (i = 0; i < STM_NB_SEGMENTS; i++) {
-        struct stm_bag_seg_s *bs = &bag->by_segment[i];
+        stm_bag_seg_t *bs = &bag->by_segment[i];
         struct stm_segment_info_s *pub = get_segment(i + 1);
         stm_thread_local_t *tl = pub->running_thread;
         if (tl->associated_segment_num == i + 1) {
@@ -96,7 +105,7 @@ void stm_bag_free(stm_bag_t *bag)
     free(bag);
 }
 
-static void bag_add(struct stm_bag_seg_s *bs, object_t *newobj)
+static void bag_add(stm_bag_seg_t *bs, object_t *newobj)
 {
     struct deque_block_s *block = deque_block(bs->deque_right);
     *bs->deque_right++ = (uintptr_t)newobj;
@@ -110,7 +119,7 @@ static void bag_add(struct stm_bag_seg_s *bs, object_t *newobj)
 
 static void bag_abort_callback(void *key)
 {
-    struct stm_bag_seg_s *bs = (struct stm_bag_seg_s *)key;
+    stm_bag_seg_t *bs = (stm_bag_seg_t *)key;
 
     /* remove the "added in this transaction" items */
     bs->deque_right = bs->deque_middle;
@@ -123,10 +132,10 @@ static void bag_abort_callback(void *key)
     bs->deque_middle = bs->deque_right;
 }
 
-static struct stm_bag_seg_s *bag_check_start_time(stm_bag_t *bag)
+static stm_bag_seg_t *bag_check_start_time(stm_bag_t *bag)
 {
     int i = STM_SEGMENT->segment_num - 1;
-    struct stm_bag_seg_s *bs = &bag->by_segment[i];
+    stm_bag_seg_t *bs = &bag->by_segment[i];
 
     if (bs->start_time != STM_PSEGMENT->unique_start_time) {
         /* There was a commit or an abort since the last operation
@@ -155,13 +164,13 @@ static struct stm_bag_seg_s *bag_check_start_time(stm_bag_t *bag)
 
 void stm_bag_add(stm_bag_t *bag, object_t *newobj)
 {
-    struct stm_bag_seg_s *bs = bag_check_start_time(bag);
+    stm_bag_seg_t *bs = bag_check_start_time(bag);
     bag_add(bs, newobj);
 }
 
 object_t *stm_bag_try_pop(stm_bag_t *bag)
 {
-    struct stm_bag_seg_s *bs = bag_check_start_time(bag);
+    stm_bag_seg_t *bs = bag_check_start_time(bag);
     if (bs->deque_left == bs->deque_right) {
         return NULL;
     }
@@ -189,14 +198,14 @@ void stm_bag_tracefn(stm_bag_t *bag, void trace(object_t **))
         /* only trace the items added in the current transaction;
            the rest is already old and cannot point into the nursery. */
         int i = STM_SEGMENT->segment_num - 1;
-        struct stm_bag_seg_s *bs = &bag->by_segment[i];
+        stm_bag_seg_t *bs = &bag->by_segment[i];
 
         deque_trace(bs->deque_middle, bs->deque_right, trace);
     }
     else {
         int i;
         for (i = 0; i < NB_SEGMENTS; i++) {
-            struct stm_bag_seg_s *bs = &bag->by_segment[i];
+            stm_bag_seg_t *bs = &bag->by_segment[i];
             deque_trace(bs->deque_left, bs->deque_right, trace);
         }
     }
