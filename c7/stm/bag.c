@@ -42,8 +42,7 @@ is done with careful compare-and-swaps.
 
 
 struct stm_bag_seg_s {
-    struct deque_block_s *deque_left, *deque_middle, *deque_right;
-    deque_idx_t deque_left_pos, deque_middle_pos, deque_right_pos;
+    uintptr_t *deque_left, *deque_middle, *deque_right;
     struct list_s *abort_list;
 };
 
@@ -59,12 +58,9 @@ stm_bag_t *stm_bag_create(void)
     for (i = 0; i < STM_NB_SEGMENTS; i++) {
         struct stm_bag_seg_s *bs = &bag->by_segment[i];
         struct deque_block_s *block = deque_new_block();
-        bs->deque_left = block;
-        bs->deque_middle = block;
-        bs->deque_right = block;
-        bs->deque_left_pos = 0;
-        bs->deque_middle_pos = 0;
-        bs->deque_right_pos = 0;
+        bs->deque_left = &block->items[0];
+        bs->deque_middle = &block->items[0];
+        bs->deque_right = &block->items[0];
         LIST_CREATE(bs->abort_list);
     }
     return bag;
@@ -75,11 +71,49 @@ void stm_bag_free(stm_bag_t *bag)
     int i;
     for (i = 0; i < STM_NB_SEGMENTS; i++) {
         struct stm_bag_seg_s *bs = &bag->by_segment[i];
-        while (bs->deque_left) {
-            struct deque_block_s *block = bs->deque_left;
-            bs->deque_left = block->next;
+        struct deque_block_s *block = deque_block(bs->deque_left);
+        while (block != NULL) {
+            struct deque_block_s *nextblock = block->next;
             deque_free_block(block);
+            block = nextblock;
         }
         LIST_FREE(bs->abort_list);
     }
+}
+
+void stm_bag_add(stm_bag_t *bag, object_t *newobj)
+{
+    int i = STM_SEGMENT->segment_num - 1;
+    struct stm_bag_seg_s *bs = &bag->by_segment[i];
+    struct deque_block_s *block = deque_block(bs->deque_right);
+
+    *bs->deque_right++ = (uintptr_t)newobj;
+
+    if (bs->deque_right == &block->items[DEQUE_BLOCK_SIZE]) {
+        assert(block->next == NULL);
+        block->next = deque_new_block();
+        bs->deque_right = &block->next->items[0];
+    }
+}
+
+object_t *stm_bag_try_pop(stm_bag_t *bag)
+{
+    int i = STM_SEGMENT->segment_num - 1;
+    struct stm_bag_seg_s *bs = &bag->by_segment[i];
+    if (bs->deque_left == bs->deque_right) {
+        return NULL;
+    }
+    struct deque_block_s *block = deque_block(bs->deque_left);
+    uintptr_t result = *bs->deque_left++;
+
+    if (bs->deque_left == &block->items[DEQUE_BLOCK_SIZE]) {
+        bs->deque_left = &block->next->items[0];
+        deque_free_block(block);
+    }
+    return (object_t *)result;
+}
+
+void stm_bag_tracefn(stm_bag_t *bag, void visit(object_t **))
+{
+    abort();
 }

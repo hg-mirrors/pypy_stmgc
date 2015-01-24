@@ -193,3 +193,22 @@ static bool tree_delete_item(struct tree_s *tree, uintptr_t addr)
  missing:
     return false;
 }
+
+
+/************************************************************/
+
+static struct deque_block_s *deque_new_block(void)
+{
+    void *mem;
+    struct deque_block_s *db;
+    size_t size = sizeof(struct deque_block_s);
+
+    assert((size & (size - 1)) == 0);   /* a power of two */
+
+    if (posix_memalign(&mem, size, size) != 0)
+        stm_fatalerror("out of memory in deque_new_block");   /* XXX */
+
+    db = (struct deque_block_s *)mem;
+    db->next = NULL;
+    return db;
+}

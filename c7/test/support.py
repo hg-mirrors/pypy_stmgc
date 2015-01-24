@@ -178,6 +178,16 @@ void stm_hashtable_tracefn(stm_hashtable_t *, void (object_t **));
 
 void _set_hashtable(object_t *obj, stm_hashtable_t *h);
 stm_hashtable_t *_get_hashtable(object_t *obj);
+
+typedef struct stm_bag_s stm_bag_t;
+stm_bag_t *stm_bag_create(void);
+void stm_bag_free(stm_bag_t *);
+void stm_bag_add(stm_bag_t *, object_t *);
+object_t *stm_bag_try_pop(stm_bag_t *);
+void stm_bag_tracefn(stm_bag_t *, void (object_t **));
+
+void _set_bag(object_t *obj, stm_bag_t *h);
+stm_bag_t *_get_bag(object_t *obj);
 """)
 
 
@@ -308,6 +318,20 @@ stm_hashtable_t *_get_hashtable(object_t *obj)
     return *(stm_hashtable_t *TLPREFIX *)field_addr;
 }
 
+void _set_bag(object_t *obj, stm_bag_t *bag)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    *(stm_bag_t *TLPREFIX *)field_addr = bag;
+}
+
+stm_bag_t *_get_bag(object_t *obj)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    return *(stm_bag_t *TLPREFIX *)field_addr;
+}
+
 void _set_ptr(object_t *obj, int n, object_t *v)
 {
     long nrefs = (long)((myobj_t*)obj)->type_id - 421420;
@@ -344,6 +368,9 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj)
         if (myobj->type_id == 421418) {    /* hashtable entry */
             return sizeof(struct stm_hashtable_entry_s);
         }
+        if (myobj->type_id == 421417) {    /* bag */
+            return sizeof(struct myobj_s) + 1 * sizeof(void*);
+        }
         /* basic case: tid equals 42 plus the size of the object */
         assert(myobj->type_id >= 42 + sizeof(struct myobj_s));
         assert((myobj->type_id - 42) >= 16);
@@ -374,6 +401,12 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
         object_t **ref = &((struct stm_hashtable_entry_s *)myobj)->object;
         visit(ref);
     }
+    if (myobj->type_id == 421417) {
+        /* bag */
+        stm_bag_t *b = *((stm_bag_t **)(myobj + 1));
+        stm_bag_tracefn(b, visit);
+        return;
+    }
     if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
@@ -394,6 +427,7 @@ void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
     struct myobj_s *myobj = (struct myobj_s*)obj;
     assert(myobj->type_id != 421419);
     assert(myobj->type_id != 421418);
+    assert(myobj->type_id != 421417);
     if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
@@ -513,6 +547,18 @@ def stm_allocate_hashtable():
 def get_hashtable(o):
     assert lib._get_type_id(o) == 421419
     return lib._get_hashtable(o)
+
+def stm_allocate_bag():
+    o = lib.stm_allocate(16)
+    tid = 421417
+    lib._set_type_id(o, tid)
+    h = lib.stm_bag_create()
+    lib._set_bag(o, h)
+    return o
+
+def get_bag(o):
+    assert lib._get_type_id(o) == 421417
+    return lib._get_bag(o)
 
 def stm_get_weakref(o):
     return lib._get_weakref(o)
