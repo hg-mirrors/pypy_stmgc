@@ -67,3 +67,15 @@ class TestBag(BaseTestBag):
             assert got == lp2
         py.test.raises(BagLooksEmpty, b_pop, q)
         py.test.raises(BagLooksEmpty, b_pop, q)
+
+    def test_large_push_pop(self):
+        self.start_transaction()
+        q = self.allocate_bag()
+        lps = [stm_allocate(16) for i in range(65)]
+        for lp in lps:
+            b_add(q, lp)
+        for lp in lps:
+            got = b_pop(q)
+            assert got == lp
+        py.test.raises(BagLooksEmpty, b_pop, q)
+        py.test.raises(BagLooksEmpty, b_pop, q)
