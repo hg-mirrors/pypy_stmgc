@@ -206,9 +206,8 @@ struct stm_priv_segment_info_s {
     /* regular finalizers (objs from the current transaction only) */
     struct finalizers_s *finalizers;
 
-    /* list of bags that are overflow objects (current transaction but
-       outside the nursery) */
-    struct list_s *overflow_bags;
+    /* list of bags that are old but modified */
+    struct list_s *modified_bags;
 };
 
 enum /* safe_point */ {
