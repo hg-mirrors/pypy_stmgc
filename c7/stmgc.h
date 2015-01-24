@@ -559,6 +559,7 @@ stm_bag_t *stm_bag_create(void);
 void stm_bag_free(stm_bag_t *);
 void stm_bag_add(stm_bag_t *, object_t *);
 object_t *stm_bag_try_pop(stm_bag_t *);
+void stm_bag_tracefn(stm_bag_t *, void (object_t **));
 
 /* ==================== END ==================== */
 
