@@ -55,4 +55,4 @@ Running the examples:
    ln -s /full/path/to/checkfence
    ./run test1.c test1.lsl
 
-   Look at 'T0.bsc-overview.htm' in your web browser.
+   Look at 'T*.bsc-overview.htm' in your web browser.
