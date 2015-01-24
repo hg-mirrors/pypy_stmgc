@@ -96,6 +96,16 @@ static struct list_s *list_extend(struct list_s *lst, struct list_s *lst2,
         }                                       \
     } while (0)
 
+#define LIST_FOREACH_F(lst, TYPE, CODE)         \
+    do {                                        \
+        struct list_s *_lst = (lst);            \
+        uintptr_t _i, _c = _lst->count;         \
+        for (_i = 0; _i < _c; _i++) {           \
+            TYPE item = (TYPE)_lst->items[_i];  \
+            CODE;                               \
+        }                                       \
+    } while (0)
+
 /************************************************************/
 
 /* The tree_xx functions are, like the name hints, implemented as a tree,
