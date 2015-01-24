@@ -104,16 +104,34 @@ object_t *stm_bag_try_pop(stm_bag_t *bag)
         return NULL;
     }
     struct deque_block_s *block = deque_block(bs->deque_left);
+    bool any_old_item_to_pop = (bs->deque_left != bs->deque_middle);
     uintptr_t result = *bs->deque_left++;
 
     if (bs->deque_left == &block->items[DEQUE_BLOCK_SIZE]) {
         bs->deque_left = &block->next->items[0];
         deque_free_block(block);
     }
+    if (!any_old_item_to_pop) {
+        bs->deque_middle = bs->deque_left;
+    }
     return (object_t *)result;
 }
 
-void stm_bag_tracefn(stm_bag_t *bag, void visit(object_t **))
+void stm_bag_tracefn(stm_bag_t *bag, void trace(object_t **))
 {
-    abort();
+    if (trace == TRACE_FOR_MINOR_COLLECTION) {
+        /* only trace the items added in the current transaction;
+           the rest is already old and cannot point into the nursery. */
+        int i = STM_SEGMENT->segment_num - 1;
+        struct stm_bag_seg_s *bs = &bag->by_segment[i];
+
+        deque_trace(bs->deque_middle, bs->deque_right, trace);
+    }
+    else {
+        int i;
+        for (i = 0; i < NB_SEGMENTS; i++) {
+            struct stm_bag_seg_s *bs = &bag->by_segment[i];
+            deque_trace(bs->deque_left, bs->deque_right, trace);
+        }
+    }
 }

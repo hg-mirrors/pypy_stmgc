@@ -246,3 +246,5 @@ static inline bool deque_index_equal(uintptr_t *inner_ptr, uintptr_t index)
     struct deque_block_s *block = deque_block(inner_ptr);
     return (inner_ptr == &block->items[index]);
 }
+
+static void deque_trace(uintptr_t *start, uintptr_t *stop, void (object_t **));
