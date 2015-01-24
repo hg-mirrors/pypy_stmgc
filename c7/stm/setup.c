@@ -130,7 +130,7 @@ void stm_setup(void)
         pr->callbacks_on_commit_and_abort[1] = tree_create();
         pr->young_objects_with_light_finalizers = list_create();
         pr->old_objects_with_light_finalizers = list_create();
-        pr->overflow_bags = NULL;
+        pr->modified_bags = NULL;
         pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * i;
         highest_overflow_number = pr->overflow_number;
         pr->pub.transaction_read_version = 0xff;
@@ -175,7 +175,7 @@ void stm_teardown(void)
         tree_free(pr->callbacks_on_commit_and_abort[1]);
         list_free(pr->young_objects_with_light_finalizers);
         list_free(pr->old_objects_with_light_finalizers);
-        list_free(pr->overflow_bags);
+        list_free(pr->modified_bags);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);

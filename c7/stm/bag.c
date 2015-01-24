@@ -46,7 +46,7 @@ typedef union {
         uintptr_t *deque_left, *deque_middle, *deque_right;
         struct list_s *abort_list;
         uint64_t start_time;    /* the transaction's unique_start_time */
-        bool must_add_to_overflow_bags;
+        bool must_add_to_modified_bags;
     };
     char alignment[64];   /* 64-bytes alignment, to prevent false sharing */
 } stm_bag_seg_t;
@@ -74,7 +74,7 @@ stm_bag_t *stm_bag_create(void)
         bs->deque_right = &block->items[0];
         LIST_CREATE(bs->abort_list);
         bs->start_time = 0;
-        bs->must_add_to_overflow_bags = false;   /* currently young */
+        bs->must_add_to_modified_bags = false;   /* currently young */
     }
     return bag;
 }
@@ -154,8 +154,7 @@ static stm_bag_seg_t *bag_check_start_time(stm_bag_t *bag)
         bs->deque_middle = bs->deque_right;
         list_clear(bs->abort_list);
         bs->start_time = STM_PSEGMENT->unique_start_time;
-        bs->must_add_to_overflow_bags = false;    /* not current transaction
-                                                     any more */
+        bs->must_add_to_modified_bags = true;
 
         /* We're about to modify the bag, so register an abort
            callback now. */
@@ -172,11 +171,11 @@ void stm_bag_add(stm_bag_t *bag, object_t *newobj)
     stm_bag_seg_t *bs = bag_check_start_time(bag);
     bag_add(bs, newobj);
 
-    if (bs->must_add_to_overflow_bags) {
-        bs->must_add_to_overflow_bags = false;
-        if (STM_PSEGMENT->overflow_bags == NULL)
-            LIST_CREATE(STM_PSEGMENT->overflow_bags);
-        LIST_APPEND(STM_PSEGMENT->overflow_bags, bag);
+    if (bs->must_add_to_modified_bags) {
+        bs->must_add_to_modified_bags = false;
+        if (STM_PSEGMENT->modified_bags == NULL)
+            LIST_CREATE(STM_PSEGMENT->modified_bags);
+        LIST_APPEND(STM_PSEGMENT->modified_bags, bag);
     }
 }
 
@@ -214,9 +213,7 @@ void stm_bag_tracefn(stm_bag_t *bag, void trace(object_t **))
 
         deque_trace(bs->deque_middle, bs->deque_right, trace);
 
-        /* this case should only be called if the bag is from the current
-           transaction (either in the nursery or already overflowed) */
-        bs->must_add_to_overflow_bags = true;
+        bs->must_add_to_modified_bags = true;
     }
     else {
         int i;
@@ -227,9 +224,9 @@ void stm_bag_tracefn(stm_bag_t *bag, void trace(object_t **))
     }
 }
 
-static void collect_overflow_bags(void)
+static void collect_modified_bags(void)
 {
-    LIST_FOREACH_R(STM_PSEGMENT->overflow_bags, stm_bag_t *,
+    LIST_FOREACH_R(STM_PSEGMENT->modified_bags, stm_bag_t *,
                    stm_bag_tracefn(item, TRACE_FOR_MINOR_COLLECTION));
-    LIST_FREE(STM_PSEGMENT->overflow_bags);
+    LIST_FREE(STM_PSEGMENT->modified_bags);
 }

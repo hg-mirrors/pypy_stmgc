@@ -1,2 +1,2 @@
 
-static void collect_overflow_bags(void);
+static void collect_modified_bags(void);
