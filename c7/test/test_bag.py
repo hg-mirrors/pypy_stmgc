@@ -131,3 +131,31 @@ class TestBag(BaseTestBag):
         assert got == lp1
         #
         stm_major_collect()       # to get rid of the bag object
+
+    def test_abort_recovers_popped(self):
+        self.start_transaction()
+        q = self.allocate_bag()
+        self.push_root(q)
+        lp1 = stm_allocate(16)
+        lp2 = stm_allocate(16)
+        stm_set_char(lp1, 'M')
+        stm_set_char(lp2, 'N')
+        b_add(q, lp1)
+        b_add(q, lp2)
+        self.commit_transaction()
+        q = self.pop_root()
+        #
+        self.start_transaction()
+        lp1 = b_pop(q)
+        lp2 = b_pop(q)
+        assert stm_get_char(lp1) == 'M'
+        assert stm_get_char(lp2) == 'N'
+        self.abort_transaction()
+        #
+        self.start_transaction()
+        lp1 = b_pop(q)
+        lp2 = b_pop(q)
+        assert stm_get_char(lp1) == 'M'
+        assert stm_get_char(lp2) == 'N'
+        #
+        stm_major_collect()       # to get rid of the bag object

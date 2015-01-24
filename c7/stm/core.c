@@ -324,7 +324,7 @@ static void reset_transaction_read_version(void)
     STM_SEGMENT->transaction_read_version = 1;
 }
 
-static uint64_t _global_start_time = 0;
+static uint64_t _global_start_time = 1;
 
 static void _stm_start_transaction(stm_thread_local_t *tl)
 {
@@ -337,7 +337,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
     timing_event(tl, STM_TRANSACTION_START);
-    STM_PSEGMENT->start_time = _global_start_time++;
+    STM_PSEGMENT->unique_start_time = _global_start_time++;
     STM_PSEGMENT->signalled_to_commit_soon = false;
     STM_PSEGMENT->safe_point = SP_RUNNING;
     STM_PSEGMENT->marker_inev.object = NULL;

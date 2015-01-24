@@ -73,7 +73,7 @@ static void cm_always_abort_other(struct contmgr_s *cm)
 __attribute__((unused))
 static void cm_abort_the_younger(struct contmgr_s *cm)
 {
-    if (STM_PSEGMENT->start_time >= cm->other_pseg->start_time) {
+    if (STM_PSEGMENT->unique_start_time >= cm->other_pseg->unique_start_time) {
         /* We started after the other thread.  Abort */
         cm->abort_other = false;
     }
@@ -100,7 +100,7 @@ static void cm_always_wait_for_other_thread(struct contmgr_s *cm)
 __attribute__((unused))
 static void cm_pause_if_younger(struct contmgr_s *cm)
 {
-    if (STM_PSEGMENT->start_time >= cm->other_pseg->start_time) {
+    if (STM_PSEGMENT->unique_start_time >= cm->other_pseg->unique_start_time) {
         /* We started after the other thread.  Pause */
         cm->try_sleep = true;
         cm->abort_other = false;

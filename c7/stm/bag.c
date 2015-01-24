@@ -44,6 +44,7 @@ is done with careful compare-and-swaps.
 struct stm_bag_seg_s {
     uintptr_t *deque_left, *deque_middle, *deque_right;
     struct list_s *abort_list;
+    uint64_t start_time;    /* the transaction's unique_start_time */
 };
 
 struct stm_bag_s {
@@ -62,6 +63,7 @@ stm_bag_t *stm_bag_create(void)
         bs->deque_middle = &block->items[0];
         bs->deque_right = &block->items[0];
         LIST_CREATE(bs->abort_list);
+        bs->start_time = 0;
     }
     return bag;
 }
@@ -79,40 +81,104 @@ void stm_bag_free(stm_bag_t *bag)
         }
         LIST_FREE(bs->abort_list);
     }
+
+    s_mutex_lock();
+    for (i = 0; i < STM_NB_SEGMENTS; i++) {
+        struct stm_bag_seg_s *bs = &bag->by_segment[i];
+        struct stm_segment_info_s *pub = get_segment(i + 1);
+        stm_thread_local_t *tl = pub->running_thread;
+        if (tl->associated_segment_num == i + 1) {
+            stm_call_on_abort(tl, bs, NULL);
+        }
+    }
+    s_mutex_unlock();
+
+    free(bag);
 }
 
-void stm_bag_add(stm_bag_t *bag, object_t *newobj)
+static void bag_add(struct stm_bag_seg_s *bs, object_t *newobj)
 {
-    int i = STM_SEGMENT->segment_num - 1;
-    struct stm_bag_seg_s *bs = &bag->by_segment[i];
     struct deque_block_s *block = deque_block(bs->deque_right);
-
     *bs->deque_right++ = (uintptr_t)newobj;
 
     if (bs->deque_right == &block->items[DEQUE_BLOCK_SIZE]) {
-        assert(block->next == NULL);
-        block->next = deque_new_block();
+        if (block->next == NULL)
+            block->next = deque_new_block();
         bs->deque_right = &block->next->items[0];
     }
 }
 
-object_t *stm_bag_try_pop(stm_bag_t *bag)
+static void bag_abort_callback(void *key)
+{
+    struct stm_bag_seg_s *bs = (struct stm_bag_seg_s *)key;
+
+    /* remove the "added in this transaction" items */
+    bs->deque_right = bs->deque_middle;
+
+    /* reinstall the items from the "abort_list" */
+    LIST_FOREACH_F(bs->abort_list, object_t *, bag_add(bs, item));
+    list_clear(bs->abort_list);
+
+    /* these items are not "added in this transaction" */
+    bs->deque_middle = bs->deque_right;
+}
+
+static struct stm_bag_seg_s *bag_check_start_time(stm_bag_t *bag)
 {
     int i = STM_SEGMENT->segment_num - 1;
     struct stm_bag_seg_s *bs = &bag->by_segment[i];
+
+    if (bs->start_time != STM_PSEGMENT->unique_start_time) {
+        /* There was a commit or an abort since the last operation
+           on the same bag in the same segment.  If there was an
+           abort, bag_abort_callback() should have been called to
+           reset the state.  Assume that any non-reset state is
+           there because of a commit.
+
+           The middle pointer moves to the right: there are no
+           more "added in this transaction" entries.  And the
+           "already popped items" list is forgotten.
+        */
+        bs->deque_middle = bs->deque_right;
+        list_clear(bs->abort_list);
+        bs->start_time = STM_PSEGMENT->unique_start_time;
+
+        /* We're about to modify the bag, so register an abort
+           callback now. */
+        stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+        assert(tl->associated_segment_num == STM_SEGMENT->segment_num);
+        stm_call_on_abort(tl, bs, &bag_abort_callback);
+    }
+
+    return bs;
+}
+
+void stm_bag_add(stm_bag_t *bag, object_t *newobj)
+{
+    struct stm_bag_seg_s *bs = bag_check_start_time(bag);
+    bag_add(bs, newobj);
+}
+
+object_t *stm_bag_try_pop(stm_bag_t *bag)
+{
+    struct stm_bag_seg_s *bs = bag_check_start_time(bag);
     if (bs->deque_left == bs->deque_right) {
         return NULL;
     }
+
     struct deque_block_s *block = deque_block(bs->deque_left);
-    bool any_old_item_to_pop = (bs->deque_left != bs->deque_middle);
+    bool from_same_transaction = (bs->deque_left == bs->deque_middle);
     uintptr_t result = *bs->deque_left++;
 
     if (bs->deque_left == &block->items[DEQUE_BLOCK_SIZE]) {
         bs->deque_left = &block->next->items[0];
         deque_free_block(block);
     }
-    if (!any_old_item_to_pop) {
+    if (from_same_transaction) {
         bs->deque_middle = bs->deque_left;
+    }
+    else {
+        LIST_APPEND(bs->abort_list, result);
     }
     return (object_t *)result;
 }
