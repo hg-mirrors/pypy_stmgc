@@ -35,6 +35,7 @@ Compiling checkfence:
    
    edit the Makefile: ZCHAFFDIR=/path/to/zchaff64
    fix src/Parser.yy for bison 3.0 by replacing all "yyloc" with "yyla.location"
+   comment out src/Value.C:122: ASSERT(inOffset < 128);
 
    make dbg     # or "make opt", but this gives me a segfaulting version :-(
 
