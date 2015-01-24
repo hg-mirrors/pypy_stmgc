@@ -1,5 +1,5 @@
-Installing checkfence on Linux 64
----------------------------------
+Installing checkfence on Linux 64 (Ubuntu 14.04)
+------------------------------------------------
 
 apt-get install bison flex ocaml ocaml-findlib
 
@@ -34,7 +34,9 @@ Compiling checkfence:
    cd checkfence/build
    
    edit the Makefile: ZCHAFFDIR=/path/to/zchaff64
-   make opt
+   fix src/Parser.yy for bison 3.0 by replacing all "yyloc" with "yyla.location"
+
+   make dbg     # or "make opt", but this gives me a segfaulting version :-(
 
 
 Compiling C2LSL:
@@ -48,7 +50,7 @@ Compiling C2LSL:
 
 
 Running the examples:
-   cd c4
+   cd c7
    ln -s /full/path/to/c2lsl
    ln -s /full/path/to/checkfence
    ./run test1.c test1.lsl

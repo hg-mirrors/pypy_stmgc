@@ -8,4 +8,4 @@ $C2LSL_HOME/bin/c2lsl.exe "$1" _run.lsl || exit 1
 shift
 $CHECKFENCE_HOME/run/clean || exit 1
 echo -------------------------------------------------------------------------
-$CHECKFENCE_HOME/run/checkfence -i _run.lsl "$@" || exit 1
+$CHECKFENCE_HOME/run/checkfence_g -i _run.lsl "$@" || exit 1
