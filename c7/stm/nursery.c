@@ -578,6 +578,9 @@ static void _do_minor_collection(bool commit)
     if (STM_PSEGMENT->finalizers != NULL)
         collect_objs_still_young_but_with_finalizers();
 
+    if (STM_PSEGMENT->overflow_bags != NULL)
+        collect_overflow_bags();
+
     collect_oldrefs_to_nursery();
     assert(list_is_empty(STM_PSEGMENT->old_objects_with_cards));
 

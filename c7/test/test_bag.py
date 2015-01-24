@@ -93,6 +93,15 @@ class TestBag(BaseTestBag):
         assert lp1b != ffi.NULL
         assert stm_get_char(lp1b) == 'N'
         assert lp1b != lp1
+        #
+        lp2 = stm_allocate(16)
+        stm_set_char(lp2, 'M')
+        b_add(b, lp2)
+        stm_minor_collect()
+        lp2b = b_pop(b)
+        assert lp2b != ffi.NULL
+        assert stm_get_char(lp2b) == 'M'
+        assert lp2b != lp2
 
     def test_keepalive_major(self):
         self.start_transaction()
