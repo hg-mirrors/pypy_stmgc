@@ -79,3 +79,55 @@ class TestBag(BaseTestBag):
             assert got == lp
         py.test.raises(BagLooksEmpty, b_pop, q)
         py.test.raises(BagLooksEmpty, b_pop, q)
+
+    def test_keepalive_minor(self):
+        self.start_transaction()
+        b = self.allocate_bag()
+        self.push_root(b)
+        lp1 = stm_allocate(16)
+        stm_set_char(lp1, 'N')
+        b_add(b, lp1)
+        stm_minor_collect()
+        b = self.pop_root()
+        lp1b = b_pop(b)
+        assert lp1b != ffi.NULL
+        assert stm_get_char(lp1b) == 'N'
+        assert lp1b != lp1
+
+    def test_keepalive_major(self):
+        self.start_transaction()
+        b = self.allocate_bag()
+        self.push_root(b)
+        lp1 = stm_allocate(16)
+        stm_set_char(lp1, 'N')
+        b_add(b, lp1)
+        stm_major_collect()
+        b = self.pop_root()
+        lp1b = b_pop(b)
+        assert lp1b != ffi.NULL
+        assert stm_get_char(lp1b) == 'N'
+        assert lp1b != lp1
+
+    def test_transaction_local(self):
+        self.start_transaction()
+        q = self.allocate_bag()
+        self.push_root(q)
+        self.commit_transaction()
+        q = self.pop_root()
+        #
+        self.start_transaction()
+        lp1 = stm_allocate(16)
+        b_add(q, lp1)
+        #
+        self.switch(1)
+        self.start_transaction()
+        lp2 = stm_allocate(16)
+        b_add(q, lp2)
+        got = b_pop(q)
+        assert got == lp2
+        #
+        self.switch(0)
+        got = b_pop(q)
+        assert got == lp1
+        #
+        stm_major_collect()       # to get rid of the bag object

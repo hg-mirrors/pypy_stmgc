@@ -212,3 +212,29 @@ static struct deque_block_s *deque_new_block(void)
     db->next = NULL;
     return db;
 }
+
+static void deque_trace(uintptr_t *start, uintptr_t *stop,
+                        void trace(object_t **))
+{
+    struct deque_block_s *block = deque_block(start);
+    struct deque_block_s *last_block = deque_block(stop);
+    uintptr_t *end;
+
+    while (1) {
+        if (block == last_block)
+            end = stop;
+        else
+            end = &block->items[DEQUE_BLOCK_SIZE];
+
+        while (start != end) {
+            trace((object_t **)start);
+            start++;
+        }
+
+        if (block == last_block)
+            break;
+
+        block = block->next;
+        start = &block->items[0];
+    }
+}
