@@ -23,6 +23,8 @@ In raw memory, for each segment, we have a list and a deque:
    | already      |       | next items            | added in this |
    | popped items |       | to pop                | transaction   |
    +--------------+       +-----------------------+---------------+
+                          ^                       ^               ^
+                          left                 middle         right
 
 Adding objects puts them at the right end of the deque.  Popping them
 takes them off the left end and stores a copy of the pointer into a
@@ -42,11 +44,39 @@ is done with careful compare-and-swaps.
 
 
 typedef union {
+    /* Data describing the deque and abort_list belonging to the segment i. */
     struct {
-        uintptr_t *deque_left, *deque_middle, *deque_right;
+        /* Left deque position: read/write by whoever has got the 'lock'.
+           Don't access at all without holding the lock. */
+        uintptr_t *deque_left;
+
+        /* Middle deque position: written only by segment i when it holds
+           the 'lock'.  Can be read freely by segment i.  Can be
+           read by the other segments when they hold the 'lock'. */
+        uintptr_t *deque_middle;
+
+        /* Right deque position: only accessed by the segment i.  No
+           locking needed. */
+        uintptr_t *deque_right;
+
+        /* Abort list.  Only accessed by the segment i. */
         struct list_s *abort_list;
-        uint64_t start_time;    /* the transaction's unique_start_time */
+
+        /* The segment i's transaction's unique_start_time, as it was
+           the last time we did a change to this stm_bag_seg_t.  Used
+           to detect lazily when a commit occurred in-between. */
+        uint64_t start_time;
+
+        /* This flag is set to arm the bag-specific "write barrier".
+           When adding new items to the bag, when this flag is set we
+           must record the bag into the 'modified_bags' list, used for
+           minor collections, so that we can trace the newly added
+           items. */
         bool must_add_to_modified_bags;
+
+        /* The lock, to access deque_left and deque_middle as
+           explained above. */
+        uint8_t lock;
     };
     char alignment[64];   /* 64-bytes alignment, to prevent false sharing */
 } stm_bag_seg_t;
@@ -75,6 +105,7 @@ stm_bag_t *stm_bag_create(void)
         LIST_CREATE(bs->abort_list);
         bs->start_time = 0;
         bs->must_add_to_modified_bags = false;   /* currently young */
+        bs->lock = 0;
     }
     return bag;
 }
@@ -128,11 +159,15 @@ static void bag_abort_callback(void *key)
     bs->deque_right = bs->deque_middle;
 
     /* reinstall the items from the "abort_list" */
-    LIST_FOREACH_F(bs->abort_list, object_t *, bag_add(bs, item));
-    list_clear(bs->abort_list);
+    if (!list_is_empty(bs->abort_list)) {
+        LIST_FOREACH_F(bs->abort_list, object_t *, bag_add(bs, item));
+        list_clear(bs->abort_list);
 
-    /* these items are not "added in this transaction" */
-    bs->deque_middle = bs->deque_right;
+        /* these items are not "added in this transaction" */
+        spinlock_acquire(bs->lock);
+        bs->deque_middle = bs->deque_right;
+        spinlock_release(bs->lock);
+    }
 }
 
 static stm_bag_seg_t *bag_check_start_time(stm_bag_t *bag)
@@ -151,7 +186,11 @@ static stm_bag_seg_t *bag_check_start_time(stm_bag_t *bag)
            more "added in this transaction" entries.  And the
            "already popped items" list is forgotten.
         */
-        bs->deque_middle = bs->deque_right;
+        if (bs->deque_middle != bs->deque_right) {
+            spinlock_acquire(bs->lock);
+            bs->deque_middle = bs->deque_right;
+            spinlock_release(bs->lock);
+        }
         list_clear(bs->abort_list);
         bs->start_time = STM_PSEGMENT->unique_start_time;
         bs->must_add_to_modified_bags = true;
@@ -182,7 +221,11 @@ void stm_bag_add(stm_bag_t *bag, object_t *newobj)
 object_t *stm_bag_try_pop(stm_bag_t *bag)
 {
     stm_bag_seg_t *bs = bag_check_start_time(bag);
+
+    spinlock_acquire(bs->lock);
+
     if (bs->deque_left == bs->deque_right) {
+        spinlock_release(bs->lock);
         return NULL;
     }
 
@@ -196,8 +239,10 @@ object_t *stm_bag_try_pop(stm_bag_t *bag)
     }
     if (from_same_transaction) {
         bs->deque_middle = bs->deque_left;
+        spinlock_release(bs->lock);
     }
     else {
+        spinlock_release(bs->lock);
         LIST_APPEND(bs->abort_list, result);
     }
     return (object_t *)result;
