@@ -27,13 +27,13 @@ class TestProf(BaseTest):
 
     def test_simple(self):
         filename = os.path.join(str(udir), 'simple.prof')
-        r = lib.stm_set_timing_log(filename, ffi.NULL)
+        r = lib.stm_set_timing_log(filename, 0, ffi.NULL)
         assert r == 0
         try:
             self.start_transaction()
             self.commit_transaction()
         finally:
-            lib.stm_set_timing_log(ffi.NULL, ffi.NULL)
+            lib.stm_set_timing_log(ffi.NULL, 0, ffi.NULL)
 
         result = read_log(filename)
         assert result[0][2] == lib.STM_TRANSACTION_START
@@ -48,7 +48,7 @@ class TestProf(BaseTest):
             p[0] = chr(100 + marker.odd_number)
             return 1
         filename = os.path.join(str(udir), 'contention.prof')
-        r = lib.stm_set_timing_log(filename, expand_marker)
+        r = lib.stm_set_timing_log(filename, 0, expand_marker)
         assert r == 0
         try:
             p = stm_allocate_old(16)
@@ -62,7 +62,7 @@ class TestProf(BaseTest):
             stm_set_char(p, 'B')                # write
             py.test.raises(Conflict, self.commit_transaction)
         finally:
-            lib.stm_set_timing_log(ffi.NULL, ffi.NULL)
+            lib.stm_set_timing_log(ffi.NULL, 0, ffi.NULL)
 
         result = read_log(filename)
         id0 = result[0][1][0]
