@@ -345,7 +345,11 @@ static void mark_visit_from_modified_objects(void)
                assert(!is_new_object(item)); /* should never be in that list */
 
                if (!mark_visited_test_and_set(item)) {
-                   /* trace shared, committed version */
+                   /* trace shared, committed version: only do this if we didn't
+                      trace it already. This is safe because we don't trace any
+                      objs before mark_visit_from_modified_objects AND if we
+                      do mark_and_trace on an obj that is modified in >1 segment,
+                      the tracing always happens in seg0 (see mark_and_trace). */
                    mark_and_trace(item, stm_object_pages);
                }
                mark_and_trace(item, base);   /* private, modified version */
