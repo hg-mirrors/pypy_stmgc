@@ -12,22 +12,30 @@ pairs at that index (usually only one, unless there is a hash
 collision).
 
 The main operations on a hashtable are reading or writing an object at a
-given index.  It might support in the future enumerating the indexes of
-non-NULL objects.
+given index.  It also supports iterating its non-NULL entries.
 
 There are two markers for every index (a read and a write marker).
 This is unlike regular arrays, which have only two markers in total.
+
+Additionally, we use the read marker for the hashtable object itself
+to mean "we are iterating".  When a transaction has got this "global"
+read marker and another transaction attempts to create a new key/value
+pair via stm_hashtable_{lookup,read,write}, the call immediately fails
+with a read/write conflict.  This gives priority to the iterating
+transaction rather than the modifying transaction, which is probably
+what we want.
 
 
 Implementation
 --------------
 
 First idea: have the hashtable in raw memory, pointing to "entry"
-objects.  The entry objects themselves point to the user-specified
-objects.  The entry objects have the read/write markers.  Every entry
-object, once created, stays around.  It is only removed by the next
-major GC if it points to NULL and its read/write markers are not set
-in any currently-running transaction.
+objects (which are regular, GC- and STM-managed objects).  The entry
+objects themselves point to the user-specified objects.  The entry
+objects hold the read/write markers.  Every entry object, once
+created, stays around.  It is only removed by the next major GC if it
+points to NULL and its read/write markers are not set in any
+currently-running transaction.
 
 References
 ----------
@@ -54,8 +62,12 @@ typedef struct {
 
        The field 'resize_counter' also works as a write lock: changes
        go via the intermediate value RESIZING_LOCK (0).
+
+       In addition, 'resize_counter' can be the negative of the odd
+       number that it would normally be, as a hint to force the check
+       of the global read marker, as set by iteration.
     */
-    uintptr_t resize_counter;
+    intptr_t resize_counter;
 
     stm_hashtable_entry_t *items[INITIAL_HASHTABLE_SIZE];
 } stm_hashtable_table_t;
@@ -88,7 +100,7 @@ stm_hashtable_t *stm_hashtable_create(void)
 
 void stm_hashtable_free(stm_hashtable_t *hashtable)
 {
-    uintptr_t rc = hashtable->initial_table.resize_counter;
+    intptr_t rc = hashtable->initial_table.resize_counter;
     free(hashtable);
     while (IS_EVEN(rc)) {
         assert(rc != RESIZING_LOCK);
@@ -150,15 +162,16 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
     assert(biggertable);   // XXX
 
     stm_hashtable_table_t *table = hashtable->table;
-    table->resize_counter = (uintptr_t)biggertable;
+    table->resize_counter = (intptr_t)biggertable;
     /* ^^^ this unlocks the table by writing a non-zero value to
        table->resize_counter, but the new value is a pointer to the
        new bigger table, so IS_EVEN() is still true */
+    assert(IS_EVEN(table->resize_counter));
 
     init_table(biggertable, biggercount);
 
     uintptr_t j, mask = table->mask;
-    uintptr_t rc = biggertable->resize_counter;
+    intptr_t rc = biggertable->resize_counter;
     char *segment_base = get_segment_base(remove_unread_from_seg);
     for (j = 0; j <= mask; j++) {
         stm_hashtable_entry_t *entry = table->items[j];
@@ -175,6 +188,7 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
         _insert_clean(biggertable, entry);
         rc -= 6;
     }
+    assert(rc > 0);
     biggertable->resize_counter = rc;
 
     write_fence();   /* make sure that 'biggertable' is valid here,
@@ -218,7 +232,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
     }
     /* here, we didn't find the 'entry' with the correct index. */
 
-    uintptr_t rc = VOLATILE_TABLE(table)->resize_counter;
+    intptr_t rc = VOLATILE_TABLE(table)->resize_counter;
 
     /* if rc is RESIZING_LOCK (which is 0, so even), a concurrent thread
        is writing to the hashtable.  Or, if rc is another even number, it is
@@ -307,6 +321,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
         return entry;
     }
     else {
+        //xxxxxxxxxxxxxxxxxxxxxxx;
         /* if rc is smaller than 6, we must allocate a new bigger table.
          */
         uintptr_t biggercount = table->mask + 1;
@@ -364,7 +379,7 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
     assert(!IS_EVEN(table->resize_counter));
 
     if (table != &hashtable->initial_table) {
-        uintptr_t rc = hashtable->initial_table.resize_counter;
+        intptr_t rc = hashtable->initial_table.resize_counter;
         while (1) {
             assert(IS_EVEN(rc));
             assert(rc != RESIZING_LOCK);
@@ -375,7 +390,8 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
             rc = old_table->resize_counter;
             free(old_table);
         }
-        hashtable->initial_table.resize_counter = (uintptr_t)table;
+        hashtable->initial_table.resize_counter = (intptr_t)table;
+        assert(IS_EVEN(hashtable->initial_table.resize_counter));
     }
 }
 
