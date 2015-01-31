@@ -25,6 +25,10 @@ with a read/write conflict.  This gives priority to the iterating
 transaction rather than the modifying transaction, which is probably
 what we want.
 
+XXX NO: when creating new key/value objects, we should copy the read
+marker from the hashtableobj to the new key/value object.  I *think*
+this gives a correct and better result XXX
+
 
 Implementation
 --------------
@@ -231,7 +235,16 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             perturb >>= PERTURB_SHIFT;
         }
     }
-    /* here, we didn't find the 'entry' with the correct index. */
+    /* here, we didn't find the 'entry' with the correct index.  Note
+       that even if the same 'table' is modified or resized by other
+       threads concurrently, any new item found from a race condition
+       would anyway contain NULL in the present segment (ensured by
+       the first write_fence() below).  If the 'table' grows an entry
+       just after we checked above, then we go ahead and lock the
+       table; but after we get the lock, we will notice the new entry
+       (ensured by the second write_fence() below) and restart the
+       whole process.
+     */
 
     intptr_t rc = VOLATILE_TABLE(table)->resize_counter;
     bool rc_must_be_negative = false;
@@ -347,9 +360,25 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
          */
         int j, my_segment = STM_SEGMENT->segment_num;
         for (j = 1; j <= NB_SEGMENTS; j++) {
-            if (j != my_segment) {
-                if (was_read_remote(get_segment_base(j), hashtableobj)) {
-                    xxxxxxxxxxxx conflict xxxxxxxxxxx;
+            if (j == my_segment)
+                continue;
+            if (was_read_remote(get_segment_base(j), hashtableobj)) {
+                /* conflict! */
+                table->resize_counter = rc;    /* unlock */
+                if (write_read_contention_management(j, hashtableobj)) {
+                    /* If we reach this point, we didn't abort, but we
+                       had to wait for the other thread to commit.  If
+                       we did, then we have to restart. */
+                    return true;
+                    ...;
+                    
+                    }
+                    /* we aborted the other transaction without waiting, so
+                       we can just break out of this loop on
+                       modified_old_objects and continue with the next
+                       segment */
+                    
+                    xxx;
                 }
             }
         }
@@ -458,14 +487,15 @@ stm_hashtable_next(object_t *hobj, stm_hashtable_t *hashtable,
 static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
 {
     stm_hashtable_table_t *table = hashtable->table;
-    assert(!IS_EVEN(table->resize_counter));
+    intptr_t rc = table->resize_counter;
+    assert(!IS_EVEN(rc));
 
     if ((hashtable->additions >> 8) * 4 > table->mask) {
         int segment_num = (hashtable->additions & 0xFF);
         if (!segment_num) segment_num = 1;
         hashtable->additions = segment_num;
         uintptr_t initial_rc = (table->mask + 1) * 4 + 1;
-        uintptr_t num_entries_times_6 = initial_rc - table->resize_counter;
+        uintptr_t num_entries_times_6 = initial_rc - (rc < 0 ? -rc : rc);
         uintptr_t count = INITIAL_HASHTABLE_SIZE;
         while (count * 4 < num_entries_times_6)
             count *= 2;
@@ -475,7 +505,7 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
 
         dprintf(("compact with %ld items:\n", num_entries_times_6 / 6));
         _stm_rehash_hashtable(hashtable, count, /*remove_unread=*/segment_num,
-                              /*rc_must_be_negative=*/false);
+                              /*rc_must_be_negative=*/rc < 0);
     }
 
     table = hashtable->table;
