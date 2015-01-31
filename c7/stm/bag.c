@@ -2,15 +2,16 @@
 Design of stmgc's "bag" objects
 ===============================
 
-A "bag" is an unordered list of objects.  You can only add objects and
-pop a random object.
+A "bag" is an unordered list of objects.  *This is not a STM-aware
+object at all!*  You can add objects and pop a random object.
 
-Conflicts never occur, but popping may return "the bag looks empty",
-which can be wrong in the serialized order.  The caller should be
-ready to handle this case.  The guarantee is that if you get the
-result "the bag looks empty" in all threads that may add objects to
-it, and afterwards none of the threads adds any object, then at this
-point the bag is really empty.
+A typical use case is to collect the objects we want to add in some
+regular STM list, and then when we commit, we copy the objects into
+the bag.  Note that we *copy*, not *move*: as usual, we must not
+change the STM list outside a transaction.
+
+When we pop an object, we should arrange for it to be put back into
+the bag if the transaction aborts.
 
 
 Implementation
@@ -43,178 +44,79 @@ is done with careful compare-and-swaps.
 */
 
 
+typedef struct bag_node_s {
+    struct bag_node_s *next;
+    object_t *value;
+} bag_node_t;
+
+
 typedef union {
-    /* Data describing the deque and abort_list belonging to the segment i. */
+    /* Data describing the bag from the point of view of segment 'i'. */
+
     struct {
-        /* Left deque position: read/write by whoever has got the 'lock'.
-           Don't access at all without holding the lock. */
-        uintptr_t *deque_left;
-
-        /* Middle deque position: written only by segment i when it holds
-           the 'lock'.  Can be read freely by segment i.  Can be
-           read by the other segments when they hold the 'lock'. */
-        uintptr_t *deque_middle;
-
-        /* Right deque position: only accessed by the segment i.  No
-           locking needed. */
-        uintptr_t *deque_right;
-
-        /* Abort list.  Only accessed by the segment i. */
-        struct list_s *abort_list;
+        bag_node_t *added;    /* added in current transaction */
+        bag_node_t *removed;  /* removed in current transaction */
 
         /* The segment i's transaction's unique_start_time, as it was
            the last time we did a change to this stm_bag_seg_t.  Used
            to detect lazily when a commit occurred in-between. */
         uint64_t start_time;
-
-        /* This flag is set to arm the bag-specific "write barrier".
-           When adding new items to the bag, when this flag is set we
-           must record the bag into the 'modified_bags' list, used for
-           minor collections, so that we can trace the newly added
-           items. */
-        bool must_add_to_modified_bags;
-
-        /* The lock, to access deque_left and deque_middle as
-           explained above. */
-        uint8_t lock;
     };
     char alignment[64];   /* 64-bytes alignment, to prevent false sharing */
-} stm_bag_seg_t;
+
+} bag_seg_t;
+
 
 struct stm_bag_s {
-    stm_bag_seg_t by_segment[STM_NB_SEGMENTS];
+    ,,,,,,,,,,,,,,,,,,,,
+    bag_node_t *tail;   /* the newest committed element in the bag */
+
+    struct {
+    } by_segment[NB_SEGMENTS];
 };
 
 stm_bag_t *stm_bag_create(void)
 {
-    int i;
-    stm_bag_t *bag;
-    void *mem;
-
-    assert(sizeof(stm_bag_seg_t) == 64);
-    if (posix_memalign(&mem, sizeof(stm_bag_seg_t), sizeof(stm_bag_t)) != 0)
-        stm_fatalerror("out of memory in stm_bag_create");   /* XXX */
-
-    bag = (stm_bag_t *)mem;
-    for (i = 0; i < STM_NB_SEGMENTS; i++) {
-        stm_bag_seg_t *bs = &bag->by_segment[i];
-        struct deque_block_s *block = deque_new_block();
-        bs->deque_left = &block->items[0];
-        bs->deque_middle = &block->items[0];
-        bs->deque_right = &block->items[0];
-        LIST_CREATE(bs->abort_list);
-        bs->start_time = 0;
-        bs->must_add_to_modified_bags = false;   /* currently young */
-        bs->lock = 0;
-    }
+    stm_bag_t *bag = malloc(sizeof(stm_bag_t));
+    assert(bag);    /* XXX out of memory in stm_bag_create */
+    memset(bag, 0, sizeof(stm_bag_t));
     return bag;
+}
+
+static void bag_node_free_rec(bag_node_t *p)
+{
+    while (p != NULL) {
+        bag_node_t *q = p->next;
+        free(p);
+        p = q;
+    }
 }
 
 void stm_bag_free(stm_bag_t *bag)
 {
     int i;
-
-    s_mutex_lock();
-    for (i = 0; i < STM_NB_SEGMENTS; i++) {
-        stm_bag_seg_t *bs = &bag->by_segment[i];
-        struct stm_segment_info_s *pub = get_segment(i + 1);
-        stm_thread_local_t *tl = pub->running_thread;
-        if (tl != NULL && tl->associated_segment_num == i + 1) {
-            stm_call_on_abort(tl, bs, NULL);
-        }
+    bag_node_free_rec(bag->tail);
+    for (i = 0; i < NB_SEGMENTS; i++) {
+        bag_node_free_rec(bag->by_segment[i].added);
+        bag_node_free_rec(bag->by_segment[i].removed);
     }
-    s_mutex_unlock();
-
-    for (i = 0; i < STM_NB_SEGMENTS; i++) {
-        stm_bag_seg_t *bs = &bag->by_segment[i];
-        struct deque_block_s *block = deque_block(bs->deque_left);
-        while (block != NULL) {
-            struct deque_block_s *nextblock = block->next;
-            deque_free_block(block);
-            block = nextblock;
-        }
-        LIST_FREE(bs->abort_list);
-    }
-
+    bag_node_free_rec(bag->head);
     free(bag);
-}
-
-static void bag_add(stm_bag_seg_t *bs, object_t *newobj)
-{
-    struct deque_block_s *block = deque_block(bs->deque_right);
-    *bs->deque_right++ = (uintptr_t)newobj;
-
-    if (bs->deque_right == &block->items[DEQUE_BLOCK_SIZE]) {
-        if (block->next == NULL)
-            block->next = deque_new_block();
-        bs->deque_right = &block->next->items[0];
-    }
-}
-
-static void bag_abort_callback(void *key)
-{
-    stm_bag_seg_t *bs = (stm_bag_seg_t *)key;
-
-    /* remove the "added in this transaction" items */
-    bs->deque_right = bs->deque_middle;
-
-    /* reinstall the items from the "abort_list" */
-    if (!list_is_empty(bs->abort_list)) {
-        LIST_FOREACH_F(bs->abort_list, object_t *, bag_add(bs, item));
-        list_clear(bs->abort_list);
-
-        /* these items are not "added in this transaction" */
-        spinlock_acquire(bs->lock);
-        bs->deque_middle = bs->deque_right;
-        spinlock_release(bs->lock);
-    }
-}
-
-static stm_bag_seg_t *bag_check_start_time(stm_bag_t *bag)
-{
-    int i = STM_SEGMENT->segment_num - 1;
-    stm_bag_seg_t *bs = &bag->by_segment[i];
-
-    if (bs->start_time != STM_PSEGMENT->unique_start_time) {
-        /* There was a commit or an abort since the last operation
-           on the same bag in the same segment.  If there was an
-           abort, bag_abort_callback() should have been called to
-           reset the state.  Assume that any non-reset state is
-           there because of a commit.
-
-           The middle pointer moves to the right: there are no
-           more "added in this transaction" entries.  And the
-           "already popped items" list is forgotten.
-        */
-        if (bs->deque_middle != bs->deque_right) {
-            spinlock_acquire(bs->lock);
-            bs->deque_middle = bs->deque_right;
-            spinlock_release(bs->lock);
-        }
-        list_clear(bs->abort_list);
-        bs->start_time = STM_PSEGMENT->unique_start_time;
-        bs->must_add_to_modified_bags = true;
-
-        /* We're about to modify the bag, so register an abort
-           callback now. */
-        stm_thread_local_t *tl = STM_SEGMENT->running_thread;
-        assert(tl->associated_segment_num == STM_SEGMENT->segment_num);
-        stm_call_on_abort(tl, bs, &bag_abort_callback);
-    }
-
-    return bs;
 }
 
 void stm_bag_add(stm_bag_t *bag, object_t *newobj)
 {
-    stm_bag_seg_t *bs = bag_check_start_time(bag);
-    bag_add(bs, newobj);
+    uint32_t i = STM_SEGMENT->segment_num - 1;
+    bag_node_t **p_added = &bag->by_segment[i].added;
+    bag_node_t *p = malloc(sizeof(bag_node_t));
+    assert(p);       /* XXX */
 
-    if (bs->must_add_to_modified_bags) {
-        bs->must_add_to_modified_bags = false;
-        if (STM_PSEGMENT->modified_bags == NULL)
-            LIST_CREATE(STM_PSEGMENT->modified_bags);
-        LIST_APPEND(STM_PSEGMENT->modified_bags, bag);
+    p->value = newobj;
+    while (1) {
+        bag_node_t *old = *p_added;
+        p->next = old;
+        if (__sync_bool_compare_and_swap(p_added, old, p))
+            break;
     }
 }
 
@@ -225,6 +127,23 @@ object_t *stm_bag_try_pop(stm_bag_t *bag)
     spinlock_acquire(bs->lock);
 
     if (bs->deque_left == bs->deque_right) {
+        /* look up inside other segments without locks; this might get
+           occasional nonsense, but it should not matter here */
+        int i;
+        stm_bag_seg_t *src = NULL;
+        for (i = 0; i < STM_NB_SEGMENTS; i++) {
+            stm_bag_seg_t *other = &bag->by_segment[i];
+            uintptr_t *left = other->deque_left;
+            uintptr_t *middle = other->deque_left;
+            ...;
+            
+            if (other->deque_left != other->deque_right) {
+                src = other;
+                if (other->deque_
+            }
+        }
+
+        
         spinlock_release(bs->lock);
         return NULL;
     }
