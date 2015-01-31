@@ -281,9 +281,17 @@ static void abort_with_mutex(void) __attribute__((noreturn));
 static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
-static inline bool was_read_remote(char *base, object_t *obj,
-                                   uint8_t other_transaction_read_version)
+static inline bool was_read_local(object_t *obj)
 {
+    return ((stm_read_marker_t *)(((uintptr_t)obj) >> 4))->rm ==
+        STM_SEGMENT->transaction_read_version;
+}
+
+static inline bool was_read_remote(char *base, object_t *obj)
+{
+    uint8_t other_transaction_read_version =
+        ((struct stm_segment_info_s *)REAL_ADDRESS(base, STM_PSEGMENT))
+            ->transaction_read_version;
     uint8_t rm = ((struct stm_read_marker_s *)
                   (base + (((uintptr_t)obj) >> 4)))->rm;
     assert(rm <= other_transaction_read_version);
