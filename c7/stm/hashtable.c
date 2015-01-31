@@ -63,9 +63,9 @@ typedef struct {
        The field 'resize_counter' also works as a write lock: changes
        go via the intermediate value RESIZING_LOCK (0).
 
-       In addition, 'resize_counter' can be the negative of the odd
-       number that it would normally be, as a hint to force the check
-       of the global read marker, as set by iteration.
+       In addition, 'resize_counter' can be the negation of the odd
+       number that it would normally be: in this case it is "probably
+       write-protected" (see stm_hashtable_next()).
     */
     intptr_t resize_counter;
 
@@ -151,7 +151,8 @@ static void _insert_clean(stm_hashtable_table_t *table,
 
 static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
                                   uintptr_t biggercount,
-                                  int remove_unread_from_seg)
+                                  int remove_unread_from_seg,
+                                  bool rc_must_be_negative)
 {
     dprintf(("rehash %p to %ld, remove_unread_from_seg=%d\n",
              hashtable, biggercount, remove_unread_from_seg));
@@ -189,7 +190,7 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
         rc -= 6;
     }
     assert(rc > 0);
-    biggertable->resize_counter = rc;
+    biggertable->resize_counter = rc_must_be_negative ? -rc : rc;
 
     write_fence();   /* make sure that 'biggertable' is valid here,
                         and make sure 'table->resize_counter' is updated
@@ -233,6 +234,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
     /* here, we didn't find the 'entry' with the correct index. */
 
     intptr_t rc = VOLATILE_TABLE(table)->resize_counter;
+    bool rc_must_be_negative = false;
 
     /* if rc is RESIZING_LOCK (which is 0, so even), a concurrent thread
        is writing to the hashtable.  Or, if rc is another even number, it is
@@ -264,6 +266,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
     /* if rc is greater than 6, there is enough room for a new
        item in the current table.
     */
+ retry_adding:
     if (rc > 6) {
         /* we can only enter here once!  If we allocate stuff, we may
            run the GC, and so 'hashtableobj' might move afterwards. */
@@ -317,11 +320,12 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
         write_fence();     /* make sure 'entry' is fully initialized here */
         table->items[i] = entry;
         write_fence();     /* make sure 'table->items' is written here */
-        VOLATILE_TABLE(table)->resize_counter = rc - 6;    /* unlock */
+        rc -= 6;
+        VOLATILE_TABLE(table)->resize_counter = (
+                                  rc_must_be_negative ? -rc : rc);  /* unlock */
         return entry;
     }
-    else {
-        //xxxxxxxxxxxxxxxxxxxxxxx;
+    else if (rc > 0) {
         /* if rc is smaller than 6, we must allocate a new bigger table.
          */
         uintptr_t biggercount = table->mask + 1;
@@ -329,8 +333,35 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             biggercount *= 4;
         else
             biggercount *= 2;
-        _stm_rehash_hashtable(hashtable, biggercount, /*remove_unread=*/0);
+        _stm_rehash_hashtable(hashtable, biggercount, /*remove_unread=*/0,
+                              rc_must_be_negative);
         goto restart;
+    }
+    else {
+        assert(rc < 0);
+        assert(!_is_in_nursery(hashtableobj));
+
+        /* if rc is negative, the hashtable is probably write-protected.
+           Check if the read marker of the 'hashtableobj' is set in
+           another segment.
+         */
+        int j, my_segment = STM_SEGMENT->segment_num;
+        for (j = 1; j <= NB_SEGMENTS; j++) {
+            if (j != my_segment) {
+                if (was_read_remote(get_segment_base(j), hashtableobj)) {
+                    xxxxxxxxxxxx conflict xxxxxxxxxxx;
+                }
+            }
+        }
+
+        /* if even in this thread's segment it was not read, then there
+           is no point in keeping it write-protected.  So we set
+           'rc_must_be_negative', i.e. keep it write-protected, iff
+           it was read locally.
+        */
+        rc_must_be_negative = was_read_local(hashtableobj);
+        rc = -rc;
+        goto retry_adding;
     }
 }
 
@@ -353,6 +384,77 @@ void stm_hashtable_write(object_t *hobj, stm_hashtable_t *hashtable,
     e->object = nvalue;
 }
 
+struct stm_hashtable_entry_s *
+stm_hashtable_next(object_t *hobj, stm_hashtable_t *hashtable,
+                   uintptr_t *pposition, stm_thread_local_t *tl)
+{
+    /* this assumes the simple c7 model whereby commits only occur with
+       all other transaction paused at a known point. */
+    stm_hashtable_table_t *table;
+    intptr_t rc;
+
+    /* First set the read marker.  It will be left as long as we're running
+       the same transaction.  Note that this code assumes that nothing else
+       can set the read marker!  Also, if 'hobj' is still in the nursery,
+       it was created by this transaction and there is nothing to do.
+    */
+    if (!_is_in_nursery(hobj) && !was_read_local(hobj)) {
+
+        stm_read(hobj);
+
+        /* Change the 'resize_counter' field to its negative value.  This
+           must be done after we've set the read marker. */
+     restart:
+        table = VOLATILE_HASHTABLE(hashtable)->table;
+        rc = VOLATILE_TABLE(table)->resize_counter;
+        if (IS_EVEN(rc)) {
+            spin_loop();
+            goto restart;
+        }
+        if (!__sync_bool_compare_and_swap(&table->resize_counter, rc,
+                                          rc > 0 ? -rc : rc))
+            goto restart;
+        /* Note that we did a compare-and-swap even if rc was already
+           negative.  This is needed for its memory-ordering effect,
+           to ensure that from now on the other threads do see our
+           read marker set. */
+    }
+    else {
+        /* Read marker already set.  Assume (and assert) that we
+           already set a negative value into 'resize_counter'.
+           Changes of 'table' or 'resize_counter' under our feet
+           should not be possible here.
+        */
+        table = hashtable->table;
+
+        if (!_is_in_nursery(hobj)) {
+            assert(!IS_EVEN(table->resize_counter) &&
+                   table->resize_counter < 0);
+        }
+    }
+
+    /* At this point, the hashtable is write-protected: no other
+       thread may add new key/value objects nor grow/replace the
+       'table'.  The hashtable will remain write-protected as long as
+       this transaction is running.  Note that *this* thread is
+       allowed to continue modifying the hashtable (unless another
+       thread did also set a write protection).
+    */
+    uintptr_t position = *pposition;
+    uintptr_t mask = table->mask;
+    stm_hashtable_entry_t *entry;
+
+    while (position <= mask) {
+        entry = table->items[position++];
+        if (entry != NULL) {
+            *pposition = position;
+            return entry;
+        }
+    }
+    *pposition = (uintptr_t)-1;
+    return NULL;
+}
+
 static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
 {
     stm_hashtable_table_t *table = hashtable->table;
@@ -372,7 +474,8 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
         assert(count <= table->mask + 1);
 
         dprintf(("compact with %ld items:\n", num_entries_times_6 / 6));
-        _stm_rehash_hashtable(hashtable, count, /*remove_unread=*/segment_num);
+        _stm_rehash_hashtable(hashtable, count, /*remove_unread=*/segment_num,
+                              /*rc_must_be_negative=*/false);
     }
 
     table = hashtable->table;
