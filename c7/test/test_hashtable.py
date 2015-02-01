@@ -29,6 +29,11 @@ def htitems(o):
     return [(lib._get_entry_index(entries[i]),
              lib._get_entry_object(entries[i])) for i in range(count)]
 
+def htlen(o):
+    h = get_hashtable(o)
+    count = lib.stm_hashtable_list(o, h, ffi.NULL)
+    return count
+
 
 class BaseTestHashtable(BaseTest):
 
@@ -270,6 +275,14 @@ class TestHashtable(BaseTestHashtable):
         lst = htitems(h)
         assert len(lst) == 29
         assert sorted(lst) == sorted(expected)
+
+    def test_list_3(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        for i in range(29):
+            htset(h, 19 ^ i, stm_allocate(32), tl0)
+        assert htlen(h) == 29
 
 
 class TestRandomHashtable(BaseTestHashtable):
