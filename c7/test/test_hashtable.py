@@ -16,6 +16,19 @@ def htset(o, key, nvalue, tl):
     if res:
         raise Conflict
 
+def ht_length_upper_bound(o):
+    h = get_hashtable(o)
+    return lib.stm_hashtable_length_upper_bound(h)
+
+def htitems(o):
+    h = get_hashtable(o)
+    upper_bound = lib.stm_hashtable_length_upper_bound(h)
+    entries = ffi.new("stm_hashtable_entry_t *[]", upper_bound)
+    count = lib.stm_hashtable_list(o, h, entries)
+    assert count <= upper_bound
+    return [(lib._get_entry_index(entries[i]),
+             lib._get_entry_object(entries[i])) for i in range(count)]
+
 
 class BaseTestHashtable(BaseTest):
 
@@ -235,6 +248,28 @@ class TestHashtable(BaseTestHashtable):
         assert htget(h, 10) != ffi.NULL
         assert htget(h, 11) != ffi.NULL
         assert htget(h, 12) != ffi.NULL
+
+    def test_list_1(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        for i in range(32):
+            assert ht_length_upper_bound(h) == i
+            htset(h, 19 ^ i, stm_allocate(32), tl0)
+        assert ht_length_upper_bound(h) == 32
+
+    def test_list_2(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        expected = []
+        for i in range(29):
+            lp = stm_allocate(32)
+            htset(h, 19 ^ i, lp, tl0)
+            expected.append((19 ^ i, lp))
+        lst = htitems(h)
+        assert len(lst) == 29
+        assert sorted(lst) == sorted(expected)
 
 
 class TestRandomHashtable(BaseTestHashtable):
