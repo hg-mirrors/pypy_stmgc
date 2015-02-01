@@ -31,7 +31,7 @@ stm_thread_local_t *_stm_thread(void)
 
 bool _stm_was_read(object_t *obj)
 {
-    return was_read_local(obj);
+    return was_read_remote(STM_SEGMENT->segment_base, obj);
 }
 
 bool _stm_was_written(object_t *obj)
