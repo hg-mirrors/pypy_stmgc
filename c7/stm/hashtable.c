@@ -12,22 +12,16 @@ pairs at that index (usually only one, unless there is a hash
 collision).
 
 The main operations on a hashtable are reading or writing an object at a
-given index.  It also supports iterating its non-NULL entries.
+given index.  It also supports fetching the list of non-NULL entries.
 
 There are two markers for every index (a read and a write marker).
 This is unlike regular arrays, which have only two markers in total.
 
 Additionally, we use the read marker for the hashtable object itself
-to mean "we are iterating".  When a transaction has got this "global"
-read marker and another transaction attempts to create a new key/value
-pair via stm_hashtable_{lookup,read,write}, the call immediately fails
-with a read/write conflict.  This gives priority to the iterating
-transaction rather than the modifying transaction, which is probably
-what we want.
-
-XXX NO: when creating new key/value objects, we should copy the read
-marker from the hashtableobj to the new key/value object.  I *think*
-this gives a correct and better result XXX
+to mean "we have read the complete list of keys".  This plays the role
+of a "global" read marker: when any thread adds a new key/value object
+to the hashtable, this new object's read marker is initialized with a
+copy of the "global" read marker --- in all segments.
 
 
 Implementation
@@ -66,12 +60,8 @@ typedef struct {
 
        The field 'resize_counter' also works as a write lock: changes
        go via the intermediate value RESIZING_LOCK (0).
-
-       In addition, 'resize_counter' can be the negation of the odd
-       number that it would normally be: in this case it is "probably
-       write-protected" (see stm_hashtable_next()).
     */
-    intptr_t resize_counter;
+    uintptr_t resize_counter;
 
     stm_hashtable_entry_t *items[INITIAL_HASHTABLE_SIZE];
 } stm_hashtable_table_t;
@@ -104,7 +94,7 @@ stm_hashtable_t *stm_hashtable_create(void)
 
 void stm_hashtable_free(stm_hashtable_t *hashtable)
 {
-    intptr_t rc = hashtable->initial_table.resize_counter;
+    uintptr_t rc = hashtable->initial_table.resize_counter;
     free(hashtable);
     while (IS_EVEN(rc)) {
         assert(rc != RESIZING_LOCK);
@@ -119,9 +109,7 @@ static bool _stm_was_read_by_anybody(object_t *obj)
 {
     long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
-        char *remote_base = get_segment_base(i);
-        uint8_t remote_version = get_segment(i)->transaction_read_version;
-        if (was_read_remote(remote_base, obj, remote_version))
+        if (was_read_remote(get_segment_base(i), obj))
             return true;
     }
     return false;
@@ -155,8 +143,7 @@ static void _insert_clean(stm_hashtable_table_t *table,
 
 static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
                                   uintptr_t biggercount,
-                                  int remove_unread_from_seg,
-                                  bool rc_must_be_negative)
+                                  int remove_unread_from_seg)
 {
     dprintf(("rehash %p to %ld, remove_unread_from_seg=%d\n",
              hashtable, biggercount, remove_unread_from_seg));
@@ -167,7 +154,7 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
     assert(biggertable);   // XXX
 
     stm_hashtable_table_t *table = hashtable->table;
-    table->resize_counter = (intptr_t)biggertable;
+    table->resize_counter = (uintptr_t)biggertable;
     /* ^^^ this unlocks the table by writing a non-zero value to
        table->resize_counter, but the new value is a pointer to the
        new bigger table, so IS_EVEN() is still true */
@@ -176,7 +163,7 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
     init_table(biggertable, biggercount);
 
     uintptr_t j, mask = table->mask;
-    intptr_t rc = biggertable->resize_counter;
+    uintptr_t rc = biggertable->resize_counter;
     char *segment_base = get_segment_base(remove_unread_from_seg);
     for (j = 0; j <= mask; j++) {
         stm_hashtable_entry_t *entry = table->items[j];
@@ -191,10 +178,10 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
             }
         }
         _insert_clean(biggertable, entry);
+        assert(rc > 6);
         rc -= 6;
     }
-    assert(rc > 0);
-    biggertable->resize_counter = rc_must_be_negative ? -rc : rc;
+    biggertable->resize_counter = rc;
 
     write_fence();   /* make sure that 'biggertable' is valid here,
                         and make sure 'table->resize_counter' is updated
@@ -246,8 +233,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
        whole process.
      */
 
-    intptr_t rc = VOLATILE_TABLE(table)->resize_counter;
-    bool rc_must_be_negative = false;
+    uintptr_t rc = VOLATILE_TABLE(table)->resize_counter;
 
     /* if rc is RESIZING_LOCK (which is 0, so even), a concurrent thread
        is writing to the hashtable.  Or, if rc is another even number, it is
@@ -279,7 +265,6 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
     /* if rc is greater than 6, there is enough room for a new
        item in the current table.
     */
- retry_adding:
     if (rc > 6) {
         /* we can only enter here once!  If we allocate stuff, we may
            run the GC, and so 'hashtableobj' might move afterwards. */
@@ -312,12 +297,22 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
                synchronization with other pieces of the code that may
                change.
             */
+
+            /* First fetch the read marker of 'hashtableobj' in all
+               segments, before allocate_outside_nursery_large()
+               which might trigger a GC */
+            long j;
+            uint8_t readmarkers[NB_SEGMENTS];
+            for (j = 1; j <= NB_SEGMENTS; j++) {
+                readmarkers[j - 1] = get_read_marker(get_segment_base(j),
+                                                     hashtableobj)->rm;
+            }
+
             acquire_privatization_lock();
             char *p = allocate_outside_nursery_large(
                           sizeof(stm_hashtable_entry_t));
             entry = (stm_hashtable_entry_t *)(p - stm_object_pages);
 
-            long j;
             for (j = 0; j <= NB_SEGMENTS; j++) {
                 struct stm_hashtable_entry_s *e;
                 e = (struct stm_hashtable_entry_s *)
@@ -329,16 +324,19 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             }
             hashtable->additions += 0x100;
             release_privatization_lock();
+
+            for (j = 1; j <= NB_SEGMENTS; j++) {
+                get_read_marker(get_segment_base(j), (object_t *)entry)->rm =
+                    readmarkers[j - 1];
+            }
         }
         write_fence();     /* make sure 'entry' is fully initialized here */
         table->items[i] = entry;
         write_fence();     /* make sure 'table->items' is written here */
-        rc -= 6;
-        VOLATILE_TABLE(table)->resize_counter = (
-                                  rc_must_be_negative ? -rc : rc);  /* unlock */
+        VOLATILE_TABLE(table)->resize_counter = rc - 6;    /* unlock */
         return entry;
     }
-    else if (rc > 0) {
+    else {
         /* if rc is smaller than 6, we must allocate a new bigger table.
          */
         uintptr_t biggercount = table->mask + 1;
@@ -346,51 +344,8 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             biggercount *= 4;
         else
             biggercount *= 2;
-        _stm_rehash_hashtable(hashtable, biggercount, /*remove_unread=*/0,
-                              rc_must_be_negative);
+        _stm_rehash_hashtable(hashtable, biggercount, /*remove_unread=*/0);
         goto restart;
-    }
-    else {
-        assert(rc < 0);
-        assert(!_is_in_nursery(hashtableobj));
-
-        /* if rc is negative, the hashtable is probably write-protected.
-           Check if the read marker of the 'hashtableobj' is set in
-           another segment.
-         */
-        int j, my_segment = STM_SEGMENT->segment_num;
-        for (j = 1; j <= NB_SEGMENTS; j++) {
-            if (j == my_segment)
-                continue;
-            if (was_read_remote(get_segment_base(j), hashtableobj)) {
-                /* conflict! */
-                table->resize_counter = rc;    /* unlock */
-                if (write_read_contention_management(j, hashtableobj)) {
-                    /* If we reach this point, we didn't abort, but we
-                       had to wait for the other thread to commit.  If
-                       we did, then we have to restart. */
-                    return true;
-                    ...;
-                    
-                    }
-                    /* we aborted the other transaction without waiting, so
-                       we can just break out of this loop on
-                       modified_old_objects and continue with the next
-                       segment */
-                    
-                    xxx;
-                }
-            }
-        }
-
-        /* if even in this thread's segment it was not read, then there
-           is no point in keeping it write-protected.  So we set
-           'rc_must_be_negative', i.e. keep it write-protected, iff
-           it was read locally.
-        */
-        rc_must_be_negative = was_read_local(hashtableobj);
-        rc = -rc;
-        goto retry_adding;
     }
 }
 
@@ -413,81 +368,86 @@ void stm_hashtable_write(object_t *hobj, stm_hashtable_t *hashtable,
     e->object = nvalue;
 }
 
-struct stm_hashtable_entry_s *
-stm_hashtable_next(object_t *hobj, stm_hashtable_t *hashtable,
-                   uintptr_t *pposition, stm_thread_local_t *tl)
+long stm_hashtable_length_upper_bound(stm_hashtable_t *hashtable)
 {
-    /* this assumes the simple c7 model whereby commits only occur with
-       all other transaction paused at a known point. */
+    stm_hashtable_table_t *table;
+    uintptr_t rc;
+
+ restart:
+    table = VOLATILE_HASHTABLE(hashtable)->table;
+    rc = VOLATILE_TABLE(table)->resize_counter;
+    if (IS_EVEN(rc)) {
+        spin_loop();
+        goto restart;
+    }
+
+    uintptr_t initial_rc = (table->mask + 1) * 4 + 1;
+    uintptr_t num_entries_times_6 = initial_rc - rc;
+    return num_entries_times_6 / 6;
+}
+
+long stm_hashtable_list(object_t *hobj, stm_hashtable_t *hashtable,
+                        stm_hashtable_entry_t **results)
+{
     stm_hashtable_table_t *table;
     intptr_t rc;
 
-    /* First set the read marker.  It will be left as long as we're running
-       the same transaction.  Note that this code assumes that nothing else
-       can set the read marker!  Also, if 'hobj' is still in the nursery,
-       it was created by this transaction and there is nothing to do.
+    /* Set the read marker.  It will be left as long as we're running
+       the same transaction.
     */
-    if (!_is_in_nursery(hobj) && !was_read_local(hobj)) {
+    stm_read(hobj);
 
-        stm_read(hobj);
+    /* Acquire and immediately release the lock.  We don't actually
+       need to do anything while we hold the lock, but the point is to
+       wait until the lock is available, and to synchronize other
+       threads with the stm_read() done above.
+     */
+ restart:
+    table = VOLATILE_HASHTABLE(hashtable)->table;
+    rc = VOLATILE_TABLE(table)->resize_counter;
+    if (IS_EVEN(rc)) {
+        spin_loop();
+        goto restart;
+    }
+    if (!__sync_bool_compare_and_swap(&table->resize_counter, rc, rc))
+        goto restart;
 
-        /* Change the 'resize_counter' field to its negative value.  This
-           must be done after we've set the read marker. */
-     restart:
-        table = VOLATILE_HASHTABLE(hashtable)->table;
-        rc = VOLATILE_TABLE(table)->resize_counter;
-        if (IS_EVEN(rc)) {
-            spin_loop();
-            goto restart;
+    /* Read all entries, check which ones are not NULL, count them,
+       and optionally list them in 'results'.
+    */
+    uintptr_t i, mask = table->mask;
+    stm_hashtable_entry_t *entry;
+    long nresult = 0;
+
+    if (results != NULL) {
+        /* collect the results in the provided list */
+        for (i = 0; i <= mask; i++) {
+            entry = VOLATILE_TABLE(table)->items[i];
+            if (entry != NULL) {
+                stm_read((object_t *)entry);
+                if (entry->object != NULL)
+                    results[nresult++] = entry;
+            }
         }
-        if (!__sync_bool_compare_and_swap(&table->resize_counter, rc,
-                                          rc > 0 ? -rc : rc))
-            goto restart;
-        /* Note that we did a compare-and-swap even if rc was already
-           negative.  This is needed for its memory-ordering effect,
-           to ensure that from now on the other threads do see our
-           read marker set. */
     }
     else {
-        /* Read marker already set.  Assume (and assert) that we
-           already set a negative value into 'resize_counter'.
-           Changes of 'table' or 'resize_counter' under our feet
-           should not be possible here.
-        */
-        table = hashtable->table;
-
-        if (!_is_in_nursery(hobj)) {
-            assert(!IS_EVEN(table->resize_counter) &&
-                   table->resize_counter < 0);
+        /* don't collect, just get the exact number of results */
+        for (i = 0; i <= mask; i++) {
+            entry = VOLATILE_TABLE(table)->items[i];
+            if (entry != NULL) {
+                stm_read((object_t *)entry);
+                if (entry->object != NULL)
+                    nresult++;
+            }
         }
     }
-
-    /* At this point, the hashtable is write-protected: no other
-       thread may add new key/value objects nor grow/replace the
-       'table'.  The hashtable will remain write-protected as long as
-       this transaction is running.  Note that *this* thread is
-       allowed to continue modifying the hashtable (unless another
-       thread did also set a write protection).
-    */
-    uintptr_t position = *pposition;
-    uintptr_t mask = table->mask;
-    stm_hashtable_entry_t *entry;
-
-    while (position <= mask) {
-        entry = table->items[position++];
-        if (entry != NULL) {
-            *pposition = position;
-            return entry;
-        }
-    }
-    *pposition = (uintptr_t)-1;
-    return NULL;
+    return nresult;
 }
 
 static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
 {
     stm_hashtable_table_t *table = hashtable->table;
-    intptr_t rc = table->resize_counter;
+    uintptr_t rc = table->resize_counter;
     assert(!IS_EVEN(rc));
 
     if ((hashtable->additions >> 8) * 4 > table->mask) {
@@ -495,7 +455,7 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
         if (!segment_num) segment_num = 1;
         hashtable->additions = segment_num;
         uintptr_t initial_rc = (table->mask + 1) * 4 + 1;
-        uintptr_t num_entries_times_6 = initial_rc - (rc < 0 ? -rc : rc);
+        uintptr_t num_entries_times_6 = initial_rc - rc;
         uintptr_t count = INITIAL_HASHTABLE_SIZE;
         while (count * 4 < num_entries_times_6)
             count *= 2;
@@ -504,15 +464,14 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
         assert(count <= table->mask + 1);
 
         dprintf(("compact with %ld items:\n", num_entries_times_6 / 6));
-        _stm_rehash_hashtable(hashtable, count, /*remove_unread=*/segment_num,
-                              /*rc_must_be_negative=*/rc < 0);
+        _stm_rehash_hashtable(hashtable, count, /*remove_unread=*/segment_num);
     }
 
     table = hashtable->table;
     assert(!IS_EVEN(table->resize_counter));
 
     if (table != &hashtable->initial_table) {
-        intptr_t rc = hashtable->initial_table.resize_counter;
+        uintptr_t rc = hashtable->initial_table.resize_counter;
         while (1) {
             assert(IS_EVEN(rc));
             assert(rc != RESIZING_LOCK);
@@ -523,7 +482,7 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
             rc = old_table->resize_counter;
             free(old_table);
         }
-        hashtable->initial_table.resize_counter = (intptr_t)table;
+        hashtable->initial_table.resize_counter = (uintptr_t)table;
         assert(IS_EVEN(hashtable->initial_table.resize_counter));
     }
 }
