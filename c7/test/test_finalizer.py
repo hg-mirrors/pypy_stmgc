@@ -176,12 +176,14 @@ class TestRegularFinalizer(BaseTest):
 
     def test_finalizer_in_major_collection(self):
         self.start_transaction()
-        lp1 = stm_allocate_with_finalizer(48)
-        lp2 = stm_allocate_with_finalizer(48)
-        lp3 = stm_allocate_with_finalizer(48)
-        print lp1, lp2, lp3
-        stm_major_collect()
-        self.expect_finalized([lp1, lp2, lp3])
+        for repeat in range(2):
+            lp1 = stm_allocate_with_finalizer(48)
+            lp2 = stm_allocate_with_finalizer(48)
+            lp3 = stm_allocate_with_finalizer(48)
+            print repeat, lp1, lp2, lp3
+            self.expect_finalized([])
+            stm_major_collect()
+            self.expect_finalized([lp1, lp2, lp3])
 
     def test_finalizer_from_other_thread(self):
         self.start_transaction()
