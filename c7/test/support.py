@@ -167,17 +167,23 @@ void stm_enable_light_finalizer(object_t *);
 void (*stmcb_finalizer)(object_t *);
 
 typedef struct stm_hashtable_s stm_hashtable_t;
+typedef ... stm_hashtable_entry_t;
 stm_hashtable_t *stm_hashtable_create(void);
 void stm_hashtable_free(stm_hashtable_t *);
 bool _check_hashtable_read(object_t *, stm_hashtable_t *, uintptr_t key);
 object_t *hashtable_read_result;
 bool _check_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
                             object_t *nvalue, stm_thread_local_t *tl);
+long stm_hashtable_length_upper_bound(stm_hashtable_t *);
+long stm_hashtable_list(object_t *, stm_hashtable_t *,
+                        stm_hashtable_entry_t **results);
 uint32_t stm_hashtable_entry_userdata;
 void stm_hashtable_tracefn(stm_hashtable_t *, void (object_t **));
 
 void _set_hashtable(object_t *obj, stm_hashtable_t *h);
 stm_hashtable_t *_get_hashtable(object_t *obj);
+uintptr_t _get_entry_index(stm_hashtable_entry_t *entry);
+object_t *_get_entry_object(stm_hashtable_entry_t *entry);
 """)
 
 
@@ -306,6 +312,18 @@ stm_hashtable_t *_get_hashtable(object_t *obj)
     stm_char *field_addr = ((stm_char*)obj);
     field_addr += SIZEOF_MYOBJ; /* header */
     return *(stm_hashtable_t *TLPREFIX *)field_addr;
+}
+
+uintptr_t _get_entry_index(stm_hashtable_entry_t *entry)
+{
+    stm_read((object_t *)entry);
+    return entry->index;
+}
+
+object_t *_get_entry_object(stm_hashtable_entry_t *entry)
+{
+    stm_read((object_t *)entry);
+    return entry->object;
 }
 
 void _set_ptr(object_t *obj, int n, object_t *v)
