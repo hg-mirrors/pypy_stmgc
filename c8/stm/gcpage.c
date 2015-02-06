@@ -521,7 +521,8 @@ static inline bool largemalloc_keep_object_at(char *data)
         long i;
         for (i = 1; i < NB_SEGMENTS; i++) {
             /* reset read marker */
-            *((char *)(get_segment_base(i) + (((uintptr_t)obj) >> 4))) = 0;
+            ((struct stm_read_marker_s *)
+             (get_segment_base(i) + (((uintptr_t)obj) >> 4)))->rm = 0;
         }
         return false;
     }
@@ -547,7 +548,8 @@ static inline bool smallmalloc_keep_object_at(char *data)
         long i;
         for (i = 1; i < NB_SEGMENTS; i++) {
             /* reset read marker */
-            *((char *)(get_segment_base(i) + (((uintptr_t)obj) >> 4))) = 0;
+            ((struct stm_read_marker_s *)
+             (get_segment_base(i) + (((uintptr_t)obj) >> 4)))->rm = 0;
         }
         return false;
     }
