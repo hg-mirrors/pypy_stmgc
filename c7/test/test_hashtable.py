@@ -284,6 +284,25 @@ class TestHashtable(BaseTestHashtable):
             htset(h, 19 ^ i, stm_allocate(32), tl0)
         assert htlen(h) == 29
 
+    def test_len_conflicts_with_additions(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        self.push_root(h)
+        self.commit_transaction()
+        h = self.pop_root()
+        #
+        self.start_transaction()
+        assert htlen(h) == 0
+        #
+        self.switch(1)
+        self.start_transaction()
+        tl0 = self.tls[self.current_thread]
+        htset(h, 10, stm_allocate(32), tl0)
+        py.test.raises(Conflict, self.commit_transaction)
+        #
+        self.switch(0)
+        stm_major_collect()       # to get rid of the hashtable object
+
 
 class TestRandomHashtable(BaseTestHashtable):
 
