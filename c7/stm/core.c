@@ -313,10 +313,6 @@ static void reset_transaction_read_version(void)
     dprintf(("reset_transaction_read_version: %p %ld\n", readmarkers,
              (long)(NB_READMARKER_PAGES * 4096UL)));
 
-    /* see hashtable.c for why we need the privatization lock here
-       (grep for reset_transaction_read_version)
-    */
-    acquire_privatization_lock();
     if (mmap(readmarkers, NB_READMARKER_PAGES * 4096UL,
              PROT_READ | PROT_WRITE,
              MAP_FIXED | MAP_PAGES_FLAGS, -1, 0) != readmarkers) {
@@ -327,7 +323,6 @@ static void reset_transaction_read_version(void)
         memset(readmarkers, 0, NB_READMARKER_PAGES * 4096UL);
     }
     STM_SEGMENT->transaction_read_version = 1;
-    release_privatization_lock();
 }
 
 static uint64_t _global_start_time = 0;
