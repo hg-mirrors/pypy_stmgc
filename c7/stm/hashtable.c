@@ -304,7 +304,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             };
             entry = (stm_hashtable_entry_t *)
                 stm_allocate_preexisting(sizeof(stm_hashtable_entry_t),
-                                         &initial.header);
+                                         (char *)&initial.header);
             hashtable->additions += 0x100;
         }
         table->items[i] = entry;

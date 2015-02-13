@@ -570,7 +570,7 @@ struct stm_hashtable_entry_s {
    use stm_write() and make local changes.
 */
 object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
-                                   struct object_s *initial_data);
+                                   const char *initial_data);
 
 /* ==================== END ==================== */
 
