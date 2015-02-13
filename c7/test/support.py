@@ -62,6 +62,7 @@ bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
 bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
+bool _check_commit_and_start_inevitable(stm_thread_local_t *tl);
 int stm_is_inevitable(void);
 long current_segment_num(void);
 
@@ -254,11 +255,15 @@ bool _check_abort_transaction(void) {
 }
 
 bool _check_become_inevitable(stm_thread_local_t *tl) {
-    CHECKED(stm_become_inevitable(tl, "TEST"));
+    CHECKED(stm_become_inevitable(tl, "TESTINEV"));
 }
 
 bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
     CHECKED(stm_become_globally_unique_transaction(tl, "TESTGUT"));
+}
+
+bool _check_commit_and_start_inevitable(stm_thread_local_t *tl) {
+    CHECKED(stm_commit_and_start_inevitable(tl, "TESTCSI"));
 }
 
 object_t *hashtable_read_result;
@@ -780,4 +785,9 @@ class BaseTest(object):
     def become_globally_unique_transaction(self):
         tl = self.tls[self.current_thread]
         if lib._check_become_globally_unique_transaction(tl):
+            raise Conflict()
+
+    def commit_and_start_inevitable(self):
+        tl = self.tls[self.current_thread]
+        if lib._check_commit_and_start_inevitable(tl):
             raise Conflict()
