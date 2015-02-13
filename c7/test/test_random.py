@@ -314,14 +314,10 @@ class GlobalState(object):
 ###################################################################
 
 
-def op_start_transaction(ex, global_state, thread_state,
-                         commit_and_start_inevitable=False):
+def op_start_transaction(ex, global_state, thread_state):
     thread_state.start_transaction(ex.thread_num)
     #
-    if commit_and_start_inevitable:
-        ex.do('self.commit_and_start_inevitable()')
-    else:
-        ex.do('self.start_transaction()')
+    ex.do('self.start_transaction()')
     thread_state.reload_roots(ex)
     #
     # assert that everything known is old:
@@ -330,8 +326,7 @@ def op_start_transaction(ex, global_state, thread_state,
         ex.do("assert not is_in_nursery(%s)" % o)
 
 
-def op_commit_transaction(ex, global_state, thread_state,
-                          commit_and_start_inevitable=False):
+def op_commit_transaction(ex, global_state, thread_state):
     #
     # push all new roots
     ex.do("# push new objs before commit:")
@@ -340,8 +335,7 @@ def op_commit_transaction(ex, global_state, thread_state,
     #
     if aborts:
         thread_state.abort_transaction()
-    if not commit_and_start_inevitable:
-        ex.do(raising_call(aborts, "self.commit_transaction"))
+    ex.do(raising_call(aborts, "self.commit_transaction"))
 
 def op_abort_transaction(ex, global_state, thread_state):
     trs = thread_state.transaction_state
@@ -351,17 +345,13 @@ def op_abort_transaction(ex, global_state, thread_state):
     thread_state.abort_transaction()
     ex.do('self.abort_transaction()')
 
-def op_become_inevitable(ex, global_state, thread_state,
-                         commit_and_start_inevitable=False):
+def op_become_inevitable(ex, global_state, thread_state):
     trs = thread_state.transaction_state
     global_state.check_if_can_become_inevitable(trs)
 
     thread_state.push_roots(ex)
-    if commit_and_start_inevitable:
-        assert not trs.check_must_abort()
-    else:
-        ex.do(raising_call(trs.check_must_abort(),
-                        "self.become_inevitable"))
+    ex.do(raising_call(trs.check_must_abort(),
+                       "self.become_inevitable"))
     if trs.check_must_abort():
         thread_state.abort_transaction()
     else:
@@ -369,16 +359,6 @@ def op_become_inevitable(ex, global_state, thread_state,
         thread_state.pop_roots(ex)
         thread_state.reload_roots(ex)
 
-def op_commit_and_start_inevitable(ex, global_state, thread_state):
-    op_become_inevitable(ex, global_state, thread_state)
-    if thread_state.transaction_state is not None:
-        op_commit_transaction(ex, global_state, thread_state,
-                              commit_and_start_inevitable=True)
-        op_start_transaction(ex, global_state, thread_state,
-                             commit_and_start_inevitable=True)
-        op_become_inevitable(ex, global_state, thread_state,
-                             commit_and_start_inevitable=True)
-        assert thread_state.transaction_state is not None
 
 def op_allocate(ex, global_state, thread_state):
     size = global_state.rnd.choice([
@@ -604,7 +584,6 @@ class TestRandom(BaseTest):
             op_abort_transaction,
             op_forget_root,
             op_become_inevitable,
-            op_commit_and_start_inevitable,
             op_assert_size,
             op_assert_modified,
             op_minor_collect,
