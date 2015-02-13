@@ -184,6 +184,8 @@ void _set_hashtable(object_t *obj, stm_hashtable_t *h);
 stm_hashtable_t *_get_hashtable(object_t *obj);
 uintptr_t _get_entry_index(stm_hashtable_entry_t *entry);
 object_t *_get_entry_object(stm_hashtable_entry_t *entry);
+
+object_t *stm_allocate_preexisting(ssize_t size_rounded_up, struct object_s *);
 """)
 
 
