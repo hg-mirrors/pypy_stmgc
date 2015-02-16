@@ -96,9 +96,12 @@ static stm_char *allocate_outside_nursery_large(uint64_t size)
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up)
 {
-    /* this is for tests, and for stm_setup_prebuilt() */
+    /* only for tests xxx but stm_setup_prebuilt() uses this now too */
     stm_char *p = allocate_outside_nursery_large(size_rounded_up);
     object_t *o = (object_t *)p;
+
+    // sharing seg0 needs to be current:
+    assert(STM_SEGMENT->segment_num == 0);
     memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
 
