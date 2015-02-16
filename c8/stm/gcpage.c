@@ -100,7 +100,9 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
     stm_char *p = allocate_outside_nursery_large(size_rounded_up);
     object_t *o = (object_t *)p;
 
-    // sharing seg0 needs to be current:
+    /* Sharing seg0 needs to be current, because in core.c handle_segfault_in_page,
+       we depend on simply copying the page from seg0 if it was never accessed by
+       anyone so far (we only run in seg1 <= seg < NB_SEGMENT). */
     assert(STM_SEGMENT->segment_num == 0);
     memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
