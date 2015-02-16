@@ -179,7 +179,7 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     /* increment_total_allocated(4096); */
 
     if (copy_from_segnum == -1) {
-        /* this page is only accessible in the sharing segment so far (new
+        /* this page is only accessible in the sharing segment seg0 so far (new
            allocation). We can thus simply mark it accessible here. */
         pagecopy(get_virtual_page(my_segnum, pagenum),
                  get_virtual_page(0, pagenum));
@@ -288,7 +288,8 @@ static bool _stm_validate()
 {
     /* returns true if we reached a valid state, or false if
        we need to abort now */
-    dprintf(("_stm_validate()\n"));
+    dprintf(("_stm_validate() at cl=%p, rev=%lu\n", STM_PSEGMENT->last_commit_log_entry,
+             STM_PSEGMENT->last_commit_log_entry->rev_num));
     /* go from last known entry in commit log to the
        most current one and apply all changes done
        by other transactions. Abort if we have read one of
@@ -388,6 +389,7 @@ static bool _stm_validate()
                          !needs_abort);  /* if we abort, we still want to copy everything */
                 }
 
+                dprintf(("_stm_validate() to cl=%p, rev=%lu\n", cl, cl->rev_num));
                 /* last fully validated entry */
                 STM_PSEGMENT->last_commit_log_entry = cl;
                 if (cl == last_cl)
@@ -530,6 +532,9 @@ static void _validate_and_add_to_commit_log(void)
     else {
         _validate_and_attach(new);
     }
+
+    STM_PSEGMENT->transaction_state = TS_NONE;
+    STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
 
     acquire_modification_lock(STM_SEGMENT->segment_num);
     list_clear(STM_PSEGMENT->modified_old_objects);
@@ -843,6 +848,7 @@ void stm_commit_transaction(void)
 
     push_new_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
+    bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
 
     invoke_and_clear_user_callbacks(0);   /* for commit */
@@ -854,7 +860,7 @@ void stm_commit_transaction(void)
 
     stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
 
-    if (globally_unique_transaction && STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+    if (globally_unique_transaction && was_inev) {
         committed_globally_unique_transaction();
     }
 
