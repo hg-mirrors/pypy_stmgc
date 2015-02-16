@@ -566,13 +566,10 @@ static void clean_up_commit_log_entries()
     struct stm_commit_log_entry_s *cl, *next;
 
 #ifndef NDEBUG
-    /* check that all segments are at the same revision (or not running
-       a transaction at all): */
+    /* check that all segments are at the same revision: */
     cl = get_priv_segment(0)->last_commit_log_entry;
     for (long i = 1; i < NB_SEGMENTS; i++) {
-        if (get_priv_segment(i)->transaction_state != TS_NONE) {
-            assert(get_priv_segment(i)->last_commit_log_entry == cl);
-        }
+        assert(get_priv_segment(i)->last_commit_log_entry == cl);
     }
 #endif
 
