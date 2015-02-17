@@ -429,11 +429,16 @@ static void major_do_validation_and_minor_collections(void)
     int original_num = STM_SEGMENT->segment_num;
     long i;
 
+    assert(_has_mutex());
+
     /* including the sharing seg0 */
     for (i = 0; i < NB_SEGMENTS; i++) {
         set_gs_register(get_segment_base(i));
 
-        if (!_stm_validate()) {
+        bool ok = _stm_validate();
+        assert(get_priv_segment(i)->last_commit_log_entry->next == NULL
+               || get_priv_segment(i)->last_commit_log_entry->next == INEV_RUNNING);
+        if (!ok) {
             assert(i != 0);     /* sharing seg0 should never need an abort */
 
             if (STM_PSEGMENT->transaction_state == TS_NONE) {

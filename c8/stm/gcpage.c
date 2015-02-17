@@ -570,16 +570,19 @@ static void clean_up_commit_log_entries()
 #ifndef NDEBUG
     /* check that all segments are at the same revision: */
     cl = get_priv_segment(0)->last_commit_log_entry;
-    for (long i = 1; i < NB_SEGMENTS; i++) {
-        assert(get_priv_segment(i)->last_commit_log_entry == cl);
+    for (long i = 0; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+        assert(pseg->last_commit_log_entry == cl);
     }
 #endif
 
     /* if there is only one element, we don't have to do anything: */
     cl = &commit_log_root;
 
-    if (cl->next == NULL || cl->next == INEV_RUNNING)
+    if (cl->next == NULL || cl->next == INEV_RUNNING) {
+        assert(get_priv_segment(0)->last_commit_log_entry == cl);
         return;
+    }
 
     bool was_inev = false;
     uint64_t rev_num = -1;
