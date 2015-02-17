@@ -126,6 +126,7 @@ void stm_setup(void)
     setup_nursery();
     setup_gcpage();
     setup_pages();
+    setup_forksupport();
 
     set_gs_register(get_segment_base(0));
 }

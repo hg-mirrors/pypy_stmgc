@@ -27,6 +27,7 @@
 #include "stm/nursery.c"
 #include "stm/weakref.c"
 #include "stm/sync.c"
+#include "stm/forksupport.c"
 #include "stm/setup.c"
 #include "stm/hash_id.c"
 #include "stm/core.c"
