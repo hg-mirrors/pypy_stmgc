@@ -13,7 +13,7 @@
 #define STEPS_PER_THREAD 50000
 #define THREAD_STARTS 100 // how many restarts of threads
 #define PREBUILT_ROOTS 3
-#define FORKS 0
+#define FORKS 4
 
 #define ACTIVE_ROOTS_SET_SIZE 100 // max num of roots created/alive in one transaction
 #define MAX_ROOTS_ON_SS 1000 // max on shadow stack

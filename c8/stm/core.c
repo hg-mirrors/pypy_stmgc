@@ -672,7 +672,7 @@ static void reset_transaction_read_version(void)
              (long)(NB_READMARKER_PAGES * 4096UL)));
     if (mmap(readmarkers, NB_READMARKER_PAGES * 4096UL,
              PROT_READ | PROT_WRITE,
-             MAP_FIXED | MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0) != readmarkers) {
+             MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0) != readmarkers) {
         /* fall-back */
 #if STM_TESTS
         stm_fatalerror("reset_transaction_read_version: %m");
