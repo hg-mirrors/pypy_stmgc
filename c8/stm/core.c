@@ -302,7 +302,8 @@ static bool _stm_validate()
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         //assert(first_cl->next == INEV_RUNNING);
         /* the above assert may fail when running a major collection
-           while the commit of the inevitable transaction is in progress */
+           while the commit of the inevitable transaction is in progress
+           and the element is already attached */
         return true;
     }
 
@@ -502,6 +503,12 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 
         /* check for requested safe point. otherwise an INEV transaction
            may try to commit but cannot because of the busy-loop here. */
+        /* minor gc is fine here because we did one immediately before, so
+           there are no young objs anyway. major gc is fine because the
+           modified_old_objects list is still populated with the same
+           cl-entry objs */
+        /* XXXXXXXX: memory leak if we happen to do a major gc, we get aborted
+           in major_do_validation_and_minor_collections, and don't free 'new' */
         _stm_collectable_safe_point();
     }
 }
