@@ -350,6 +350,7 @@ class TestRandomHashtable(BaseTestHashtable):
         (self.values, self.roots) = self.other_thread
         self.mirror = None
         self.other_thread = old_thread
+        print "----- switch to %s -----" % (self.current_thread,)
 
     def test_random_single_thread(self):
         import random
