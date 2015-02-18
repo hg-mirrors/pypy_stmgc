@@ -482,6 +482,7 @@ static void clean_up_segment_lists(void)
            This is the case for transactions where
                MINOR_NOTHING_TO_DO() == true
            but they still did write-barriers on objects
+           (the objs are still in modified_old_objects list)
         */
         lst = pseg->objects_pointing_to_nursery;
         if (!list_is_empty(lst)) {
@@ -515,6 +516,7 @@ static void clean_up_segment_lists(void)
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
+
 
 static inline bool largemalloc_keep_object_at(char *data)
 {
