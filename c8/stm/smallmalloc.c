@@ -175,13 +175,17 @@ static inline stm_char *allocate_outside_nursery_small(uint64_t size)
 
     increment_total_allocated(size);
 
-    if (UNLIKELY(result == NULL))
+    if (UNLIKELY(result == NULL)) {
+        char *addr = _allocate_small_slowpath(size);
+        ((struct object_s*)addr)->stm_flags = 0;
         return (stm_char*)
-            (_allocate_small_slowpath(size) - stm_object_pages);
+            (addr - stm_object_pages);
+    }
 
     *fl = result->next;
     /* dprintf(("allocate_outside_nursery_small(%lu): %p\n", */
     /*          size, (char*)((char *)result - stm_object_pages))); */
+    ((struct object_s*)result)->stm_flags = 0;
     return (stm_char*)
         ((char *)result - stm_object_pages);
 }
