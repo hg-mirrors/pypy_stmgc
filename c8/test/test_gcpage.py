@@ -466,3 +466,10 @@ class TestGCPage(BaseTest):
         stm_major_collect()
         stm_major_collect()
         self.commit_transaction()
+
+    def test_small_old_surives_major(self):
+        s = stm_allocate_old_small(16)
+        self.start_transaction()
+        stm_major_collect()
+        assert stm_get_char(s) == '\0'
+        self.commit_transaction()
