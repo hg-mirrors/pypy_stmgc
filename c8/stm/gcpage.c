@@ -2,7 +2,6 @@
 # error "must be compiled via stmgc.c"
 #endif
 
-static struct list_s *testing_prebuilt_objs = NULL;
 static struct tree_s *tree_prebuilt_objs = NULL;     /* XXX refactor */
 
 
@@ -446,7 +445,7 @@ static void ready_new_objects(void)
                 assert(realobj = (struct object_s*)REAL_ADDRESS(pseg->pub.segment_base, item));
                 assert(realobj->stm_flags & GCFLAG_WB_EXECUTED);
 
-                /* clear VISITED and ensure WB_EXECUTED in seg0 */
+                /* clear VISITED (garbage) and ensure WB_EXECUTED in seg0 */
                 mark_visited_test_and_clear(item);
                 realobj = (struct object_s*)REAL_ADDRESS(stm_object_pages, item);
                 realobj->stm_flags |= GCFLAG_WB_EXECUTED;

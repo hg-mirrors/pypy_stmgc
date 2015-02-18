@@ -196,6 +196,10 @@ object_t *_stm_allocate_old_small(ssize_t size_rounded_up)
     memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
     o->stm_flags = GCFLAG_WRITE_BARRIER;
 
+    if (testing_prebuilt_objs == NULL)
+        testing_prebuilt_objs = list_create();
+    LIST_APPEND(testing_prebuilt_objs, o);
+
     dprintf(("_stm_allocate_old_small(%lu): %p, seg=%d, page=%lu\n",
              size_rounded_up, p,
              get_segment_of_linear_address(stm_object_pages + (uintptr_t)p),
@@ -203,6 +207,7 @@ object_t *_stm_allocate_old_small(ssize_t size_rounded_up)
 
     return o;
 }
+
 
 /************************************************************/
 
