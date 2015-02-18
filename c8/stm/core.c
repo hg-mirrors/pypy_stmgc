@@ -774,9 +774,15 @@ long stm_start_transaction(stm_thread_local_t *tl)
 
 void stm_start_inevitable_transaction(stm_thread_local_t *tl)
 {
-    s_mutex_lock();
-    _stm_start_transaction(tl);
-    _stm_become_inevitable("stm_start_inevitable_transaction");
+    /* used to be more efficient, starting directly an inevitable transaction,
+       but there is no real point any more, I believe */
+    rewind_jmp_buf rjbuf;
+    stm_rewind_jmp_enterframe(tl, &rjbuf);
+
+    stm_start_transaction(tl);
+    stm_become_inevitable(tl, "start_inevitable_transaction");
+
+    stm_rewind_jmp_leaveframe(tl, &rjbuf);
 }
 
 #ifdef STM_NO_AUTOMATIC_SETJMP
@@ -858,14 +864,17 @@ void stm_commit_transaction(void)
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
 
-    invoke_and_clear_user_callbacks(0);   /* for commit */
+
 
     /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
+
     enter_safe_point_if_requested();
     assert(STM_SEGMENT->nursery_end == NURSERY_END);
 
     stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+
+    invoke_and_clear_user_callbacks(0);   /* for commit */
 
     if (globally_unique_transaction && was_inev) {
         committed_globally_unique_transaction();

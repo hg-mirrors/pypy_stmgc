@@ -402,6 +402,7 @@ static void mark_visit_from_roots(void)
 
     /* also visit all objs in the rewind-shadowstack */
     long i;
+    assert(get_priv_segment(0)->transaction_state == TS_NONE);
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (get_priv_segment(i)->transaction_state != TS_NONE) {
             mark_visit_possibly_new_object(
