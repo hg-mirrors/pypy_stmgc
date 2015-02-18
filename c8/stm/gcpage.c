@@ -62,6 +62,10 @@ static stm_char *allocate_outside_nursery_large(uint64_t size)
                  size, (char*)(addr - stm_object_pages),
                  (uintptr_t)(addr - stm_object_pages) / 4096UL));
 
+        /* set stm_flags to 0 in seg0 so that major gc will see them
+           as not visited during sweeping */
+        ((struct object_s*)addr)->stm_flags = 0;
+
         return (stm_char*)(addr - stm_object_pages);
     }
 
@@ -88,6 +92,8 @@ static stm_char *allocate_outside_nursery_large(uint64_t size)
     dprintf(("allocate_outside_nursery_large(%lu): %p, page=%lu\n",
              size, (char*)(addr - stm_object_pages),
              (uintptr_t)(addr - stm_object_pages) / 4096UL));
+
+    ((struct object_s*)addr)->stm_flags = 0;
 
     spinlock_release(lock_growth_large);
     return (stm_char*)(addr - stm_object_pages);
