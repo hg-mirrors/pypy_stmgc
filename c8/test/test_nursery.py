@@ -82,7 +82,6 @@ class TestNursery(BaseTest):
         assert young
 
     def test_larger_than_limit_for_nursery_die(self):
-        py.test.xfail()
         obj_size = lib._STM_FAST_ALLOC + 16
 
         self.start_transaction()
@@ -202,7 +201,6 @@ class TestNursery(BaseTest):
         assert lib.stm_can_move(old) == 0
 
     def test_marker_1(self):
-        py.test.xfail()
         self.start_transaction()
         p1 = stm_allocate(600)
         stm_set_char(p1, 'o')
