@@ -14,13 +14,11 @@ class TestDemo:
         self._do("../demo/%s > /dev/null" % target)
 
     def test_shadowstack(self):
-        py.test.xfail("no major gc yet")
         self.make_and_run("debug-test_shadowstack")
 
     def test_demo_simple_build(self):   self.make_and_run("build-demo_simple")
 
     def test_demo_largemalloc_build(self):
-        py.test.xfail("no largemalloc")
         self.make_and_run("build-demo_largemalloc")
 
 
