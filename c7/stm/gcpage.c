@@ -139,6 +139,9 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
         char *dest = get_segment_base(j) + nobj;
         memcpy(dest, initial_data, size_rounded_up);
         ((struct object_s *)dest)->stm_flags = GCFLAG_WRITE_BARRIER;
+        if (j) {
+            assert(!was_read_remote(get_segment_base(j), (object_t *)nobj));
+        }
     }
 
     release_privatization_lock();
