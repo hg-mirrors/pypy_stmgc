@@ -105,10 +105,12 @@ class TestHashtable(BaseTestHashtable):
         self.start_transaction()
         h = self.pop_root()
         stm_set_char(lp2, 'B')
+        self.switch(1)
+        self.start_transaction()
+        self.switch(0)
         htset(h, 9991234, lp2, tl0)
         #
         self.switch(1)
-        self.start_transaction()
         lp1b = htget(h, 1234)
         assert lp1b != ffi.NULL
         assert stm_get_char(lp1b) == 'A'
@@ -301,6 +303,36 @@ class TestHashtable(BaseTestHashtable):
         py.test.raises(Conflict, self.commit_transaction)
         #
         self.switch(0)
+        stm_major_collect()       # to get rid of the hashtable object
+
+    def test_grow_without_conflict(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        self.push_root(h)
+        self.commit_transaction()
+        h = self.pop_root()
+        self.push_root(h)
+        #
+        STEPS = 50
+        for i in range(STEPS):
+            self.switch(1)
+            self.start_transaction()
+            tl0 = self.tls[self.current_thread]
+            htset(h, i + STEPS, stm_allocate(32), tl0)
+            #
+            self.switch(0)
+            self.start_transaction()
+            tl0 = self.tls[self.current_thread]
+            htset(h, i, stm_allocate(24), tl0)
+            #
+            self.switch(1)
+            self.commit_transaction()
+            #
+            self.switch(0)
+            self.commit_transaction()
+        #
+        self.pop_root()
+        self.start_transaction()
         stm_major_collect()       # to get rid of the hashtable object
 
 
