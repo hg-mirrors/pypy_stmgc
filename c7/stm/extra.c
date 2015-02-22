@@ -72,8 +72,9 @@ static void invoke_and_clear_user_callbacks(long index)
         assert(key != NULL);
         assert(callback != NULL);
 
-        /* The callback may call stm_call_on_abort(key, NULL).  It is ignored,
-           because 'callbacks_on_commit_and_abort' was cleared already. */
+        /* The callback may call stm_call_on_abort(key, NULL)
+           (so with callback==NULL).  It is ignored, because
+           'callbacks_on_commit_and_abort' was cleared already. */
         callback(key);
 
     } TREE_LOOP_END;
