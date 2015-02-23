@@ -6,15 +6,21 @@
 static long register_callbacks(stm_thread_local_t *tl,
                                void *key, void callback(void *), long index)
 {
-    if (!(_stm_in_transaction(tl) && tl == STM_SEGMENT->running_thread)) {
-        /* check that the current thread-local is really running the
-           transaction in STM_SEGMENT, and do nothing otherwise. */
+    if (tl->associated_segment_num == -1) {
+        /* check that the provided thread-local is really running a
+           transaction, and do nothing otherwise. */
         return -1;
     }
-
+    /* The tl was only here to check that.  We're really using
+       STM_PSEGMENT below, which is often but not always the
+       segment corresponding to the tl.  One case where it's not
+       the case is if this gets called from stmcb_light_finalizer()
+       from abort_finalizers() from major collections or contention.
+    */
     if (STM_PSEGMENT->transaction_state != TS_REGULAR) {
         /* ignore callbacks if we're in an inevitable transaction
            (which cannot abort) */
+        assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE);
         return -1;
     }
 
