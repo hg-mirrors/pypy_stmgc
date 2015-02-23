@@ -40,6 +40,7 @@ long stm_call_on_commit(stm_thread_local_t *tl,
     if (result < 0 && callback != NULL) {
         /* no regular transaction running, invoke the callback
            immediately */
+        dprintf(("stm_call_on_commit calls now: %p(%p)\n", callback, key));
         callback(key);
     }
     return result;
@@ -76,6 +77,8 @@ static void invoke_and_clear_user_callbacks(long index)
         /* The callback may call stm_call_on_abort(key, NULL)
            (so with callback==NULL).  It is ignored, because
            'callbacks_on_commit_and_abort' was cleared already. */
+        dprintf(("invoke_and_clear_user_callbacks(%ld): %p(%p)\n",
+                 index, callback, key));
         callback(key);
 
     } TREE_LOOP_END;
