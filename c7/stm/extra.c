@@ -6,13 +6,13 @@
 static long register_callbacks(stm_thread_local_t *tl,
                                void *key, void callback(void *), long index)
 {
-    if (!_stm_in_transaction(tl)) {
-        /* check that the current thread-local is really running a
-           transaction, and do nothing otherwise. */
+    if (!(_stm_in_transaction(tl) && tl == STM_SEGMENT->running_thread)) {
+        /* check that the current thread-local is really running the
+           transaction in STM_SEGMENT, and do nothing otherwise. */
         return -1;
     }
 
-    if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+    if (STM_PSEGMENT->transaction_state != TS_REGULAR) {
         /* ignore callbacks if we're in an inevitable transaction
            (which cannot abort) */
         return -1;
@@ -27,6 +27,7 @@ static long register_callbacks(stm_thread_local_t *tl,
     }
     else {
         /* double-registering the same key will crash */
+        dprintf(("register_callbacks: tl=%p key=%p callback=%p index=%ld\n", tl, key, callback, index));
         tree_insert(callbacks, (uintptr_t)key, (uintptr_t)callback);
         return 1;
     }
