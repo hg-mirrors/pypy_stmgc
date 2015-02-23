@@ -6,9 +6,12 @@
 static long register_callbacks(stm_thread_local_t *tl,
                                void *key, void callback(void *), long index)
 {
+    dprintf(("register_callbacks: tl=%p key=%p callback=%p index=%ld\n",
+             tl, key, callback, index));
     if (tl->associated_segment_num == -1) {
         /* check that the provided thread-local is really running a
            transaction, and do nothing otherwise. */
+        dprintf(("  NOT IN TRANSACTION\n"));
         return -1;
     }
     /* The tl was only here to check that.  We're really using
@@ -20,6 +23,7 @@ static long register_callbacks(stm_thread_local_t *tl,
     if (STM_PSEGMENT->transaction_state != TS_REGULAR) {
         /* ignore callbacks if we're in an inevitable transaction
            (which cannot abort) */
+        dprintf(("  STATE = %d\n", (int)STM_PSEGMENT->transaction_state));
         assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE);
         return -1;
     }
@@ -29,11 +33,13 @@ static long register_callbacks(stm_thread_local_t *tl,
 
     if (callback == NULL) {
         /* double-unregistering works, but return 0 */
-        return tree_delete_item(callbacks, (uintptr_t)key);
+        long res = tree_delete_item(callbacks, (uintptr_t)key);
+        dprintf(("  DELETED %ld\n", res));
+        return res;
     }
     else {
         /* double-registering the same key will crash */
-        dprintf(("register_callbacks: tl=%p key=%p callback=%p index=%ld\n", tl, key, callback, index));
+        dprintf(("  INSERTING\n"));
         tree_insert(callbacks, (uintptr_t)key, (uintptr_t)callback);
         return 1;
     }
