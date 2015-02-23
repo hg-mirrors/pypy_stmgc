@@ -22,9 +22,8 @@ static long register_callbacks(stm_thread_local_t *tl,
     */
     if (STM_PSEGMENT->transaction_state != TS_REGULAR) {
         /* ignore callbacks if we're in an inevitable transaction
-           (which cannot abort) */
+           (which cannot abort) or no transaction at all in this segment */
         dprintf(("  STATE = %d\n", (int)STM_PSEGMENT->transaction_state));
-        assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE);
         return -1;
     }
 
