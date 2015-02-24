@@ -15,6 +15,7 @@
 #include "stm/extra.h"
 #include "stm/fprintcolor.h"
 #include "stm/rewind_setjmp.h"
+#include "stm/finalizer.h"
 
 #include "stm/misc.c"
 #include "stm/list.c"
@@ -34,3 +35,4 @@
 #include "stm/extra.c"
 #include "stm/fprintcolor.c"
 #include "stm/rewind_setjmp.c"
+#include "stm/finalizer.c"
