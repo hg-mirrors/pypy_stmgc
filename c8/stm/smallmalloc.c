@@ -64,7 +64,8 @@ static void grab_more_free_pages_for_small_allocations(void)
         uninitialized_page_stop -= decrease_by;
         first_small_uniform_loc = uninitialized_page_stop - stm_object_pages;
 
-        if (!_stm_largemalloc_resize_arena(uninitialized_page_stop - uninitialized_page_start))
+        char *base = stm_object_pages + END_NURSERY_PAGE * 4096UL;
+        if (!_stm_largemalloc_resize_arena(uninitialized_page_stop - base))
             goto out_of_memory;
 
         /* make writable in sharing seg */
