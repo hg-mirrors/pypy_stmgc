@@ -254,3 +254,20 @@ class TestRegularFinalizer(BaseTest):
         lp3 = stm_allocate_with_finalizer(32)
         print lp1, lp2, lp3
         stm_major_collect()
+
+    def test_new_objects_w_finalizers(self):
+        self.switch(2)
+        self.start_transaction()
+        lp1 = stm_allocate_with_finalizer_refs(3)
+        lp2 = stm_allocate_with_finalizer_refs(3)
+        stm_set_ref(lp1, 0, lp2)
+
+        self.push_root(lp1)
+        stm_minor_collect()
+        lp1 = self.pop_root()
+        lp2 = stm_get_ref(lp1, 0)
+        # lp1, lp2 have WB_EXECUTED objs
+
+        self.expect_finalized([])
+        stm_major_collect()
+        self.expect_finalized([lp1])
