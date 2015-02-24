@@ -773,6 +773,8 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     assert(tree_is_cleared(STM_PSEGMENT->nursery_objects_shadows));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[0]));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[1]));
+    assert(list_is_empty(STM_PSEGMENT->young_objects_with_light_finalizers));
+    assert(STM_PSEGMENT->finalizers == NULL);
 
     check_nursery_at_transaction_start();
 
@@ -871,6 +873,8 @@ static void push_new_objects_to_other_segments(void)
 
 void stm_commit_transaction(void)
 {
+    exec_local_finalizers();
+
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     assert(STM_PSEGMENT->running_pthread == pthread_self());
@@ -884,7 +888,6 @@ void stm_commit_transaction(void)
     _validate_and_add_to_commit_log();
 
 
-
     /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
 
@@ -893,6 +896,8 @@ void stm_commit_transaction(void)
 
     stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
 
+    commit_finalizers();
+
     invoke_and_clear_user_callbacks(0);   /* for commit */
 
     if (globally_unique_transaction && was_inev) {
@@ -900,10 +905,15 @@ void stm_commit_transaction(void)
     }
 
     /* done */
+    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     _finish_transaction();
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
+
+    /* between transactions, call finalizers. this will execute
+       a transaction itself */
+    invoke_general_finalizers(tl);
 }
 
 static void reset_modified_from_backup_copies(int segment_num)
@@ -958,6 +968,8 @@ static void abort_data_structures_from_segment_num(int segment_num)
         stm_fatalerror("abort: bad transaction_state == %d",
                        (int)pseg->transaction_state);
     }
+
+    abort_finalizers(pseg);
 
     long bytes_in_nursery = throw_away_nursery(pseg);
 

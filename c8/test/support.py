@@ -40,6 +40,7 @@ void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
+object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 
 void stm_setup(void);
 void stm_teardown(void);
@@ -77,6 +78,7 @@ bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
 bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 int stm_is_inevitable(void);
+long current_segment_num(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
 uint32_t _get_type_id(object_t *obj);
@@ -127,6 +129,12 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj);
 object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
 bool (*_stm_smallmalloc_keep)(char *data);
 void _stm_smallmalloc_sweep_test(void);
+
+
+void (*stmcb_light_finalizer)(object_t *);
+void stm_enable_light_finalizer(object_t *);
+
+void (*stmcb_finalizer)(object_t *);
 
 """)
 
@@ -322,6 +330,10 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     }
 }
 
+long current_segment_num(void)
+{
+    return STM_SEGMENT->segment_num;
+}
 ''', sources=source_files,
      define_macros=[('STM_TESTS', '1'),
                     ('STM_NO_AUTOMATIC_SETJMP', '1'),
@@ -332,7 +344,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
                     ],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0', '-Wall', '-Werror', '-ferror-limit=5'],
+     extra_compile_args=['-g', '-O0', '-Wall', '-ferror-limit=5'],
      extra_link_args=['-g', '-lrt'],
      force_generic_engine=True)
 
@@ -386,14 +398,26 @@ def stm_allocate_weakref(point_to_obj, size=None):
     lib._set_weakref(o, point_to_obj)
     return o
 
-def stm_get_weakref(o):
-    return lib._get_weakref(o)
-
 def stm_allocate_refs(n):
     o = lib.stm_allocate(HDR + n * WORD)
     tid = 421420 + n
     lib._set_type_id(o, tid)
     return o
+
+def stm_allocate_with_finalizer(size):
+    o = lib.stm_allocate_with_finalizer(size)
+    tid = 42 + size
+    lib._set_type_id(o, tid)
+    return o
+
+def stm_allocate_with_finalizer_refs(n):
+    o = lib.stm_allocate_with_finalizer(HDR + n * WORD)
+    tid = 421420 + n
+    lib._set_type_id(o, tid)
+    return o
+
+def stm_get_weakref(o):
+    return lib._get_weakref(o)
 
 def stm_set_ref(obj, idx, ref, use_cards=False):
     if use_cards:
