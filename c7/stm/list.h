@@ -45,6 +45,9 @@ static inline struct list_s *list_append2(struct list_s *lst,
     return lst;
 }
 
+#define LIST_APPEND2(lst, e1, e2)   ((lst) = list_append2((lst),   \
+                                        (uintptr_t)(e1), (uintptr_t)(e2)))
+
 
 static inline void list_clear(struct list_s *lst)
 {
@@ -82,6 +85,9 @@ static inline uintptr_t *list_ptr_to_item(struct list_s *lst, uintptr_t index)
 {
     return &lst->items[index];
 }
+
+static struct list_s *list_extend(struct list_s *lst, struct list_s *lst2,
+                                  uintptr_t slicestart);
 
 #define LIST_FOREACH_R(lst, TYPE, CODE)         \
     do {                                        \

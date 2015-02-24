@@ -22,8 +22,8 @@ static void close_fd_mmap(int ignored)
 static char *setup_mmap(char *reason, int *map_fd)
 {
     char name[128];
-    sprintf(name, "/stmgc-c7-bigmem-%ld-%.18e",
-            (long)getpid(), get_stm_time());
+    sprintf(name, "/stmgc-c7-bigmem-%ld",
+            (long)getpid());
 
     /* Create the big shared memory object, and immediately unlink it.
        There is a small window where if this process is killed the
@@ -99,9 +99,21 @@ void stm_setup(void)
 
     stm_object_pages = setup_mmap("initial stm_object_pages mmap()",
                                   &stm_object_pages_fd);
+
+    /* remap MAP_PRIVATE pages on the initial part of each segment
+       in stm_object_pages */
+    long i;
+    for (i = 0; i <= NB_SEGMENTS; i++) {
+        char *res;
+        res = mmap(get_segment_base(i), END_NURSERY_PAGE * 4096UL,
+                   PROT_READ | PROT_WRITE,
+                   MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
+                   -1, 0);
+        if (res == MAP_FAILED)
+            stm_fatalerror("mmap(private) failed: %m");
+    }
     setup_protection_settings();
 
-    long i;
     for (i = 1; i <= NB_SEGMENTS; i++) {
         char *segment_base = get_segment_base(i);
 
@@ -113,7 +125,7 @@ void stm_setup(void)
 
         /* Initialize STM_PSEGMENT */
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
-        assert(1 <= i && i < 255);   /* 255 is WL_VISITED in gcpage.c */
+        assert(1 <= i && i < 253);   /* 253 is WL_FINALIZ_ORDER_1 in gcpage.c */
         pr->write_lock_num = i;
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
@@ -122,24 +134,22 @@ void stm_setup(void)
         pr->large_overflow_objects = NULL;
         pr->modified_old_objects = list_create();
         pr->modified_old_objects_markers = list_create();
+        pr->modified_old_hashtables = list_create();
         pr->young_weakrefs = list_create();
         pr->old_weakrefs = list_create();
         pr->young_outside_nursery = tree_create();
         pr->nursery_objects_shadows = tree_create();
         pr->callbacks_on_commit_and_abort[0] = tree_create();
         pr->callbacks_on_commit_and_abort[1] = tree_create();
+        pr->young_objects_with_light_finalizers = list_create();
+        pr->old_objects_with_light_finalizers = list_create();
         pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * i;
         highest_overflow_number = pr->overflow_number;
-        pr->pub.transaction_read_version = 0xff;
+        pr->pub.transaction_read_version = 0;
     }
 
     /* The pages are shared lazily, as remap_file_pages() takes a relatively
        long time for each page.
-
-       The read markers are initially zero, but we set anyway
-       transaction_read_version to 0xff in order to force the first
-       transaction to "clear" the read markers by mapping a different,
-       private range of addresses.
     */
 
     setup_sync();
@@ -147,6 +157,7 @@ void stm_setup(void)
     setup_gcpage();
     setup_pages();
     setup_forksupport();
+    setup_finalizer();
 }
 
 void stm_teardown(void)
@@ -163,18 +174,22 @@ void stm_teardown(void)
         assert(pr->large_overflow_objects == NULL);
         list_free(pr->modified_old_objects);
         list_free(pr->modified_old_objects_markers);
+        list_free(pr->modified_old_hashtables);
         list_free(pr->young_weakrefs);
         list_free(pr->old_weakrefs);
         tree_free(pr->young_outside_nursery);
         tree_free(pr->nursery_objects_shadows);
         tree_free(pr->callbacks_on_commit_and_abort[0]);
         tree_free(pr->callbacks_on_commit_and_abort[1]);
+        list_free(pr->young_objects_with_light_finalizers);
+        list_free(pr->old_objects_with_light_finalizers);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);
     stm_object_pages = NULL;
     close_fd_mmap(stm_object_pages_fd);
 
+    teardown_finalizer();
     teardown_core();
     teardown_sync();
     teardown_gcpage();
@@ -226,6 +241,8 @@ static pthread_t *_get_cpth(stm_thread_local_t *tl)
     return (pthread_t *)(tl->creating_pthread);
 }
 
+static int thread_local_counters = 0;
+
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
     int num;
@@ -239,17 +256,17 @@ void stm_register_thread_local(stm_thread_local_t *tl)
         tl->prev = stm_all_thread_locals->prev;
         stm_all_thread_locals->prev->next = tl;
         stm_all_thread_locals->prev = tl;
-        num = tl->prev->associated_segment_num;
+        num = tl->prev->last_associated_segment_num;
     }
     tl->thread_local_obj = NULL;
-    tl->_timing_cur_state = STM_TIME_OUTSIDE_TRANSACTION;
-    tl->_timing_cur_start = get_stm_time();
 
     /* assign numbers consecutively, but that's for tests; we could also
        assign the same number to all of them and they would get their own
        numbers automatically. */
     num = (num % NB_SEGMENTS) + 1;
-    tl->associated_segment_num = num;
+    tl->associated_segment_num = -1;
+    tl->last_associated_segment_num = num;
+    tl->thread_local_counter = ++thread_local_counters;
     *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num));

@@ -1,0 +1,52 @@
+Handling of pages in stmgc
+--------------------------
+
+(Proposal)
+
+Each segment corresponds to one range of virtual addresses, of NB_PAGES.
+
+There is additionally one file descriptor corresponding to a
+memory-mapped file of length "15/16 * NB_PAGES".  In each segment, the
+final 15/16th of it is normally remapped with MAP_SHARED to correspond
+to this file.
+
+For each page of the file and each segment, we store two status bits
+that give one of three possible states: the NO_ACCESS state means that
+the corresponding page was mprotected to PROT_NONE; the SHARED state
+means the page is mapped to the file; the PRIVATE state means the page
+was remapped to an anonymous MAP_PRIVATE page.
+
+When a segment allocates new objects (out of its nursery), they go into
+pages that are initially set to SHARED in this segment, and NO_ACCESS in
+all other segments.
+
+When we try to read the same object from another segment, we get a
+segfault.  In the segment that receives the segfault, the page is
+NO_ACCESS.  At that point, two cases: either we can use the same data,
+or we can't.  We can if the data in the shared page is the unmodified
+data from the current revision (or from a later revision, in which case
+we just update to this later revision).  We can't if the shared data
+comes from a past revision or if it contains currently-modified data.
+
+If we can: we mprotect our segment's page back to SHARED.
+
+If we can't: we remap the page to PRIVATE.
+
+Finally, here is the write barrier logic.  When we're about to write to
+a page in our segment: first, we make sure it's not a NO_ACCESS page (by
+forcing a segfault to occur, I suppose).  Then, if it's a PRIVATE page,
+nothing to do; but if it's a SHARED page, we first check the other
+segments.  If none of them has also the page in the SHARED status (all
+have NO_ACCESS or PRIVATE), then we don't do anything either.  Only if
+there is a different segment that also has the page SHARED do we need
+more care.  There are two solutions in this case:
+
+1. We can change our page to PRIVATE.
+
+2. We can change the other segment's pages to NO_ACCESS.
+
+Which solution to choose in which case is unclear so far.
+
+The end result is that we end with as few PRIVATE pages as reasonably
+possible: it occurs only if one segment has currently changes in the
+page *and* a different segment is currently viewing the same data.

@@ -124,16 +124,12 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
 
         dprintf_test(("write_slowpath %p -> mod_old\n", obj));
 
-        /* First change to this old object from this transaction.
+        /* Add the current marker, recording where we wrote to this object */
+        timing_record_write();
+
+        /* Change to this old object from this transaction.
            Add it to the list 'modified_old_objects'. */
         LIST_APPEND(STM_PSEGMENT->modified_old_objects, obj);
-
-        /* Add the current marker, recording where we wrote to this object */
-        uintptr_t marker[2];
-        marker_fetch(STM_SEGMENT->running_thread, marker);
-        STM_PSEGMENT->modified_old_objects_markers =
-            list_append2(STM_PSEGMENT->modified_old_objects_markers,
-                         marker[0], marker[1]);
 
         release_marker_lock(STM_SEGMENT->segment_base);
 
@@ -313,44 +309,41 @@ static void reset_transaction_read_version(void)
     /* force-reset all read markers to 0 */
 
     char *readmarkers = REAL_ADDRESS(STM_SEGMENT->segment_base,
-                                     FIRST_READMARKER_PAGE * 4096UL);
+                                     FIRST_OLD_RM_PAGE * 4096UL);
+    uintptr_t num_bytes = 4096UL *
+        (NB_READMARKER_PAGES - (FIRST_OLD_RM_PAGE - FIRST_READMARKER_PAGE));
+
     dprintf(("reset_transaction_read_version: %p %ld\n", readmarkers,
-             (long)(NB_READMARKER_PAGES * 4096UL)));
-    if (mmap(readmarkers, NB_READMARKER_PAGES * 4096UL,
+             (long)num_bytes));
+
+    if (mmap(readmarkers, num_bytes,
              PROT_READ | PROT_WRITE,
-             MAP_FIXED | MAP_PAGES_FLAGS, -1, 0) != readmarkers) {
-        /* fall-back */
-#if STM_TESTS
+             MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
+             -1, 0) != readmarkers) {
+        /* failed */
         stm_fatalerror("reset_transaction_read_version: %m");
-#endif
-        memset(readmarkers, 0, NB_READMARKER_PAGES * 4096UL);
     }
     STM_SEGMENT->transaction_read_version = 1;
 }
 
-static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
+static uint64_t _global_start_time = 0;
+
+static void _stm_start_transaction(stm_thread_local_t *tl)
 {
     assert(!_stm_in_transaction(tl));
 
-  retry:
-    if (inevitable) {
-        wait_for_end_of_inevitable_transaction(tl);
-    }
-
-    if (!acquire_thread_segment(tl))
-        goto retry;
+    while (!acquire_thread_segment(tl))
+        ;
     /* GS invalid before this point! */
 
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
-    change_timing_state(STM_TIME_RUN_CURRENT);
-    STM_PSEGMENT->start_time = tl->_timing_cur_start;
+    timing_event(tl, STM_TRANSACTION_START);
+    STM_PSEGMENT->start_time = _global_start_time++;
     STM_PSEGMENT->signalled_to_commit_soon = false;
     STM_PSEGMENT->safe_point = SP_RUNNING;
-    STM_PSEGMENT->marker_inev[1] = 0;
-    if (inevitable)
-        marker_fetch_inev();
-    STM_PSEGMENT->transaction_state = (inevitable ? TS_INEVITABLE : TS_REGULAR);
+    STM_PSEGMENT->marker_inev.object = NULL;
+    STM_PSEGMENT->transaction_state = TS_REGULAR;
 #ifndef NDEBUG
     STM_PSEGMENT->running_pthread = pthread_self();
 #endif
@@ -376,13 +369,16 @@ static void _stm_start_transaction(stm_thread_local_t *tl, bool inevitable)
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects_markers));
+    assert(list_is_empty(STM_PSEGMENT->modified_old_hashtables));
     assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
     assert(tree_is_cleared(STM_PSEGMENT->nursery_objects_shadows));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[0]));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[1]));
+    assert(list_is_empty(STM_PSEGMENT->young_objects_with_light_finalizers));
     assert(STM_PSEGMENT->objects_pointing_to_nursery == NULL);
     assert(STM_PSEGMENT->large_overflow_objects == NULL);
+    assert(STM_PSEGMENT->finalizers == NULL);
 #ifndef NDEBUG
     /* this should not be used when objects_pointing_to_nursery == NULL */
     STM_PSEGMENT->modified_old_objects_markers_num_old = 99999999999999999L;
@@ -399,14 +395,21 @@ long stm_start_transaction(stm_thread_local_t *tl)
 #else
     long repeat_count = stm_rewind_jmp_setjmp(tl);
 #endif
-    _stm_start_transaction(tl, false);
+    _stm_start_transaction(tl);
     return repeat_count;
 }
 
 void stm_start_inevitable_transaction(stm_thread_local_t *tl)
 {
-    s_mutex_lock();
-    _stm_start_transaction(tl, true);
+    /* used to be more efficient, starting directly an inevitable transaction,
+       but there is no real point any more, I believe */
+    rewind_jmp_buf rjbuf;
+    stm_rewind_jmp_enterframe(tl, &rjbuf);
+
+    stm_start_transaction(tl);
+    stm_become_inevitable(tl, "start_inevitable_transaction");
+
+    stm_rewind_jmp_leaveframe(tl, &rjbuf);
 }
 
 
@@ -431,27 +434,50 @@ static bool detect_write_read_conflicts(void)
             continue;    /* no need to check: is pending immediate abort */
 
         char *remote_base = get_segment_base(i);
-        uint8_t remote_version = get_segment(i)->transaction_read_version;
+        object_t *conflicting_obj;
+        uintptr_t j, limit;
+        struct list_s *lst;
 
-        LIST_FOREACH_R(
-            STM_PSEGMENT->modified_old_objects,
-            object_t * /*item*/,
-            ({
-                if (was_read_remote(remote_base, item, remote_version)) {
-                    /* A write-read conflict! */
-                    dprintf(("write-read conflict on %p, our seg: %d, other: %ld\n",
-                             item, STM_SEGMENT->segment_num, i));
-                    if (write_read_contention_management(i, item)) {
-                        /* If we reach this point, we didn't abort, but we
-                           had to wait for the other thread to commit.  If we
-                           did, then we have to restart committing from our call
-                           to synchronize_all_threads(). */
-                        return true;
-                    }
-                    /* we aborted the other transaction without waiting, so
-                       we can just continue */
-                }
-            }));
+        /* Look in forward order: this is an attempt to report the _first_
+           write that conflicts with another segment's reads
+        */
+        lst = STM_PSEGMENT->modified_old_objects;
+        limit = list_count(lst);
+        for (j = 0; j < limit; j++) {
+            object_t *obj = (object_t *)list_item(lst, j);
+            if (was_read_remote(remote_base, obj)) {
+                conflicting_obj = obj;
+                goto found_conflict;
+            }
+        }
+
+        lst = STM_PSEGMENT->modified_old_hashtables;
+        limit = list_count(lst);
+        for (j = 0; j < limit; j += 2) {
+            object_t *hobj = (object_t *)list_item(lst, j);
+            if (was_read_remote(remote_base, hobj)) {
+                conflicting_obj = (object_t *)list_item(lst, j + 1);
+                goto found_conflict;
+            }
+        }
+
+        continue;
+
+     found_conflict:
+        /* A write-read conflict! */
+        dprintf(("write-read conflict on %p, our seg: %d, other: %ld\n",
+                 conflicting_obj, STM_SEGMENT->segment_num, i));
+        if (write_read_contention_management(i, conflicting_obj)) {
+            /* If we reach this point, we didn't abort, but we
+               had to wait for the other thread to commit.  If we
+               did, then we have to restart committing from our call
+               to synchronize_all_threads(). */
+            return true;
+        }
+        /* we aborted the other transaction without waiting, so we can
+           just ignore the rest of this (now aborted) segment.  Let's
+           move on to the next one. */
+        continue;
     }
 
     return false;
@@ -588,7 +614,6 @@ static void _card_wise_synchronize_object_now(object_t *obj, ssize_t obj_size)
     uintptr_t first_card_index = get_write_lock_idx((uintptr_t)obj);
     uintptr_t card_index = 1;
     uintptr_t last_card_index = get_index_to_card_index(real_idx_count - 1); /* max valid index */
-    long myself = STM_SEGMENT->segment_num;
 
     /* simple heuristic to check if probably the whole object is
        marked anyway so we should do page-wise synchronize */
@@ -662,7 +687,7 @@ static void _card_wise_synchronize_object_now(object_t *obj, ssize_t obj_size)
             /* dprintf(("copy %lu bytes\n", copy_size)); */
 
             /* since we have marked cards, at least one page here must be private */
-            assert(_has_private_page_in_range(myself, start, copy_size));
+            assert(_has_private_page_in_range(STM_SEGMENT->segment_num, start, copy_size));
 
             /* push to seg0 and enqueue for synchronization */
             _synchronize_fragment((stm_char *)start, copy_size);
@@ -806,15 +831,16 @@ static void push_modified_to_other_segments(void)
     synchronize_objects_flush();
     list_clear(STM_PSEGMENT->modified_old_objects);
     list_clear(STM_PSEGMENT->modified_old_objects_markers);
+    list_clear(STM_PSEGMENT->modified_old_hashtables);
 }
 
-static void _finish_transaction(int attribute_to)
+static void _finish_transaction(enum stm_event_e event)
 {
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
 
     /* marker_inev is not needed anymore */
-    STM_PSEGMENT->marker_inev[1] = 0;
+    STM_PSEGMENT->marker_inev.object = NULL;
 
     /* reset these lists to NULL for the next transaction */
     _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
@@ -822,23 +848,23 @@ static void _finish_transaction(int attribute_to)
     list_clear(STM_PSEGMENT->old_objects_with_cards);
     LIST_FREE(STM_PSEGMENT->large_overflow_objects);
 
-    timing_end_transaction(attribute_to);
-
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+    timing_event(tl, event);
+
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 }
 
 void stm_commit_transaction(void)
 {
+ restart_all:
+    exec_local_finalizers();
+
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     assert(STM_PSEGMENT->running_pthread == pthread_self());
 
     minor_collection(/*commit=*/ true);
-
-    /* the call to minor_collection() above leaves us with
-       STM_TIME_BOOKKEEPING */
 
     /* synchronize overflow objects living in privatized pages */
     push_overflow_objects_from_privatized_pages();
@@ -850,6 +876,11 @@ void stm_commit_transaction(void)
        automatically when we are done here, i.e. at mutex_unlock().
        Important: we should not call cond_wait() in the meantime. */
     synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
+
+    if (any_local_finalizers()) {
+        s_mutex_unlock();
+        goto restart_all;
+    }
 
     /* detect conflicts */
     if (detect_write_read_conflicts())
@@ -863,14 +894,16 @@ void stm_commit_transaction(void)
 
     /* if a major collection is required, do it here */
     if (is_major_collection_requested()) {
-        int oldstate = change_timing_state(STM_TIME_MAJOR_GC);
+        timing_event(STM_SEGMENT->running_thread, STM_GC_MAJOR_START);
         major_collection_now_at_safe_point();
-        change_timing_state(oldstate);
+        timing_event(STM_SEGMENT->running_thread, STM_GC_MAJOR_DONE);
     }
 
     /* synchronize modified old objects to other threads */
     push_modified_to_other_segments();
     _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
+
+    commit_finalizers();
 
     /* update 'overflow_number' if needed */
     if (STM_PSEGMENT->overflow_number_has_been_used) {
@@ -892,10 +925,13 @@ void stm_commit_transaction(void)
     }
 
     /* done */
-    _finish_transaction(STM_TIME_RUN_COMMITTED);
+    stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+    _finish_transaction(STM_TRANSACTION_COMMIT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
+
+    invoke_general_finalizers(tl);
 }
 
 void stm_abort_transaction(void)
@@ -957,6 +993,7 @@ reset_modified_from_other_segments(int segment_num)
 
     list_clear(pseg->modified_old_objects);
     list_clear(pseg->modified_old_objects_markers);
+    list_clear(pseg->modified_old_hashtables);
 }
 
 static void abort_data_structures_from_segment_num(int segment_num)
@@ -985,9 +1022,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
                        (int)pseg->transaction_state);
     }
 
-    /* if we don't have marker information already, look up and preserve
-       the marker information from the shadowstack as a string */
-    marker_default_for_abort(pseg);
+    abort_finalizers(pseg);
 
     /* throw away the content of the nursery */
     long bytes_in_nursery = throw_away_nursery(pseg);
@@ -1077,16 +1112,13 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
     /* invoke the callbacks */
     invoke_and_clear_user_callbacks(1);   /* for abort */
 
-    int attribute_to = STM_TIME_RUN_ABORTED_OTHER;
-
     if (is_abort(STM_SEGMENT->nursery_end)) {
         /* done aborting */
-        attribute_to = STM_SEGMENT->nursery_end;
         STM_SEGMENT->nursery_end = pause_signalled ? NSE_SIGPAUSE
                                                    : NURSERY_END;
     }
 
-    _finish_transaction(attribute_to);
+    _finish_transaction(STM_TRANSACTION_ABORT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     /* Broadcast C_ABORTED to wake up contention.c */
@@ -1128,8 +1160,10 @@ void _stm_become_inevitable(const char *msg)
     if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
         dprintf(("become_inevitable: %s\n", msg));
 
-        marker_fetch_inev();
-        wait_for_end_of_inevitable_transaction(NULL);
+        timing_fetch_inev();
+        write_fence();    /* make sure others see a correct 'marker_inev'
+                             if they see TS_INEVITABLE */
+        wait_for_end_of_inevitable_transaction();
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
         stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
         invoke_and_clear_user_callbacks(0);   /* for commit */
@@ -1148,5 +1182,25 @@ void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
 
     s_mutex_lock();
     synchronize_all_threads(STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE);
+    s_mutex_unlock();
+}
+
+void stm_stop_all_other_threads(void)
+{
+    if (!stm_is_inevitable())         /* may still abort */
+        _stm_become_inevitable("stop_all_other_threads");
+
+    s_mutex_lock();
+    synchronize_all_threads(STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE);
+    s_mutex_unlock();
+}
+
+void stm_resume_all_other_threads(void)
+{
+    /* this calls 'committed_globally_unique_transaction()' even though
+       we're not committing now.  It's a way to piggyback on the existing
+       implementation for stm_become_globally_unique_transaction(). */
+    s_mutex_lock();
+    committed_globally_unique_transaction();
     s_mutex_unlock();
 }

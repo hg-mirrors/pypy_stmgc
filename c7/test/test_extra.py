@@ -192,3 +192,24 @@ class TestExtra(BaseTest):
         assert lib.stm_is_inevitable()
         #
         py.test.raises(Conflict, self.switch, 0)
+
+    def test_stm_stop_all_other_threads_1(self):
+        self.start_transaction()
+        #
+        self.switch(1)
+        self.start_transaction()
+        self.stop_all_other_threads()
+        assert lib.stm_is_inevitable()
+        #
+        py.test.raises(Conflict, self.switch, 0)
+
+    def test_stm_stop_all_other_threads_2(self):
+        self.start_transaction()
+        #
+        self.switch(1)
+        self.start_transaction()
+        self.stop_all_other_threads()
+        self.resume_all_other_threads()
+        assert lib.stm_is_inevitable()
+        #
+        self.switch(0)   # no conflict

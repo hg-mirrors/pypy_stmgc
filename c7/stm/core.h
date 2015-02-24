@@ -43,13 +43,18 @@ enum /* stm_flags */ {
     */
     GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
 
+    /* This flag is set by gcpage.c for all objects living in
+       uniformly-sized pages of small objects.
+    */
+    GCFLAG_SMALL_UNIFORM = 0x02,
+
     /* The following flag is set on nursery objects of which we asked
        the id or the identityhash.  It means that a space of the size of
        the object has already been allocated in the nonmovable part.
        The same flag is abused to mark prebuilt objects whose hash has
        been taken during translation and is statically recorded just
        after the object. */
-    GCFLAG_HAS_SHADOW = 0x02,
+    GCFLAG_HAS_SHADOW = 0x04,
 
     /* Set on objects that are large enough (_STM_MIN_CARD_OBJ_SIZE)
        to have multiple cards (at least _STM_MIN_CARD_COUNT), and that
@@ -64,7 +69,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x8   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x10   /* must be last */
 };
 
 #define SYNC_QUEUE_SIZE    31
@@ -91,6 +96,15 @@ struct stm_priv_segment_info_s {
        the entry to modified_old_objects. */
     struct list_s *modified_old_objects_markers;
     uintptr_t modified_old_objects_markers_num_old;
+
+    /* This list contains all old hashtables that have entries that we
+       modified.  It's actually a list of pairs hashtable/sample_entry.
+       Note that several transactions can all commit if
+       they have the same hashtable listed here.  The point of this
+       list is only that if another segment does a global "read" of
+       the hashtable (stm_hashtable_list), then it conflicts with this
+       segment if it has got any change to the hashtable. */
+    struct list_s *modified_old_hashtables;
 
     /* List of out-of-nursery objects that may contain pointers to
        nursery objects.  This is used to track the GC status: they are
@@ -135,7 +149,7 @@ struct stm_priv_segment_info_s {
 
     /* Start time: to know approximately for how long a transaction has
        been running, in contention management */
-    double start_time;
+    uint64_t start_time;
 
     /* This is the number stored in the overflowed objects (a multiple of
        GCFLAG_OVERFLOW_NUMBER_bit0).  It is incremented when the
@@ -202,10 +216,15 @@ struct stm_priv_segment_info_s {
     int sq_fragsizes[SYNC_QUEUE_SIZE];
     int sq_len;
 
-    /* Temporarily stores the marker information */
-    char marker_self[_STM_MARKER_LEN];
-    char marker_other[_STM_MARKER_LEN];
-    uintptr_t marker_inev[2];  /* marker where this thread became inevitable */
+    /* marker where this thread became inevitable */
+    stm_loc_marker_t marker_inev;
+
+    /* light finalizers */
+    struct list_s *young_objects_with_light_finalizers;
+    struct list_s *old_objects_with_light_finalizers;
+
+    /* regular finalizers (objs from the current transaction only) */
+    struct finalizers_s *finalizers;
 };
 
 enum /* safe_point */ {
@@ -285,9 +304,11 @@ static void abort_with_mutex(void) __attribute__((noreturn));
 static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
-static inline bool was_read_remote(char *base, object_t *obj,
-                                   uint8_t other_transaction_read_version)
+static inline bool was_read_remote(char *base, object_t *obj)
 {
+    uint8_t other_transaction_read_version =
+        ((struct stm_segment_info_s *)REAL_ADDRESS(base, STM_PSEGMENT))
+            ->transaction_read_version;
     uint8_t rm = ((struct stm_read_marker_s *)
                   (base + (((uintptr_t)obj) >> 4)))->rm;
     assert(rm <= other_transaction_read_version);

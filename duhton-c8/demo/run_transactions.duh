@@ -1,0 +1,25 @@
+
+(setq c (container 0))
+
+(defun g (n)
+  (setq i n)
+  (while (< 0 i)
+    (set c (+ (get c) 1))
+    (setq i (- i 1))
+    )
+  )
+
+(defun f (thread n)
+  (g n)
+  )
+
+(transaction f (quote t1) 10000)
+(transaction f (quote t2) 20000)
+(transaction f (quote t3) 10002)
+(run-transactions)
+(transaction f (quote t1) 15)
+(transaction f (quote t2) 15)
+(run-transactions)
+(print (quote result) (get c))
+(print (quote finished))
+
