@@ -388,10 +388,10 @@ static void mark_visit_from_roots(void)
         */
 
         /* only for new, uncommitted objects:
-           If 'tl' is currently running, its 'associated_segment_num'
+           If 'tl' is currently running, its 'last_associated_segment_num'
            field is the segment number that contains the correct
            version of its overflowed objects. */
-        char *segment_base = get_segment_base(tl->associated_segment_num);
+        char *segment_base = get_segment_base(tl->last_associated_segment_num);
 
         struct stm_shadowentry_s *current = tl->shadowstack;
         struct stm_shadowentry_s *base = tl->shadowstack_base;
