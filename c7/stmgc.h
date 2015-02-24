@@ -124,7 +124,7 @@ char *stm_object_pages;
 #endif
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
-#define _STM_GCFLAG_CARDS_SET          0x04
+#define _STM_GCFLAG_CARDS_SET          0x08
 #define _STM_CARD_SIZE                 32     /* must be >= 32 */
 #define _STM_MIN_CARD_COUNT            17
 #define _STM_MIN_CARD_OBJ_SIZE         (_STM_CARD_SIZE * _STM_MIN_CARD_COUNT)
