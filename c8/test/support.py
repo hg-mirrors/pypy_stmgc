@@ -28,6 +28,7 @@ typedef struct {
     size_t mem_bytes_to_clear_on_abort;
     long last_abort__bytes_in_nursery;
     int associated_segment_num;
+    int last_associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
     ...;
@@ -55,7 +56,7 @@ object_t *stm_setup_prebuilt_weakref(object_t *);
 void _stm_start_safe_point(void);
 bool _check_stop_safe_point(void);
 
-ssize_t _checked_stmcb_size_rounded_up(struct object_s *obj);
+ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
 bool _checked_stm_write(object_t *obj);
 bool _stm_was_read(object_t *obj);
@@ -122,8 +123,6 @@ void _stm_start_enum_last_cl_entry();
 long _stm_count_cl_entries();
 
 void *memset(void *s, int c, size_t n);
-
-ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
 
 object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
@@ -206,19 +205,6 @@ long _check_start_transaction(stm_thread_local_t *tl) {
         return 0;                                               \
     }                                                           \
     clear_jmpbuf(tl);                                           \
-    return 1;
-}
-
-ssize_t _checked_stmcb_size_rounded_up(struct object_s *obj)
-{
-    stm_thread_local_t *_tl = STM_SEGMENT->running_thread;      \
-    void **jmpbuf = _tl->rjthread.jmpbuf;                       \
-    if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
-        ssize_t res = stmcb_size_rounded_up(obj);
-        clear_jmpbuf(_tl);
-        return res;
-    }
-    clear_jmpbuf(_tl);
     return 1;
 }
 
@@ -492,10 +478,7 @@ def stm_is_accessible_page(pagenum):
     return lib._stm_is_accessible_page(pagenum)
 
 def stm_get_obj_size(o):
-    res = lib._checked_stmcb_size_rounded_up(stm_get_real_address(o))
-    if res == 1:
-        raise Conflict()
-    return res
+    return lib.stmcb_size_rounded_up(stm_get_real_address(o))
 
 def stm_get_obj_pages(o):
     start = int(ffi.cast('uintptr_t', o))
