@@ -267,6 +267,9 @@ static inline void _append_to_finalizer_tmpstack(object_t **pobj)
 static inline struct list_s *finalizer_trace(char *base, object_t *obj,
                                              struct list_s *lst)
 {
+    if (!is_new_object(obj))
+        base = stm_object_pages;
+
     struct object_s *realobj = (struct object_s *)REAL_ADDRESS(base, obj);
     _finalizer_tmpstack = lst;
     stmcb_trace(realobj, &_append_to_finalizer_tmpstack);
@@ -421,7 +424,9 @@ static void mark_visit_from_finalizer1(char *base, struct finalizers_s *f)
 {
     if (f != NULL && f->run_finalizers != NULL) {
         LIST_FOREACH_R(f->run_finalizers, object_t * /*item*/,
-                       mark_visit_object(item, base));
+                       ({
+                           mark_visit_possibly_new_object(base, item);
+                       }));
     }
 }
 
