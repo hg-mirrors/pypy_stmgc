@@ -84,6 +84,34 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
     return o;
 }
 
+object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
+                                   const char *initial_data)
+{
+    acquire_privatization_lock();
+
+    char *p = allocate_outside_nursery_large(size_rounded_up);
+    uintptr_t nobj = p - stm_object_pages;
+    dprintf(("allocate_preexisting: %p\n", (object_t *)nobj));
+    long j;
+    for (j = 0; j <= NB_SEGMENTS; j++) {
+        char *dest = get_segment_base(j) + nobj;
+        memcpy(dest, initial_data, size_rounded_up);
+        ((struct object_s *)dest)->stm_flags = GCFLAG_WRITE_BARRIER;
+#ifdef STM_TESTS
+        /* can't really enable this check outside tests, because there is
+           a change that the transaction_state changes in parallel */
+        if (j && get_priv_segment(j)->transaction_state != TS_NONE) {
+            assert(!was_read_remote(get_segment_base(j), (object_t *)nobj));
+        }
+#endif
+    }
+
+    release_privatization_lock();
+
+    write_fence();     /* make sure 'nobj' is fully initialized from
+                          all threads here */
+    return (object_t *)nobj;
+}
 
 /************************************************************/
 
@@ -98,7 +126,7 @@ static void major_collection_if_requested(void)
 
     if (is_major_collection_requested()) {   /* if still true */
 
-        int oldstate = change_timing_state(STM_TIME_MAJOR_GC);
+        timing_event(STM_SEGMENT->running_thread, STM_GC_MAJOR_START);
 
         synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
 
@@ -106,10 +134,11 @@ static void major_collection_if_requested(void)
             major_collection_now_at_safe_point();
         }
 
-        change_timing_state(oldstate);
+        timing_event(STM_SEGMENT->running_thread, STM_GC_MAJOR_DONE);
     }
 
     s_mutex_unlock();
+    exec_local_finalizers();
 }
 
 
@@ -118,7 +147,11 @@ static void major_collection_if_requested(void)
 
 static struct list_s *mark_objects_to_trace;
 
-#define WL_VISITED   255
+#define WL_FINALIZ_ORDER_1    253
+#define WL_FINALIZ_ORDER_2    254
+#define WL_FINALIZ_ORDER_3    WL_VISITED
+
+#define WL_VISITED            255
 
 
 static inline uintptr_t mark_loc(object_t *obj)
@@ -296,6 +329,8 @@ static inline void mark_record_trace(object_t **pobj)
     LIST_APPEND(mark_objects_to_trace, obj);
 }
 
+#define TRACE_FOR_MAJOR_COLLECTION  (&mark_record_trace)
+
 static void mark_trace(object_t *obj, char *segment_base)
 {
     assert(list_is_empty(mark_objects_to_trace));
@@ -304,7 +339,7 @@ static void mark_trace(object_t *obj, char *segment_base)
         /* trace into the object (the version from 'segment_base') */
         struct object_s *realobj =
             (struct object_s *)REAL_ADDRESS(segment_base, obj);
-        stmcb_trace(realobj, &mark_record_trace);
+        stmcb_trace(realobj, TRACE_FOR_MAJOR_COLLECTION);
 
         if (list_is_empty(mark_objects_to_trace))
             break;
@@ -340,12 +375,12 @@ static void mark_visit_from_roots(void)
 
     stm_thread_local_t *tl = stm_all_thread_locals;
     do {
-        /* If 'tl' is currently running, its 'associated_segment_num'
+        /* If 'tl' is currently running, its 'last_associated_segment_num'
            field is the segment number that contains the correct
            version of its overflowed objects.  If not, then the
            field is still some correct segment number, and it doesn't
            matter which one we pick. */
-        char *segment_base = get_segment_base(tl->associated_segment_num);
+        char *segment_base = get_segment_base(tl->last_associated_segment_num);
 
         struct stm_shadowentry_s *current = tl->shadowstack;
         struct stm_shadowentry_s *base = tl->shadowstack_base;
@@ -375,10 +410,26 @@ static void mark_visit_from_modified_objects(void)
 {
     /* The modified objects are the ones that may exist in two different
        versions: one in the segment that modified it, and another in all
-       other segments.  (It can also be more than two if we don't have
-       eager write locking.)
+       other segments.  (It could also be more than two if we did't have
+       eager write locking, but for now we do.)
     */
     long i;
+    for (i = 1; i <= NB_SEGMENTS; i++) {
+        LIST_FOREACH_R(
+            get_priv_segment(i)->modified_old_objects,
+            object_t * /*item*/,
+            ({
+                /* This function is called first, and there should not be
+                   any duplicate in modified_old_objects. */
+                if (mark_visited_test_and_set(item)) {
+                    assert(!"duplicate in modified_old_objects!");
+                }
+            }));
+    }
+
+    /* Now that we have marked all modified_old_objects, trace them
+       (which will mark more objects).
+    */
     for (i = 1; i <= NB_SEGMENTS; i++) {
         char *base = get_segment_base(i);
 
@@ -386,7 +437,6 @@ static void mark_visit_from_modified_objects(void)
             get_priv_segment(i)->modified_old_objects,
             object_t * /*item*/,
             ({
-                mark_visited_test_and_set(item);
                 mark_trace(item, stm_object_pages);  /* shared version */
                 mark_trace(item, base);              /* private version */
             }));
@@ -403,9 +453,9 @@ static void mark_visit_from_markers(void)
         for (i = list_count(lst); i > 0; i -= 2) {
             mark_visit_object((object_t *)list_item(lst, i - 1), base);
         }
-        if (get_priv_segment(j)->marker_inev[1]) {
-            uintptr_t marker_inev_obj = get_priv_segment(j)->marker_inev[1];
-            mark_visit_object((object_t *)marker_inev_obj, base);
+        if (get_priv_segment(j)->marker_inev.segment_base) {
+            object_t *marker_inev_obj = get_priv_segment(j)->marker_inev.object;
+            mark_visit_object(marker_inev_obj, base);
         }
     }
 }
@@ -481,10 +531,28 @@ static void clean_up_segment_lists(void)
             uintptr_t n = list_count(lst);
             while (n > 0) {
                 object_t *obj = (object_t *)list_item(lst, --n);
-                if (!mark_visited_test(obj)) {
+                if (!mark_visited_test(obj))
                     list_set_item(lst, n, list_pop_item(lst));
+            }
+        }
+
+        /* Remove from 'modified_old_hashtables' all old hashtables that
+           die, but keeping the order */
+        {
+            lst = pseg->modified_old_hashtables;
+            uintptr_t j, k = 0, limit = list_count(lst);
+            for (j = 0; j < limit; j += 2) {
+                object_t *hobj = (object_t *)list_item(lst, j);
+                if (mark_visited_test(hobj)) {
+                    /* hobj does not die */
+                    if (j != k) {
+                        list_set_item(lst, k, (uintptr_t)hobj);
+                        list_set_item(lst, k + 1, list_item(lst, j + 1));
+                    }
+                    k += 2;
                 }
             }
+            lst->count = k;
         }
     }
 #pragma pop_macro("STM_SEGMENT")
@@ -581,10 +649,17 @@ static void major_collection_now_at_safe_point(void)
     mark_visit_from_modified_objects();
     mark_visit_from_markers();
     mark_visit_from_roots();
+    mark_visit_from_finalizer_pending();
     LIST_FREE(mark_objects_to_trace);
 
-    /* weakrefs: */
+    /* finalizer support: will mark as WL_VISITED all objects with a
+       finalizer and all objects reachable from there, and also moves
+       some objects from 'objects_with_finalizers' to 'run_finalizers'. */
+    deal_with_objects_with_finalizers();
+
+    /* weakrefs and old light finalizers */
     stm_visit_old_weakrefs();
+    deal_with_old_objects_with_finalizers();
 
     /* cleanup */
     clean_up_segment_lists();

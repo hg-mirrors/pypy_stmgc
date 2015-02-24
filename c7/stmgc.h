@@ -25,7 +25,6 @@
 typedef TLPREFIX struct object_s object_t;
 typedef TLPREFIX struct stm_segment_info_s stm_segment_info_t;
 typedef TLPREFIX struct stm_read_marker_s stm_read_marker_t;
-typedef TLPREFIX struct stm_creation_marker_s stm_creation_marker_t;
 typedef TLPREFIX char stm_char;
 
 struct stm_read_marker_s {
@@ -54,28 +53,6 @@ struct stm_shadowentry_s {
     object_t *ss;
 };
 
-enum stm_time_e {
-    STM_TIME_OUTSIDE_TRANSACTION,
-    STM_TIME_RUN_CURRENT,
-    STM_TIME_RUN_COMMITTED,
-    STM_TIME_RUN_ABORTED_WRITE_WRITE,
-    STM_TIME_RUN_ABORTED_WRITE_READ,
-    STM_TIME_RUN_ABORTED_INEVITABLE,
-    STM_TIME_RUN_ABORTED_OTHER,
-    STM_TIME_WAIT_FREE_SEGMENT,
-    STM_TIME_WAIT_WRITE_READ,
-    STM_TIME_WAIT_INEVITABLE,
-    STM_TIME_WAIT_OTHER,
-    STM_TIME_SYNC_COMMIT_SOON,
-    STM_TIME_BOOKKEEPING,
-    STM_TIME_MINOR_GC,
-    STM_TIME_MAJOR_GC,
-    STM_TIME_SYNC_PAUSE,
-    _STM_TIME_N
-};
-
-#define _STM_MARKER_LEN  80
-
 typedef struct stm_thread_local_s {
     /* every thread should handle the shadow stack itself */
     struct stm_shadowentry_s *shadowstack, *shadowstack_base;
@@ -88,20 +65,12 @@ typedef struct stm_thread_local_s {
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
     /* after an abort, some details about the abort are stored there.
-       (these fields are not modified on a successful commit) */
+       (this field is not modified on a successful commit) */
     long last_abort__bytes_in_nursery;
-    /* timing information, accumulated */
-    uint32_t events[_STM_TIME_N];
-    float timing[_STM_TIME_N];
-    double _timing_cur_start;
-    enum stm_time_e _timing_cur_state;
-    /* the marker with the longest associated time so far */
-    enum stm_time_e longest_marker_state;
-    double longest_marker_time;
-    char longest_marker_self[_STM_MARKER_LEN];
-    char longest_marker_other[_STM_MARKER_LEN];
     /* the next fields are handled internally by the library */
     int associated_segment_num;
+    int last_associated_segment_num;
+    int thread_local_counter;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
 } stm_thread_local_t;
@@ -159,7 +128,7 @@ char *stm_object_pages;
 #define _STM_CARD_SIZE                 32     /* must be >= 32 */
 #define _STM_MIN_CARD_COUNT            17
 #define _STM_MIN_CARD_OBJ_SIZE         (_STM_CARD_SIZE * _STM_MIN_CARD_COUNT)
-#define _STM_NSE_SIGNAL_MAX     _STM_TIME_N
+#define _STM_NSE_SIGNAL_MAX            7
 #define _STM_FAST_ALLOC           (66*1024)
 
 
@@ -193,7 +162,7 @@ char *stm_object_pages;
    The best is to use typedefs like above.
 
    The object_s part contains some fields reserved for the STM library.
-   Right now this is only one byte.
+   Right now this is only four bytes.
 */
 
 struct object_s {
@@ -223,10 +192,13 @@ static inline void stm_read(object_t *obj)
    necessary to call it immediately after stm_allocate().
 */
 __attribute__((always_inline))
-static inline void stm_write(object_t *obj)
+static inline int stm_write(object_t *obj)
 {
-    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
+    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0)) {
         _stm_write_slowpath(obj);
+        return 1;
+    }
+    return 0;
 }
 
 /* The following is a GC-optimized barrier that works on the granularity
@@ -437,25 +409,92 @@ long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
    other threads.  A very heavy-handed way to make sure that no other
    transaction is running concurrently.  Avoid as much as possible.
    Other transactions will continue running only after this transaction
-   commits. */
+   commits.  (xxx deprecated and may be removed) */
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
                                             const char *msg);
 
+/* Temporarily stop all the other threads, by waiting until they
+   reach a safe-point.  Don't nest the calls to stop/resume and make sure
+   that resume is called.  The current transaction is turned inevitable. */
+void stm_stop_all_other_threads(void);
+void stm_resume_all_other_threads(void);
 
-/* Temporary? */
-void stm_flush_timing(stm_thread_local_t *tl, int verbose);
 
+/* Profiling events.  In the comments: content of the markers, if any */
+enum stm_event_e {
+    /* always STM_TRANSACTION_START followed later by one of COMMIT or ABORT */
+    STM_TRANSACTION_START,
+    STM_TRANSACTION_COMMIT,
+    STM_TRANSACTION_ABORT,
+
+    /* contention; see details at the start of contention.c */
+    STM_CONTENTION_WRITE_WRITE,  /* markers: self loc / other written loc */
+    STM_CONTENTION_WRITE_READ,   /* markers: self written loc / other missing */
+    STM_CONTENTION_INEVITABLE,   /* markers: self loc / other inev loc */
+
+    /* following a contention, we get from the same thread one of:
+       STM_ABORTING_OTHER_CONTENTION, STM_TRANSACTION_ABORT (self-abort),
+       or STM_WAIT_CONTENTION (self-wait). */
+    STM_ABORTING_OTHER_CONTENTION,
+
+    /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE */
+    STM_WAIT_FREE_SEGMENT,
+    STM_WAIT_SYNC_PAUSE,
+    STM_WAIT_CONTENTION,
+    STM_WAIT_DONE,
+
+    /* start and end of GC cycles */
+    STM_GC_MINOR_START,
+    STM_GC_MINOR_DONE,
+    STM_GC_MAJOR_START,
+    STM_GC_MAJOR_DONE,
+
+    _STM_EVENT_N
+};
+
+#define STM_EVENT_NAMES                         \
+    "transaction start",                        \
+    "transaction commit",                       \
+    "transaction abort",                        \
+    "contention write write",                   \
+    "contention write read",                    \
+    "contention inevitable",                    \
+    "aborting other contention",                \
+    "wait free segment",                        \
+    "wait sync pause",                          \
+    "wait contention",                          \
+    "wait done",                                \
+    "gc minor start",                           \
+    "gc minor done",                            \
+    "gc major start",                           \
+    "gc major done"
 
 /* The markers pushed in the shadowstack are an odd number followed by a
-   regular pointer.  When needed, this library invokes this callback to
-   turn this pair into a human-readable explanation. */
-extern void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,
-                                   object_t *following_object,
-                                   char *outputbuf, size_t outputbufsize);
-extern void (*stmcb_debug_print)(const char *cause, double time,
-                                 const char *marker);
+   regular pointer. */
+typedef struct {
+    stm_thread_local_t *tl;
+    char *segment_base;    /* base to interpret the 'object' below */
+    uintptr_t odd_number;  /* marker odd number, or 0 if marker is missing */
+    object_t *object;      /* marker object, or NULL if marker is missing */
+} stm_loc_marker_t;
+extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
+                                  enum stm_event_e event,
+                                  stm_loc_marker_t *markers);
 
-/* Conventience macros to push the markers into the shadowstack */
+/* Calling this sets up a stmcb_timing_event callback that will produce
+   a binary file called 'profiling_file_name'.  Call it with
+   'fork_mode == 0' for only the main process, and with
+   'fork_mode == 1' to also write files called
+   'profiling_file_name.fork<PID>' after a fork().  Call it with NULL to
+   stop profiling.  Returns -1 in case of error (see errno then).
+   The optional 'expand_marker' function pointer is called to expand
+   the marker's odd_number and object into data, starting at the given
+   position and with the given maximum length. */
+int stm_set_timing_log(const char *profiling_file_name, int fork_mode,
+                       int expand_marker(stm_loc_marker_t *, char *, int));
+
+
+/* Convenience macros to push the markers into the shadowstack */
 #define STM_PUSH_MARKER(tl, odd_num, p)   do {  \
     uintptr_t _odd_num = (odd_num);             \
     assert(_odd_num & 1);                       \
@@ -480,8 +519,69 @@ extern void (*stmcb_debug_print)(const char *cause, double time,
     _ss->ss = (object_t *)_odd_num;                             \
 } while (0)
 
-char *_stm_expand_marker(void);
 
+/* Support for light finalizers.  This is a simple version of
+   finalizers that guarantees not to do anything fancy, like not
+   resurrecting objects. */
+extern void (*stmcb_light_finalizer)(object_t *);
+void stm_enable_light_finalizer(object_t *);
+
+/* Support for regular finalizers.  Unreachable objects with
+   finalizers are kept alive, as well as everything they point to, and
+   stmcb_finalizer() is called after the major GC.  If there are
+   several objects with finalizers that reference each other in a
+   well-defined order (i.e. there are no cycles), then they are
+   finalized in order from outermost to innermost (i.e. starting with
+   the ones that are unreachable even from others).
+
+   For objects that have been created by the current transaction, if a
+   major GC runs while that transaction is alive and finds the object
+   unreachable, the finalizer is called immediately in the same
+   transaction.  For older objects, the finalizer is called from a
+   random thread between regular transactions, in a new custom
+   transaction. */
+extern void (*stmcb_finalizer)(object_t *);
+object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
+
+/* Hashtables.  Keys are 64-bit unsigned integers, values are
+   'object_t *'.  Note that the type 'stm_hashtable_t' is not an
+   object type at all; you need to allocate and free it explicitly.
+   If you want to embed the hashtable inside an 'object_t' you
+   probably need a light finalizer to do the freeing. */
+typedef struct stm_hashtable_s stm_hashtable_t;
+typedef TLPREFIX struct stm_hashtable_entry_s stm_hashtable_entry_t;
+
+stm_hashtable_t *stm_hashtable_create(void);
+void stm_hashtable_free(stm_hashtable_t *);
+stm_hashtable_entry_t *stm_hashtable_lookup(object_t *, stm_hashtable_t *,
+                                            uintptr_t key);
+object_t *stm_hashtable_read(object_t *, stm_hashtable_t *, uintptr_t key);
+void stm_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
+                         object_t *nvalue, stm_thread_local_t *);
+void stm_hashtable_write_entry(object_t *hobj, stm_hashtable_entry_t *entry,
+                               object_t *nvalue);
+long stm_hashtable_length_upper_bound(stm_hashtable_t *);
+long stm_hashtable_list(object_t *, stm_hashtable_t *,
+                        stm_hashtable_entry_t **results);
+extern uint32_t stm_hashtable_entry_userdata;
+void stm_hashtable_tracefn(stm_hashtable_t *, void (object_t **));
+
+struct stm_hashtable_entry_s {
+    struct object_s header;
+    uint32_t userdata;
+    uintptr_t index;
+    object_t *object;
+};
+
+/* Make an object "that always existed".  Can be used for cases where
+   the object pointer could also be seen by other running transactions
+   even if the current one did not commit yet (by means outside the
+   normal scope of stmgc).  Must provide the initial content of the
+   object seen in all threads; afterwards, the running transaction can
+   use stm_write() and make local changes.
+*/
+object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
+                                   const char *initial_data);
 
 /* ==================== END ==================== */
 

@@ -44,6 +44,10 @@ static inline bool _is_young(object_t *obj)
         tree_contains(STM_PSEGMENT->young_outside_nursery, (uintptr_t)obj));
 }
 
+static inline bool _is_from_same_transaction(object_t *obj) {
+    return _is_young(obj) || IS_OVERFLOW_OBJ(STM_PSEGMENT, obj);
+}
+
 long stm_can_move(object_t *obj)
 {
     /* 'long' return value to avoid using 'bool' in the public interface */
@@ -259,9 +263,9 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
     OPT_ASSERT(write_locks[first_card_index] <= NB_SEGMENTS
                || write_locks[first_card_index] == 255); /* see gcpage.c */
 
-    dprintf(("mark cards of %p, size %lu with %d, all: %d\n",
+  /*dprintf(("mark cards of %p, size %lu with %d, all: %d\n",
              obj, size, mark_value, mark_all));
-    dprintf(("obj has %lu cards\n", last_card_index));
+    dprintf(("obj has %lu cards\n", last_card_index));*/
     while (card_index <= last_card_index) {
         uintptr_t card_lock_idx = first_card_index + card_index;
 
@@ -329,6 +333,7 @@ static void _trace_card_object(object_t *obj)
 }
 
 
+#define TRACE_FOR_MINOR_COLLECTION  (&minor_trace_if_young)
 
 static inline void _collect_now(object_t *obj)
 {
@@ -342,7 +347,7 @@ static inline void _collect_now(object_t *obj)
            outside the nursery, possibly forcing nursery objects out and
            adding them to 'objects_pointing_to_nursery' as well. */
         char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-        stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+        stmcb_trace((struct object_s *)realobj, TRACE_FOR_MINOR_COLLECTION);
 
         obj->stm_flags |= GCFLAG_WRITE_BARRIER;
     }
@@ -427,12 +432,30 @@ static void collect_roots_from_markers(uintptr_t num_old)
     for (i = num_old + 1; i < total; i += 2) {
         minor_trace_if_young((object_t **)list_ptr_to_item(mlst, i));
     }
-    if (STM_PSEGMENT->marker_inev[1]) {
-        uintptr_t *pmarker_inev_obj = (uintptr_t *)
+    if (STM_PSEGMENT->marker_inev.segment_base) {
+        assert(STM_PSEGMENT->marker_inev.segment_base ==
+               STM_SEGMENT->segment_base);
+        object_t **pmarker_inev_obj = (object_t **)
             REAL_ADDRESS(STM_SEGMENT->segment_base,
-                         &STM_PSEGMENT->marker_inev[1]);
-        minor_trace_if_young((object_t **)pmarker_inev_obj);
+                         &STM_PSEGMENT->marker_inev.object);
+        minor_trace_if_young(pmarker_inev_obj);
     }
+}
+
+static void collect_objs_still_young_but_with_finalizers(void)
+{
+    struct list_s *lst = STM_PSEGMENT->finalizers->objects_with_finalizers;
+    uintptr_t i, total = list_count(lst);
+
+    for (i = STM_PSEGMENT->finalizers->count_non_young; i < total; i++) {
+
+        object_t *o = (object_t *)list_item(lst, i);
+        minor_trace_if_young(&o);
+
+        /* was not actually movable */
+        assert(o == (object_t *)list_item(lst, i));
+    }
+    STM_PSEGMENT->finalizers->count_non_young = total;
 }
 
 static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
@@ -554,11 +577,15 @@ static void _do_minor_collection(bool commit)
 
     collect_roots_in_nursery();
 
+    if (STM_PSEGMENT->finalizers != NULL)
+        collect_objs_still_young_but_with_finalizers();
+
     collect_oldrefs_to_nursery();
     assert(list_is_empty(STM_PSEGMENT->old_objects_with_cards));
 
     /* now all surviving nursery objects have been moved out */
     stm_move_young_weakrefs();
+    deal_with_young_objects_with_finalizers();
 
     throw_away_nursery(get_priv_segment(STM_SEGMENT->segment_num));
 
@@ -574,11 +601,11 @@ static void minor_collection(bool commit)
 
     stm_safe_point();
 
-    change_timing_state(STM_TIME_MINOR_GC);
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_START);
 
     _do_minor_collection(commit);
 
-    change_timing_state(commit ? STM_TIME_BOOKKEEPING : STM_TIME_RUN_CURRENT);
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_DONE);
 }
 
 void stm_collect(long level)

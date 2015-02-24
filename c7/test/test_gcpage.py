@@ -247,3 +247,16 @@ class TestGCPage(BaseTest):
         p1 = self.pop_root()
         assert stm_get_char(p1) == 'o'
         assert stm_get_char(p2) == 't'
+
+    def test_allocate_preexisting(self):
+        self.start_transaction()
+        p1 = stm_allocate(32)
+        stm_set_char(p1, 'X')
+        rawaddr = stm_get_real_address(p1)
+        p2 = lib.stm_allocate_preexisting(32, rawaddr)
+        #
+        assert stm_get_char(p2) == 'X'
+        #
+        self.switch(1)
+        self.start_transaction()
+        assert stm_get_char(p2) == 'X'

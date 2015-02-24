@@ -1,0 +1,9 @@
+
+
+(defun square_root (n)
+  (setq i 0)
+  (while (< (* i i) n)
+    (setq i (+ i 1)))
+  i)
+
+(print (square_root 1000000000))
