@@ -146,6 +146,7 @@ static void major_collection_if_requested(void)
     }
 
     s_mutex_unlock();
+    exec_local_finalizers();
 }
 
 
@@ -456,6 +457,9 @@ static void ready_new_objects(void)
                 mark_visited_test_and_clear(item);
                 realobj = (struct object_s*)REAL_ADDRESS(stm_object_pages, item);
                 realobj->stm_flags |= GCFLAG_WB_EXECUTED;
+
+                /* make sure this flag is cleared as well */
+                realobj->stm_flags &= ~GCFLAG_FINALIZATION_ORDERING;
             }));
     }
 #pragma pop_macro("STM_SEGMENT")
@@ -657,9 +661,16 @@ static void major_collection_now_at_safe_point(void)
     LIST_CREATE(marked_objects_to_trace);
     mark_visit_from_modified_objects();
     mark_visit_from_roots();
+    mark_visit_from_finalizer_pending();
+
+    /* finalizer support: will mark as visited all objects with a
+       finalizer and all objects reachable from there, and also moves
+       some objects from 'objects_with_finalizers' to 'run_finalizers'. */
+    deal_with_objects_with_finalizers();
+
     LIST_FREE(marked_objects_to_trace);
 
-    /* weakrefs */
+    /* weakrefs and execute old light finalizers */
     stm_visit_old_weakrefs();
     deal_with_old_objects_with_finalizers();
 

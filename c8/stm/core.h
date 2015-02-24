@@ -39,6 +39,7 @@ enum /* stm_flags */ {
     GCFLAG_HAS_SHADOW = 0x02,
     GCFLAG_WB_EXECUTED = 0x04,
     GCFLAG_VISITED = 0x08,
+    GCFLAG_FINALIZATION_ORDERING = 0x10,
 };
 
 
