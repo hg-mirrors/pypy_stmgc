@@ -110,6 +110,14 @@ struct stm_priv_segment_info_s {
     pthread_t running_pthread;
 #endif
 
+    /* light finalizers */
+    struct list_s *young_objects_with_light_finalizers;
+    struct list_s *old_objects_with_light_finalizers;
+
+    /* regular finalizers (objs from the current transaction only) */
+    struct finalizers_s *finalizers;
+
+
     /* This is for smallmalloc.c */
     struct small_malloc_data_s small_malloc_data;
 

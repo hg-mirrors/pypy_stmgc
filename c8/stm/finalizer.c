@@ -28,6 +28,8 @@ static void teardown_finalizer(void)
 
 static void _commit_finalizers(void)
 {
+    /* move finalizer lists to g_finalizers for major collections */
+
     if (STM_PSEGMENT->finalizers->run_finalizers != NULL) {
         /* copy 'STM_PSEGMENT->finalizers->run_finalizers' into
            'g_finalizers.run_finalizers', dropping any initial NULLs
@@ -96,14 +98,14 @@ static void abort_finalizers(struct stm_priv_segment_info_s *pseg)
         list_clear(lst);
     }
 
-    /* also deals with overflow objects: they are at the tail of
+    /* also deals with newly created objects: they are at the tail of
        old_objects_with_light_finalizers (this list is kept in order
        and we cannot add any already-committed object) */
     lst = pseg->old_objects_with_light_finalizers;
     count = list_count(lst);
     while (count > 0) {
         object_t *obj = (object_t *)list_item(lst, --count);
-        if (!IS_OVERFLOW_OBJ(pseg, obj))
+        if (!(obj->stm_flags & GCFLAG_WB_EXECUTED))
             break;
         lst->count = count;
         if (must_fix_gs) {
@@ -153,7 +155,8 @@ object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up)
 
 static void deal_with_young_objects_with_finalizers(void)
 {
-    /* for light finalizers */
+    /* for light finalizers: executes finalizers for objs that don't survive
+       this minor gc */
     struct list_s *lst = STM_PSEGMENT->young_objects_with_light_finalizers;
     long i, count = list_count(lst);
     for (i = 0; i < count; i++) {
@@ -174,48 +177,48 @@ static void deal_with_young_objects_with_finalizers(void)
     list_clear(lst);
 }
 
-static void deal_with_old_objects_with_finalizers(void)
-{
-    /* for light finalizers */
-    int old_gs_register = STM_SEGMENT->segment_num;
-    int current_gs_register = old_gs_register;
-    long j;
-    for (j = 1; j <= NB_SEGMENTS; j++) {
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
+/* static void deal_with_old_objects_with_finalizers(void) */
+/* { */
+/*     /\* for light finalizers *\/ */
+/*     int old_gs_register = STM_SEGMENT->segment_num; */
+/*     int current_gs_register = old_gs_register; */
+/*     long j; */
+/*     for (j = 1; j <= NB_SEGMENTS; j++) { */
+/*         struct stm_priv_segment_info_s *pseg = get_priv_segment(j); */
 
-        struct list_s *lst = pseg->old_objects_with_light_finalizers;
-        long i, count = list_count(lst);
-        lst->count = 0;
-        for (i = 0; i < count; i++) {
-            object_t *obj = (object_t *)list_item(lst, i);
-            if (!mark_visited_test(obj)) {
-                /* not marked: object dies */
-                /* we're calling the light finalizer in the same
-                   segment as where it was originally registered.  For
-                   objects that existed since a long time, it doesn't
-                   change anything: any thread should see the same old
-                   content (because if it wasn't the case, the object
-                   would be in a 'modified_old_objects' list
-                   somewhere, and so it wouldn't be dead).  But it's
-                   important if the object was created by the same
-                   transaction: then only that segment sees valid
-                   content.
-                */
-                if (j != current_gs_register) {
-                    set_gs_register(get_segment_base(j));
-                    current_gs_register = j;
-                }
-                stmcb_light_finalizer(obj);
-            }
-            else {
-                /* object survives */
-                list_set_item(lst, lst->count++, (uintptr_t)obj);
-            }
-        }
-    }
-    if (old_gs_register != current_gs_register)
-        set_gs_register(get_segment_base(old_gs_register));
-}
+/*         struct list_s *lst = pseg->old_objects_with_light_finalizers; */
+/*         long i, count = list_count(lst); */
+/*         lst->count = 0; */
+/*         for (i = 0; i < count; i++) { */
+/*             object_t *obj = (object_t *)list_item(lst, i); */
+/*             if (!mark_visited_test(obj)) { */
+/*                 /\* not marked: object dies *\/ */
+/*                 /\* we're calling the light finalizer in the same */
+/*                    segment as where it was originally registered.  For */
+/*                    objects that existed since a long time, it doesn't */
+/*                    change anything: any thread should see the same old */
+/*                    content (because if it wasn't the case, the object */
+/*                    would be in a 'modified_old_objects' list */
+/*                    somewhere, and so it wouldn't be dead).  But it's */
+/*                    important if the object was created by the same */
+/*                    transaction: then only that segment sees valid */
+/*                    content. */
+/*                 *\/ */
+/*                 if (j != current_gs_register) { */
+/*                     set_gs_register(get_segment_base(j)); */
+/*                     current_gs_register = j; */
+/*                 } */
+/*                 stmcb_light_finalizer(obj); */
+/*             } */
+/*             else { */
+/*                 /\* object survives *\/ */
+/*                 list_set_item(lst, lst->count++, (uintptr_t)obj); */
+/*             } */
+/*         } */
+/*     } */
+/*     if (old_gs_register != current_gs_register) */
+/*         set_gs_register(get_segment_base(old_gs_register)); */
+/* } */
 
 
 /************************************************************/
@@ -224,195 +227,195 @@ static void deal_with_old_objects_with_finalizers(void)
     as well as rpython/memory/gc/minimark.py.
 */
 
-static inline int _finalization_state(object_t *obj)
-{
-    /* Returns the state, "0", 1, 2 or 3, as per finalizer-order.rst.
-       One difference is that the official state 0 is returned here
-       as a number that is <= 0. */
-    uintptr_t lock_idx = mark_loc(obj);
-    return write_locks[lock_idx] - (WL_FINALIZ_ORDER_1 - 1);
-}
+/* static inline int _finalization_state(object_t *obj) */
+/* { */
+/*     /\* Returns the state, "0", 1, 2 or 3, as per finalizer-order.rst. */
+/*        One difference is that the official state 0 is returned here */
+/*        as a number that is <= 0. *\/ */
+/*     uintptr_t lock_idx = mark_loc(obj); */
+/*     return write_locks[lock_idx] - (WL_FINALIZ_ORDER_1 - 1); */
+/* } */
 
-static void _bump_finalization_state_from_0_to_1(object_t *obj)
-{
-    uintptr_t lock_idx = mark_loc(obj);
-    assert(write_locks[lock_idx] < WL_FINALIZ_ORDER_1);
-    write_locks[lock_idx] = WL_FINALIZ_ORDER_1;
-}
+/* static void _bump_finalization_state_from_0_to_1(object_t *obj) */
+/* { */
+/*     uintptr_t lock_idx = mark_loc(obj); */
+/*     assert(write_locks[lock_idx] < WL_FINALIZ_ORDER_1); */
+/*     write_locks[lock_idx] = WL_FINALIZ_ORDER_1; */
+/* } */
 
-static struct list_s *_finalizer_tmpstack;
-static struct list_s *_finalizer_emptystack;
-static struct list_s *_finalizer_pending;
+/* static struct list_s *_finalizer_tmpstack; */
+/* static struct list_s *_finalizer_emptystack; */
+/* static struct list_s *_finalizer_pending; */
 
-static inline void _append_to_finalizer_tmpstack(object_t **pobj)
-{
-    object_t *obj = *pobj;
-    if (obj != NULL)
-        LIST_APPEND(_finalizer_tmpstack, obj);
-}
+/* static inline void _append_to_finalizer_tmpstack(object_t **pobj) */
+/* { */
+/*     object_t *obj = *pobj; */
+/*     if (obj != NULL) */
+/*         LIST_APPEND(_finalizer_tmpstack, obj); */
+/* } */
 
-static inline struct list_s *finalizer_trace(char *base, object_t *obj,
-                                             struct list_s *lst)
-{
-    struct object_s *realobj = (struct object_s *)REAL_ADDRESS(base, obj);
-    _finalizer_tmpstack = lst;
-    stmcb_trace(realobj, &_append_to_finalizer_tmpstack);
-    return _finalizer_tmpstack;
-}
+/* static inline struct list_s *finalizer_trace(char *base, object_t *obj, */
+/*                                              struct list_s *lst) */
+/* { */
+/*     struct object_s *realobj = (struct object_s *)REAL_ADDRESS(base, obj); */
+/*     _finalizer_tmpstack = lst; */
+/*     stmcb_trace(realobj, &_append_to_finalizer_tmpstack); */
+/*     return _finalizer_tmpstack; */
+/* } */
 
-static void _recursively_bump_finalization_state(char *base, object_t *obj,
-                                                 int to_state)
-{
-    struct list_s *tmpstack = _finalizer_emptystack;
-    assert(list_is_empty(tmpstack));
+/* static void _recursively_bump_finalization_state(char *base, object_t *obj, */
+/*                                                  int to_state) */
+/* { */
+/*     struct list_s *tmpstack = _finalizer_emptystack; */
+/*     assert(list_is_empty(tmpstack)); */
 
-    while (1) {
-        if (_finalization_state(obj) == to_state - 1) {
-            /* bump to the next state */
-            write_locks[mark_loc(obj)]++;
+/*     while (1) { */
+/*         if (_finalization_state(obj) == to_state - 1) { */
+/*             /\* bump to the next state *\/ */
+/*             write_locks[mark_loc(obj)]++; */
 
-            /* trace */
-            tmpstack = finalizer_trace(base, obj, tmpstack);
-        }
+/*             /\* trace *\/ */
+/*             tmpstack = finalizer_trace(base, obj, tmpstack); */
+/*         } */
 
-        if (list_is_empty(tmpstack))
-            break;
+/*         if (list_is_empty(tmpstack)) */
+/*             break; */
 
-        obj = (object_t *)list_pop_item(tmpstack);
-    }
-    _finalizer_emptystack = tmpstack;
-}
+/*         obj = (object_t *)list_pop_item(tmpstack); */
+/*     } */
+/*     _finalizer_emptystack = tmpstack; */
+/* } */
 
-static struct list_s *mark_finalize_step1(char *base, struct finalizers_s *f)
-{
-    if (f == NULL)
-        return NULL;
+/* static struct list_s *mark_finalize_step1(char *base, struct finalizers_s *f) */
+/* { */
+/*     if (f == NULL) */
+/*         return NULL; */
 
-    struct list_s *marked = list_create();
+/*     struct list_s *marked = list_create(); */
 
-    struct list_s *lst = f->objects_with_finalizers;
-    long i, count = list_count(lst);
-    lst->count = 0;
-    f->count_non_young = 0;
+/*     struct list_s *lst = f->objects_with_finalizers; */
+/*     long i, count = list_count(lst); */
+/*     lst->count = 0; */
+/*     f->count_non_young = 0; */
 
-    for (i = 0; i < count; i++) {
-        object_t *x = (object_t *)list_item(lst, i);
+/*     for (i = 0; i < count; i++) { */
+/*         object_t *x = (object_t *)list_item(lst, i); */
 
-        assert(_finalization_state(x) != 1);
-        if (_finalization_state(x) >= 2) {
-            list_set_item(lst, lst->count++, (uintptr_t)x);
-            continue;
-        }
-        LIST_APPEND(marked, x);
+/*         assert(_finalization_state(x) != 1); */
+/*         if (_finalization_state(x) >= 2) { */
+/*             list_set_item(lst, lst->count++, (uintptr_t)x); */
+/*             continue; */
+/*         } */
+/*         LIST_APPEND(marked, x); */
 
-        struct list_s *pending = _finalizer_pending;
-        LIST_APPEND(pending, x);
-        while (!list_is_empty(pending)) {
-            object_t *y = (object_t *)list_pop_item(pending);
-            int state = _finalization_state(y);
-            if (state <= 0) {
-                _bump_finalization_state_from_0_to_1(y);
-                pending = finalizer_trace(base, y, pending);
-            }
-            else if (state == 2) {
-                _recursively_bump_finalization_state(base, y, 3);
-            }
-        }
-        _finalizer_pending = pending;
-        assert(_finalization_state(x) == 1);
-        _recursively_bump_finalization_state(base, x, 2);
-    }
-    return marked;
-}
+/*         struct list_s *pending = _finalizer_pending; */
+/*         LIST_APPEND(pending, x); */
+/*         while (!list_is_empty(pending)) { */
+/*             object_t *y = (object_t *)list_pop_item(pending); */
+/*             int state = _finalization_state(y); */
+/*             if (state <= 0) { */
+/*                 _bump_finalization_state_from_0_to_1(y); */
+/*                 pending = finalizer_trace(base, y, pending); */
+/*             } */
+/*             else if (state == 2) { */
+/*                 _recursively_bump_finalization_state(base, y, 3); */
+/*             } */
+/*         } */
+/*         _finalizer_pending = pending; */
+/*         assert(_finalization_state(x) == 1); */
+/*         _recursively_bump_finalization_state(base, x, 2); */
+/*     } */
+/*     return marked; */
+/* } */
 
-static void mark_finalize_step2(char *base, struct finalizers_s *f,
-                                struct list_s *marked)
-{
-    if (f == NULL)
-        return;
+/* static void mark_finalize_step2(char *base, struct finalizers_s *f, */
+/*                                 struct list_s *marked) */
+/* { */
+/*     if (f == NULL) */
+/*         return; */
 
-    struct list_s *run_finalizers = f->run_finalizers;
+/*     struct list_s *run_finalizers = f->run_finalizers; */
 
-    long i, count = list_count(marked);
-    for (i = 0; i < count; i++) {
-        object_t *x = (object_t *)list_item(marked, i);
+/*     long i, count = list_count(marked); */
+/*     for (i = 0; i < count; i++) { */
+/*         object_t *x = (object_t *)list_item(marked, i); */
 
-        int state = _finalization_state(x);
-        assert(state >= 2);
-        if (state == 2) {
-            if (run_finalizers == NULL)
-                run_finalizers = list_create();
-            LIST_APPEND(run_finalizers, x);
-            _recursively_bump_finalization_state(base, x, 3);
-        }
-        else {
-            struct list_s *lst = f->objects_with_finalizers;
-            list_set_item(lst, lst->count++, (uintptr_t)x);
-        }
-    }
-    list_free(marked);
+/*         int state = _finalization_state(x); */
+/*         assert(state >= 2); */
+/*         if (state == 2) { */
+/*             if (run_finalizers == NULL) */
+/*                 run_finalizers = list_create(); */
+/*             LIST_APPEND(run_finalizers, x); */
+/*             _recursively_bump_finalization_state(base, x, 3); */
+/*         } */
+/*         else { */
+/*             struct list_s *lst = f->objects_with_finalizers; */
+/*             list_set_item(lst, lst->count++, (uintptr_t)x); */
+/*         } */
+/*     } */
+/*     list_free(marked); */
 
-    f->run_finalizers = run_finalizers;
-}
+/*     f->run_finalizers = run_finalizers; */
+/* } */
 
-static void deal_with_objects_with_finalizers(void)
-{
-    /* for non-light finalizers */
+/* static void deal_with_objects_with_finalizers(void) */
+/* { */
+/*     /\* for non-light finalizers *\/ */
 
-    /* there is one 'objects_with_finalizers' list per segment.
-       Objects that die at a major collection running in the same
-       transaction as they were created will be put in the
-       'run_finalizers' list of that segment.  Objects that survive at
-       least one commit move to the global g_objects_with_finalizers,
-       and when they die they go to g_run_finalizers.  The former kind
-       of dying object must have its finalizer called in the correct
-       thread; the latter kind can be called in any thread, through
-       any segment, because they all should see the same old content
-       anyway.  (If the content was different between segments at this
-       point, the object would be in a 'modified_old_objects' list
-       somewhere, and so it wouldn't be dead).
-    */
-    struct list_s *marked_seg[NB_SEGMENTS + 1];
-    LIST_CREATE(_finalizer_emptystack);
-    LIST_CREATE(_finalizer_pending);
+/*     /\* there is one 'objects_with_finalizers' list per segment. */
+/*        Objects that die at a major collection running in the same */
+/*        transaction as they were created will be put in the */
+/*        'run_finalizers' list of that segment.  Objects that survive at */
+/*        least one commit move to the global g_objects_with_finalizers, */
+/*        and when they die they go to g_run_finalizers.  The former kind */
+/*        of dying object must have its finalizer called in the correct */
+/*        thread; the latter kind can be called in any thread, through */
+/*        any segment, because they all should see the same old content */
+/*        anyway.  (If the content was different between segments at this */
+/*        point, the object would be in a 'modified_old_objects' list */
+/*        somewhere, and so it wouldn't be dead). */
+/*     *\/ */
+/*     struct list_s *marked_seg[NB_SEGMENTS + 1]; */
+/*     LIST_CREATE(_finalizer_emptystack); */
+/*     LIST_CREATE(_finalizer_pending); */
 
-    long j;
-    for (j = 1; j <= NB_SEGMENTS; j++) {
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
-        marked_seg[j] = mark_finalize_step1(pseg->pub.segment_base,
-                                            pseg->finalizers);
-    }
-    marked_seg[0] = mark_finalize_step1(stm_object_pages, &g_finalizers);
+/*     long j; */
+/*     for (j = 1; j <= NB_SEGMENTS; j++) { */
+/*         struct stm_priv_segment_info_s *pseg = get_priv_segment(j); */
+/*         marked_seg[j] = mark_finalize_step1(pseg->pub.segment_base, */
+/*                                             pseg->finalizers); */
+/*     } */
+/*     marked_seg[0] = mark_finalize_step1(stm_object_pages, &g_finalizers); */
 
-    LIST_FREE(_finalizer_pending);
+/*     LIST_FREE(_finalizer_pending); */
 
-    for (j = 1; j <= NB_SEGMENTS; j++) {
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
-        mark_finalize_step2(pseg->pub.segment_base, pseg->finalizers,
-                            marked_seg[j]);
-    }
-    mark_finalize_step2(stm_object_pages, &g_finalizers, marked_seg[0]);
+/*     for (j = 1; j <= NB_SEGMENTS; j++) { */
+/*         struct stm_priv_segment_info_s *pseg = get_priv_segment(j); */
+/*         mark_finalize_step2(pseg->pub.segment_base, pseg->finalizers, */
+/*                             marked_seg[j]); */
+/*     } */
+/*     mark_finalize_step2(stm_object_pages, &g_finalizers, marked_seg[0]); */
 
-    LIST_FREE(_finalizer_emptystack);
-}
+/*     LIST_FREE(_finalizer_emptystack); */
+/* } */
 
-static void mark_visit_from_finalizer1(char *base, struct finalizers_s *f)
-{
-    if (f != NULL && f->run_finalizers != NULL) {
-        LIST_FOREACH_R(f->run_finalizers, object_t * /*item*/,
-                       mark_visit_object(item, base));
-    }
-}
+/* static void mark_visit_from_finalizer1(char *base, struct finalizers_s *f) */
+/* { */
+/*     if (f != NULL && f->run_finalizers != NULL) { */
+/*         LIST_FOREACH_R(f->run_finalizers, object_t * /\*item*\/, */
+/*                        mark_visit_object(item, base)); */
+/*     } */
+/* } */
 
-static void mark_visit_from_finalizer_pending(void)
-{
-    long j;
-    for (j = 1; j <= NB_SEGMENTS; j++) {
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
-        mark_visit_from_finalizer1(pseg->pub.segment_base, pseg->finalizers);
-    }
-    mark_visit_from_finalizer1(stm_object_pages, &g_finalizers);
-}
+/* static void mark_visit_from_finalizer_pending(void) */
+/* { */
+/*     long j; */
+/*     for (j = 1; j <= NB_SEGMENTS; j++) { */
+/*         struct stm_priv_segment_info_s *pseg = get_priv_segment(j); */
+/*         mark_visit_from_finalizer1(pseg->pub.segment_base, pseg->finalizers); */
+/*     } */
+/*     mark_visit_from_finalizer1(stm_object_pages, &g_finalizers); */
+/* } */
 
 static void _execute_finalizers(struct finalizers_s *f)
 {

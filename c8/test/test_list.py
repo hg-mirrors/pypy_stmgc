@@ -6,6 +6,12 @@ from common import parent_dir
 ffi = cffi.FFI()
 ffi.cdef("""
 struct list_s *list_create(void);
+void list_free(struct list_s *lst);
+struct list_s *list_append(struct list_s *lst, uintptr_t item);
+uintptr_t list_count(struct list_s *lst);
+uintptr_t list_item(struct list_s *lst, uintptr_t index);
+struct list_s *list_extend(struct list_s *lst, struct list_s *lst2,
+                           uintptr_t slicestart);
 
 struct tree_s *tree_create(void);
 void tree_free(struct tree_s *tree);
@@ -127,3 +133,16 @@ def test_tree_walk_big():
 def test_hash_permutation():
     hashes = [((n ^ (n << 4)) & 0xFF0) for n in range(256)]
     assert set(hashes) == set(range(0, 4096, 16))
+
+def test_list_extend():
+    a = lib.list_create()
+    b = lib.list_create()
+    for i in range(100, 120):
+        b = lib.list_append(b, i)
+    a = lib.list_extend(a, b, 3)
+    a = lib.list_extend(a, b, 13)
+    assert lib.list_count(a) == 17 + 7
+    for i, expected in enumerate(range(103, 120) + range(113, 120)):
+        assert lib.list_item(a, i) == expected
+    lib.list_free(b)
+    lib.list_free(a)

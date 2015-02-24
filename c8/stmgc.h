@@ -270,6 +270,31 @@ void stm_become_globally_unique_transaction(stm_thread_local_t *tl, const char *
 void stm_validate(void);
 
 
+
+/* Support for light finalizers.  This is a simple version of
+   finalizers that guarantees not to do anything fancy, like not
+   resurrecting objects. */
+extern void (*stmcb_light_finalizer)(object_t *);
+void stm_enable_light_finalizer(object_t *);
+
+/* Support for regular finalizers.  Unreachable objects with
+   finalizers are kept alive, as well as everything they point to, and
+   stmcb_finalizer() is called after the major GC.  If there are
+   several objects with finalizers that reference each other in a
+   well-defined order (i.e. there are no cycles), then they are
+   finalized in order from outermost to innermost (i.e. starting with
+   the ones that are unreachable even from others).
+
+   For objects that have been created by the current transaction, if a
+   major GC runs while that transaction is alive and finds the object
+   unreachable, the finalizer is called immediately in the same
+   transaction.  For older objects, the finalizer is called from a
+   random thread between regular transactions, in a new custom
+   transaction. */
+extern void (*stmcb_finalizer)(object_t *);
+object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
+
+
 /* dummies for now: */
 __attribute__((always_inline))
 static inline void stm_write_card(object_t *obj, uintptr_t index)
