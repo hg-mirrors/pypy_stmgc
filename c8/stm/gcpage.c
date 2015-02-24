@@ -661,6 +661,7 @@ static void major_collection_now_at_safe_point(void)
 
     /* weakrefs */
     stm_visit_old_weakrefs();
+    deal_with_old_objects_with_finalizers();
 
     /* cleanup */
     clean_up_segment_lists();
