@@ -223,14 +223,15 @@ void stm_register_thread_local(stm_thread_local_t *tl)
         tl->prev = stm_all_thread_locals->prev;
         stm_all_thread_locals->prev->next = tl;
         stm_all_thread_locals->prev = tl;
-        num = (tl->prev->associated_segment_num) % (NB_SEGMENTS-1);
+        num = (tl->prev->last_associated_segment_num) % (NB_SEGMENTS-1);
     }
     tl->thread_local_obj = NULL;
 
     /* assign numbers consecutively, but that's for tests; we could also
        assign the same number to all of them and they would get their own
        numbers automatically. */
-    tl->associated_segment_num = num + 1;
+    tl->associated_segment_num = -1;
+    tl->last_associated_segment_num = num + 1;
     *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num + 1));
