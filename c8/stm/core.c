@@ -873,8 +873,7 @@ static void push_new_objects_to_other_segments(void)
 
 void stm_commit_transaction(void)
 {
-    major_collection_if_requested();
-    //exec_local_finalizers(); done by ^^^
+    exec_local_finalizers();
 
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
@@ -896,6 +895,15 @@ void stm_commit_transaction(void)
     assert(STM_SEGMENT->nursery_end == NURSERY_END);
 
     stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+
+    /* if a major collection is required, do it here */
+    if (is_major_collection_requested()) {
+        synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
+
+        if (is_major_collection_requested()) {   /* if *still* true */
+            major_collection_now_at_safe_point();
+        }
+    }
 
     commit_finalizers();
 
