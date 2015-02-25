@@ -78,6 +78,8 @@ bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
 bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
+bool _check_stop_all_other_threads(void);
+void stm_resume_all_other_threads(void);
 int stm_is_inevitable(void);
 long current_segment_num(void);
 
@@ -223,6 +225,10 @@ bool _check_become_inevitable(stm_thread_local_t *tl) {
 
 bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
     CHECKED(stm_become_globally_unique_transaction(tl, "TESTGUT"));
+}
+
+bool _check_stop_all_other_threads(void) {
+    CHECKED(stm_stop_all_other_threads());
 }
 
 bool _check_stm_validate(void) {
@@ -667,4 +673,12 @@ class BaseTest(object):
     def become_globally_unique_transaction(self):
         tl = self.tls[self.current_thread]
         if lib._check_become_globally_unique_transaction(tl):
+            raise Conflict()
+
+    def stop_all_other_threads(self):
+        if lib._check_stop_all_other_threads():
+            raise Conflict()
+
+    def resume_all_other_threads(self):
+        if lib.stm_resume_all_other_threads():
             raise Conflict()
