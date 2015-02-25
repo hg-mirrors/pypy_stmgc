@@ -873,7 +873,8 @@ static void push_new_objects_to_other_segments(void)
 
 void stm_commit_transaction(void)
 {
-    exec_local_finalizers();
+    major_collection_if_requested();
+    //exec_local_finalizers(); done by ^^^
 
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
