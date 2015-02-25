@@ -524,6 +524,7 @@ static void clean_up_segment_lists(void)
 
 static inline bool largemalloc_keep_object_at(char *data)
 {
+    /* XXX: identical to smallmalloc_keep_object_at()? */
     /* this is called by _stm_largemalloc_sweep() */
     object_t *obj = (object_t *)(data - stm_object_pages);
     //dprintf(("keep obj %p ? -> %d\n", obj, mark_visited_test(obj)));
@@ -646,9 +647,36 @@ static void major_collection_now_at_safe_point(void)
     dprintf((" | commit log entries before: %ld\n",
              _stm_count_cl_entries()));
 
+
     /* free all commit log entries. all segments are on the most recent
        revision now. */
+    uint64_t allocd_before = pages_ctl.total_allocated;
     clean_up_commit_log_entries();
+    /* check if freeing the log entries actually freed a considerable
+       amount itself. Then we don't want to also trace the whole heap
+       and just leave major gc right here.
+       The problem is apparent from raytrace.py, but may disappear if
+       we have card marking that also reduces the size of commit log
+       entries */
+    if ((pages_ctl.total_allocated < pages_ctl.total_allocated_bound)
+        && (allocd_before - pages_ctl.total_allocated > 0.3 * allocd_before)) {
+        /* 0.3 should mean that we are at about 50% of the way to the
+           allocated_bound again */
+#ifndef STM_TESTS
+        /* we freed a considerable amount just by freeing commit log entries */
+        pages_ctl.major_collection_requested = false; // reset_m_gc_requested
+
+        dprintf(("STOP AFTER FREEING CL ENTRIES: -%ld\n",
+                 (long)(allocd_before - pages_ctl.total_allocated)));
+        dprintf((" | used after collection:  %ld\n",
+                (long)pages_ctl.total_allocated));
+        dprintf((" `----------------------------------------------\n"));
+        if (must_abort())
+            abort_with_mutex();
+
+        return;
+#endif
+    }
 
     /* only necessary because of assert that fails otherwise (XXX) */
     acquire_all_privatization_locks();
