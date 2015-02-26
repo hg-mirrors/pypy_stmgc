@@ -581,7 +581,7 @@ void stm_validate()
 }
 
 
-static bool obj_should_use_cards(char *seg_base, object_t *obj)
+bool obj_should_use_cards(char *seg_base, object_t *obj)
 {
     if (is_small_uniform(obj))
         return false;
