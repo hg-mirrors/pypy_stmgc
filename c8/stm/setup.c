@@ -104,6 +104,7 @@ void stm_setup(void)
         pr->young_weakrefs = list_create();
         pr->old_weakrefs = list_create();
         pr->objects_pointing_to_nursery = list_create();
+        pr->old_objects_with_cards_set = list_create();
         pr->young_outside_nursery = tree_create();
         pr->nursery_objects_shadows = tree_create();
         pr->callbacks_on_commit_and_abort[0] = tree_create();
@@ -147,6 +148,7 @@ void stm_teardown(void)
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
         assert(list_is_empty(pr->objects_pointing_to_nursery));
         list_free(pr->objects_pointing_to_nursery);
+        list_free(pr->old_objects_with_cards_set);
         list_free(pr->modified_old_objects);
         assert(list_is_empty(pr->new_objects));
         list_free(pr->new_objects);
