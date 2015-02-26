@@ -985,7 +985,7 @@ static void push_new_objects_to_other_segments(void)
         ({
             assert(item->stm_flags & GCFLAG_WB_EXECUTED);
             _cards_cleared_in_object(pseg, item); /* check for C8 */
-            _reset_object_cards(pseg, item, CARD_CLEAR, false); /* unnecessary, as sync_obj_enq does it already? */
+
             item->stm_flags &= ~GCFLAG_WB_EXECUTED;
             synchronize_object_enqueue(item, true);
         }));
