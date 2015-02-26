@@ -43,6 +43,8 @@ object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 
+/*void stm_write_card(); use _checked_stm_write_card() instead */
+
 void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
@@ -59,8 +61,10 @@ bool _check_stop_safe_point(void);
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
 bool _checked_stm_write(object_t *obj);
+bool _checked_stm_write_card(object_t *obj, uintptr_t index);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
+bool _stm_was_written_card(object_t *obj);
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 int _stm_get_flags(object_t *obj);
@@ -118,8 +122,10 @@ long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
+long _stm_count_old_objects_with_cards_set(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
+object_t *_stm_enum_old_objects_with_cards_set(long index);
 object_t *_stm_next_last_cl_entry();
 void _stm_start_enum_last_cl_entry();
 long _stm_count_cl_entries();
@@ -189,6 +195,10 @@ void _test_run_abort(stm_thread_local_t *tl) {
 
 bool _checked_stm_write(object_t *object) {
     CHECKED(stm_write(object));
+}
+
+bool _checked_stm_write_card(object_t *object, uintptr_t index) {
+    CHECKED(stm_write_card(object, index));
 }
 
 bool _check_commit_transaction(void) {
@@ -321,6 +331,25 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
         visit(ref);
     }
 }
+
+void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
+                       uintptr_t start, uintptr_t stop)
+{
+    int i;
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    assert(myobj->type_id != 421419);
+    assert(myobj->type_id != 421418);
+    if (myobj->type_id < 421420) {
+        /* basic case: no references */
+        return;
+    }
+
+    for (i=start; (i < myobj->type_id - 421420) && (i < stop); i++) {
+        object_t **ref = ((object_t **)(myobj + 1)) + i;
+        visit(ref);
+    }
+}
+
 
 long current_segment_num(void)
 {
@@ -506,11 +535,11 @@ def objects_pointing_to_nursery():
         return None
     return map(lib._stm_enum_objects_pointing_to_nursery, range(count))
 
-def old_objects_with_cards():
-    count = lib._stm_count_old_objects_with_cards()
+def old_objects_with_cards_set():
+    count = lib._stm_count_old_objects_with_cards_set()
     if count < 0:
         return None
-    return map(lib._stm_enum_old_objects_with_cards, range(count))
+    return map(lib._stm_enum_old_objects_with_cards_set, range(count))
 
 def last_commit_log_entry_objs():
     lib._stm_start_enum_last_cl_entry()
