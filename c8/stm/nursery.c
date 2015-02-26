@@ -250,8 +250,6 @@ static void _trace_card_object(object_t *obj)
     uintptr_t card_index = 1;
     uintptr_t last_card_index = get_index_to_card_index(size - 1); /* max valid index */
 
-    assert(cards->rm == STM_SEGMENT->transaction_read_version); /* stm_read() */
-
     /* XXX: merge ranges */
     while (card_index <= last_card_index) {
         if (cards[card_index].rm == CARD_MARKED) {

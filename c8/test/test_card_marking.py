@@ -2,6 +2,8 @@ from support import *
 import py
 
 
+get_card_value = lib._stm_get_card_value
+
 class TestBasic(BaseTest):
 
     def _collect(self, kind):
@@ -220,4 +222,25 @@ class TestBasic(BaseTest):
 
         assert stm_get_char(o, 1000+CARD_SIZE*12) == 'e'
 
+        self.commit_transaction()
+
+
+    def test_clear_cards(self):
+        o = stm_allocate_old(1000+20*CARD_SIZE)
+
+        self.start_transaction()
+        assert get_card_value(o, 1000) == CARD_CLEAR
+        stm_set_char(o, 'a', 1000, True)
+        assert get_card_value(o, 1000) == CARD_MARKED
+        assert o in old_objects_with_cards_set()
+
+        stm_minor_collect()
+        assert get_card_value(o, 1000) == CARD_MARKED_OLD
+        self.commit_transaction()
+
+        self.start_transaction()
+        assert get_card_value(o, 1000) == CARD_CLEAR
+        stm_set_char(o, 'b', 1000, True)
+        assert get_card_value(o, 1000) == CARD_MARKED
+        assert o in old_objects_with_cards_set()
         self.commit_transaction()

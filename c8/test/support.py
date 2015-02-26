@@ -11,6 +11,7 @@ typedef ... object_t;
 #define _STM_GCFLAG_WRITE_BARRIER ...
 #define _STM_FAST_ALLOC ...
 #define _STM_CARD_SIZE ...
+#define _STM_CARD_MARKED ...
 
 typedef struct {
 ...;
@@ -45,6 +46,8 @@ object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 
 /*void stm_write_card(); use _checked_stm_write_card() instead */
+
+uint8_t _stm_get_card_value(object_t *obj, long idx);
 
 void stm_setup(void);
 void stm_teardown(void);
@@ -396,6 +399,10 @@ GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
 FAST_ALLOC = lib._STM_FAST_ALLOC
 CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
+CARD_CLEAR = 0
+CARD_MARKED = lib._STM_CARD_MARKED
+CARD_MARKED_OLD = CARD_MARKED + 1
+
 
 class Conflict(Exception):
     pass
