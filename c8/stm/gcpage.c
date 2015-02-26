@@ -501,11 +501,6 @@ static void clean_up_segment_lists(void)
                     realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
 
                     OPT_ASSERT(!(realobj->stm_flags & GCFLAG_CARDS_SET));
-                    if (realobj->stm_flags & GCFLAG_CARDS_SET) {
-                        /* we called a normal WB on this object, so all cards
-                           need to be marked OLD */
-                        _reset_object_cards(pseg, item, CARD_MARKED_OLD, true); /* mark all */
-                    }
                 }));
             list_clear(lst);
         } else {
@@ -519,11 +514,11 @@ static void clean_up_segment_lists(void)
             ({
                 struct object_s *realobj = (struct object_s *)
                     REAL_ADDRESS(pseg->pub.segment_base, item);
-                OPT_ASSERT(realobj->stm_flags & GCFLAG_CARDS_SET);
                 OPT_ASSERT(realobj->stm_flags & GCFLAG_WRITE_BARRIER);
 
-                /* mark marked cards as old otherwise */
-                uint8_t mark_value = CARD_MARKED_OLD;
+                /* mark marked cards as old if it survives */
+                uint8_t mark_value = mark_visited_test(item) ?
+                    CARD_MARKED_OLD : CARD_CLEAR;
                 _reset_object_cards(pseg, item, mark_value, false);
             }));
         list_clear(lst);
@@ -535,6 +530,8 @@ static void clean_up_segment_lists(void)
         while (n-- > 0) {
             object_t *obj = (object_t *)list_item(lst, n);
             if (!mark_visited_test(obj)) {
+                if (obj_should_use_cards(pseg->pub.segment_base, obj))
+                    _reset_object_cards(pseg, obj, CARD_CLEAR, false);
                 list_set_item(lst, n, list_pop_item(lst));
             }
         }

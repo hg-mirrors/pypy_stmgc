@@ -237,6 +237,7 @@ static inline int get_segment_of_linear_address(char *addr) {
     return (addr - stm_object_pages) / (NB_PAGES * 4096UL);
 }
 
+bool obj_should_use_cards(char *seg_base, object_t *obj);
 
 static bool _is_tl_registered(stm_thread_local_t *tl);
 static bool _seems_to_be_running_transaction(void);
