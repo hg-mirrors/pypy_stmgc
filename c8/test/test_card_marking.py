@@ -42,7 +42,7 @@ class TestBasic(BaseTest):
 
         stm_write_card(o, 5)
 
-        assert o in old_objects_with_cards()
+        assert o in old_objects_with_cards_set()
         assert o not in modified_old_objects() # overflow object
         assert o not in objects_pointing_to_nursery()
         # don't remove GCFLAG_WB
@@ -141,7 +141,7 @@ class TestBasic(BaseTest):
 
         assert not modified_old_objects()
         assert not objects_pointing_to_nursery()
-        assert not old_objects_with_cards()
+        assert not old_objects_with_cards_set()
 
         self.start_transaction()
         d = stm_allocate(64)

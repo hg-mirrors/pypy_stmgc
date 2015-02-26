@@ -576,21 +576,67 @@ void stm_validate()
 }
 
 
-void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
+static bool obj_should_use_cards(object_t *obj)
 {
-    stm_write(obj);
+    struct object_s *realobj = (struct object_s *)
+        REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    long supports = stmcb_obj_supports_cards(realobj);
+    if (!supports)
+        return false;
+
+    /* check also if it makes sense: */
+    size_t size = stmcb_size_rounded_up(realobj);
+    return (size >= _STM_MIN_CARD_OBJ_SIZE);
 }
 
-void _stm_write_slowpath(object_t *obj)
+__attribute__((always_inline))
+static void write_gc_only_path(object_t *obj, bool mark_card)
+{
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    assert(obj->stm_flags & GCFLAG_WB_EXECUTED);
+    dprintf(("write_slowpath-fast(%p)\n", obj));
+
+    if (!mark_card) {
+        /* The basic case, with no card marking.  We append the object
+           into 'objects_pointing_to_nursery', and remove the flag so
+           that the write_slowpath will not be called again until the
+           next minor collection. */
+        if (obj->stm_flags & GCFLAG_CARDS_SET) {
+            /* if we clear this flag, we also need to clear the cards */
+            _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
+                                obj, CARD_CLEAR, false);
+        }
+        obj->stm_flags &= ~(GCFLAG_WRITE_BARRIER | GCFLAG_CARDS_SET);
+        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+    } else {
+        /* Card marking.  Don't remove GCFLAG_WRITE_BARRIER because we
+           need to come back to _stm_write_slowpath_card() for every
+           card to mark.  Add GCFLAG_CARDS_SET. */
+        assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
+        obj->stm_flags |= GCFLAG_CARDS_SET;
+        LIST_APPEND(STM_PSEGMENT->old_objects_with_cards_set, obj);
+    }
+}
+
+
+__attribute__((always_inline))
+static void write_slowpath_common(object_t *obj, bool mark_card)
 {
     assert(_seems_to_be_running_transaction());
     assert(!_is_in_nursery(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
-    int my_segnum = STM_SEGMENT->segment_num;
-    uintptr_t end_page, first_page = ((uintptr_t)obj) / 4096UL;
+    if (obj->stm_flags & GCFLAG_WB_EXECUTED) {
+        /* already executed WB once in this transaction. do GC
+           part again: */
+        write_gc_only_path(obj, mark_card);
+        return;
+    }
+
     char *realobj;
     size_t obj_size;
+    int my_segnum = STM_SEGMENT->segment_num;
+    uintptr_t end_page, first_page = ((uintptr_t)obj) / 4096UL;
 
     realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
@@ -603,15 +649,6 @@ void _stm_write_slowpath(object_t *obj)
 
     /* add to read set: */
     stm_read(obj);
-
-    if (obj->stm_flags & GCFLAG_WB_EXECUTED) {
-        /* already executed WB once in this transaction. do GC
-           part again: */
-        dprintf(("write_slowpath-fast(%p)\n", obj));
-        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
-        return;
-    }
 
     assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
     dprintf(("write_slowpath(%p): sz=%lu\n", obj, obj_size));
@@ -679,19 +716,104 @@ void _stm_write_slowpath(object_t *obj)
     }
     OPT_ASSERT(remaining_obj_sz == 0);
 
-    /* remove the WRITE_BARRIER flag and add WB_EXECUTED */
-    obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-    obj->stm_flags |= GCFLAG_WB_EXECUTED;
+    if (!mark_card) {
+        /* also add it to the GC list for minor collections */
+        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+
+        if (obj->stm_flags & GCFLAG_CARDS_SET) {
+            /* if we clear this flag, we have to tell sync_old_objs that
+               everything needs to be synced */
+            _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
+                                obj, CARD_MARKED_OLD, true); /* mark all */
+        }
+
+        /* remove the WRITE_BARRIER flag and add WB_EXECUTED */
+        obj->stm_flags &= ~(GCFLAG_WRITE_BARRIER | GCFLAG_CARDS_SET);
+        obj->stm_flags |= GCFLAG_WB_EXECUTED;
+    } else {
+        /* don't remove WRITE_BARRIER, but add CARDS_SET */
+        obj->stm_flags |= (GCFLAG_CARDS_SET | GCFLAG_WB_EXECUTED);
+        /* XXXXXXXXXXXX maybe not set WB_EXECUTED and make CARDS_SET
+           mean the same thing where necessary */
+        LIST_APPEND(STM_PSEGMENT->old_objects_with_cards_set, obj);
+    }
 
     DEBUG_EXPECT_SEGFAULT(true);
 
     release_modification_lock(STM_SEGMENT->segment_num);
     /* done fiddling with protection and privatization */
     release_all_privatization_locks();
-
-    /* also add it to the GC list for minor collections */
-    LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
 }
+
+
+char _stm_write_slowpath_card_extra(object_t *obj)
+{
+    /* the PyPy JIT calls this function directly if it finds that an
+       array doesn't have the GCFLAG_CARDS_SET */
+    bool mark_card = obj_should_use_cards(obj);
+    write_slowpath_common(obj, mark_card);
+    return mark_card;
+}
+
+long _stm_write_slowpath_card_extra_base(void)
+{
+    /* XXX can go away? */
+    /* for the PyPy JIT: _stm_write_slowpath_card_extra_base[obj >> 4]
+       is the byte that must be set to CARD_MARKED.  The logic below
+       does the same, but more explicitly. */
+    return 0;
+}
+
+void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
+{
+    dprintf_test(("write_slowpath_card(%p, %lu)\n",
+                  obj, index));
+
+    /* If CARDS_SET is not set so far, issue a normal write barrier.
+       If the object is large enough, ask it to set up the object for
+       card marking instead. */
+    if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
+        char mark_card = _stm_write_slowpath_card_extra(obj);
+        if (!mark_card)
+            return;
+    }
+
+    dprintf_test(("write_slowpath_card %p -> index:%lu\n",
+                  obj, index));
+
+    /* We reach this point if we have to mark the card. */
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+    assert(obj->stm_flags & GCFLAG_CARDS_SET);
+    assert(!is_small_uniform(obj)); /* not supported/tested */
+
+#ifndef NDEBUG
+    struct object_s *realobj = (struct object_s *)
+        REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t size = stmcb_size_rounded_up(realobj);
+    /* we need at least one read marker in addition to the STM-reserved object
+       write-lock */
+    assert(size >= 32);
+    /* the 'index' must be in range(length-of-obj), but we don't have
+       a direct way to know the length.  We know that it is smaller
+       than the size in bytes. */
+    assert(index < size);
+#endif
+
+    /* Write into the card's lock.  This is used by the next minor
+       collection to know what parts of the big object may have changed.
+       We already own the object here or it is an overflow obj. */
+    struct stm_read_marker_s *cards = get_read_marker(STM_SEGMENT->segment_base,
+                                                      (uintptr_t)obj);
+    cards[get_index_to_card_index(index)].rm = CARD_MARKED;
+
+    dprintf(("mark %p index %lu, card:%lu with %d\n",
+             obj, index, get_index_to_card_index(index), CARD_MARKED));
+}
+
+void _stm_write_slowpath(object_t *obj) {
+    write_slowpath_common(obj,  /* mark_card */ false);
+}
+
 
 static void reset_transaction_read_version(void)
 {
@@ -831,7 +953,10 @@ static void _finish_transaction()
 
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
+
+    _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
+    list_clear(STM_PSEGMENT->old_objects_with_cards_set);
     list_clear(STM_PSEGMENT->new_objects);
 
     release_thread_segment(tl);
@@ -854,12 +979,15 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
 
 static void push_new_objects_to_other_segments(void)
 {
+    struct stm_priv_segment_info_s *pseg = get_priv_segment(STM_SEGMENT->segment_num);
     acquire_privatization_lock(STM_SEGMENT->segment_num);
     LIST_FOREACH_R(STM_PSEGMENT->new_objects, object_t *,
         ({
             assert(item->stm_flags & GCFLAG_WB_EXECUTED);
+            _cards_cleared_in_object(pseg, item); /* check for C8 */
+            _reset_object_cards(pseg, item, CARD_CLEAR, false); /* unnecessary, as sync_obj_enq does it already? */
             item->stm_flags &= ~GCFLAG_WB_EXECUTED;
-            synchronize_object_enqueue(item);
+            synchronize_object_enqueue(item, true);
         }));
     synchronize_objects_flush();
     release_privatization_lock(STM_SEGMENT->segment_num);
@@ -910,6 +1038,8 @@ void stm_commit_transaction(void)
         }
     }
 
+    _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
+
     commit_finalizers();
 
     invoke_and_clear_user_callbacks(0);   /* for commit */
@@ -951,6 +1081,10 @@ static void reset_modified_from_backup_copies(int segment_num)
                undo->backup,
                SLICE_SIZE(undo->slice));
 
+        if (obj_should_use_cards(obj))
+            _reset_object_cards(pseg, obj, CARD_CLEAR, false);
+        /* XXXXXXXXX: only reset cards of slice!! ^^^^^^^ */
+
         dprintf(("reset_modified_from_backup_copies(%d): obj=%p off=%lu bk=%p\n",
                  segment_num, obj, SLICE_OFFSET(undo->slice), undo->backup));
 
@@ -987,9 +1121,23 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     long bytes_in_nursery = throw_away_nursery(pseg);
 
+    /* some new objects may have cards when aborting, clear them too */
+    LIST_FOREACH_R(pseg->new_objects, object_t * /*item*/,
+        {
+            struct object_s *realobj = (struct object_s *)
+                REAL_ADDRESS(pseg->pub.segment_base, item);
+
+            if (realobj->stm_flags & GCFLAG_CARDS_SET) {
+                /* CARDS_SET is enough since other HAS_CARDS objs
+                   are already cleared */
+                _reset_object_cards(pseg, item, CARD_CLEAR, false);
+            }
+        });
+
     acquire_modification_lock(segment_num);
     reset_modified_from_backup_copies(segment_num);
     release_modification_lock(segment_num);
+    _verify_cards_cleared_in_all_lists(pseg);
 
     stm_thread_local_t *tl = pseg->pub.running_thread;
 #ifdef STM_NO_AUTOMATIC_SETJMP
@@ -1013,6 +1161,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
     tl->last_abort__bytes_in_nursery = bytes_in_nursery;
 
     list_clear(pseg->objects_pointing_to_nursery);
+    list_clear(pseg->old_objects_with_cards_set);
     list_clear(pseg->new_objects);
     list_clear(pseg->young_weakrefs);
 #pragma pop_macro("STM_SEGMENT")
@@ -1143,7 +1292,133 @@ static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
     ++STM_PSEGMENT->sq_len;
 }
 
-static void synchronize_object_enqueue(object_t *obj)
+
+static void _page_wise_synchronize_object_now(object_t *obj, ssize_t obj_size)
+{
+    uintptr_t start = (uintptr_t)obj;
+    uintptr_t end = start + obj_size;
+
+    do {
+        uintptr_t copy_up_to = (start + 4096) & ~4095;   /* end of page */
+        if (copy_up_to >= end) {
+            copy_up_to = end;        /* this is the last fragment */
+        }
+        uintptr_t copy_size = copy_up_to - start;
+
+        /* double-check that the result fits in one page */
+        assert(copy_size > 0);
+        assert(copy_size + (start & 4095) <= 4096);
+
+        _synchronize_fragment((stm_char *)start, copy_size);
+
+        start = copy_up_to;
+    } while (start != end);
+}
+
+static void _card_wise_synchronize_object_now(object_t *obj, ssize_t obj_size)
+{
+    assert(obj_size >= 32);
+    assert(obj_should_use_cards(obj));
+    assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
+
+    uintptr_t offset_itemsize[2];
+    struct object_s *realobj = (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    stmcb_get_card_base_itemsize(realobj, offset_itemsize);
+    size_t real_idx_count = (obj_size - offset_itemsize[0]) / offset_itemsize[1];
+
+    struct stm_read_marker_s *cards = get_read_marker(STM_SEGMENT->segment_base, (uintptr_t)obj);
+    uintptr_t card_index = 1;
+    uintptr_t last_card_index = get_index_to_card_index(real_idx_count - 1); /* max valid index */
+    assert(cards->rm == STM_SEGMENT->transaction_read_version); /* stm_read() */
+
+    /* simple heuristic to check if probably the whole object is
+       marked anyway so we should do page-wise synchronize */
+    if (cards[1].rm == CARD_MARKED_OLD
+        && cards[last_card_index].rm == CARD_MARKED_OLD
+        && cards[(last_card_index >> 1) + 1].rm == CARD_MARKED_OLD) {
+
+        dprintf(("card_wise_sync assumes %p,size:%lu is fully marked\n", obj, obj_size));
+        _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
+                            obj, CARD_CLEAR, false);
+        _page_wise_synchronize_object_now(obj, obj_size);
+        return;
+    }
+
+    dprintf(("card_wise_sync syncs %p,size:%lu card-wise\n", obj, obj_size));
+
+    /* Combine multiple marked cards and do a memcpy for them. We don't
+       try yet to use page_copy() or otherwise take into account privatization
+       of pages (except _has_private_page_in_range) */
+    bool all_cards_were_cleared = true;
+
+    uintptr_t start_card_index = -1;
+    while (card_index <= last_card_index) {
+        uint8_t card_value = cards[card_index].rm;
+
+        if (card_value == CARD_MARKED_OLD) {
+            cards[card_index].rm = CARD_CLEAR;
+
+            if (start_card_index == -1) {   /* first marked card */
+                start_card_index = card_index;
+                /* start = (uintptr_t)obj + stmcb_index_to_byte_offset( */
+                /*     realobj, get_card_index_to_index(card_index)); */
+                if (all_cards_were_cleared) {
+                    all_cards_were_cleared = false;
+                }
+            }
+        }
+        else {
+            OPT_ASSERT(card_value == CARD_CLEAR);
+        }
+
+        if (start_card_index != -1                    /* something to copy */
+            && (card_value != CARD_MARKED_OLD         /* found non-marked card */
+                || card_index == last_card_index)) {  /* this is the last card */
+            /* do the copying: */
+            uintptr_t start, copy_size;
+            uintptr_t next_card_offset;
+            uintptr_t start_card_offset;
+            uintptr_t next_card_index = card_index;
+
+            if (card_value == CARD_MARKED_OLD) {
+                /* card_index is the last card of the object, but we need
+                   to go one further to get the right offset */
+                next_card_index++;
+            }
+
+            start_card_offset = offset_itemsize[0] +
+                get_card_index_to_index(start_card_index) * offset_itemsize[1];
+
+            next_card_offset = offset_itemsize[0] +
+                get_card_index_to_index(next_card_index) * offset_itemsize[1];
+
+            if (next_card_offset > obj_size)
+                next_card_offset = obj_size;
+
+            start = (uintptr_t)obj + start_card_offset;
+            copy_size = next_card_offset - start_card_offset;
+            OPT_ASSERT(copy_size > 0);
+
+            /* push to seg0 and enqueue for synchronization */
+            _synchronize_fragment((stm_char *)start, copy_size);
+
+            start_card_index = -1;
+        }
+
+        card_index++;
+    }
+
+    if (all_cards_were_cleared) {
+        /* well, seems like we never called stm_write_card() on it, so actually
+           we need to fall back to synchronize the whole object */
+        _page_wise_synchronize_object_now(obj, obj_size);
+        return;
+    }
+
+}
+
+
+static void synchronize_object_enqueue(object_t *obj, bool ignore_cards)
 {
     assert(!_is_young(obj));
     assert(STM_PSEGMENT->privatization_lock);
@@ -1155,28 +1430,18 @@ static void synchronize_object_enqueue(object_t *obj)
     OPT_ASSERT(obj_size >= 16);
 
     if (LIKELY(is_small_uniform(obj))) {
+        assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
         OPT_ASSERT(obj_size <= GC_LAST_SMALL_SIZE);
         _synchronize_fragment((stm_char *)obj, obj_size);
         return;
+    } else if (ignore_cards || !obj_should_use_cards(obj)) {
+        /* else, a more complicated case for large objects, to copy
+           around data only within the needed pages */
+        _page_wise_synchronize_object_now(obj, obj_size);
+    } else {
+        /* ... or even only cards that need to be updated */
+        _card_wise_synchronize_object_now(obj, obj_size);
     }
-
-    /* else, a more complicated case for large objects, to copy
-       around data only within the needed pages
-    */
-    uintptr_t start = (uintptr_t)obj;
-    uintptr_t end = start + obj_size;
-
-    do {
-        uintptr_t copy_up_to = (start + 4096) & ~4095;   /* end of page */
-        if (copy_up_to >= end) {
-            copy_up_to = end;        /* this is the last fragment */
-        }
-        uintptr_t copy_size = copy_up_to - start;
-
-        _synchronize_fragment((stm_char *)start, copy_size);
-
-        start = copy_up_to;
-    } while (start != end);
 }
 
 static void synchronize_objects_flush(void)

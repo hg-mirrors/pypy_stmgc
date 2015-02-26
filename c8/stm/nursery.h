@@ -2,6 +2,11 @@
 #define NSE_SIGPAUSE   _STM_NSE_SIGNAL_MAX
 #define NSE_SIGABORT   _STM_NSE_SIGNAL_ABORT
 
+static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, object_t *obj);
+static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
+                                object_t *obj, uint8_t mark_value,
+                                bool mark_all);
+
 static void minor_collection(bool commit);
 static void check_nursery_at_transaction_start(void);
 static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg);

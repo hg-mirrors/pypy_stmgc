@@ -73,10 +73,15 @@ typedef struct stm_thread_local_s {
 } stm_thread_local_t;
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
-#define _STM_GCFLAG_CARDS_SET          0x10
 #define _STM_FAST_ALLOC           (66*1024)
 #define _STM_NSE_SIGNAL_ABORT             1
 #define _STM_NSE_SIGNAL_MAX               2
+
+#define _STM_CARD_MARKED 1
+#define _STM_GCFLAG_CARDS_SET          0x8
+#define _STM_CARD_SIZE                 32     /* must be >= 32 */
+#define _STM_MIN_CARD_COUNT            17
+#define _STM_MIN_CARD_OBJ_SIZE         (_STM_CARD_SIZE * _STM_MIN_CARD_COUNT)
 
 void _stm_write_slowpath(object_t *);
 void _stm_write_slowpath_card(object_t *, uintptr_t);
@@ -163,6 +168,16 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **));
    ranges of indices (using stm_write_card(o, index)) */
 extern void stmcb_trace_cards(struct object_s *, void (object_t **),
                               uintptr_t start, uintptr_t stop);
+/* this function will be called on objects that support cards.
+   It returns the base_offset (in bytes) inside the object from
+   where the indices start, and item_size (in bytes) for the size of
+   one item */
+extern void stmcb_get_card_base_itemsize(struct object_s *,
+                                         uintptr_t offset_itemsize[2]);
+/* returns whether this object supports cards. we will only call
+   stmcb_get_card_base_itemsize on objs that do so. */
+extern long stmcb_obj_supports_cards(struct object_s *);
+
 
 
 

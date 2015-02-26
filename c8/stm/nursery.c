@@ -142,8 +142,138 @@ static void minor_trace_if_young(object_t **pobj)
 
     /* Must trace the object later */
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
+    _cards_cleared_in_object(get_priv_segment(STM_SEGMENT->segment_num), nobj);
 }
 
+static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, object_t *obj)
+{
+#ifndef NDEBUG
+    struct object_s *realobj = (struct object_s *)REAL_ADDRESS(pseg->pub.segment_base, obj);
+    size_t size = stmcb_size_rounded_up(realobj);
+
+    if (size < _STM_MIN_CARD_OBJ_SIZE)
+        return;                 /* too small for cards */
+
+    struct stm_read_marker_s *cards = get_read_marker(pseg->pub.segment_base, (uintptr_t)obj);
+    uintptr_t card_index = 1;
+    uintptr_t last_card_index = get_index_to_card_index(size - 1); /* max valid index */
+
+    while (card_index <= last_card_index) {
+        assert(cards[card_index].rm == CARD_CLEAR);
+        card_index++;
+    }
+
+    assert(!(realobj->stm_flags & GCFLAG_CARDS_SET));
+#endif
+}
+
+static void _verify_cards_cleared_in_all_lists(struct stm_priv_segment_info_s *pseg)
+{
+#ifndef NDEBUG
+    struct list_s *list = pseg->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+
+    for (; undo < end; undo++) {
+        _cards_cleared_in_object(pseg, undo->object);
+    }
+    LIST_FOREACH_R(
+        pseg->new_objects, object_t * /*item*/,
+        _cards_cleared_in_object(pseg, item));
+    LIST_FOREACH_R(
+        pseg->objects_pointing_to_nursery, object_t * /*item*/,
+        _cards_cleared_in_object(pseg, item));
+    LIST_FOREACH_R(
+        pseg->old_objects_with_cards_set, object_t * /*item*/,
+        _cards_cleared_in_object(pseg, item));
+#endif
+}
+
+static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
+                                object_t *obj, uint8_t mark_value,
+                                bool mark_all)
+{
+#pragma push_macro("STM_PSEGMENT")
+#pragma push_macro("STM_SEGMENT")
+#undef STM_PSEGMENT
+#undef STM_SEGMENT
+    struct object_s *realobj = (struct object_s *)REAL_ADDRESS(pseg->pub.segment_base, obj);
+    size_t size = stmcb_size_rounded_up(realobj);
+    OPT_ASSERT(size >= _STM_MIN_CARD_OBJ_SIZE);
+
+    uintptr_t offset_itemsize[2];
+    stmcb_get_card_base_itemsize(realobj, offset_itemsize);
+    size = (size - offset_itemsize[0]) / offset_itemsize[1];
+
+    assert(IMPLY(mark_value == CARD_CLEAR, !mark_all)); /* not necessary */
+    assert(IMPLY(mark_all, mark_value == CARD_MARKED_OLD)); /* set *all* to OLD */
+    assert(IMPLY(realobj->stm_flags & GCFLAG_WB_EXECUTED,
+                 mark_value == CARD_CLEAR)); /* overflows are always CLEARed */
+
+
+    struct stm_read_marker_s *cards = get_read_marker(pseg->pub.segment_base, (uintptr_t)obj);
+    uintptr_t card_index = 1;
+    uintptr_t last_card_index = get_index_to_card_index(size - 1); /* max valid index */
+
+    /* dprintf(("mark cards of %p, size %lu with %d, all: %d\n",
+                obj, size, mark_value, mark_all));
+       dprintf(("obj has %lu cards\n", last_card_index));*/
+    while (card_index <= last_card_index) {
+        if (mark_all || cards[card_index].rm != CARD_CLEAR) {
+            /* dprintf(("mark card %lu,wl:%lu of %p with %d\n", */
+            /*          card_index, card_lock_idx, obj, mark_value)); */
+            cards[card_index].rm = mark_value;
+        }
+        card_index++;
+    }
+
+    realobj->stm_flags &= ~GCFLAG_CARDS_SET;
+
+#pragma pop_macro("STM_SEGMENT")
+#pragma pop_macro("STM_PSEGMENT")
+}
+
+
+static void _trace_card_object(object_t *obj)
+{
+    assert(!_is_in_nursery(obj));
+    assert(obj->stm_flags & GCFLAG_CARDS_SET);
+    assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+
+    dprintf(("_trace_card_object(%p)\n", obj));
+    uint8_t mark_value = CARD_MARKED_OLD;
+
+    struct object_s *realobj = (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t size = stmcb_size_rounded_up(realobj);
+    uintptr_t offset_itemsize[2];
+    stmcb_get_card_base_itemsize(realobj, offset_itemsize);
+    size = (size - offset_itemsize[0]) / offset_itemsize[1];
+
+    struct stm_read_marker_s *cards = get_read_marker(STM_SEGMENT->segment_base, (uintptr_t)obj);
+    uintptr_t card_index = 1;
+    uintptr_t last_card_index = get_index_to_card_index(size - 1); /* max valid index */
+
+    assert(cards->rm == STM_SEGMENT->transaction_read_version); /* stm_read() */
+
+    /* XXX: merge ranges */
+    while (card_index <= last_card_index) {
+        if (cards[card_index].rm == CARD_MARKED) {
+            /* clear or set to old: */
+            cards[card_index].rm = mark_value;
+
+            uintptr_t start = get_card_index_to_index(card_index);
+            uintptr_t stop = get_card_index_to_index(card_index + 1);
+
+            dprintf(("trace_cards on %p with start:%lu stop:%lu\n",
+                     obj, start, stop));
+            stmcb_trace_cards(realobj, &minor_trace_if_young,
+                              start, stop);
+        }
+
+        card_index++;
+    }
+    obj->stm_flags &= ~GCFLAG_CARDS_SET;
+}
 
 static void collect_roots_in_nursery(void)
 {
@@ -177,15 +307,20 @@ static void collect_roots_in_nursery(void)
 static inline void _collect_now(object_t *obj)
 {
     assert(!_is_young(obj));
+    assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
 
     //dprintf(("_collect_now: %p\n", obj));
 
-    assert(!(obj->stm_flags & GCFLAG_WRITE_BARRIER));
+    if (!(obj->stm_flags & GCFLAG_WRITE_BARRIER)) {
+        /* Trace the 'obj' to replace pointers to nursery with pointers
+           outside the nursery, possibly forcing nursery objects out and
+           adding them to 'objects_pointing_to_nursery' as well. */
+        char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+        stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
 
-    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
-
-    obj->stm_flags |= GCFLAG_WRITE_BARRIER;
+        obj->stm_flags |= GCFLAG_WRITE_BARRIER;
+    }
+    /* else traced in collect_cardrefs_to_nursery if necessary */
 }
 
 
@@ -201,18 +336,21 @@ static void collect_oldrefs_to_nursery(void)
         assert(!_is_in_nursery(obj));
 
         _collect_now(obj);
+        assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
 
         if (obj_sync_now & FLAG_SYNC_LARGE) {
             /* this is a newly allocated obj in this transaction. We must
                either synchronize the object to other segments now, or
                add the object to new_objects list */
-            if (STM_PSEGMENT->minor_collect_will_commit_now) {
-                acquire_privatization_lock(STM_SEGMENT->segment_num);
-                synchronize_object_enqueue(obj);
-                release_privatization_lock(STM_SEGMENT->segment_num);
+            struct stm_priv_segment_info_s *pseg = get_priv_segment(STM_SEGMENT->segment_num);
+            if (pseg->minor_collect_will_commit_now) {
+                acquire_privatization_lock(pseg->pub.segment_num);
+                synchronize_object_enqueue(obj, true); /* ignore cards! */
+                release_privatization_lock(pseg->pub.segment_num);
             } else {
-                LIST_APPEND(STM_PSEGMENT->new_objects, obj);
+                LIST_APPEND(pseg->new_objects, obj);
             }
+            _cards_cleared_in_object(pseg, obj);
         }
 
         /* the list could have moved while appending */
@@ -229,6 +367,30 @@ static void collect_oldrefs_to_nursery(void)
         assert(STM_PSEGMENT->sq_len == 0);
     }
 }
+
+
+static void collect_cardrefs_to_nursery(void)
+{
+    dprintf(("collect_cardrefs_to_nursery\n"));
+    struct list_s *lst = STM_PSEGMENT->old_objects_with_cards_set;
+
+    while (!list_is_empty(lst)) {
+        object_t *obj = (object_t*)list_pop_item(lst);
+
+        assert(!_is_young(obj));
+
+        if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
+            /* sometimes we remove the CARDS_SET in the WB slowpath, see core.c */
+            continue;
+        }
+
+        /* traces cards, clears marked cards or marks them old if necessary */
+        _trace_card_object(obj);
+
+        assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
+    }
+}
+
 
 static void collect_objs_still_young_but_with_finalizers(void)
 {
@@ -314,12 +476,15 @@ static void _do_minor_collection(bool commit)
 
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
 
+    collect_cardrefs_to_nursery();
+
     collect_roots_in_nursery();
 
     if (STM_PSEGMENT->finalizers != NULL)
         collect_objs_still_young_but_with_finalizers();
 
     collect_oldrefs_to_nursery();
+    assert(list_is_empty(STM_PSEGMENT->old_objects_with_cards_set));
 
     /* now all surviving nursery objects have been moved out */
     acquire_privatization_lock(STM_SEGMENT->segment_num);

@@ -34,19 +34,26 @@
 #define FIRST_OLD_RM_PAGE     (OLD_RM_START / 4096UL)
 #define NB_READMARKER_PAGES   (FIRST_OBJECT_PAGE - FIRST_READMARKER_PAGE)
 
+#define CARD_SIZE   _STM_CARD_SIZE
+
 enum /* stm_flags */ {
     GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
     GCFLAG_HAS_SHADOW = 0x02,
     GCFLAG_WB_EXECUTED = 0x04,
-    GCFLAG_HAS_CARDS = 0x08,
     GCFLAG_CARDS_SET = _STM_GCFLAG_CARDS_SET,
-    GCFLAG_VISITED = 0x20,
-    GCFLAG_FINALIZATION_ORDERING = 0x40,
+    GCFLAG_VISITED = 0x10,
+    GCFLAG_FINALIZATION_ORDERING = 0x20,
 };
 
-
-
 #define SYNC_QUEUE_SIZE    31
+
+enum /* card values in read markers */ {
+    CARD_CLEAR = 0,                 /* card not used at all */
+    CARD_MARKED = _STM_CARD_MARKED, /* card marked for tracing in the next gc */
+    CARD_MARKED_OLD = _STM_CARD_MARKED+1,
+    /* card was marked before, but cleared in a GC */
+};
+
 
 
 /************************************************************/
@@ -196,6 +203,18 @@ static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
 
+static inline uintptr_t get_index_to_card_index(uintptr_t index) {
+    return (index / CARD_SIZE) + 1;
+}
+
+static inline uintptr_t get_card_index_to_index(uintptr_t card_index) {
+    return (card_index - 1) * CARD_SIZE;
+}
+
+static inline struct stm_read_marker_s *get_read_marker(char *segment_base, uintptr_t obj)
+{
+   return (struct stm_read_marker_s *)(segment_base + (obj >> 4));
+}
 
 static inline char *get_segment_base(long segment_num) {
     return stm_object_pages + segment_num * (NB_PAGES * 4096UL);
@@ -226,7 +245,7 @@ static void abort_with_mutex(void) __attribute__((noreturn));
 static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
-static void synchronize_object_enqueue(object_t *obj);
+static void synchronize_object_enqueue(object_t *obj, bool ignore_cards);
 static void synchronize_objects_flush(void);
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
