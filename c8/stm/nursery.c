@@ -207,9 +207,6 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
 
     assert(IMPLY(mark_value == CARD_CLEAR, !mark_all)); /* not necessary */
     assert(IMPLY(mark_all, mark_value == CARD_MARKED_OLD)); /* set *all* to OLD */
-    assert(IMPLY(realobj->stm_flags & GCFLAG_WB_EXECUTED,
-                 mark_value == CARD_CLEAR)); /* overflows are always CLEARed */
-
 
     struct stm_read_marker_s *cards = get_read_marker(pseg->pub.segment_base, (uintptr_t)obj);
     uintptr_t card_index = 1;

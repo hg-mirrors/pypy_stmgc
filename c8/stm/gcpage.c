@@ -499,6 +499,13 @@ static void clean_up_segment_lists(void)
                     assert(!(realobj->stm_flags & GCFLAG_WRITE_BARRIER));
 
                     realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
+
+                    OPT_ASSERT(!(realobj->stm_flags & GCFLAG_CARDS_SET));
+                    if (realobj->stm_flags & GCFLAG_CARDS_SET) {
+                        /* we called a normal WB on this object, so all cards
+                           need to be marked OLD */
+                        _reset_object_cards(pseg, item, CARD_MARKED_OLD, true); /* mark all */
+                    }
                 }));
             list_clear(lst);
         } else {
@@ -506,6 +513,21 @@ static void clean_up_segment_lists(void)
                we "didn't do a collection" at all. So nothing to do on
                modified_old_objs. */
         }
+
+        lst = pseg->old_objects_with_cards_set;
+        LIST_FOREACH_R(lst, object_t* /*item*/,
+            ({
+                struct object_s *realobj = (struct object_s *)
+                    REAL_ADDRESS(pseg->pub.segment_base, item);
+                OPT_ASSERT(realobj->stm_flags & GCFLAG_CARDS_SET);
+                OPT_ASSERT(realobj->stm_flags & GCFLAG_WRITE_BARRIER);
+
+                /* mark marked cards as old otherwise */
+                uint8_t mark_value = CARD_MARKED_OLD;
+                _reset_object_cards(pseg, item, mark_value, false);
+            }));
+        list_clear(lst);
+
 
         /* remove from new_objects all objects that die */
         lst = pseg->new_objects;
