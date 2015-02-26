@@ -445,6 +445,7 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 }
 
 
+static void reset_cards_from_modified_objects(void);
 static void reset_wb_executed_flags(void);
 static void readd_wb_executed_flags(void);
 static void check_all_write_barrier_flags(char *segbase, struct list_s *list);
@@ -527,6 +528,8 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
         STM_PSEGMENT->transaction_state = TS_NONE;
         STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
 
+        reset_cards_from_modified_objects();
+
         list_clear(STM_PSEGMENT->modified_old_objects);
         STM_PSEGMENT->last_commit_log_entry = new;
         release_modification_lock(STM_SEGMENT->segment_num);
@@ -553,6 +556,8 @@ static void _validate_and_add_to_commit_log(void)
         check_all_write_barrier_flags(STM_SEGMENT->segment_base,
                                       STM_PSEGMENT->modified_old_objects);
 
+        reset_cards_from_modified_objects();
+
         /* compare with _validate_and_attach: */
         STM_PSEGMENT->transaction_state = TS_NONE;
         STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
@@ -576,10 +581,13 @@ void stm_validate()
 }
 
 
-static bool obj_should_use_cards(object_t *obj)
+static bool obj_should_use_cards(char *seg_base, object_t *obj)
 {
+    if (is_small_uniform(obj))
+        return false;
+
     struct object_s *realobj = (struct object_s *)
-        REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+        REAL_ADDRESS(seg_base, obj);
     long supports = stmcb_obj_supports_cards(realobj);
     if (!supports)
         return false;
@@ -750,7 +758,7 @@ char _stm_write_slowpath_card_extra(object_t *obj)
 {
     /* the PyPy JIT calls this function directly if it finds that an
        array doesn't have the GCFLAG_CARDS_SET */
-    bool mark_card = obj_should_use_cards(obj);
+    bool mark_card = obj_should_use_cards(STM_SEGMENT->segment_base, obj);
     write_slowpath_common(obj, mark_card);
     return mark_card;
 }
@@ -833,6 +841,20 @@ static void reset_transaction_read_version(void)
         memset(readmarkers, 0, NB_READMARKER_PAGES * 4096UL);
     }
     STM_SEGMENT->transaction_read_version = 1;
+}
+
+static void reset_cards_from_modified_objects(void)
+{
+    struct list_s *list = STM_PSEGMENT->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+
+    for (; undo < end; undo++) {
+        object_t *obj = undo->object;
+        if (obj_should_use_cards(STM_SEGMENT->segment_base, obj))
+            _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
+                                obj, CARD_CLEAR, false);
+    }
 }
 
 static void reset_wb_executed_flags(void)
@@ -984,9 +1006,9 @@ static void push_new_objects_to_other_segments(void)
     LIST_FOREACH_R(STM_PSEGMENT->new_objects, object_t *,
         ({
             assert(item->stm_flags & GCFLAG_WB_EXECUTED);
-            _cards_cleared_in_object(pseg, item); /* check for C8 */
-
             item->stm_flags &= ~GCFLAG_WB_EXECUTED;
+            if (obj_should_use_cards(pseg->pub.segment_base, item))
+                _reset_object_cards(pseg, item, CARD_CLEAR, false);
             synchronize_object_enqueue(item, true);
         }));
     synchronize_objects_flush();
@@ -1019,7 +1041,6 @@ void stm_commit_transaction(void)
     /* push before validate. otherwise they are reachable too early */
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
-
 
     /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
@@ -1081,7 +1102,7 @@ static void reset_modified_from_backup_copies(int segment_num)
                undo->backup,
                SLICE_SIZE(undo->slice));
 
-        if (obj_should_use_cards(obj))
+        if (obj_should_use_cards(pseg->pub.segment_base, obj))
             _reset_object_cards(pseg, obj, CARD_CLEAR, false);
         /* XXXXXXXXX: only reset cards of slice!! ^^^^^^^ */
 
@@ -1124,14 +1145,8 @@ static void abort_data_structures_from_segment_num(int segment_num)
     /* some new objects may have cards when aborting, clear them too */
     LIST_FOREACH_R(pseg->new_objects, object_t * /*item*/,
         {
-            struct object_s *realobj = (struct object_s *)
-                REAL_ADDRESS(pseg->pub.segment_base, item);
-
-            if (realobj->stm_flags & GCFLAG_CARDS_SET) {
-                /* CARDS_SET is enough since other HAS_CARDS objs
-                   are already cleared */
+            if (obj_should_use_cards(pseg->pub.segment_base, item))
                 _reset_object_cards(pseg, item, CARD_CLEAR, false);
-            }
         });
 
     acquire_modification_lock(segment_num);
@@ -1318,7 +1333,7 @@ static void _page_wise_synchronize_object_now(object_t *obj, ssize_t obj_size)
 static void _card_wise_synchronize_object_now(object_t *obj, ssize_t obj_size)
 {
     assert(obj_size >= 32);
-    assert(obj_should_use_cards(obj));
+    assert(obj_should_use_cards(STM_SEGMENT->segment_base, obj));
     assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
 
     uintptr_t offset_itemsize[2];
@@ -1434,7 +1449,7 @@ static void synchronize_object_enqueue(object_t *obj, bool ignore_cards)
         OPT_ASSERT(obj_size <= GC_LAST_SMALL_SIZE);
         _synchronize_fragment((stm_char *)obj, obj_size);
         return;
-    } else if (ignore_cards || !obj_should_use_cards(obj)) {
+    } else if (ignore_cards || !obj_should_use_cards(STM_SEGMENT->segment_base, obj)) {
         /* else, a more complicated case for large objects, to copy
            around data only within the needed pages */
         _page_wise_synchronize_object_now(obj, obj_size);

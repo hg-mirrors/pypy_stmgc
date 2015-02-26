@@ -94,6 +94,7 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
 #include <stdbool.h>
+uint8_t _stm_get_card_value(object_t *obj, long idx);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 bool _stm_was_written_card(object_t *obj);

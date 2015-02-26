@@ -111,6 +111,15 @@ object_t *_stm_enum_old_objects_with_cards_set(long index)
 }
 
 
+uint8_t _stm_get_card_value(object_t *obj, long idx)
+{
+    struct stm_read_marker_s *cards = get_read_marker(STM_SEGMENT->segment_base,
+                                                      (uintptr_t)obj);
+    return cards[get_index_to_card_index(idx)].rm;
+}
+
+
+
 static struct stm_commit_log_entry_s *_last_cl_entry;
 static long _last_cl_entry_index;
 void _stm_start_enum_last_cl_entry()
