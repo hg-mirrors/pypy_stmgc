@@ -73,7 +73,7 @@ typedef struct stm_thread_local_s {
 } stm_thread_local_t;
 
 #define _STM_GCFLAG_WRITE_BARRIER      0x01
-#define _STM_GCFLAG_CARDS_SET          0x08
+#define _STM_GCFLAG_CARDS_SET          0x10
 #define _STM_FAST_ALLOC           (66*1024)
 #define _STM_NSE_SIGNAL_ABORT             1
 #define _STM_NSE_SIGNAL_MAX               2

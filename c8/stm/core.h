@@ -38,8 +38,10 @@ enum /* stm_flags */ {
     GCFLAG_WRITE_BARRIER = _STM_GCFLAG_WRITE_BARRIER,
     GCFLAG_HAS_SHADOW = 0x02,
     GCFLAG_WB_EXECUTED = 0x04,
-    GCFLAG_VISITED = 0x08,
-    GCFLAG_FINALIZATION_ORDERING = 0x10,
+    GCFLAG_HAS_CARDS = 0x08,
+    GCFLAG_CARDS_SET = _STM_GCFLAG_CARDS_SET,
+    GCFLAG_VISITED = 0x20,
+    GCFLAG_FINALIZATION_ORDERING = 0x40,
 };
 
 
@@ -72,6 +74,7 @@ struct stm_priv_segment_info_s {
     struct list_s *modified_old_objects;
 
     struct list_s *objects_pointing_to_nursery;
+    struct list_s *old_objects_with_cards_set;
     struct tree_s *young_outside_nursery;
     struct tree_s *nursery_objects_shadows;
 

@@ -576,6 +576,11 @@ void stm_validate()
 }
 
 
+void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
+{
+    stm_write(obj);
+}
+
 void _stm_write_slowpath(object_t *obj)
 {
     assert(_seems_to_be_running_transaction());
