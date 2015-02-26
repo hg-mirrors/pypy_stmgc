@@ -10,6 +10,7 @@ typedef ... object_t;
 #define STM_NB_SEGMENTS ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
 #define _STM_FAST_ALLOC ...
+#define _STM_CARD_SIZE ...
 
 typedef struct {
 ...;
@@ -332,6 +333,11 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     }
 }
 
+long stmcb_obj_supports_cards(struct object_s *obj)
+{
+    return 1;
+}
+
 void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
                        uintptr_t start, uintptr_t stop)
 {
@@ -350,6 +356,19 @@ void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
     }
 }
 
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2])
+{
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 421420) {
+        offset_itemsize[0] = SIZEOF_MYOBJ;
+        offset_itemsize[1] = 1;
+    }
+    else {
+        offset_itemsize[0] = sizeof(struct myobj_s);
+        offset_itemsize[1] = sizeof(object_t *);
+    }
+}
 
 long current_segment_num(void)
 {
@@ -376,6 +395,7 @@ assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
 FAST_ALLOC = lib._STM_FAST_ALLOC
+CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
 
 class Conflict(Exception):
     pass
