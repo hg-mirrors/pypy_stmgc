@@ -518,8 +518,9 @@ static void clean_up_segment_lists(void)
 
                 /* mark marked cards as old if it survives */
                 uint8_t mark_value = mark_visited_test(item) ?
-                    CARD_MARKED_OLD : CARD_CLEAR;
-                _reset_object_cards(pseg, item, mark_value, false);
+                    pseg->pub.transaction_read_version : CARD_CLEAR;
+                _reset_object_cards(pseg, item, mark_value, false,
+                                    mark_value == CARD_CLEAR);
             }));
         list_clear(lst);
 
@@ -531,7 +532,7 @@ static void clean_up_segment_lists(void)
             object_t *obj = (object_t *)list_item(lst, n);
             if (!mark_visited_test(obj)) {
                 if (obj_should_use_cards(pseg->pub.segment_base, obj))
-                    _reset_object_cards(pseg, obj, CARD_CLEAR, false);
+                    _reset_object_cards(pseg, obj, CARD_CLEAR, false, true);
                 list_set_item(lst, n, list_pop_item(lst));
             }
         }

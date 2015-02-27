@@ -50,7 +50,7 @@ enum /* stm_flags */ {
 enum /* card values in read markers */ {
     CARD_CLEAR = 0,                 /* card not used at all */
     CARD_MARKED = _STM_CARD_MARKED, /* card marked for tracing in the next gc */
-    CARD_MARKED_OLD = _STM_CARD_MARKED+1,
+    /* CARD_MARKED_OLD = STM_PSEGMENT->transaction_read_version, */
     /* card was marked before, but cleared in a GC */
 };
 
@@ -246,7 +246,7 @@ static void abort_with_mutex(void) __attribute__((noreturn));
 static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
-static void synchronize_object_enqueue(object_t *obj, bool ignore_cards);
+static void synchronize_object_enqueue(object_t *obj);
 static void synchronize_objects_flush(void);
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context);

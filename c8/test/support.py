@@ -48,6 +48,7 @@ object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 /*void stm_write_card(); use _checked_stm_write_card() instead */
 
 uint8_t _stm_get_card_value(object_t *obj, long idx);
+uint8_t _stm_get_transaction_read_version();
 
 void stm_setup(void);
 void stm_teardown(void);
@@ -401,7 +402,7 @@ FAST_ALLOC = lib._STM_FAST_ALLOC
 CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
 CARD_CLEAR = 0
 CARD_MARKED = lib._STM_CARD_MARKED
-CARD_MARKED_OLD = CARD_MARKED + 1
+CARD_MARKED_OLD = lib._stm_get_transaction_read_version
 
 
 class Conflict(Exception):
