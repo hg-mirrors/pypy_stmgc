@@ -89,6 +89,18 @@ static void fork_abort_thread(long i)
     assert(STM_SEGMENT->segment_num == i);
 
     s_mutex_lock();
+    if (pr->transaction_state == TS_NONE) {
+        /* just committed, TS_NONE but still has running_thread */
+
+        /* do _finish_transaction() */
+        STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
+        list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
+        list_clear(STM_PSEGMENT->large_overflow_objects);
+
+        s_mutex_unlock();
+        return;
+    }
+
 #ifndef NDEBUG
     pr->running_pthread = pthread_self();
 #endif
