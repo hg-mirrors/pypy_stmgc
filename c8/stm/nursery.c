@@ -179,7 +179,7 @@ static void _verify_cards_cleared_in_all_lists(struct stm_priv_segment_info_s *p
         _cards_cleared_in_object(pseg, undo->object);
     }
     LIST_FOREACH_R(
-        pseg->new_objects, object_t * /*item*/,
+        pseg->large_overflow_objects, object_t * /*item*/,
         _cards_cleared_in_object(pseg, item));
     LIST_FOREACH_R(
         pseg->objects_pointing_to_nursery, object_t * /*item*/,
