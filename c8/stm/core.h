@@ -43,6 +43,14 @@ enum /* stm_flags */ {
     GCFLAG_CARDS_SET = _STM_GCFLAG_CARDS_SET,
     GCFLAG_VISITED = 0x10,
     GCFLAG_FINALIZATION_ORDERING = 0x20,
+    /* All remaining bits of the 32-bit 'stm_flags' field are taken by
+       the "overflow number".  This is a number that identifies the
+       "overflow objects" from the current transaction among all old
+       objects.  More precisely, overflow objects are objects from the
+       current transaction that have been flushed out of the nursery,
+       which occurs if the same transaction allocates too many objects.
+    */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x40   /* must be last */
 };
 
 #define SYNC_QUEUE_SIZE    31
@@ -98,8 +106,9 @@ struct stm_priv_segment_info_s {
     /* list of objects created in the current transaction and
        that survived at least one minor collection. They need
        to be synchronized to other segments on commit, but they
-       do not need to be in the commit log entry. */
-    struct list_s *new_objects;
+       do not need to be in the commit log entry.
+       XXX: for now it also contains small overflow objs */
+    struct list_s *large_overflow_objects;
 
     uint8_t privatization_lock;  // XXX KILL
 
@@ -110,6 +119,14 @@ struct stm_priv_segment_info_s {
     bool minor_collect_will_commit_now;
 
     struct tree_s *callbacks_on_commit_and_abort[2];
+
+    /* This is the number stored in the overflowed objects (a multiple of
+       GCFLAG_OVERFLOW_NUMBER_bit0).  It is incremented when the
+       transaction is done, but only if we actually overflowed any
+       object; otherwise, no object has got this number. */
+    uint32_t overflow_number;
+    bool overflow_number_has_been_used;
+
 
     struct stm_commit_log_entry_s *last_commit_log_entry;
 
@@ -202,6 +219,9 @@ static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
+
+#define IS_OVERFLOW_OBJ(pseg, obj) (((obj)->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) \
+                                    == (pseg)->overflow_number)
 
 static inline uintptr_t get_index_to_card_index(uintptr_t index) {
     return (index / CARD_SIZE) + 1;

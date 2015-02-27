@@ -636,7 +636,8 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
     assert(!_is_in_nursery(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
-    if (obj->stm_flags & GCFLAG_WB_EXECUTED) {
+    if (obj->stm_flags & GCFLAG_WB_EXECUTED
+|| isoverflow) {
         /* already executed WB once in this transaction. do GC
            part again: */
         write_gc_only_path(obj, mark_card);
@@ -922,7 +923,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
-    assert(list_is_empty(STM_PSEGMENT->new_objects));
+    assert(list_is_empty(STM_PSEGMENT->large_overflow_objects));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
@@ -986,7 +987,7 @@ static void _finish_transaction()
     _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
     list_clear(STM_PSEGMENT->old_objects_with_cards_set);
-    list_clear(STM_PSEGMENT->new_objects);
+    list_clear(STM_PSEGMENT->large_overflow_objects);
 
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
@@ -1006,15 +1007,17 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
 #endif
 }
 
-static void push_new_objects_to_other_segments(void)
+static void push_large_overflow_objects_to_other_segments(void)
 {
+    if (list_is_empty(STM_PSEGMENT->large_overflow_objects))
+        return;
+
+    /* XXX: also pushes small ones right now */
     struct stm_priv_segment_info_s *pseg = get_priv_segment(STM_SEGMENT->segment_num);
     acquire_privatization_lock(STM_SEGMENT->segment_num);
-    LIST_FOREACH_R(STM_PSEGMENT->new_objects, object_t *,
+    LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
         ({
-            assert(item->stm_flags & GCFLAG_WB_EXECUTED);
-            item->stm_flags &= ~GCFLAG_WB_EXECUTED;
-            if (obj_should_use_cards(pseg->pub.segment_base, item))
+            assert(!(item->stm_flags & GCFLAG_WB_EXECUTED));            if (obj_should_use_cards(pseg->pub.segment_base, item))
                 _reset_object_cards(pseg, item, CARD_CLEAR, false);
             synchronize_object_enqueue(item, true);
         }));
@@ -1029,7 +1032,7 @@ static void push_new_objects_to_other_segments(void)
        in handle_segfault_in_page() that also copies
        unknown-to-the-segment/uncommitted things.
     */
-    list_clear(STM_PSEGMENT->new_objects);
+    list_clear(STM_PSEGMENT->large_overflow_objects);
 }
 
 
@@ -1044,18 +1047,31 @@ void stm_commit_transaction(void)
     dprintf(("> stm_commit_transaction()\n"));
     minor_collection(1);
 
-    push_new_objects_to_other_segments();
+    push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
 
+    stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+
     /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
+    commit_finalizers();
 
+    /* update 'overflow_number' if needed */
+    if (STM_PSEGMENT->overflow_number_has_been_used) {
+        highest_overflow_number += GCFLAG_OVERFLOW_NUMBER_bit0;
+        assert(highest_overflow_number !=        /* XXX else, overflow! */
+               (uint32_t)-GCFLAG_OVERFLOW_NUMBER_bit0);
+        STM_PSEGMENT->overflow_number = highest_overflow_number;
+        STM_PSEGMENT->overflow_number_has_been_used = false;
+    }
+
+    invoke_and_clear_user_callbacks(0);   /* for commit */
+
+    /* >>>>> there may be a FORK() happening in the safepoint below <<<<<*/
     enter_safe_point_if_requested();
     assert(STM_SEGMENT->nursery_end == NURSERY_END);
-
-    stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
 
     /* if a major collection is required, do it here */
     if (is_major_collection_requested()) {
@@ -1067,10 +1083,6 @@ void stm_commit_transaction(void)
     }
 
     _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
-
-    commit_finalizers();
-
-    invoke_and_clear_user_callbacks(0);   /* for commit */
 
     if (globally_unique_transaction && was_inev) {
         committed_globally_unique_transaction();
@@ -1184,7 +1196,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     list_clear(pseg->objects_pointing_to_nursery);
     list_clear(pseg->old_objects_with_cards_set);
-    list_clear(pseg->new_objects);
+    list_clear(pseg->large_overflow_objects);
     list_clear(pseg->young_weakrefs);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")

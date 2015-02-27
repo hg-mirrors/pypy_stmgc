@@ -38,7 +38,7 @@ static inline bool _is_young(object_t *obj)
 }
 
 static inline bool _is_from_same_transaction(object_t *obj) {
-    return _is_young(obj) || (obj->stm_flags & GCFLAG_WB_EXECUTED);
+    return _is_young(obj) || IS_OVERFLOW_OBJ(STM_PSEGMENT, obj);
 }
 
 long stm_can_move(object_t *obj)
@@ -132,12 +132,12 @@ static void minor_trace_if_young(object_t **pobj)
         nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
     }
 
-    /* if this is not during commit, we will add them to the new_objects
-       list and push them to other segments on commit. Thus we can add
-       the WB_EXECUTED flag so that they don't end up in modified_old_objects */
+    /* if this is not during commit, we make them overflow objects
+       and push them to other segments on commit. */
     assert(!(nobj->stm_flags & GCFLAG_WB_EXECUTED));
+    assert((nobj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) == 0);
     if (!STM_PSEGMENT->minor_collect_will_commit_now) {
-        nobj->stm_flags |= GCFLAG_WB_EXECUTED;
+        nobj->stm_flags |= STM_PSEGMENT->overflow_number;
     }
 
     /* Must trace the object later */
@@ -339,16 +339,17 @@ static void collect_oldrefs_to_nursery(void)
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
 
         if (obj_sync_now & FLAG_SYNC_LARGE) {
+            /* XXX: SYNC_LARGE even set for small objs right now */
             /* this is a newly allocated obj in this transaction. We must
                either synchronize the object to other segments now, or
-               add the object to new_objects list */
+               add the object to large_overflow_objects list */
             struct stm_priv_segment_info_s *pseg = get_priv_segment(STM_SEGMENT->segment_num);
             if (pseg->minor_collect_will_commit_now) {
                 acquire_privatization_lock(pseg->pub.segment_num);
                 synchronize_object_enqueue(obj);
                 release_privatization_lock(pseg->pub.segment_num);
             } else {
-                LIST_APPEND(pseg->new_objects, obj);
+                LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
             }
             _cards_cleared_in_object(pseg, obj);
         }
@@ -357,7 +358,7 @@ static void collect_oldrefs_to_nursery(void)
         lst = STM_PSEGMENT->objects_pointing_to_nursery;
     }
 
-    /* flush all new objects to other segments now */
+    /* flush all overflow objects to other segments now */
     if (STM_PSEGMENT->minor_collect_will_commit_now) {
         acquire_privatization_lock(STM_SEGMENT->segment_num);
         synchronize_objects_flush();
@@ -475,6 +476,11 @@ static void _do_minor_collection(bool commit)
     dprintf(("minor_collection commit=%d\n", (int)commit));
 
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
+    if (!commit) {
+        /* 'STM_PSEGMENT->overflow_number' is used now by this collection,
+           in the sense that it's copied to the overflow objects */
+        STM_PSEGMENT->overflow_number_has_been_used = true;
+    }
 
     collect_cardrefs_to_nursery();
 
