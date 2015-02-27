@@ -142,10 +142,11 @@ static void minor_trace_if_young(object_t **pobj)
 
     /* Must trace the object later */
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
-    _cards_cleared_in_object(get_priv_segment(STM_SEGMENT->segment_num), nobj);
+    _cards_cleared_in_object(get_priv_segment(STM_SEGMENT->segment_num), nobj, true);
 }
 
-static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, object_t *obj)
+static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, object_t *obj,
+                                     bool strict) /* strict = MARKED_OLD not allowed */
 {
 #ifndef NDEBUG
     struct object_s *realobj = (struct object_s *)REAL_ADDRESS(pseg->pub.segment_base, obj);
@@ -154,17 +155,25 @@ static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, objec
     if (size < _STM_MIN_CARD_OBJ_SIZE)
         return;                 /* too small for cards */
 
+    assert(!(realobj->stm_flags & GCFLAG_CARDS_SET));
+
+    if (!stmcb_obj_supports_cards(realobj))
+        return;
+
+    uintptr_t offset_itemsize[2] = {0, 0};
+    stmcb_get_card_base_itemsize(realobj, offset_itemsize);
     struct stm_read_marker_s *cards = get_read_marker(pseg->pub.segment_base, (uintptr_t)obj);
     uintptr_t card_index = 1;
-    uintptr_t last_card_index = get_index_to_card_index(size - 1); /* max valid index */
+    size_t real_idx_count = (size - offset_itemsize[0]) / offset_itemsize[1];
+    uintptr_t last_card_index = get_index_to_card_index(real_idx_count - 1); /* max valid index */
 
     while (card_index <= last_card_index) {
         assert(cards[card_index].rm == CARD_CLEAR
-               || cards[card_index].rm < pseg->pub.transaction_read_version);
+               || (cards[card_index].rm != CARD_MARKED
+                   && cards[card_index].rm < pseg->pub.transaction_read_version)
+               || (!strict && cards[card_index].rm != CARD_MARKED));
         card_index++;
     }
-
-    assert(!(realobj->stm_flags & GCFLAG_CARDS_SET));
 #endif
 }
 
@@ -176,17 +185,17 @@ static void _verify_cards_cleared_in_all_lists(struct stm_priv_segment_info_s *p
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
-        _cards_cleared_in_object(pseg, undo->object);
+        _cards_cleared_in_object(pseg, undo->object, false);
     }
     LIST_FOREACH_R(
         pseg->large_overflow_objects, object_t * /*item*/,
-        _cards_cleared_in_object(pseg, item));
+        _cards_cleared_in_object(pseg, item, false));
     LIST_FOREACH_R(
         pseg->objects_pointing_to_nursery, object_t * /*item*/,
-        _cards_cleared_in_object(pseg, item));
+        _cards_cleared_in_object(pseg, item, false));
     LIST_FOREACH_R(
         pseg->old_objects_with_cards_set, object_t * /*item*/,
-        _cards_cleared_in_object(pseg, item));
+        _cards_cleared_in_object(pseg, item, false));
 #endif
 }
 
@@ -198,6 +207,8 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
 #pragma push_macro("STM_SEGMENT")
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
+    dprintf(("_reset_object_cards(%p, mark=%d, mark_all=%d, really_clear=%d)\n",
+             obj, mark_value, mark_all, really_clear));
     struct object_s *realobj = (struct object_s *)REAL_ADDRESS(pseg->pub.segment_base, obj);
     size_t size = stmcb_size_rounded_up(realobj);
     OPT_ASSERT(size >= _STM_MIN_CARD_OBJ_SIZE);
@@ -351,7 +362,7 @@ static void collect_oldrefs_to_nursery(void)
             } else {
                 LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
             }
-            _cards_cleared_in_object(pseg, obj);
+            _cards_cleared_in_object(pseg, obj, false);
         }
 
         /* the list could have moved while appending */
