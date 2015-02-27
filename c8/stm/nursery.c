@@ -132,9 +132,8 @@ static void minor_trace_if_young(object_t **pobj)
         nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
     }
 
-    /* if this is not during commit, we will add them to the new_objects
-       list and push them to other segments on commit. Thus we can add
-       the WB_EXECUTED flag so that they don't end up in modified_old_objects */
+    /* if this is not during commit, we make them overflow objects
+       and push them to other segments on commit. */
     assert(!(nobj->stm_flags & GCFLAG_WB_EXECUTED));
     if (!STM_PSEGMENT->minor_collect_will_commit_now) {
         nobj->stm_flags |= GCFLAG_WB_EXECUTED;
@@ -203,15 +202,16 @@ static void collect_oldrefs_to_nursery(void)
         _collect_now(obj);
 
         if (obj_sync_now & FLAG_SYNC_LARGE) {
+            /* XXX: SYNC_LARGE even set for small objs right now */
             /* this is a newly allocated obj in this transaction. We must
                either synchronize the object to other segments now, or
-               add the object to new_objects list */
+               add the object to large_overflow_objects list */
             if (STM_PSEGMENT->minor_collect_will_commit_now) {
                 acquire_privatization_lock(STM_SEGMENT->segment_num);
                 synchronize_object_enqueue(obj);
                 release_privatization_lock(STM_SEGMENT->segment_num);
             } else {
-                LIST_APPEND(STM_PSEGMENT->new_objects, obj);
+                LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
             }
         }
 
@@ -219,7 +219,7 @@ static void collect_oldrefs_to_nursery(void)
         lst = STM_PSEGMENT->objects_pointing_to_nursery;
     }
 
-    /* flush all new objects to other segments now */
+    /* flush all overflow objects to other segments now */
     if (STM_PSEGMENT->minor_collect_will_commit_now) {
         acquire_privatization_lock(STM_SEGMENT->segment_num);
         synchronize_objects_flush();

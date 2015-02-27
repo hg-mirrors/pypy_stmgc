@@ -88,8 +88,9 @@ struct stm_priv_segment_info_s {
     /* list of objects created in the current transaction and
        that survived at least one minor collection. They need
        to be synchronized to other segments on commit, but they
-       do not need to be in the commit log entry. */
-    struct list_s *new_objects;
+       do not need to be in the commit log entry.
+       XXX: for now it also contains small overflow objs */
+    struct list_s *large_overflow_objects;
 
     uint8_t privatization_lock;  // XXX KILL
 
