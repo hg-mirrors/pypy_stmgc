@@ -600,12 +600,12 @@ static void make_bk_slices_for_range(
     dprintf(("make_bk_slices_for_range(%p, %lu, %lu)\n",
              obj, start - (stm_char*)obj, end - start));
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    size_t obj_size = stmcb_size_rounded_up((struct object_s*)realobj);
     uintptr_t first_page = ((uintptr_t)start) / 4096UL;
     uintptr_t end_page = ((uintptr_t)end) / 4096UL;
 
     uintptr_t page;
     uintptr_t slice_sz;
+    uintptr_t slice_off = start - (stm_char*)obj;
     uintptr_t in_page_offset = (uintptr_t)start % 4096UL;
     uintptr_t remaining_obj_sz = end - start;
     for (page = first_page; page <= end_page; page++) {
@@ -617,7 +617,6 @@ static void make_bk_slices_for_range(
             slice_sz = 4096UL - in_page_offset;
         }
 
-        size_t slice_off = obj_size - remaining_obj_sz;
         remaining_obj_sz -= slice_sz;
         in_page_offset = (in_page_offset + slice_sz) % 4096UL; /* mostly 0 */
 
@@ -633,7 +632,10 @@ static void make_bk_slices_for_range(
             (uintptr_t)obj,     /* obj */
             (uintptr_t)bk_slice,  /* bk_addr */
             NEW_SLICE(slice_off, slice_sz));
+        dprintf(("> append slice %p, off=%lu, sz=%lu\n", bk_slice, slice_off, slice_sz));
         release_modification_lock(STM_SEGMENT->segment_num);
+
+        slice_off += slice_sz;
     }
 
 }
@@ -775,6 +777,7 @@ static void make_bk_slices(object_t *obj,
         card_index++;
     }
 
+    obj->stm_flags &= ~GCFLAG_CARDS_SET;
     _cards_cleared_in_object(get_priv_segment(STM_SEGMENT->segment_num), obj);
 }
 
@@ -783,7 +786,7 @@ static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
 {
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
-    dprintf(("write_slowpath-fast(%p)\n", obj));
+    dprintf(("write_slowpath_overflow_obj(%p)\n", obj));
 
     if (!mark_card) {
         /* The basic case, with no card marking.  We append the object
@@ -833,10 +836,12 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
     DEBUG_EXPECT_SEGFAULT(false);
 
     if (mark_card) {
-        make_bk_slices(obj,
-                       true,        /* first_call */
-                       -2,          /* index: backup only fixed part */
-                       false);      /* do_missing_cards */
+        if (!(obj->stm_flags & GCFLAG_WB_EXECUTED)) {
+            make_bk_slices(obj,
+                           true,        /* first_call */
+                           -2,          /* index: backup only fixed part */
+                           false);      /* do_missing_cards */
+        }
 
         /* don't remove WRITE_BARRIER, but add CARDS_SET */
         obj->stm_flags |= (GCFLAG_CARDS_SET | GCFLAG_WB_EXECUTED);
@@ -936,8 +941,9 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
     struct stm_read_marker_s *cards = get_read_marker(STM_SEGMENT->segment_base,
                                                       (uintptr_t)obj);
     uintptr_t card_index = get_index_to_card_index(index);
-    if (!(cards[card_index].rm == CARD_MARKED
-          || cards[card_index].rm == STM_SEGMENT->transaction_read_version)) {
+    if (!IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)
+        && !(cards[card_index].rm == CARD_MARKED
+             || cards[card_index].rm == STM_SEGMENT->transaction_read_version)) {
         /* need to do the backup slice of the card */
         make_bk_slices(obj,
                        false,       /* first_call */

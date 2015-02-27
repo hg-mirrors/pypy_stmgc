@@ -239,7 +239,7 @@ class TestBasic(BaseTest):
         self.commit_transaction()
 
         self.start_transaction()
-        assert get_card_value(o, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000) not in (CARD_CLEAR, CARD_MARKED_OLD())
         stm_set_char(o, 'b', 1000, True)
         assert get_card_value(o, 1000) == CARD_MARKED
         assert o in old_objects_with_cards_set()
@@ -264,7 +264,7 @@ class TestBasic(BaseTest):
         self.commit_transaction()
 
         self.start_transaction()
-        assert get_card_value(o, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000) not in (CARD_CLEAR, CARD_MARKED_OLD())
         stm_set_char(o, 'b', 1000, True)
         assert get_card_value(o, 1000) == CARD_MARKED
         assert o in old_objects_with_cards_set()
@@ -310,8 +310,9 @@ class TestBasic(BaseTest):
         assert get_card_value(p, 1000) == CARD_MARKED
 
         self.push_root(o)
-        stm_minor_collect()
+        stm_major_collect()
         o = self.pop_root()
+        # p dies and gets cards CLEARed
 
         assert get_card_value(o, 1000) == CARD_MARKED_OLD()
         assert get_card_value(p, 1000) == CARD_CLEAR
