@@ -891,24 +891,10 @@ void stm_commit_transaction(void)
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
 
+    stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
 
     /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
-
-    enter_safe_point_if_requested();
-    assert(STM_SEGMENT->nursery_end == NURSERY_END);
-
-    stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
-
-    /* if a major collection is required, do it here */
-    if (is_major_collection_requested()) {
-        synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
-
-        if (is_major_collection_requested()) {   /* if *still* true */
-            major_collection_now_at_safe_point();
-        }
-    }
-
     commit_finalizers();
 
     /* update 'overflow_number' if needed */
@@ -921,6 +907,19 @@ void stm_commit_transaction(void)
     }
 
     invoke_and_clear_user_callbacks(0);   /* for commit */
+
+    /* >>>>> there may be a FORK() happening in the safepoint below <<<<<*/
+    enter_safe_point_if_requested();
+    assert(STM_SEGMENT->nursery_end == NURSERY_END);
+
+    /* if a major collection is required, do it here */
+    if (is_major_collection_requested()) {
+        synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
+
+        if (is_major_collection_requested()) {   /* if *still* true */
+            major_collection_now_at_safe_point();
+        }
+    }
 
     if (globally_unique_transaction && was_inev) {
         committed_globally_unique_transaction();
