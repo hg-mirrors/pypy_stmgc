@@ -40,6 +40,15 @@ enum /* stm_flags */ {
     GCFLAG_WB_EXECUTED = 0x04,
     GCFLAG_VISITED = 0x08,
     GCFLAG_FINALIZATION_ORDERING = 0x10,
+
+    /* All remaining bits of the 32-bit 'stm_flags' field are taken by
+       the "overflow number".  This is a number that identifies the
+       "overflow objects" from the current transaction among all old
+       objects.  More precisely, overflow objects are objects from the
+       current transaction that have been flushed out of the nursery,
+       which occurs if the same transaction allocates too many objects.
+    */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x20   /* must be last */
 };
 
 
@@ -101,6 +110,14 @@ struct stm_priv_segment_info_s {
     bool minor_collect_will_commit_now;
 
     struct tree_s *callbacks_on_commit_and_abort[2];
+
+    /* This is the number stored in the overflowed objects (a multiple of
+       GCFLAG_OVERFLOW_NUMBER_bit0).  It is incremented when the
+       transaction is done, but only if we actually overflowed any
+       object; otherwise, no object has got this number. */
+    uint32_t overflow_number;
+    bool overflow_number_has_been_used;
+
 
     struct stm_commit_log_entry_s *last_commit_log_entry;
 
@@ -193,6 +210,9 @@ static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 
 #define REAL_ADDRESS(segment_base, src)   ((segment_base) + (uintptr_t)(src))
+
+#define IS_OVERFLOW_OBJ(pseg, obj) (((obj)->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) \
+                                    == (pseg)->overflow_number)
 
 
 static inline char *get_segment_base(long segment_num) {

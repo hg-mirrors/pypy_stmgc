@@ -84,7 +84,7 @@ static void fork_abort_thread(long i)
     stm_thread_local_t *tl = pr->pub.running_thread;
     dprintf(("forksupport_child: abort in seg%ld\n", i));
     assert(tl->associated_segment_num == i);
-    assert(pr->transaction_state == TS_REGULAR);
+    assert(pr->transaction_state != TS_INEVITABLE);
     set_gs_register(get_segment_base(i));
     assert(STM_SEGMENT->segment_num == i);
 

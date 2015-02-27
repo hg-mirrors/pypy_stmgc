@@ -473,3 +473,27 @@ class TestGCPage(BaseTest):
         stm_major_collect()
         assert stm_get_char(s) == '\0'
         self.commit_transaction()
+
+
+    def test_overflow_on_ss_in_major_gc(self):
+        self.start_transaction()
+        o = stm_allocate_refs(100)
+        p = stm_allocate(16)
+        stm_set_ref(o, 0, p)
+        self.push_root(o)
+        stm_minor_collect()
+        o = self.pop_root()
+        p = stm_get_ref(o, 0)
+        assert stm_get_char(p) == '\0'
+        self.push_root(o)
+
+        self.switch(1)
+
+        self.start_transaction()
+        stm_major_collect()
+        self.commit_transaction()
+
+        self.switch(0)
+        # p not freed
+        assert stm_get_char(p) == '\0'
+        self.commit_transaction()

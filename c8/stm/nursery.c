@@ -38,7 +38,7 @@ static inline bool _is_young(object_t *obj)
 }
 
 static inline bool _is_from_same_transaction(object_t *obj) {
-    return _is_young(obj) || (obj->stm_flags & GCFLAG_WB_EXECUTED);
+    return _is_young(obj) || IS_OVERFLOW_OBJ(STM_PSEGMENT, obj);
 }
 
 long stm_can_move(object_t *obj)
@@ -135,8 +135,9 @@ static void minor_trace_if_young(object_t **pobj)
     /* if this is not during commit, we make them overflow objects
        and push them to other segments on commit. */
     assert(!(nobj->stm_flags & GCFLAG_WB_EXECUTED));
+    assert((nobj->stm_flags & -GCFLAG_OVERFLOW_NUMBER_bit0) == 0);
     if (!STM_PSEGMENT->minor_collect_will_commit_now) {
-        nobj->stm_flags |= GCFLAG_WB_EXECUTED;
+        nobj->stm_flags |= STM_PSEGMENT->overflow_number;
     }
 
     /* Must trace the object later */
@@ -313,6 +314,11 @@ static void _do_minor_collection(bool commit)
     dprintf(("minor_collection commit=%d\n", (int)commit));
 
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
+    if (!commit) {
+        /* 'STM_PSEGMENT->overflow_number' is used now by this collection,
+           in the sense that it's copied to the overflow objects */
+        STM_PSEGMENT->overflow_number_has_been_used = true;
+    }
 
     collect_roots_in_nursery();
 

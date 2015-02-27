@@ -200,13 +200,17 @@ static inline bool mark_visited_test_and_clear(object_t *obj)
 
 /************************************************************/
 
-
-static bool is_new_object(object_t *obj)
+static bool is_overflow_obj_safe(struct stm_priv_segment_info_s *pseg, object_t *obj)
 {
-    struct object_s *realobj = (struct object_s*)REAL_ADDRESS(stm_object_pages, obj); /* seg0 */
-    return realobj->stm_flags & GCFLAG_WB_EXECUTED;
-}
+    /* this function first also checks if the page is accessible in order
+       to not cause segfaults during major gc (it does exactly the same
+       as IS_OVERFLOW_OBJ otherwise) */
+    if (get_page_status_in(pseg->pub.segment_num, (uintptr_t)obj / 4096UL) == PAGE_NO_ACCESS)
+        return false;
 
+    struct object_s *realobj = (struct object_s*)REAL_ADDRESS(pseg->pub.segment_base, obj);
+    return IS_OVERFLOW_OBJ(pseg, realobj);
+}
 
 static inline void mark_record_trace(object_t **pobj)
 {
@@ -230,7 +234,10 @@ static inline void mark_record_trace(object_t **pobj)
 }
 
 
-static void mark_and_trace(object_t *obj, char *segment_base)
+static void mark_and_trace(
+    object_t *obj,
+    char *segment_base, /* to trace obj in */
+    struct stm_priv_segment_info_s *pseg) /* to trace children in */
 {
     /* mark the obj and trace all reachable objs from it */
 
@@ -243,35 +250,39 @@ static void mark_and_trace(object_t *obj, char *segment_base)
 
     /* trace all references found in sharing seg0 (should always be
        up-to-date and not cause segfaults, except for overflow objs) */
+    segment_base = pseg->pub.segment_base;
     while (!list_is_empty(marked_objects_to_trace)) {
         obj = (object_t *)list_pop_item(marked_objects_to_trace);
 
-        char *base = is_new_object(obj) ? segment_base : stm_object_pages;
+        char *base = is_overflow_obj_safe(pseg, obj) ? segment_base : stm_object_pages;
         realobj = (struct object_s *)REAL_ADDRESS(base, obj);
         stmcb_trace(realobj, &mark_record_trace);
     }
 }
 
-static inline void mark_visit_object(object_t *obj, char *segment_base)
+static inline void mark_visit_object(
+    object_t *obj,
+    char *segment_base, /* to trace ojb in */
+    struct stm_priv_segment_info_s *pseg) /* to trace children in */
 {
     /* if already visited, don't trace */
     if (obj == NULL || mark_visited_test_and_set(obj))
         return;
-    mark_and_trace(obj, segment_base);
+    mark_and_trace(obj, segment_base, pseg);
 }
 
 
-static void mark_visit_possibly_new_object(char *segment_base, object_t *obj)
+static void mark_visit_possibly_new_object(object_t *obj, struct stm_priv_segment_info_s *pseg)
 {
     /* if newly allocated object, we trace in segment_base, otherwise in
        the sharing seg0 */
     if (obj == NULL)
         return;
 
-    if (is_new_object(obj)) {
-        mark_visit_object(obj, segment_base);
+    if (is_overflow_obj_safe(pseg, obj)) {
+        mark_visit_object(obj, pseg->pub.segment_base, pseg);
     } else {
-        mark_visit_object(obj, stm_object_pages);
+        mark_visit_object(obj, stm_object_pages, pseg);
     }
 }
 
@@ -282,8 +293,10 @@ static void *mark_visit_objects_from_ss(void *_, const void *slice, size_t size)
     end = (const struct stm_shadowentry_s *)(slice + size);
     for (; p < end; p++)
         if ((((uintptr_t)p->ss) & 3) == 0) {
-            assert(!is_new_object(p->ss));
-            mark_visit_object(p->ss, stm_object_pages); // seg0
+            mark_visit_object(p->ss, stm_object_pages, // seg0
+                              /* there should be no overflow objs not already
+                                 visited, so any pseg is fine really: */
+                              get_priv_segment(STM_SEGMENT->segment_num));
         }
     return NULL;
 }
@@ -350,7 +363,7 @@ static void mark_visit_from_modified_objects(void)
                   and thus make all pages accessible. */
                assert_obj_accessible_in(i, item);
 
-               assert(!is_new_object(item)); /* should never be in that list */
+               assert(!is_overflow_obj_safe(get_priv_segment(i), item)); /* should never be in that list */
 
                if (!mark_visited_test_and_set(item)) {
                    /* trace shared, committed version: only do this if we didn't
@@ -358,9 +371,9 @@ static void mark_visit_from_modified_objects(void)
                       objs before mark_visit_from_modified_objects AND if we
                       do mark_and_trace on an obj that is modified in >1 segment,
                       the tracing always happens in seg0 (see mark_and_trace). */
-                   mark_and_trace(item, stm_object_pages);
+                   mark_and_trace(item, stm_object_pages, get_priv_segment(i));
                }
-               mark_and_trace(item, base);   /* private, modified version */
+               mark_and_trace(item, base, get_priv_segment(i));   /* private, modified version */
            }));
 
         list_clear(uniques);
@@ -372,7 +385,11 @@ static void mark_visit_from_roots(void)
 {
     if (testing_prebuilt_objs != NULL) {
         LIST_FOREACH_R(testing_prebuilt_objs, object_t * /*item*/,
-                       mark_visit_object(item, stm_object_pages)); // seg0
+                   mark_visit_object(item, stm_object_pages, // seg0
+                                     /* any pseg is fine, as we already traced modified
+                                        objs and thus covered all overflow objs reachable
+                                        from here */
+                                     get_priv_segment(STM_SEGMENT->segment_num)));
     }
 
     stm_thread_local_t *tl = stm_all_thread_locals;
@@ -392,17 +409,17 @@ static void mark_visit_from_roots(void)
            If 'tl' is currently running, its 'last_associated_segment_num'
            field is the segment number that contains the correct
            version of its overflowed objects. */
-        char *segment_base = get_segment_base(tl->last_associated_segment_num);
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(tl->last_associated_segment_num);
 
         struct stm_shadowentry_s *current = tl->shadowstack;
         struct stm_shadowentry_s *base = tl->shadowstack_base;
         while (current-- != base) {
             if ((((uintptr_t)current->ss) & 3) == 0) {
-                mark_visit_possibly_new_object(segment_base, current->ss);
+                mark_visit_possibly_new_object(current->ss, pseg);
             }
         }
 
-        mark_visit_possibly_new_object(segment_base, tl->thread_local_obj);
+        mark_visit_possibly_new_object(tl->thread_local_obj, pseg);
 
         tl = tl->next;
     } while (tl != stm_all_thread_locals);
@@ -413,57 +430,14 @@ static void mark_visit_from_roots(void)
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (get_priv_segment(i)->transaction_state != TS_NONE) {
             mark_visit_possibly_new_object(
-                get_segment_base(i),
-                get_priv_segment(i)->threadlocal_at_start_of_transaction);
+                get_priv_segment(i)->threadlocal_at_start_of_transaction,
+                get_priv_segment(i));
 
             stm_rewind_jmp_enum_shadowstack(
                 get_segment(i)->running_thread,
                 mark_visit_objects_from_ss);
         }
     }
-}
-
-static void ready_large_overflow_objects(void)
-{
-#pragma push_macro("STM_PSEGMENT")
-#pragma push_macro("STM_SEGMENT")
-#undef STM_PSEGMENT
-#undef STM_SEGMENT
-    /* objs in large_overflow only have garbage in the sharing seg0,
-       since it is used to mark objs as visited, we must make
-       sure the flag is cleared at the start of a major collection.
-       (XXX: ^^^ may be optional if we have the part below)
-
-       Also, we need to be able to recognize these objects in order
-       to only trace them in the segment they are valid in. So we
-       also make sure to set WB_EXECUTED in the sharing seg0. No
-       other objs than large_overflow_objects have WB_EXECUTED in seg0 (since
-       there can only be committed versions there).
-    */
-
-    long i;
-    for (i = 1; i < NB_SEGMENTS; i++) {
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
-        struct list_s *lst = pseg->large_overflow_objects;
-
-        LIST_FOREACH_R(lst, object_t* /*item*/,
-            ({
-                struct object_s *realobj;
-                /* WB_EXECUTED always set in this segment */
-                assert(realobj = (struct object_s*)REAL_ADDRESS(pseg->pub.segment_base, item));
-                assert(realobj->stm_flags & GCFLAG_WB_EXECUTED);
-
-                /* clear VISITED (garbage) and ensure WB_EXECUTED in seg0 */
-                mark_visited_test_and_clear(item);
-                realobj = (struct object_s*)REAL_ADDRESS(stm_object_pages, item);
-                realobj->stm_flags |= GCFLAG_WB_EXECUTED;
-
-                /* make sure this flag is cleared as well */
-                realobj->stm_flags &= ~GCFLAG_FINALIZATION_ORDERING;
-            }));
-    }
-#pragma pop_macro("STM_SEGMENT")
-#pragma pop_macro("STM_PSEGMENT")
 }
 
 
@@ -494,10 +468,7 @@ static void clean_up_segment_lists(void)
                 ({
                     struct object_s *realobj = (struct object_s *)
                         REAL_ADDRESS(pseg->pub.segment_base, (uintptr_t)item);
-
-                    assert(realobj->stm_flags & GCFLAG_WB_EXECUTED);
                     assert(!(realobj->stm_flags & GCFLAG_WRITE_BARRIER));
-
                     realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
                 }));
             list_clear(lst);
@@ -682,8 +653,6 @@ static void major_collection_now_at_safe_point(void)
     acquire_all_privatization_locks();
 
     DEBUG_EXPECT_SEGFAULT(false);
-
-    ready_large_overflow_objects();
 
     /* marking */
     LIST_CREATE(marked_objects_to_trace);

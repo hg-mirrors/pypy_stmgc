@@ -112,6 +112,8 @@ void stm_setup(void)
         pr->old_objects_with_light_finalizers = list_create();
 
         pr->last_commit_log_entry = &commit_log_root;
+        pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * i;
+        highest_overflow_number = pr->overflow_number;
         pr->pub.transaction_read_version = 0xff;
     }
 
