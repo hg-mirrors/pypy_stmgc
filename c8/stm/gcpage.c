@@ -488,7 +488,8 @@ static void clean_up_segment_lists(void)
                     REAL_ADDRESS(pseg->pub.segment_base, item);
                 OPT_ASSERT(realobj->stm_flags & GCFLAG_WRITE_BARRIER);
 
-                /* mark marked cards as old if it survives */
+                /* mark marked cards as old if it survives, otherwise
+                   CLEAR, as their spot could get reused */
                 uint8_t mark_value = mark_visited_test(item) ?
                     pseg->pub.transaction_read_version : CARD_CLEAR;
                 _reset_object_cards(pseg, item, mark_value, false,

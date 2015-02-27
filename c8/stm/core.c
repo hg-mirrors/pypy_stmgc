@@ -675,6 +675,12 @@ static void make_bk_slices(object_t *obj,
             /* whole obj */
             make_bk_slices_for_range(obj, (stm_char*)obj + start_offset,
                                      (stm_char*)obj + obj_size);
+            if (obj_should_use_cards(STM_SEGMENT->segment_base, obj)) {
+                /* mark whole obj as MARKED_OLD so we don't do bk slices anymore */
+                _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
+                                    obj, STM_SEGMENT->transaction_read_version,
+                                    true, false);
+            }
         } else {
             /* only fixed part */
             stmcb_get_card_base_itemsize(realobj, offset_itemsize);
@@ -944,6 +950,7 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
             return;
     }
 
+    assert(obj_should_use_cards(STM_SEGMENT->segment_base, obj));
     dprintf_test(("write_slowpath_card %p -> index:%lu\n",
                   obj, index));
 
@@ -1266,8 +1273,9 @@ static void reset_modified_from_backup_copies(int segment_num)
                undo->backup,
                SLICE_SIZE(undo->slice));
 
-        dprintf(("reset_modified_from_backup_copies(%d): obj=%p off=%lu bk=%p\n",
-                 segment_num, obj, SLICE_OFFSET(undo->slice), undo->backup));
+        dprintf(("reset_modified_from_backup_copies(%d): obj=%p off=%lu sz=%d bk=%p\n",
+                 segment_num, obj, SLICE_OFFSET(undo->slice),
+                 SLICE_SIZE(undo->slice), undo->backup));
 
         free_bk(undo);
     }
