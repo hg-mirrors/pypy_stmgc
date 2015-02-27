@@ -242,7 +242,7 @@ static void mark_and_trace(object_t *obj, char *segment_base)
     stmcb_trace(realobj, &mark_record_trace);
 
     /* trace all references found in sharing seg0 (should always be
-       up-to-date and not cause segfaults, except for new objs) */
+       up-to-date and not cause segfaults, except for overflow objs) */
     while (!list_is_empty(marked_objects_to_trace)) {
         obj = (object_t *)list_pop_item(marked_objects_to_trace);
 
@@ -380,7 +380,7 @@ static void mark_visit_from_roots(void)
         /* look at all objs on the shadow stack (they are old but may
            be uncommitted so far, so only exist in the associated_segment_num).
 
-           IF they are uncommitted new objs, trace in the actual segment,
+           IF they are uncommitted overflow objs, trace in the actual segment,
            otherwise, since we just executed a minor collection, they were
            all synced to the sharing seg0. Thus we can trace them there.
 
@@ -423,13 +423,13 @@ static void mark_visit_from_roots(void)
     }
 }
 
-static void ready_new_objects(void)
+static void ready_large_overflow_objects(void)
 {
 #pragma push_macro("STM_PSEGMENT")
 #pragma push_macro("STM_SEGMENT")
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
-    /* objs in new_objects only have garbage in the sharing seg0,
+    /* objs in large_overflow only have garbage in the sharing seg0,
        since it is used to mark objs as visited, we must make
        sure the flag is cleared at the start of a major collection.
        (XXX: ^^^ may be optional if we have the part below)
@@ -437,14 +437,14 @@ static void ready_new_objects(void)
        Also, we need to be able to recognize these objects in order
        to only trace them in the segment they are valid in. So we
        also make sure to set WB_EXECUTED in the sharing seg0. No
-       other objs than new_objects have WB_EXECUTED in seg0 (since
+       other objs than large_overflow_objects have WB_EXECUTED in seg0 (since
        there can only be committed versions there).
     */
 
     long i;
     for (i = 1; i < NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
-        struct list_s *lst = pseg->new_objects;
+        struct list_s *lst = pseg->large_overflow_objects;
 
         LIST_FOREACH_R(lst, object_t* /*item*/,
             ({
@@ -507,8 +507,8 @@ static void clean_up_segment_lists(void)
                modified_old_objs. */
         }
 
-        /* remove from new_objects all objects that die */
-        lst = pseg->new_objects;
+        /* remove from large_overflow_objects all objects that die */
+        lst = pseg->large_overflow_objects;
         uintptr_t n = list_count(lst);
         while (n-- > 0) {
             object_t *obj = (object_t *)list_item(lst, n);
@@ -683,7 +683,7 @@ static void major_collection_now_at_safe_point(void)
 
     DEBUG_EXPECT_SEGFAULT(false);
 
-    ready_new_objects();
+    ready_large_overflow_objects();
 
     /* marking */
     LIST_CREATE(marked_objects_to_trace);

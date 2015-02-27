@@ -766,7 +766,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
-    assert(list_is_empty(STM_PSEGMENT->new_objects));
+    assert(list_is_empty(STM_PSEGMENT->large_overflow_objects));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
@@ -827,7 +827,7 @@ static void _finish_transaction()
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
-    list_clear(STM_PSEGMENT->new_objects);
+    list_clear(STM_PSEGMENT->large_overflow_objects);
 
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
@@ -847,10 +847,11 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
 #endif
 }
 
-static void push_new_objects_to_other_segments(void)
+static void push_large_overflow_objects_to_other_segments(void)
 {
+    /* XXX: also pushes small ones right now */
     acquire_privatization_lock(STM_SEGMENT->segment_num);
-    LIST_FOREACH_R(STM_PSEGMENT->new_objects, object_t *,
+    LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
         ({
             assert(item->stm_flags & GCFLAG_WB_EXECUTED);
             item->stm_flags &= ~GCFLAG_WB_EXECUTED;
@@ -867,7 +868,7 @@ static void push_new_objects_to_other_segments(void)
        in handle_segfault_in_page() that also copies
        unknown-to-the-segment/uncommitted things.
     */
-    list_clear(STM_PSEGMENT->new_objects);
+    list_clear(STM_PSEGMENT->large_overflow_objects);
 }
 
 
@@ -882,7 +883,7 @@ void stm_commit_transaction(void)
     dprintf(("> stm_commit_transaction()\n"));
     minor_collection(1);
 
-    push_new_objects_to_other_segments();
+    push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
@@ -1008,7 +1009,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
     tl->last_abort__bytes_in_nursery = bytes_in_nursery;
 
     list_clear(pseg->objects_pointing_to_nursery);
-    list_clear(pseg->new_objects);
+    list_clear(pseg->large_overflow_objects);
     list_clear(pseg->young_weakrefs);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
