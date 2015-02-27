@@ -582,6 +582,16 @@ void _stm_write_slowpath(object_t *obj)
     assert(!_is_in_nursery(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
+    if (obj->stm_flags & GCFLAG_WB_EXECUTED
+        || IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
+        /* already executed WB once in this transaction or is
+           overflow object -> do only GC part: */
+        dprintf(("write_slowpath-fast(%p)\n", obj));
+        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
+        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
+        return;
+    }
+
     int my_segnum = STM_SEGMENT->segment_num;
     uintptr_t end_page, first_page = ((uintptr_t)obj) / 4096UL;
     char *realobj;
@@ -598,15 +608,6 @@ void _stm_write_slowpath(object_t *obj)
 
     /* add to read set: */
     stm_read(obj);
-
-    if (obj->stm_flags & GCFLAG_WB_EXECUTED) {
-        /* already executed WB once in this transaction. do GC
-           part again: */
-        dprintf(("write_slowpath-fast(%p)\n", obj));
-        obj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
-        return;
-    }
 
     assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
     dprintf(("write_slowpath(%p): sz=%lu\n", obj, obj_size));
@@ -849,12 +850,14 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
 
 static void push_large_overflow_objects_to_other_segments(void)
 {
+    if (list_is_empty(STM_PSEGMENT->large_overflow_objects))
+        return;
+
     /* XXX: also pushes small ones right now */
     acquire_privatization_lock(STM_SEGMENT->segment_num);
     LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
         ({
-            assert(item->stm_flags & GCFLAG_WB_EXECUTED);
-            item->stm_flags &= ~GCFLAG_WB_EXECUTED;
+            assert(!(item->stm_flags & GCFLAG_WB_EXECUTED));
             synchronize_object_enqueue(item);
         }));
     synchronize_objects_flush();
@@ -907,6 +910,15 @@ void stm_commit_transaction(void)
     }
 
     commit_finalizers();
+
+    /* update 'overflow_number' if needed */
+    if (STM_PSEGMENT->overflow_number_has_been_used) {
+        highest_overflow_number += GCFLAG_OVERFLOW_NUMBER_bit0;
+        assert(highest_overflow_number !=        /* XXX else, overflow! */
+               (uint32_t)-GCFLAG_OVERFLOW_NUMBER_bit0);
+        STM_PSEGMENT->overflow_number = highest_overflow_number;
+        STM_PSEGMENT->overflow_number_has_been_used = false;
+    }
 
     invoke_and_clear_user_callbacks(0);   /* for commit */
 

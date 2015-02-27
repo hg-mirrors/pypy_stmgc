@@ -2,6 +2,9 @@
 #define NSE_SIGPAUSE   _STM_NSE_SIGNAL_MAX
 #define NSE_SIGABORT   _STM_NSE_SIGNAL_ABORT
 
+static uint32_t highest_overflow_number;
+
+
 static void minor_collection(bool commit);
 static void check_nursery_at_transaction_start(void);
 static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg);
