@@ -229,44 +229,44 @@ class TestBasic(BaseTest):
         o = stm_allocate_old(1000+20*CARD_SIZE)
 
         self.start_transaction()
-        assert get_card_value(o, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000-HDR) == CARD_CLEAR
         stm_set_char(o, 'a', 1000, True)
-        assert get_card_value(o, 1000) == CARD_MARKED
+        assert get_card_value(o, 1000-HDR) == CARD_MARKED
         assert o in old_objects_with_cards_set()
 
         stm_minor_collect()
-        assert get_card_value(o, 1000) == CARD_MARKED_OLD()
+        assert get_card_value(o, 1000-HDR) == CARD_MARKED_OLD()
         self.commit_transaction()
 
         self.start_transaction()
-        assert get_card_value(o, 1000) not in (CARD_CLEAR, CARD_MARKED_OLD())
+        assert get_card_value(o, 1000-HDR) not in (CARD_CLEAR, CARD_MARKED_OLD())
         stm_set_char(o, 'b', 1000, True)
-        assert get_card_value(o, 1000) == CARD_MARKED
+        assert get_card_value(o, 1000-HDR) == CARD_MARKED
         assert o in old_objects_with_cards_set()
         self.commit_transaction()
 
     def test_clear_cards2(self):
         self.start_transaction()
         o = stm_allocate(1000+20*CARD_SIZE)
-        assert get_card_value(o, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000-HDR) == CARD_CLEAR
         stm_set_char(o, 'a', 1000, True)
-        assert get_card_value(o, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000-HDR) == CARD_CLEAR
         assert o not in old_objects_with_cards_set()
 
         self.push_root(o)
         stm_minor_collect()
         o = self.pop_root()
 
-        assert get_card_value(o, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000-HDR) == CARD_CLEAR
         stm_set_char(o, 'b', 1000, True)
-        assert get_card_value(o, 1000) == CARD_MARKED
+        assert get_card_value(o, 1000-HDR) == CARD_MARKED
         assert o in old_objects_with_cards_set()
         self.commit_transaction()
 
         self.start_transaction()
-        assert get_card_value(o, 1000) not in (CARD_CLEAR, CARD_MARKED_OLD())
+        assert get_card_value(o, 1000-HDR) not in (CARD_CLEAR, CARD_MARKED_OLD())
         stm_set_char(o, 'b', 1000, True)
-        assert get_card_value(o, 1000) == CARD_MARKED
+        assert get_card_value(o, 1000-HDR) == CARD_MARKED
         assert o in old_objects_with_cards_set()
         self.commit_transaction()
 
@@ -278,13 +278,13 @@ class TestBasic(BaseTest):
         stm_minor_collect()
         o = self.pop_root()
 
-        assert get_card_value(o, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000-HDR) == CARD_CLEAR
         stm_set_char(o, 'b', 1000, True)
-        assert get_card_value(o, 1000) == CARD_MARKED
+        assert get_card_value(o, 1000-HDR) == CARD_MARKED
         assert o in old_objects_with_cards_set()
 
         stm_major_collect()
-        assert get_card_value(o, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000-HDR) == CARD_CLEAR
         assert o not in old_objects_with_cards_set()
 
         self.commit_transaction()
@@ -293,8 +293,8 @@ class TestBasic(BaseTest):
         self.start_transaction()
         o = stm_allocate(1000+20*CARD_SIZE)
         p = stm_allocate(1000+20*CARD_SIZE)
-        assert get_card_value(o, 1000) == CARD_CLEAR
-        assert get_card_value(p, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000-HDR) == CARD_CLEAR
+        assert get_card_value(p, 1000-HDR) == CARD_CLEAR
 
         self.push_root(o)
         self.push_root(p)
@@ -302,20 +302,20 @@ class TestBasic(BaseTest):
         p = self.pop_root()
         o = self.pop_root()
 
-        assert get_card_value(o, 1000) == CARD_CLEAR
-        assert get_card_value(p, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000-HDR) == CARD_CLEAR
+        assert get_card_value(p, 1000-HDR) == CARD_CLEAR
         stm_set_char(o, 'b', 1000, True)
         stm_set_char(p, 'b', 1000, True)
-        assert get_card_value(o, 1000) == CARD_MARKED
-        assert get_card_value(p, 1000) == CARD_MARKED
+        assert get_card_value(o, 1000-HDR) == CARD_MARKED
+        assert get_card_value(p, 1000-HDR) == CARD_MARKED
 
         self.push_root(o)
         stm_major_collect()
         o = self.pop_root()
         # p dies and gets cards CLEARed
 
-        assert get_card_value(o, 1000) == CARD_MARKED_OLD()
-        assert get_card_value(p, 1000) == CARD_CLEAR
+        assert get_card_value(o, 1000-HDR) == CARD_MARKED_OLD()
+        assert get_card_value(p, 1000-HDR) == CARD_CLEAR
 
         self.push_root(o)
         self.commit_transaction()
@@ -323,10 +323,10 @@ class TestBasic(BaseTest):
         self.start_transaction()
         o = self.pop_root()
 
-        assert get_card_value(o, 1000) != CARD_CLEAR
-        assert get_card_value(o, 1000) < CARD_MARKED_OLD()
+        assert get_card_value(o, 1000-HDR) != CARD_CLEAR
+        assert get_card_value(o, 1000-HDR) < CARD_MARKED_OLD()
         stm_set_char(o, 'b', 1000, True)
-        assert get_card_value(o, 1000) == CARD_MARKED
+        assert get_card_value(o, 1000-HDR) == CARD_MARKED
 
         self.commit_transaction()
 
@@ -341,3 +341,24 @@ class TestBasic(BaseTest):
 
         self.start_transaction()
         assert stm_get_char(o, HDR) == '\0'
+
+
+    def test_card_marked_old2(self):
+        o = stm_allocate_old(1000+20*CARD_SIZE)
+
+        self.start_transaction()
+        stm_set_char(o, 'v', HDR, False)
+        self.commit_transaction()
+
+        self.start_transaction()
+        assert get_card_value(o, HDR-HDR) == CARD_CLEAR
+        stm_set_char(o, 'x', 1000, True)
+
+        stm_set_char(o, 'u', HDR, False)
+
+        stm_minor_collect()
+        stm_set_char(o, 'y', HDR, True)
+        self.abort_transaction()
+
+        self.start_transaction()
+        assert stm_get_char(o, HDR) == 'v'
