@@ -212,6 +212,7 @@ static bool is_overflow_obj_safe(struct stm_priv_segment_info_s *pseg, object_t 
     return IS_OVERFLOW_OBJ(pseg, realobj);
 }
 
+
 static inline void mark_record_trace(object_t **pobj)
 {
     /* takes a normal pointer to a thread-local pointer to an object */
@@ -470,6 +471,8 @@ static void clean_up_segment_lists(void)
                         REAL_ADDRESS(pseg->pub.segment_base, (uintptr_t)item);
                     assert(!(realobj->stm_flags & GCFLAG_WRITE_BARRIER));
                     realobj->stm_flags |= GCFLAG_WRITE_BARRIER;
+
+                    OPT_ASSERT(!(realobj->stm_flags & GCFLAG_CARDS_SET));
                 }));
             list_clear(lst);
         } else {
@@ -478,12 +481,30 @@ static void clean_up_segment_lists(void)
                modified_old_objs. */
         }
 
+        lst = pseg->old_objects_with_cards_set;
+        LIST_FOREACH_R(lst, object_t* /*item*/,
+            ({
+                struct object_s *realobj = (struct object_s *)
+                    REAL_ADDRESS(pseg->pub.segment_base, item);
+                OPT_ASSERT(realobj->stm_flags & GCFLAG_WRITE_BARRIER);
+
+                /* mark marked cards as old if it survives */
+                uint8_t mark_value = mark_visited_test(item) ?
+                    pseg->pub.transaction_read_version : CARD_CLEAR;
+                _reset_object_cards(pseg, item, mark_value, false,
+                                    mark_value == CARD_CLEAR);
+            }));
+        list_clear(lst);
+
+
         /* remove from large_overflow_objects all objects that die */
         lst = pseg->large_overflow_objects;
         uintptr_t n = list_count(lst);
         while (n-- > 0) {
             object_t *obj = (object_t *)list_item(lst, n);
             if (!mark_visited_test(obj)) {
+                if (obj_should_use_cards(pseg->pub.segment_base, obj))
+                    _reset_object_cards(pseg, obj, CARD_CLEAR, false, true);
                 list_set_item(lst, n, list_pop_item(lst));
             }
         }

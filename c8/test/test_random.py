@@ -428,7 +428,7 @@ def op_write(ex, global_state, thread_state):
     r = thread_state.get_random_root()
     trs = thread_state.transaction_state
     is_ref = global_state.has_ref_type(r)
-    try_cards = global_state.rnd.randrange(1, 100) > 5 and False
+    try_cards = global_state.rnd.randrange(1, 100) > 5 # and False
     #
     # decide on a value to write
     if is_ref:
