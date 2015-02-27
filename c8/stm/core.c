@@ -445,7 +445,6 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 }
 
 
-static void reset_cards_from_modified_objects(void);
 static void reset_wb_executed_flags(void);
 static void readd_wb_executed_flags(void);
 static void check_all_write_barrier_flags(char *segbase, struct list_s *list);
@@ -528,8 +527,6 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
         STM_PSEGMENT->transaction_state = TS_NONE;
         STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
 
-        reset_cards_from_modified_objects();
-
         list_clear(STM_PSEGMENT->modified_old_objects);
         STM_PSEGMENT->last_commit_log_entry = new;
         release_modification_lock(STM_SEGMENT->segment_num);
@@ -555,8 +552,6 @@ static void _validate_and_add_to_commit_log(void)
         reset_wb_executed_flags();
         check_all_write_barrier_flags(STM_SEGMENT->segment_base,
                                       STM_PSEGMENT->modified_old_objects);
-
-        reset_cards_from_modified_objects();
 
         /* compare with _validate_and_attach: */
         STM_PSEGMENT->transaction_state = TS_NONE;
@@ -597,11 +592,197 @@ bool obj_should_use_cards(char *seg_base, object_t *obj)
     return (size >= _STM_MIN_CARD_OBJ_SIZE);
 }
 
+
+static void make_bk_slices_for_range(
+    object_t *obj,
+    stm_char *start, stm_char *end) /* [start, end[ */
+{
+    dprintf(("make_bk_slices_for_range(%p, %lu, %lu)\n",
+             obj, start - (stm_char*)obj, end - start));
+    char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t obj_size = stmcb_size_rounded_up((struct object_s*)realobj);
+    uintptr_t first_page = ((uintptr_t)start) / 4096UL;
+    uintptr_t end_page = ((uintptr_t)end) / 4096UL;
+
+    uintptr_t page;
+    uintptr_t slice_sz;
+    uintptr_t in_page_offset = (uintptr_t)start % 4096UL;
+    uintptr_t remaining_obj_sz = end - start;
+    for (page = first_page; page <= end_page; page++) {
+        OPT_ASSERT(remaining_obj_sz);
+
+        slice_sz = remaining_obj_sz;
+        if (in_page_offset + slice_sz > 4096UL) {
+            /* not over page boundaries */
+            slice_sz = 4096UL - in_page_offset;
+        }
+
+        size_t slice_off = obj_size - remaining_obj_sz;
+        remaining_obj_sz -= slice_sz;
+        in_page_offset = (in_page_offset + slice_sz) % 4096UL; /* mostly 0 */
+
+        /* make backup slice: */
+        char *bk_slice = malloc(slice_sz);
+        increment_total_allocated(slice_sz);
+        memcpy(bk_slice, realobj + slice_off, slice_sz);
+
+        acquire_modification_lock(STM_SEGMENT->segment_num);
+        /* !! follows layout of "struct stm_undo_s" !! */
+        STM_PSEGMENT->modified_old_objects = list_append3(
+            STM_PSEGMENT->modified_old_objects,
+            (uintptr_t)obj,     /* obj */
+            (uintptr_t)bk_slice,  /* bk_addr */
+            NEW_SLICE(slice_off, slice_sz));
+        release_modification_lock(STM_SEGMENT->segment_num);
+    }
+
+}
+
+static void make_bk_slices(object_t *obj,
+                           bool first_call, /* tells us if we also need to make a bk
+                                               of the non-array part of the object */
+                           uintptr_t index,  /* index == -1: all cards, index == -2: no cards */
+                           bool do_missing_cards /* only bk the cards that don't have a bk */
+                           )
+{
+    dprintf(("make_bk_slices(%p, %d, %ld, %d)\n", obj, first_call, index, do_missing_cards));
+    /* do_missing_cards also implies that all cards are cleared at the end */
+    /* index == -1 but not do_missing_cards: bk whole obj */
+    assert(IMPLY(index == -2, first_call && !do_missing_cards));
+    assert(IMPLY(index == -1 && !do_missing_cards, first_call));
+    assert(IMPLY(do_missing_cards, index == -1));
+    assert(IMPLY(is_small_uniform(obj), index == -1 && !do_missing_cards && first_call));
+    assert(IMPLY(first_call, !do_missing_cards));
+    assert(IMPLY(index != -1, obj_should_use_cards(STM_SEGMENT->segment_base, obj)));
+
+    /* get whole card range */
+    struct object_s *realobj = (struct object_s*)REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
+    size_t obj_size = stmcb_size_rounded_up(realobj);
+
+    uintptr_t offset_itemsize[2];
+    stmcb_get_card_base_itemsize(realobj, offset_itemsize);
+    size_t real_idx_count = (obj_size - offset_itemsize[0]) / offset_itemsize[1];
+    assert(IMPLY(index != -1 && index != -2, index >= 0 && index < real_idx_count));
+
+    struct stm_read_marker_s *cards = get_read_marker(STM_SEGMENT->segment_base, (uintptr_t)obj);
+    uintptr_t last_card_index = get_index_to_card_index(real_idx_count - 1); /* max valid index */
+
+    /* decide where to start copying: */
+    size_t start_offset;
+    if (first_call) {
+        start_offset = 0;
+    } else {
+        start_offset = -1;
+    }
+
+    /* decide if we don't want to look at cards at all: */
+    if ((index == -1 || index == -2) && !do_missing_cards) {
+        assert(first_call);
+        if (index == -1) {
+            /* whole obj */
+            make_bk_slices_for_range(obj, (stm_char*)obj + start_offset,
+                                     (stm_char*)obj + obj_size);
+        } else {
+            /* only fixed part */
+            make_bk_slices_for_range(obj, (stm_char*)obj + start_offset,
+                                     (stm_char*)obj + offset_itemsize[0]);
+        }
+        return;
+    }
+
+    /* decide if we want only a specific card: */
+    if (index != -1) {
+        if (start_offset != -1) {
+            /* bk fixed part separately: */
+            make_bk_slices_for_range(obj, (stm_char*)obj + start_offset,
+                                     (stm_char*)obj + offset_itemsize[0]);
+        }
+
+        size_t after_card_offset = offset_itemsize[0] + (index + 1) * offset_itemsize[1];
+        if (after_card_offset > obj_size)
+            after_card_offset = obj_size;
+
+        make_bk_slices_for_range(
+            obj, (stm_char*)obj + offset_itemsize[0] + index * offset_itemsize[1],
+            (stm_char*)obj + after_card_offset);
+
+        return;
+    }
+
+    /* look for CARD_CLEAR or some non-transaction_read_version cards
+       and make bk slices for them */
+    assert(do_missing_cards && index == -1 && start_offset == -1);
+    uintptr_t card_index = 1;
+    uintptr_t start_card_index = -1;
+    while (card_index <= last_card_index) {
+        uint8_t card_value = cards[card_index].rm;
+
+        if (card_value == CARD_CLEAR
+            || (card_value != CARD_MARKED
+                && card_value < STM_SEGMENT->transaction_read_version)) {
+            /* we need a backup of this card */
+            if (start_card_index == -1) {   /* first unmarked card */
+                start_card_index = card_index;
+            }
+        }
+        else {
+            /* "CARD_MARKED_OLD" or CARD_MARKED */
+            OPT_ASSERT(card_value == STM_SEGMENT->transaction_read_version
+                       || card_value == CARD_MARKED);
+            /* we don't need the cards anymore after executing this function */
+            cards[card_index].rm = CARD_CLEAR;
+        }
+
+        if (start_card_index != -1                    /* something to copy */
+            && (card_value == CARD_MARKED             /* found marked card */
+                || card_value == STM_SEGMENT->transaction_read_version/* old marked */
+                || card_index == last_card_index)) {  /* this is the last card */
+
+            /* do the bk slice: */
+            uintptr_t copy_size;
+            uintptr_t next_card_offset;
+            uintptr_t start_card_offset;
+            uintptr_t next_card_index = card_index;
+
+            if (card_value == CARD_CLEAR
+                || (card_value != CARD_MARKED
+                    && card_value < STM_SEGMENT->transaction_read_version)) {
+                /* this was actually the last card which wasn't set, but we
+                   need to go one further to get the right offset */
+                next_card_index++;
+            }
+
+            start_card_offset = offset_itemsize[0] +
+                get_card_index_to_index(start_card_index) * offset_itemsize[1];
+
+            next_card_offset = offset_itemsize[0] +
+                get_card_index_to_index(next_card_index) * offset_itemsize[1];
+
+            if (next_card_offset > obj_size)
+                next_card_offset = obj_size;
+
+            copy_size = next_card_offset - start_card_offset;
+            OPT_ASSERT(copy_size > 0);
+
+            /* add the slices: */
+            make_bk_slices_for_range(
+                obj, (stm_char*)obj + start_card_offset,
+                (stm_char*)obj + next_card_offset);
+
+            start_card_index = -1;
+        }
+
+        card_index++;
+    }
+
+    _cards_cleared_in_object(get_priv_segment(STM_SEGMENT->segment_num), obj);
+}
+
 __attribute__((always_inline))
-static void write_gc_only_path(object_t *obj, bool mark_card)
+static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
 {
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
-    assert(obj->stm_flags & GCFLAG_WB_EXECUTED);
+    assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
     dprintf(("write_slowpath-fast(%p)\n", obj));
 
     if (!mark_card) {
@@ -611,8 +792,7 @@ static void write_gc_only_path(object_t *obj, bool mark_card)
            next minor collection. */
         if (obj->stm_flags & GCFLAG_CARDS_SET) {
             /* if we clear this flag, we also need to clear the cards.
-               bk_slices are not needed as this is a new object */
-            /* XXX: add_missing_bk_slices_and_"clear"_cards */
+               bk_slices are not needed as this is an overflow object */
             _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
                                 obj, CARD_CLEAR, false, false);
         }
@@ -621,7 +801,8 @@ static void write_gc_only_path(object_t *obj, bool mark_card)
     } else {
         /* Card marking.  Don't remove GCFLAG_WRITE_BARRIER because we
            need to come back to _stm_write_slowpath_card() for every
-           card to mark.  Add GCFLAG_CARDS_SET. */
+           card to mark.  Add GCFLAG_CARDS_SET.
+           again, we don't need bk_slices as this is an overflow obj */
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
         obj->stm_flags |= GCFLAG_CARDS_SET;
         LIST_APPEND(STM_PSEGMENT->old_objects_with_cards_set, obj);
@@ -636,128 +817,63 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
     assert(!_is_in_nursery(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
-    if (obj->stm_flags & GCFLAG_WB_EXECUTED
-|| isoverflow) {
+    if (IS_OVERFLOW_OBJ(STM_PSEGMENT, obj)) {
         /* already executed WB once in this transaction. do GC
            part again: */
-        write_gc_only_path(obj, mark_card);
+        assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
+        write_slowpath_overflow_obj(obj, mark_card);
         return;
     }
 
-    char *realobj;
-    size_t obj_size;
-    int my_segnum = STM_SEGMENT->segment_num;
-    uintptr_t end_page, first_page = ((uintptr_t)obj) / 4096UL;
-
-    realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-    obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
-    /* get the last page containing data from the object */
-    if (LIKELY(is_small_uniform(obj))) {
-        end_page = first_page;
-    } else {
-        end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
-    }
+    dprintf(("write_slowpath(%p)\n", obj));
 
     /* add to read set: */
     stm_read(obj);
 
-    assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
-    dprintf(("write_slowpath(%p): sz=%lu\n", obj, obj_size));
-
- retry:
-    /* privatize pages: */
-    /* XXX don't always acquire all locks... */
-    acquire_all_privatization_locks();
-
-    uintptr_t page;
-    for (page = first_page; page <= end_page; page++) {
-        if (get_page_status_in(my_segnum, page) == PAGE_NO_ACCESS) {
-            /* XXX: slow? */
-            release_all_privatization_locks();
-
-            volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
-            *dummy;            /* force segfault */
-
-            goto retry;
-        }
-    }
-    /* all pages are private to us and we hold the privatization_locks so
-       we are allowed to modify them */
-
-    /* phew, now add the obj to the write-set and register the
-       backup copy. */
-    /* XXX: we should not be here at all fiddling with page status
-       if 'obj' is merely an overflow object.  FIX ME, likely by copying
-       the overflow number logic from c7. */
-
     DEBUG_EXPECT_SEGFAULT(false);
 
-    acquire_modification_lock(STM_SEGMENT->segment_num);
-    uintptr_t slice_sz;
-    uintptr_t in_page_offset = (uintptr_t)obj % 4096UL;
-    uintptr_t remaining_obj_sz = obj_size;
-    for (page = first_page; page <= end_page; page++) {
-        /* XXX Maybe also use mprotect() again to mark pages of the object as read-only, and
-           only stick it into modified_old_objects page-by-page?  Maybe it's
-           possible to do card-marking that way, too. */
-        OPT_ASSERT(remaining_obj_sz);
+    if (mark_card) {
+        make_bk_slices(obj,
+                       true,        /* first_call */
+                       -2,          /* index: backup only fixed part */
+                       false);      /* do_missing_cards */
 
-        slice_sz = remaining_obj_sz;
-        if (in_page_offset + slice_sz > 4096UL) {
-            /* not over page boundaries */
-            slice_sz = 4096UL - in_page_offset;
-        }
+        /* don't remove WRITE_BARRIER, but add CARDS_SET */
+        obj->stm_flags |= (GCFLAG_CARDS_SET | GCFLAG_WB_EXECUTED);
+        LIST_APPEND(STM_PSEGMENT->old_objects_with_cards_set, obj);
+    } else {
+        /* called if WB_EXECUTED is set or this is the first time
+           for this obj: */
 
-        size_t slice_off = obj_size - remaining_obj_sz;
-
-        /* make backup slice: */
-        char *bk_slice = malloc(slice_sz);
-        increment_total_allocated(slice_sz);
-        memcpy(bk_slice, realobj + slice_off, slice_sz);
-
-        /* !! follows layout of "struct stm_undo_s" !! */
-        STM_PSEGMENT->modified_old_objects = list_append3(
-            STM_PSEGMENT->modified_old_objects,
-            (uintptr_t)obj,     /* obj */
-            (uintptr_t)bk_slice,  /* bk_addr */
-            NEW_SLICE(slice_off, slice_sz));
-
-        remaining_obj_sz -= slice_sz;
-        in_page_offset = (in_page_offset + slice_sz) % 4096UL; /* mostly 0 */
-    }
-    OPT_ASSERT(remaining_obj_sz == 0);
-
-    if (!mark_card) {
-        /* also add it to the GC list for minor collections */
+        /* add it to the GC list for minor collections */
         LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, obj);
 
         if (obj->stm_flags & GCFLAG_CARDS_SET) {
-            /* if we clear this flag, we have to tell sync_old_objs that
-               everything needs to be synced */
-            /* if we clear this flag, we have to tell later write barriers
-               that we already did all backup slices: */
-            /* XXX: do_other_bk_slices_and_"clear"_cards */
-            _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
-                                obj, STM_SEGMENT->transaction_read_version,
-                                true, false); /* mark all */
+            assert(obj->stm_flags & GCFLAG_WB_EXECUTED);
+
+            /* this is not the first_call to the WB for this obj,
+               we executed the above then-part before.
+               if we clear this flag, we have to add all the other
+               bk slices we didn't add yet */
+            make_bk_slices(obj,
+                           false,       /* first_call */
+                           -1,          /* index: whole obj */
+                           true);       /* do_missing_cards */
+
+        } else if (!(obj->stm_flags & GCFLAG_WB_EXECUTED)) {
+            /* first and only time we enter here: */
+            make_bk_slices(obj,
+                           true,        /* first_call */
+                           -1,          /* index: whole obj */
+                           false);      /* do_missing_cards */
         }
 
         /* remove the WRITE_BARRIER flag and add WB_EXECUTED */
         obj->stm_flags &= ~(GCFLAG_WRITE_BARRIER | GCFLAG_CARDS_SET);
         obj->stm_flags |= GCFLAG_WB_EXECUTED;
-    } else {
-        /* don't remove WRITE_BARRIER, but add CARDS_SET */
-        obj->stm_flags |= (GCFLAG_CARDS_SET | GCFLAG_WB_EXECUTED);
-        /* XXXXXXXXXXXX maybe not set WB_EXECUTED and make CARDS_SET
-           mean the same thing where necessary */
-        LIST_APPEND(STM_PSEGMENT->old_objects_with_cards_set, obj);
     }
 
     DEBUG_EXPECT_SEGFAULT(true);
-
-    release_modification_lock(STM_SEGMENT->segment_num);
-    /* done fiddling with protection and privatization */
-    release_all_privatization_locks();
 }
 
 
@@ -819,7 +935,16 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
        We already own the object here or it is an overflow obj. */
     struct stm_read_marker_s *cards = get_read_marker(STM_SEGMENT->segment_base,
                                                       (uintptr_t)obj);
-    cards[get_index_to_card_index(index)].rm = CARD_MARKED;
+    uintptr_t card_index = get_index_to_card_index(index);
+    if (!(cards[card_index].rm == CARD_MARKED
+          || cards[card_index].rm == STM_SEGMENT->transaction_read_version)) {
+        /* need to do the backup slice of the card */
+        make_bk_slices(obj,
+                       false,       /* first_call */
+                       index,       /* index: only 1 card */
+                       false);      /* do_missing_cards */
+    }
+    cards[card_index].rm = CARD_MARKED;
 
     dprintf(("mark %p index %lu, card:%lu with %d\n",
              obj, index, get_index_to_card_index(index), CARD_MARKED));
@@ -849,20 +974,6 @@ static void reset_transaction_read_version(void)
     }
     STM_SEGMENT->transaction_read_version = 2;
     assert(STM_SEGMENT->transaction_read_version > _STM_CARD_MARKED);
-}
-
-static void reset_cards_from_modified_objects(void)
-{
-    struct list_s *list = STM_PSEGMENT->modified_old_objects;
-    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
-    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
-
-    for (; undo < end; undo++) {
-        object_t *obj = undo->object;
-        if (obj_should_use_cards(STM_SEGMENT->segment_base, obj))
-            _reset_object_cards(get_priv_segment(STM_SEGMENT->segment_num),
-                                obj, CARD_CLEAR, false);
-    }
 }
 
 static void reset_wb_executed_flags(void)
@@ -1013,13 +1124,11 @@ static void push_large_overflow_objects_to_other_segments(void)
         return;
 
     /* XXX: also pushes small ones right now */
-    struct stm_priv_segment_info_s *pseg = get_priv_segment(STM_SEGMENT->segment_num);
     acquire_privatization_lock(STM_SEGMENT->segment_num);
     LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
         ({
-            assert(!(item->stm_flags & GCFLAG_WB_EXECUTED));            if (obj_should_use_cards(pseg->pub.segment_base, item))
-                _reset_object_cards(pseg, item, CARD_CLEAR, false);
-            synchronize_object_enqueue(item, true);
+            assert(!(item->stm_flags & GCFLAG_WB_EXECUTED));
+            synchronize_object_enqueue(item);
         }));
     synchronize_objects_flush();
     release_privatization_lock(STM_SEGMENT->segment_num);
@@ -1121,10 +1230,6 @@ static void reset_modified_from_backup_copies(int segment_num)
                undo->backup,
                SLICE_SIZE(undo->slice));
 
-        if (obj_should_use_cards(pseg->pub.segment_base, obj))
-            _reset_object_cards(pseg, obj, CARD_CLEAR, false);
-        /* XXXXXXXXX: only reset cards of slice!! ^^^^^^^ */
-
         dprintf(("reset_modified_from_backup_copies(%d): obj=%p off=%lu bk=%p\n",
                  segment_num, obj, SLICE_OFFSET(undo->slice), undo->backup));
 
@@ -1161,11 +1266,13 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     long bytes_in_nursery = throw_away_nursery(pseg);
 
-    /* some new objects may have cards when aborting, clear them too */
-    LIST_FOREACH_R(pseg->new_objects, object_t * /*item*/,
+    /* clear CARD_MARKED on objs (don't care about CARD_MARKED_OLD) */
+    LIST_FOREACH_R(pseg->old_objects_with_cards_set, object_t * /*item*/,
         {
-            if (obj_should_use_cards(pseg->pub.segment_base, item))
-                _reset_object_cards(pseg, item, CARD_CLEAR, false);
+            struct object_s *realobj = (struct object_s *)
+                REAL_ADDRESS(pseg->pub.segment_base, item);
+            if (realobj->stm_flags & GCFLAG_CARDS_SET)
+                _reset_object_cards(pseg, item, CARD_CLEAR, false, false);
         });
 
     acquire_modification_lock(segment_num);
