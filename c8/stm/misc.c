@@ -118,6 +118,11 @@ uint8_t _stm_get_card_value(object_t *obj, long idx)
     return cards[get_index_to_card_index(idx)].rm;
 }
 
+uint8_t _stm_get_transaction_read_version()
+{
+    return STM_SEGMENT->transaction_read_version;
+}
+
 
 
 static struct stm_commit_log_entry_s *_last_cl_entry;

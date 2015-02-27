@@ -159,7 +159,8 @@ static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, objec
     uintptr_t last_card_index = get_index_to_card_index(size - 1); /* max valid index */
 
     while (card_index <= last_card_index) {
-        assert(cards[card_index].rm == CARD_CLEAR);
+        assert(cards[card_index].rm == CARD_CLEAR
+               || cards[card_index].rm < pseg->pub.transaction_read_version);
         card_index++;
     }
 
@@ -191,7 +192,7 @@ static void _verify_cards_cleared_in_all_lists(struct stm_priv_segment_info_s *p
 
 static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
                                 object_t *obj, uint8_t mark_value,
-                                bool mark_all)
+                                bool mark_all, bool really_clear)
 {
 #pragma push_macro("STM_PSEGMENT")
 #pragma push_macro("STM_SEGMENT")
@@ -205,8 +206,12 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
     stmcb_get_card_base_itemsize(realobj, offset_itemsize);
     size = (size - offset_itemsize[0]) / offset_itemsize[1];
 
+    /* really_clear only used for freed new objs in minor collections, as
+       they need to clear cards even if they are set to transaction_read_version */
+    assert(IMPLY(really_clear, mark_value == CARD_CLEAR && !mark_all));
     assert(IMPLY(mark_value == CARD_CLEAR, !mark_all)); /* not necessary */
-    assert(IMPLY(mark_all, mark_value == CARD_MARKED_OLD)); /* set *all* to OLD */
+    assert(IMPLY(mark_all,
+                 mark_value == pseg->pub.transaction_read_version)); /* set *all* to OLD */
 
     struct stm_read_marker_s *cards = get_read_marker(pseg->pub.segment_base, (uintptr_t)obj);
     uintptr_t card_index = 1;
@@ -216,7 +221,8 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
                 obj, size, mark_value, mark_all));
        dprintf(("obj has %lu cards\n", last_card_index));*/
     while (card_index <= last_card_index) {
-        if (mark_all || cards[card_index].rm != CARD_CLEAR) {
+        if (mark_all || cards[card_index].rm == CARD_MARKED
+            || (really_clear && cards[card_index].rm != CARD_CLEAR)) {
             /* dprintf(("mark card %lu,wl:%lu of %p with %d\n", */
             /*          card_index, card_lock_idx, obj, mark_value)); */
             cards[card_index].rm = mark_value;
@@ -238,7 +244,6 @@ static void _trace_card_object(object_t *obj)
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
 
     dprintf(("_trace_card_object(%p)\n", obj));
-    uint8_t mark_value = CARD_MARKED_OLD;
 
     struct object_s *realobj = (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     size_t size = stmcb_size_rounded_up(realobj);
@@ -254,7 +259,7 @@ static void _trace_card_object(object_t *obj)
     while (card_index <= last_card_index) {
         if (cards[card_index].rm == CARD_MARKED) {
             /* clear or set to old: */
-            cards[card_index].rm = mark_value;
+            cards[card_index].rm = STM_SEGMENT->transaction_read_version;
 
             uintptr_t start = get_card_index_to_index(card_index);
             uintptr_t stop = get_card_index_to_index(card_index + 1);
@@ -340,7 +345,7 @@ static void collect_oldrefs_to_nursery(void)
             struct stm_priv_segment_info_s *pseg = get_priv_segment(STM_SEGMENT->segment_num);
             if (pseg->minor_collect_will_commit_now) {
                 acquire_privatization_lock(pseg->pub.segment_num);
-                synchronize_object_enqueue(obj, true); /* ignore cards! */
+                synchronize_object_enqueue(obj);
                 release_privatization_lock(pseg->pub.segment_num);
             } else {
                 LIST_APPEND(pseg->new_objects, obj);
