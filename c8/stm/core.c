@@ -701,10 +701,12 @@ static void make_bk_slices(object_t *obj,
         }
 
         card_index = get_index_to_card_index(index);
+
         size_t card_offset = offset_itemsize[0]
             + get_card_index_to_index(card_index) * offset_itemsize[1];
         size_t after_card_offset = offset_itemsize[0]
             + get_card_index_to_index(card_index + 1) * offset_itemsize[1];
+
         if (after_card_offset > obj_size)
             after_card_offset = obj_size;
 
@@ -733,10 +735,11 @@ static void make_bk_slices(object_t *obj,
             /* "CARD_MARKED_OLD" or CARD_MARKED */
             OPT_ASSERT(card_value == STM_SEGMENT->transaction_read_version
                        || card_value == CARD_MARKED);
-            /* we don't need CARD_MARKED anymore after executing this function,
-               but we may still need to avoid creating bk copies in the future: */
-            cards[card_index].rm = STM_SEGMENT->transaction_read_version;
         }
+        /* in any case, remember that we already made a bk slice for this
+           card, so set to "MARKED_OLD": */
+        cards[card_index].rm = STM_SEGMENT->transaction_read_version;
+
 
         if (start_card_index != -1                    /* something to copy */
             && (card_value == CARD_MARKED             /* found marked card */
