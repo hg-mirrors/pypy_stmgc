@@ -608,9 +608,7 @@ static void make_bk_slices_for_range(
     uintptr_t slice_off = start - (stm_char*)obj;
     uintptr_t in_page_offset = (uintptr_t)start % 4096UL;
     uintptr_t remaining_obj_sz = end - start;
-    for (page = first_page; page <= end_page; page++) {
-        OPT_ASSERT(remaining_obj_sz);
-
+    for (page = first_page; page <= end_page && remaining_obj_sz; page++) {
         slice_sz = remaining_obj_sz;
         if (in_page_offset + slice_sz > 4096UL) {
             /* not over page boundaries */
@@ -662,12 +660,10 @@ static void make_bk_slices(object_t *obj,
     size_t obj_size = stmcb_size_rounded_up(realobj);
 
     uintptr_t offset_itemsize[2];
-    stmcb_get_card_base_itemsize(realobj, offset_itemsize);
-    size_t real_idx_count = (obj_size - offset_itemsize[0]) / offset_itemsize[1];
-    assert(IMPLY(index != -1 && index != -2, index >= 0 && index < real_idx_count));
-
-    struct stm_read_marker_s *cards = get_read_marker(STM_SEGMENT->segment_base, (uintptr_t)obj);
-    uintptr_t last_card_index = get_index_to_card_index(real_idx_count - 1); /* max valid index */
+    if (index != -1) {
+        /* don't call if index==-1 as callback may not be supported at all */
+        stmcb_get_card_base_itemsize(realobj, offset_itemsize);
+    }
 
     /* decide where to start copying: */
     size_t start_offset;
@@ -691,6 +687,12 @@ static void make_bk_slices(object_t *obj,
         }
         return;
     }
+
+    size_t real_idx_count = (obj_size - offset_itemsize[0]) / offset_itemsize[1];
+    assert(IMPLY(index != -1 && index != -2, index >= 0 && index < real_idx_count));
+    struct stm_read_marker_s *cards = get_read_marker(STM_SEGMENT->segment_base, (uintptr_t)obj);
+    uintptr_t last_card_index = get_index_to_card_index(real_idx_count - 1); /* max valid index */
+
 
     /* decide if we want only a specific card: */
     if (index != -1) {
@@ -833,8 +835,6 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
     /* add to read set: */
     stm_read(obj);
 
-    DEBUG_EXPECT_SEGFAULT(false);
-
     if (mark_card) {
         if (!(obj->stm_flags & GCFLAG_WB_EXECUTED)) {
             make_bk_slices(obj,
@@ -842,6 +842,8 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
                            -2,          /* index: backup only fixed part */
                            false);      /* do_missing_cards */
         }
+
+        DEBUG_EXPECT_SEGFAULT(false);
 
         /* don't remove WRITE_BARRIER, but add CARDS_SET */
         obj->stm_flags |= (GCFLAG_CARDS_SET | GCFLAG_WB_EXECUTED);
@@ -873,6 +875,7 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
                            false);      /* do_missing_cards */
         }
 
+        DEBUG_EXPECT_SEGFAULT(false);
         /* remove the WRITE_BARRIER flag and add WB_EXECUTED */
         obj->stm_flags &= ~(GCFLAG_WRITE_BARRIER | GCFLAG_CARDS_SET);
         obj->stm_flags |= GCFLAG_WB_EXECUTED;
