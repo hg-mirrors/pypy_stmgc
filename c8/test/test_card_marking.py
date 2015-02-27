@@ -329,3 +329,15 @@ class TestBasic(BaseTest):
         assert get_card_value(o, 1000) == CARD_MARKED
 
         self.commit_transaction()
+
+    def test_card_marked_old(self):
+        o = stm_allocate_old(1000+20*CARD_SIZE)
+        self.start_transaction()
+        stm_set_char(o, 'x', HDR, True)
+        stm_set_char(o, 'u', HDR, False)
+        stm_minor_collect()
+        stm_set_char(o, 'y', HDR, True)
+        self.abort_transaction()
+
+        self.start_transaction()
+        assert stm_get_char(o, HDR) == '\0'
