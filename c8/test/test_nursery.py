@@ -210,7 +210,7 @@ class TestNursery(BaseTest):
         stm_set_char(p2, 't')
         self.push_root(p2)
         stm_minor_collect()
-        assert lib._stm_total_allocated() == 2 * 616
+        assert lib._stm_total_allocated() == 2 * 624
         #
         p2 = self.pop_root()
         m = self.pop_root()
@@ -230,7 +230,7 @@ class TestNursery(BaseTest):
         stm_set_char(p2, 't')
         self.push_root(p2)
         stm_minor_collect()
-        assert lib._stm_total_allocated() == 1 * 616
+        assert lib._stm_total_allocated() == 1 * 624
         #
         p2 = self.pop_root()
         m = self.pop_root()

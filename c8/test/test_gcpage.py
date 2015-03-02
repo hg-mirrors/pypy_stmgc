@@ -124,15 +124,15 @@ class TestGCPage(BaseTest):
 
     def test_major_collection(self):
         self.start_transaction()
-        new = stm_allocate(5000)
+        new = stm_allocate(5008)
         self.push_root(new)
         stm_minor_collect()
-        assert lib._stm_total_allocated() == 5000 + LMO
+        assert lib._stm_total_allocated() == 5008 + LMO
 
         new = self.pop_root()
         assert not is_in_nursery(new)
         stm_minor_collect()
-        assert lib._stm_total_allocated() == 5000 + LMO
+        assert lib._stm_total_allocated() == 5008 + LMO
 
         stm_major_collect()
         assert lib._stm_total_allocated() == 0
@@ -143,12 +143,12 @@ class TestGCPage(BaseTest):
         assert lib._stm_total_allocated() == CLEO
 
         self.start_transaction()
-        o = stm_allocate(5000)
+        o = stm_allocate(5008)
         self.push_root(o)
         self.commit_transaction()
         assert last_commit_log_entry_objs() == []
         # 2 CLEs, 1 old object
-        assert lib._stm_total_allocated() == 2*CLEO + (5000 + LMO)
+        assert lib._stm_total_allocated() == 2*CLEO + (5008 + LMO)
 
         self.start_transaction()
         o = self.pop_root()
@@ -158,13 +158,13 @@ class TestGCPage(BaseTest):
         assert last_commit_log_entry_objs() == [o]*2
         # 3 CLEs, 1 old object
         # also, 2 slices of bk_copy and thus 2 CLE entries
-        assert lib._stm_total_allocated() == 3*CLEO + (5000+LMO) + (5000 + CLEEO*2)
+        assert lib._stm_total_allocated() == 3*CLEO + (5008+LMO) + (5008 + CLEEO*2)
 
         self.start_transaction()
-        assert lib._stm_total_allocated() == 3*CLEO + (5000+LMO) + (5000 + CLEEO*2)
+        assert lib._stm_total_allocated() == 3*CLEO + (5008+LMO) + (5008 + CLEEO*2)
         stm_major_collect()
         # all CLE and CLE entries freed:
-        assert lib._stm_total_allocated() == (5000+LMO)
+        assert lib._stm_total_allocated() == (5008+LMO)
         self.commit_transaction()
 
 
@@ -180,39 +180,39 @@ class TestGCPage(BaseTest):
             return prev
 
         self.start_transaction()
-        self.push_root(make_chain(5000))
-        self.push_root(make_chain(4312))
+        self.push_root(make_chain(5008))
+        self.push_root(make_chain(4304))
         stm_minor_collect()
-        assert lib._stm_total_allocated() == (10 * (5000 + LMO) +
-                                              10 * (4312 + LMO))
+        assert lib._stm_total_allocated() == (10 * (5008 + LMO) +
+                                              10 * (4304 + LMO))
         stm_major_collect()
-        assert lib._stm_total_allocated() == (10 * (5000 + LMO) +
-                                              10 * (4312 + LMO))
+        assert lib._stm_total_allocated() == (10 * (5008 + LMO) +
+                                              10 * (4304 + LMO))
         stm_major_collect()
-        assert lib._stm_total_allocated() == (10 * (5000 + LMO) +
-                                              10 * (4312 + LMO))
+        assert lib._stm_total_allocated() == (10 * (5008 + LMO) +
+                                              10 * (4304 + LMO))
         self.pop_root()
         stm_major_collect()
-        assert lib._stm_total_allocated() == 10 * (5000 + LMO)
+        assert lib._stm_total_allocated() == 10 * (5008 + LMO)
 
     def test_trace_all_versions(self):
         self.start_transaction()
-        x = stm_allocate(5000)
+        x = stm_allocate(5008)
         stm_set_char(x, 'A')
         stm_set_char(x, 'a', 4999)
         self.push_root(x)
         self.commit_transaction()
-        assert lib._stm_total_allocated() == 5000 + LMO + CLEO
+        assert lib._stm_total_allocated() == 5008 + LMO + CLEO
 
         self.start_transaction()
         x = self.pop_root()
         self.push_root(x)
-        assert lib._stm_total_allocated() == 5000 + LMO + CLEO
+        assert lib._stm_total_allocated() == 5008 + LMO + CLEO
         stm_set_char(x, 'B')
         stm_set_char(x, 'b', 4999)
 
         py.test.skip("we don't account for private pages right now")
-        assert lib._stm_total_allocated() == 5000 + LMO + 2 * 4096  # 2 pages
+        assert lib._stm_total_allocated() == 5008 + LMO + 2 * 4096  # 2 pages
         stm_major_collect()
 
         assert stm_get_char(x)       == 'B'
@@ -226,7 +226,7 @@ class TestGCPage(BaseTest):
         self.switch(0)
         assert stm_get_char(x)       == 'B'
         assert stm_get_char(x, 4999) == 'b'
-        assert lib._stm_total_allocated() == 5000 + LMO + 2 * 4096  # 2 pages
+        assert lib._stm_total_allocated() == 5008 + LMO + 2 * 4096  # 2 pages
 
     def test_trace_correct_version_of_overflow_objects_1(self, size=32):
         self.start_transaction()
@@ -245,13 +245,13 @@ class TestGCPage(BaseTest):
         assert stm_get_char(x, size - 1) == 'E'
 
     def test_trace_correct_version_of_overflow_objects_2(self):
-        self.test_trace_correct_version_of_overflow_objects_1(size=5000)
+        self.test_trace_correct_version_of_overflow_objects_1(size=5008)
 
     def test_reshare_if_no_longer_modified_0(self, invert=0):
         if invert:
             self.switch(1)
         self.start_transaction()
-        x = stm_allocate(5000)
+        x = stm_allocate(5008)
         self.push_root(x)
         self.commit_transaction()
         x = self.pop_root()
@@ -264,12 +264,12 @@ class TestGCPage(BaseTest):
         stm_major_collect()
 
         py.test.skip("we don't account for private pages right now")
-        assert lib._stm_total_allocated() == 5000 + LMO + 2 * 4096  # 2 pages
+        assert lib._stm_total_allocated() == 5008 + LMO + 2 * 4096  # 2 pages
         self.commit_transaction()
         #
         self.start_transaction()
         stm_major_collect()
-        assert lib._stm_total_allocated() == 5000 + LMO    # shared again
+        assert lib._stm_total_allocated() == 5008 + LMO    # shared again
 
     def test_reshare_if_no_longer_modified_1(self):
         self.test_reshare_if_no_longer_modified_0(invert=1)
@@ -307,7 +307,7 @@ class TestGCPage(BaseTest):
         stm_set_char(p2, 't')
         self.push_root(p2)
         stm_major_collect()
-        assert lib._stm_total_allocated() == 2 * 616
+        assert lib._stm_total_allocated() == 2 * 624
         #
         p2 = self.pop_root()
         m = self.pop_root()
