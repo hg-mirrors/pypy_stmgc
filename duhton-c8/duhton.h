@@ -31,6 +31,8 @@ typedef TLPREFIX struct DuObject_s DuObject;
 
 
 typedef void(*trace_fn)(struct DuObject_s *, void visit(object_t **));
+typedef void(*trace_cards_fn)(struct DuObject_s *, void visit(object_t **),
+                              uintptr_t start, uintptr_t stop);
 typedef size_t(*bytesize_fn)(struct DuObject_s *);
 typedef void(*print_fn)(DuObject *);
 typedef DuObject *(*eval_fn)(DuObject *, DuObject *);
@@ -46,6 +48,9 @@ typedef struct {
     len_fn dt_is_true;
     len_fn dt_length;
     bytesize_fn dt_bytesize;
+    uintptr_t dt_cards_offset;
+    uintptr_t dt_cards_itemsize;
+    trace_cards_fn dt_trace_cards;
 } DuType;
 
 /* keep this list in sync with object.c's Du_Types[] */
@@ -181,6 +186,7 @@ void Du_TransactionRun(void);
 
 #define _du_read1(p1)           stm_read((object_t *)(p1))
 #define _du_write1(p1)          stm_write((object_t *)(p1))
+#define _du_write1_card(p, i)   stm_write_card((object_t *)(p), (i))
 
 #define INIT_PREBUILT(p)       ((typeof(p))stm_setup_prebuilt((object_t *)(p)))
 

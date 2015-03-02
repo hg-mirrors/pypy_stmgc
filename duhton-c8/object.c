@@ -37,16 +37,23 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 void stmcb_get_card_base_itemsize(struct object_s *obj,
                                   uintptr_t offset_itemsize[2])
 {
-    abort();
+    DuType *tp = Du_Types[((struct DuObject_s *)obj)->type_id];
+    offset_itemsize[0] = tp->dt_cards_offset;
+    offset_itemsize[1] = tp->dt_cards_itemsize;
 }
 void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
                        uintptr_t start, uintptr_t stop)
 {
-    abort();
+    DuType *tp = Du_Types[((struct DuObject_s *)obj)->type_id];
+    tp->dt_trace_cards((struct DuObject_s *)obj, visit, start, stop);
 }
-void stmcb_commit_soon(void) { }
-long stmcb_obj_supports_cards(struct object_s *obj) {return 0;}
+long stmcb_obj_supports_cards(struct object_s *obj)
+{
+    DuType *tp = Du_Types[((struct DuObject_s *)obj)->type_id];
+    return tp->dt_trace_cards != NULL;
+}
 
+void stmcb_commit_soon(void) { }
 
 
 DuObject *DuObject_New(DuType *tp)

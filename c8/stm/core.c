@@ -926,17 +926,6 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
 }
 
 
-char _stm_write_slowpath_card_extra(object_t *obj)
-{
-    /* the PyPy JIT calls this function directly if it finds that an
-       array doesn't have the GCFLAG_CARDS_SET */
-    bool mark_card = obj_should_use_cards(STM_SEGMENT->segment_base, obj);
-    write_slowpath_common(obj, mark_card);
-    return mark_card;
-    /* XXX likely, this whole function can be removed now */
-}
-
-
 void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
 {
     dprintf_test(("write_slowpath_card(%p, %lu)\n",
@@ -946,7 +935,8 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
        If the object is large enough, ask it to set up the object for
        card marking instead. */
     if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
-        char mark_card = _stm_write_slowpath_card_extra(obj);
+        bool mark_card = obj_should_use_cards(STM_SEGMENT->segment_base, obj);
+        write_slowpath_common(obj, mark_card);
         if (!mark_card)
             return;
     }
