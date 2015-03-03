@@ -228,7 +228,8 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
         addr >= stm_object_pages+TOTAL_MEMORY) {
         /* actual segfault, unrelated to stmgc */
         fprintf(stderr, "Segmentation fault: accessing %p\n", addr);
-        raise(SIGINT);
+        raise(SIGABRT);
+        raise(SIGKILL);
     }
 
     int segnum = get_segment_of_linear_address(addr);
@@ -236,7 +237,8 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
     if (segnum != STM_SEGMENT->segment_num) {
         fprintf(stderr, "Segmentation fault: accessing %p (seg %d) from"
                 " seg %d\n", addr, segnum, STM_SEGMENT->segment_num);
-        raise(SIGINT);
+        raise(SIGABRT);
+        raise(SIGKILL);
     }
     dprintf(("-> segment: %d\n", segnum));
 
@@ -245,7 +247,8 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
     if (pagenum < END_NURSERY_PAGE) {
         fprintf(stderr, "Segmentation fault: accessing %p (seg %d "
                         "page %lu)\n", addr, segnum, pagenum);
-        raise(SIGINT);
+        raise(SIGABRT);
+        raise(SIGKILL);
     }
 
     DEBUG_EXPECT_SEGFAULT(false);
