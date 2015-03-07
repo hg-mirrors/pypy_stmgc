@@ -93,6 +93,12 @@ struct stm_priv_segment_info_s {
     struct tree_s *young_outside_nursery;
     struct tree_s *nursery_objects_shadows;
 
+    /* For each entry in 'modified_old_objects', we have two entries
+       in the following list, which give the marker at the time we added
+       the entry to modified_old_objects. */
+    struct list_s *modified_old_objects_markers;
+    uintptr_t modified_old_objects_markers_num_old;
+
     /* List of all young weakrefs to check in minor collections. These
        are the only weakrefs that may point to young objects and never
        contain NULL. */

@@ -410,6 +410,18 @@ static void collect_cardrefs_to_nursery(void)
     }
 }
 
+static void collect_roots_from_markers(uintptr_t num_old)
+{
+    dprintf(("collect_roots_from_markers\n"));
+    /* visit the marker objects */
+    struct list_s *mlst = STM_PSEGMENT->modified_old_objects_markers;
+    STM_PSEGMENT->modified_old_objects_markers_num_old = list_count(mlst);
+    uintptr_t i, total = list_count(mlst);
+    assert((total & 1) == 0);
+    for (i = num_old + 1; i < total; i += 2) {
+        minor_trace_if_young((object_t **)list_ptr_to_item(mlst, i));
+    }
+}
 
 static void collect_objs_still_young_but_with_finalizers(void)
 {
@@ -494,6 +506,13 @@ static void _do_minor_collection(bool commit)
     dprintf(("minor_collection commit=%d\n", (int)commit));
 
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
+
+    uintptr_t num_old;
+    if (STM_PSEGMENT->overflow_number_has_been_used)
+        num_old = STM_PSEGMENT->modified_old_objects_markers_num_old;
+    else
+        num_old = 0;
+
     if (!commit) {
         /* 'STM_PSEGMENT->overflow_number' is used now by this collection,
            in the sense that it's copied to the overflow objects */
@@ -501,6 +520,8 @@ static void _do_minor_collection(bool commit)
     }
 
     collect_cardrefs_to_nursery();
+
+    collect_roots_from_markers(num_old);
 
     collect_roots_in_nursery();
 
