@@ -26,6 +26,15 @@ void tuple_trace(struct DuTupleObject_s *ob, void visit(object_t **))
     }
 }
 
+void tuple_trace_cards(struct DuTupleObject_s *ob, void visit(object_t **),
+                       uintptr_t start, uintptr_t stop)
+{
+    int i;
+    for (i = start; i < stop; i++) {
+        visit((object_t **)&ob->ob_items[i]);
+    }
+}
+
 size_t tuple_bytesize(struct DuTupleObject_s *ob)
 {
     return sizeof(DuTupleObject) + (ob->ob_capacity - 1) * sizeof(DuObject *);
@@ -91,7 +100,7 @@ void _list_append(DuListObject *ob, DuObject *x)
     int i, newcount = olditems->ob_count + 1;
 
     if (newcount <= olditems->ob_capacity) {
-        _du_write1(olditems);
+        _du_write1_card(olditems, newcount-1);
         olditems->ob_items[newcount-1] = x;
         olditems->ob_count = newcount;
     } else {                    /* allocate new one */
@@ -144,9 +153,9 @@ void _list_setitem(DuListObject *ob, int index, DuObject *newitem)
     _du_read1(ob);
     DuTupleObject *p = ob->ob_tuple;
 
-    _du_write1(p);
     if (index < 0 || index >= p->ob_count)
         Du_FatalError("list_set: index out of range");
+    _du_write1_card(p, index);
     p->ob_items[index] = newitem;
 }
 
@@ -188,6 +197,9 @@ DuType DuTuple_Type = {    /* "tuple" is mostly an internal type here */
     (len_fn)NULL,
     (len_fn)NULL,
     (bytesize_fn)tuple_bytesize,
+    offsetof(struct DuTupleObject_s, ob_items),
+    sizeof(DuObject *),
+    (trace_cards_fn)tuple_trace_cards,
 };
 
 DuType DuList_Type = {

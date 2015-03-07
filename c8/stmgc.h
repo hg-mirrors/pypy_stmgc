@@ -77,7 +77,15 @@ typedef struct stm_thread_local_s {
 #define _STM_NSE_SIGNAL_ABORT             1
 #define _STM_NSE_SIGNAL_MAX               2
 
+#define _STM_CARD_MARKED 1      /* should always be 1... */
+#define _STM_GCFLAG_CARDS_SET          0x8
+#define _STM_CARD_BITS                 5   /* must be 5/6/7 for the pypy jit */
+#define _STM_CARD_SIZE                 (1 << _STM_CARD_BITS)
+#define _STM_MIN_CARD_COUNT            17
+#define _STM_MIN_CARD_OBJ_SIZE         (_STM_CARD_SIZE * _STM_MIN_CARD_COUNT)
+
 void _stm_write_slowpath(object_t *);
+void _stm_write_slowpath_card(object_t *, uintptr_t);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
@@ -87,9 +95,11 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
 #include <stdbool.h>
+uint8_t _stm_get_transaction_read_version();
+uint8_t _stm_get_card_value(object_t *obj, long idx);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
-
+bool _stm_was_written_card(object_t *obj);
 bool _stm_is_accessible_page(uintptr_t pagenum);
 
 void _stm_test_switch(stm_thread_local_t *tl);
@@ -125,7 +135,8 @@ object_t *_stm_enum_objects_pointing_to_nursery(long index);
 object_t *_stm_next_last_cl_entry();
 void _stm_start_enum_last_cl_entry();
 long _stm_count_cl_entries();
-
+long _stm_count_old_objects_with_cards_set(void);
+object_t *_stm_enum_old_objects_with_cards_set(long index);
 uint64_t _stm_total_allocated(void);
 #endif
 
@@ -156,6 +167,22 @@ struct object_s {
 
 extern ssize_t stmcb_size_rounded_up(struct object_s *);
 void stmcb_trace(struct object_s *obj, void visit(object_t **));
+/* a special trace-callback that is only called for the marked
+   ranges of indices (using stm_write_card(o, index)) */
+extern void stmcb_trace_cards(struct object_s *, void (object_t **),
+                              uintptr_t start, uintptr_t stop);
+/* this function will be called on objects that support cards.
+   It returns the base_offset (in bytes) inside the object from
+   where the indices start, and item_size (in bytes) for the size of
+   one item */
+extern void stmcb_get_card_base_itemsize(struct object_s *,
+                                         uintptr_t offset_itemsize[2]);
+/* returns whether this object supports cards. we will only call
+   stmcb_get_card_base_itemsize on objs that do so. */
+extern long stmcb_obj_supports_cards(struct object_s *);
+
+
+
 
 __attribute__((always_inline))
 static inline void stm_read(object_t *obj)
@@ -169,6 +196,45 @@ static inline void stm_write(object_t *obj)
 {
     if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
         _stm_write_slowpath(obj);
+}
+
+
+__attribute__((always_inline))
+static inline void stm_write_card(object_t *obj, uintptr_t index)
+{
+    /* if GCFLAG_WRITE_BARRIER is set, then don't do anything more. */
+    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0)) {
+
+        /* GCFLAG_WRITE_BARRIER is not set.  This might be because
+           it's the first time we see a given small array; or it might
+           be because it's a big array with card marking.  In the
+           latter case we will always reach this point, even if we
+           already marked the correct card.  Based on the idea that it
+           is actually the most common case, check it here.  If the
+           array doesn't actually use card marking, the following read
+           is a bit nonsensical, but in a way that should never return
+           CARD_MARKED by mistake.
+
+           The computation of the card marker is further optimized by
+           assuming that large objects are allocated to multiples of
+           16 (rather than just 8, as all objects are).  Under this
+           assumption the following code is equivalent to:
+
+               (obj >> 4) + (index / _STM_CARD_SIZE) + 1
+
+           The code below however takes only a couple of assembler
+           instructions.  It also assumes that the intermediate value
+           fits in a 64-bit value, which it clearly does (all values
+           are much smaller than 2 ** 60).
+        */
+        uintptr_t v = (((uintptr_t)obj) << (_STM_CARD_BITS - 4)) + index;
+        stm_read_marker_t *card1 = (stm_read_marker_t *)(v >> _STM_CARD_BITS);
+        if (card1[1].rm != _STM_CARD_MARKED) {
+
+            /* slow path. */
+            _stm_write_slowpath_card(obj, index);
+        }
+    }
 }
 
 
@@ -327,14 +393,8 @@ object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 
 
 /* dummies for now: */
-__attribute__((always_inline))
-static inline void stm_write_card(object_t *obj, uintptr_t index)
-{
-    stm_write(obj);
-}
-
-
 static inline void stm_flush_timing(stm_thread_local_t *tl, int verbose) {}
+
 /* ==================== END ==================== */
 
 static void (*stmcb_expand_marker)(char *segment_base, uintptr_t odd_number,

@@ -1,0 +1,7 @@
+
+(setq a (list))
+
+(setq i 0)
+(while (< i 10000000)
+  (append a i)
+  (setq i (+ i 1)))

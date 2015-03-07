@@ -10,6 +10,8 @@ typedef ... object_t;
 #define STM_NB_SEGMENTS ...
 #define _STM_GCFLAG_WRITE_BARRIER ...
 #define _STM_FAST_ALLOC ...
+#define _STM_CARD_SIZE ...
+#define _STM_CARD_MARKED ...
 
 typedef struct {
 ...;
@@ -43,6 +45,11 @@ object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 
+/*void stm_write_card(); use _checked_stm_write_card() instead */
+
+uint8_t _stm_get_card_value(object_t *obj, long idx);
+uint8_t _stm_get_transaction_read_version();
+
 void stm_setup(void);
 void stm_teardown(void);
 void stm_register_thread_local(stm_thread_local_t *tl);
@@ -59,8 +66,10 @@ bool _check_stop_safe_point(void);
 ssize_t stmcb_size_rounded_up(struct object_s *obj);
 
 bool _checked_stm_write(object_t *obj);
+bool _checked_stm_write_card(object_t *obj, uintptr_t index);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
+bool _stm_was_written_card(object_t *obj);
 char *_stm_get_segment_base(long index);
 bool _stm_in_transaction(stm_thread_local_t *tl);
 int _stm_get_flags(object_t *obj);
@@ -118,8 +127,10 @@ long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
+long _stm_count_old_objects_with_cards_set(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
+object_t *_stm_enum_old_objects_with_cards_set(long index);
 object_t *_stm_next_last_cl_entry();
 void _stm_start_enum_last_cl_entry();
 long _stm_count_cl_entries();
@@ -189,6 +200,10 @@ void _test_run_abort(stm_thread_local_t *tl) {
 
 bool _checked_stm_write(object_t *object) {
     CHECKED(stm_write(object));
+}
+
+bool _checked_stm_write_card(object_t *object, uintptr_t index) {
+    CHECKED(stm_write_card(object, index));
 }
 
 bool _check_commit_transaction(void) {
@@ -322,6 +337,43 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     }
 }
 
+long stmcb_obj_supports_cards(struct object_s *obj)
+{
+    return 1;
+}
+
+void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
+                       uintptr_t start, uintptr_t stop)
+{
+    int i;
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    assert(myobj->type_id != 421419);
+    assert(myobj->type_id != 421418);
+    if (myobj->type_id < 421420) {
+        /* basic case: no references */
+        return;
+    }
+
+    for (i=start; (i < myobj->type_id - 421420) && (i < stop); i++) {
+        object_t **ref = ((object_t **)(myobj + 1)) + i;
+        visit(ref);
+    }
+}
+
+void stmcb_get_card_base_itemsize(struct object_s *obj,
+                                  uintptr_t offset_itemsize[2])
+{
+    struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id < 421420) {
+        offset_itemsize[0] = SIZEOF_MYOBJ;
+        offset_itemsize[1] = 1;
+    }
+    else {
+        offset_itemsize[0] = sizeof(struct myobj_s);
+        offset_itemsize[1] = sizeof(object_t *);
+    }
+}
+
 long current_segment_num(void)
 {
     return STM_SEGMENT->segment_num;
@@ -347,6 +399,11 @@ assert HDR == 8
 GCFLAG_WRITE_BARRIER = lib._STM_GCFLAG_WRITE_BARRIER
 NB_SEGMENTS = lib.STM_NB_SEGMENTS
 FAST_ALLOC = lib._STM_FAST_ALLOC
+CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
+CARD_CLEAR = 0
+CARD_MARKED = lib._STM_CARD_MARKED
+CARD_MARKED_OLD = lib._stm_get_transaction_read_version
+
 
 class Conflict(Exception):
     pass
@@ -506,11 +563,11 @@ def objects_pointing_to_nursery():
         return None
     return map(lib._stm_enum_objects_pointing_to_nursery, range(count))
 
-def old_objects_with_cards():
-    count = lib._stm_count_old_objects_with_cards()
+def old_objects_with_cards_set():
+    count = lib._stm_count_old_objects_with_cards_set()
     if count < 0:
         return None
-    return map(lib._stm_enum_old_objects_with_cards, range(count))
+    return map(lib._stm_enum_old_objects_with_cards_set, range(count))
 
 def last_commit_log_entry_objs():
     lib._stm_start_enum_last_cl_entry()
