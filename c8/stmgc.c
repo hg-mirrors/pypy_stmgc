@@ -14,6 +14,7 @@
 #include "stm/gcpage.h"
 #include "stm/extra.h"
 #include "stm/fprintcolor.h"
+#include "stm/marker.h"
 #include "stm/rewind_setjmp.h"
 #include "stm/finalizer.h"
 
@@ -34,5 +35,6 @@
 #include "stm/core.c"
 #include "stm/extra.c"
 #include "stm/fprintcolor.c"
+#include "stm/marker.c"
 #include "stm/rewind_setjmp.c"
 #include "stm/finalizer.c"

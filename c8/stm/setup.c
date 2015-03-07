@@ -100,6 +100,7 @@ void stm_setup(void)
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
         pr->modified_old_objects = list_create();
+        pr->modified_old_objects_markers = list_create();
         pr->large_overflow_objects = list_create();
         pr->young_weakrefs = list_create();
         pr->old_weakrefs = list_create();
@@ -152,6 +153,7 @@ void stm_teardown(void)
         list_free(pr->objects_pointing_to_nursery);
         list_free(pr->old_objects_with_cards_set);
         list_free(pr->modified_old_objects);
+        list_free(pr->modified_old_objects_markers);
         assert(list_is_empty(pr->large_overflow_objects));
         list_free(pr->large_overflow_objects);
         list_free(pr->young_weakrefs);

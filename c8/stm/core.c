@@ -528,6 +528,7 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
         STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
 
         list_clear(STM_PSEGMENT->modified_old_objects);
+        list_clear(STM_PSEGMENT->modified_old_objects_markers);
         STM_PSEGMENT->last_commit_log_entry = new;
         release_modification_lock(STM_SEGMENT->segment_num);
     }
@@ -557,6 +558,7 @@ static void _validate_and_add_to_commit_log(void)
         STM_PSEGMENT->transaction_state = TS_NONE;
         STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
         list_clear(STM_PSEGMENT->modified_old_objects);
+        list_clear(STM_PSEGMENT->modified_old_objects_markers);
         STM_PSEGMENT->last_commit_log_entry = new;
 
         /* do it: */
@@ -630,6 +632,7 @@ static void make_bk_slices_for_range(
             (uintptr_t)obj,     /* obj */
             (uintptr_t)bk_slice,  /* bk_addr */
             NEW_SLICE(slice_off, slice_sz));
+        timing_record_write();
         dprintf(("> append slice %p, off=%lu, sz=%lu\n", bk_slice, slice_off, slice_sz));
         release_modification_lock(STM_SEGMENT->segment_num);
 
@@ -1051,6 +1054,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
 
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
+    timing_event(tl, STM_TRANSACTION_START);
     STM_PSEGMENT->transaction_state = TS_REGULAR;
     STM_PSEGMENT->safe_point = SP_RUNNING;
 #ifndef NDEBUG
@@ -1071,6 +1075,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
+    assert(list_is_empty(STM_PSEGMENT->modified_old_objects_markers));
     assert(list_is_empty(STM_PSEGMENT->large_overflow_objects));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
@@ -1080,6 +1085,10 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[1]));
     assert(list_is_empty(STM_PSEGMENT->young_objects_with_light_finalizers));
     assert(STM_PSEGMENT->finalizers == NULL);
+#ifndef NDEBUG
+    /* this should not be used when objects_pointing_to_nursery == NULL */
+    STM_PSEGMENT->modified_old_objects_markers_num_old = 99999999999999999L;
+#endif
 
     check_nursery_at_transaction_start();
 
@@ -1125,7 +1134,7 @@ int stm_is_inevitable(void)
 
 /************************************************************/
 
-static void _finish_transaction()
+static void _finish_transaction(enum stm_event_e event)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
 
@@ -1136,6 +1145,7 @@ static void _finish_transaction()
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
     list_clear(STM_PSEGMENT->old_objects_with_cards_set);
     list_clear(STM_PSEGMENT->large_overflow_objects);
+    timing_event(tl, event);
 
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
@@ -1236,7 +1246,7 @@ void stm_commit_transaction(void)
 
     /* done */
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
-    _finish_transaction();
+    _finish_transaction(STM_TRANSACTION_COMMIT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
@@ -1369,7 +1379,7 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
                                                    : NURSERY_END;
     }
 
-    _finish_transaction();
+    _finish_transaction(STM_TRANSACTION_ABORT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     return tl;

@@ -124,6 +124,46 @@ void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
 long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
+/* Profiling events.  In the comments: content of the markers, if any */
+enum stm_event_e {
+    /* always STM_TRANSACTION_START followed later by one of COMMIT or ABORT */
+    STM_TRANSACTION_START,
+    STM_TRANSACTION_COMMIT,
+    STM_TRANSACTION_ABORT,
+
+    /* write-read contention: a "marker" is included in the PYPYSTM file
+       saying where the write was done.  Followed by STM_TRANSACTION_ABORT. */
+    STM_CONTENTION_WRITE_READ,
+
+    /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE */
+    STM_WAIT_FREE_SEGMENT,
+    STM_WAIT_OTHER_INEVITABLE,
+    STM_WAIT_DONE,
+
+    /* start and end of GC cycles */
+    STM_GC_MINOR_START,
+    STM_GC_MINOR_DONE,
+    STM_GC_MAJOR_START,
+    STM_GC_MAJOR_DONE,
+    ...
+};
+
+typedef struct {
+    stm_thread_local_t *tl;
+    /* If segment_base==NULL, the remaining fields are undefined.  If non-NULL,
+       the rest is a marker to interpret from this segment_base addr. */
+    char *segment_base;
+    uintptr_t odd_number;
+    object_t *object;
+} stm_loc_marker_t;
+
+typedef void (*stmcb_timing_event_fn)(stm_thread_local_t *tl,
+                                      enum stm_event_e event,
+                                      stm_loc_marker_t *markers);
+stmcb_timing_event_fn stmcb_timing_event;
+
+int stm_set_timing_log(const char *profiling_file_name, int prof_mode,
+                       int expand_marker(stm_loc_marker_t *, char *, int));
 
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
