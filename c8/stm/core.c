@@ -498,6 +498,10 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
                 break;   /* success! */
         } else if (old->next == INEV_RUNNING) {
             /* we failed because there is an INEV transaction running */
+            /* XXXXXX for now just sleep (XXX with the lock acquired?
+               isn't it a bad idea?).  We should really ask to inev
+               transaction to do the commit for us, and then we can
+               continue running. */
             usleep(10);
         }
 
