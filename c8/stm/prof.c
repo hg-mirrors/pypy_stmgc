@@ -58,7 +58,7 @@ static bool open_timing_log(const char *filename)
     if (profiling_file == NULL)
         return false;
 
-    fwrite("STMGC-C7-PROF01\n", 16, 1, profiling_file);
+    fwrite("STMGC-C8-PROF01\n", 16, 1, profiling_file);
     stmcb_timing_event = _stm_profiling_event;
     return true;
 }
