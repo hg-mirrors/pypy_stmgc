@@ -348,6 +348,8 @@ static void mark_visit_from_modified_objects(void)
         struct stm_undo_s *modified = (struct stm_undo_s *)lst->items;
         struct stm_undo_s *end = (struct stm_undo_s *)(lst->items + lst->count);
         for (; modified < end; modified++) {
+            if (modified->type == TYPE_POSITION_MARKER)
+                continue;
             object_t *obj = modified->object;
             struct object_s *dst = (struct object_s*)REAL_ADDRESS(base, obj);
 
@@ -388,14 +390,16 @@ static void mark_visit_from_modified_objects(void)
 
 static void mark_visit_from_markers(void)
 {
-    long j;
-    for (j = 1; j < NB_SEGMENTS; j++) {
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
-        struct list_s *lst = pseg->modified_old_objects_markers;
-        uintptr_t i;
-        for (i = list_count(lst); i > 0; i -= 2) {
-            mark_visit_possibly_new_object((object_t *)list_item(lst, i - 1),
-                                           pseg);
+    long i;
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+        struct list_s *lst = get_priv_segment(i)->modified_old_objects;
+
+        struct stm_undo_s *modified = (struct stm_undo_s *)lst->items;
+        struct stm_undo_s *end = (struct stm_undo_s *)(lst->items + lst->count);
+        for (; modified < end; modified++) {
+            if (modified->type == TYPE_POSITION_MARKER)
+                mark_visit_possibly_new_object(modified->marker_object, pseg);
         }
     }
 }

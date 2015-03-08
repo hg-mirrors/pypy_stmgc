@@ -3,11 +3,10 @@
 #endif
 
 
-static void marker_fetch(stm_loc_marker_t *out_marker)
+static bool marker_fetch(stm_thread_local_t *tl, stm_loc_marker_t *out_marker)
 {
-    /* Fetch the current marker from the 'out_marker->tl's shadow stack,
+    /* Fetch the current marker from tl's shadow stack,
        and return it in 'out_marker->odd_number' and 'out_marker->object'. */
-    stm_thread_local_t *tl = out_marker->tl;
     struct stm_shadowentry_s *current = tl->shadowstack - 1;
     struct stm_shadowentry_s *base = tl->shadowstack_base;
 
@@ -23,68 +22,69 @@ static void marker_fetch(stm_loc_marker_t *out_marker)
         /* found the odd marker */
         out_marker->odd_number = (uintptr_t)current[0].ss;
         out_marker->object = current[1].ss;
+        return true;
     }
     else {
         /* no marker found */
-        out_marker->odd_number = 0;
-        out_marker->object = NULL;
+        return false;
     }
 }
 
-static void marker_fetch_obj_write(object_t *obj, stm_loc_marker_t *out_marker)
+static void marker_fetch_obj_write(struct stm_undo_s *start,
+                                   struct stm_undo_s *contention,
+                                   stm_loc_marker_t *out_marker)
 {
-    /* From 'out_marker->tl', fill in 'out_marker->segment_base' and
-       'out_marker->odd_number' and 'out_marker->object' from the
-       marker associated with writing the 'obj'.
+    /* Fill out 'out_marker->odd_number' and 'out_marker->object' from
+       the marker just before 'contention' in the list starting at
+       'start'.
     */
-    assert(_has_mutex());
-
-    long i, num;
-    int in_segment_num = out_marker->tl->associated_segment_num;
-    assert(in_segment_num >= 1);
-    struct stm_priv_segment_info_s *pseg = get_priv_segment(in_segment_num);
-    struct list_s *mlst = pseg->modified_old_objects;
-    struct list_s *mlstm = pseg->modified_old_objects_markers;
-    num = list_count(mlstm) / 2;
-    assert(num * 3 <= list_count(mlst));
-    for (i = 0; i < num; i++) {
-        if (list_item(mlst, i * 3) == (uintptr_t)obj) {
-            out_marker->odd_number = list_item(mlstm, i * 2 + 0);
-            out_marker->object = (object_t *)list_item(mlstm, i * 2 + 1);
+    while (contention != start) {
+        --contention;
+        if (contention->type == TYPE_POSITION_MARKER) {
+            out_marker->odd_number = contention->marker_odd_number;
+            out_marker->object = contention->marker_object;
             return;
         }
     }
+    /* no position marker found... */
     out_marker->odd_number = 0;
     out_marker->object = NULL;
 }
 
-static void _timing_record_write(void)
+static void _timing_record_write_position(void)
 {
     stm_loc_marker_t marker;
-    marker.tl = STM_SEGMENT->running_thread;
-    marker_fetch(&marker);
+    if (!marker_fetch(STM_SEGMENT->running_thread, &marker))
+        return;
 
-    long base_count = list_count(STM_PSEGMENT->modified_old_objects) / 3;
-    struct list_s *mlstm = STM_PSEGMENT->modified_old_objects_markers;
-    while (list_count(mlstm) < 2 * base_count) {
-        mlstm = list_append2(mlstm, 0, 0);
+    struct list_s *list = STM_PSEGMENT->modified_old_objects;
+    uintptr_t i = STM_PSEGMENT->position_markers_last;
+    if (i < list_count(list)) {
+        struct stm_undo_s *undo = (struct stm_undo_s *)(list->items + i);
+        if (undo->type == TYPE_POSITION_MARKER &&
+            undo->marker_odd_number == marker.odd_number &&
+            undo->marker_object == marker.object)
+            return;    /* already up-to-date */
     }
-    mlstm = list_append2(mlstm, marker.odd_number, (uintptr_t)marker.object);
-    STM_PSEGMENT->modified_old_objects_markers = mlstm;
+
+    STM_PSEGMENT->position_markers_last = list_count(list);
+    STM_PSEGMENT->modified_old_objects = list_append3(
+        list,
+        TYPE_POSITION_MARKER,         /* type */
+        marker.odd_number,            /* marker_odd_number */
+        (uintptr_t)marker.object);    /* marker_object */
 }
 
-static void timing_write_read_contention(object_t *obj)
+static void timing_write_read_contention(struct stm_undo_s *start,
+                                         struct stm_undo_s *contention)
 {
     if (stmcb_timing_event == NULL)
         return;
 
-    /* Collect the older location of the write from the current thread. */
     stm_loc_marker_t marker;
-    marker.tl = STM_SEGMENT->running_thread;
-    marker.segment_base = STM_SEGMENT->segment_base;
-    marker_fetch_obj_write(obj, &marker);
-
-    stmcb_timing_event(marker.tl, STM_CONTENTION_WRITE_READ, &marker);
+    marker_fetch_obj_write(start, contention, &marker);
+    stmcb_timing_event(STM_SEGMENT->running_thread,
+                       STM_CONTENTION_WRITE_READ, &marker);
 }
 
 

@@ -68,6 +68,7 @@ typedef struct stm_thread_local_s {
     /* the next fields are handled internally by the library */
     int associated_segment_num;
     int last_associated_segment_num;
+    int thread_local_counter;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
 } stm_thread_local_t;
@@ -381,12 +382,10 @@ enum stm_event_e {
     "gc major done"
 
 /* The markers pushed in the shadowstack are an odd number followed by a
-   regular pointer. */
+   regular object pointer. */
 typedef struct {
-    stm_thread_local_t *tl;
-    char *segment_base;    /* base to interpret the 'object' below */
-    uintptr_t odd_number;  /* marker odd number, or 0 if marker is missing */
-    object_t *object;      /* marker object, or NULL if marker is missing */
+    uintptr_t odd_number;
+    object_t *object;
 } stm_loc_marker_t;
 extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
                                   enum stm_event_e event,
@@ -399,10 +398,12 @@ extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
    'profiling_file_name.fork<PID>' after a fork().  Call it with NULL to
    stop profiling.  Returns -1 in case of error (see errno then).
    The optional 'expand_marker' function pointer is called to expand
-   the marker's odd_number and object into data, starting at the given
-   position and with the given maximum length. */
+   the marker's odd_number and object into printable data, starting at
+   the given position and with the given maximum length. */
+typedef int (*stm_expand_marker_fn)(char *seg_base, stm_loc_marker_t *marker,
+                                    char *output, int output_size);
 int stm_set_timing_log(const char *profiling_file_name, int fork_mode,
-                       int expand_marker(stm_loc_marker_t *, char *, int));
+                       stm_expand_marker_fn expand_marker);
 
 
 /* Convenience macros to push the markers into the shadowstack */
