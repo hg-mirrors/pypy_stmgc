@@ -163,6 +163,10 @@ typedef int (*stm_expand_marker_fn)(char *seg_base, stm_loc_marker_t *marker,
 int stm_set_timing_log(const char *profiling_file_name, int fork_mode,
                        stm_expand_marker_fn expand_marker);
 
+void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
+void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
+void stm_pop_marker(stm_thread_local_t *);
+
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
 long _stm_count_old_objects_with_cards_set(void);
@@ -185,7 +189,6 @@ void (*stmcb_light_finalizer)(object_t *);
 void stm_enable_light_finalizer(object_t *);
 
 void (*stmcb_finalizer)(object_t *);
-
 """)
 
 
@@ -410,6 +413,21 @@ void stmcb_get_card_base_itemsize(struct object_s *obj,
         offset_itemsize[0] = sizeof(struct myobj_s);
         offset_itemsize[1] = sizeof(object_t *);
     }
+}
+
+void stm_push_marker(stm_thread_local_t *tl, uintptr_t onum, object_t *ob)
+{
+    STM_PUSH_MARKER(*tl, onum, ob);
+}
+
+void stm_update_marker_num(stm_thread_local_t *tl, uintptr_t onum)
+{
+    STM_UPDATE_MARKER_NUM(*tl, onum);
+}
+
+void stm_pop_marker(stm_thread_local_t *tl)
+{
+    STM_POP_MARKER(*tl);
 }
 
 long current_segment_num(void)
