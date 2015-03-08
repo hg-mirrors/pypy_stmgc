@@ -46,7 +46,7 @@ static void _stm_profiling_event(stm_thread_local_t *tl,
     }
 }
 
-static int default_expand_marker(stm_loc_marker_t *m, char *p, int s)
+static int default_expand_marker(char *b, stm_loc_marker_t *m, char *p, int s)
 {
     *(uintptr_t *)p = m->odd_number;
     return sizeof(uintptr_t);
