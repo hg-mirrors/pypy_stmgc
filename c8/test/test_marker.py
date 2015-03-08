@@ -149,10 +149,6 @@ class TestMarker(BaseTest):
         p = stm_allocate_old(16)
         #
         self.start_transaction()
-        assert stm_get_char(p) == '\x00'
-        #
-        self.switch(1)
-        self.start_transaction()
         self.push_root(ffi.cast("object_t *", 19))
         self.push_root(ffi.cast("object_t *", ffi.NULL))
         stm_set_char(p, 'A')
@@ -160,9 +156,16 @@ class TestMarker(BaseTest):
         self.pop_root()
         self.push_root(ffi.cast("object_t *", 17))
         self.push_root(ffi.cast("object_t *", ffi.NULL))
-        py.test.raises(Conflict, self.commit_transaction)
         #
-        self.check_recording(19, ffi.NULL, 0, ffi.NULL)
+        self.switch(1)
+        self.start_transaction()
+        assert stm_get_char(p) == '\x00'
+        #
+        self.switch(0)
+        self.commit_transaction()
+        #
+        py.test.raises(Conflict, self.switch, 1)
+        self.check_recording(19, ffi.NULL)
 
     def test_double_remote_markers_cb_write_write(self):
         self.recording(lib.STM_CONTENTION_WRITE_WRITE,
