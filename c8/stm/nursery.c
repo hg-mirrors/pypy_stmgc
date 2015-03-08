@@ -185,6 +185,8 @@ static void _verify_cards_cleared_in_all_lists(struct stm_priv_segment_info_s *p
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         _cards_cleared_in_object(pseg, undo->object, false);
     }
     LIST_FOREACH_R(

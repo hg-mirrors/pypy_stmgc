@@ -7,16 +7,11 @@ class TestMarker(BaseTest):
     def recording(self, *kinds):
         seen = []
         @ffi.callback("stmcb_timing_event_fn")
-        def timing_event(tl, event, markers):
+        def timing_event(tl, event, marker):
             if len(kinds) > 0 and event not in kinds:
                 return
-            if markers:
-                expanded = []
-                for i in range(2):
-                    expanded.append((markers[i].tl,
-                                     markers[i].segment_base,
-                                     markers[i].odd_number,
-                                     markers[i].object))
+            if marker:
+                expanded = (marker.odd_number, marker.object)
             else:
                 expanded = None
             seen.append((tl, event, expanded))
@@ -24,13 +19,11 @@ class TestMarker(BaseTest):
         self.timing_event_keepalive = timing_event
         self.seen = seen
 
-    def check_recording(self, i1, o1, i2, o2, extra=None):
+    def check_recording(self, i1, o1, extra=None):
         seen = self.seen
-        tl, event, markers = seen[0]
+        tl, event, marker = seen[0]
         assert tl == self.tls[1]
-        segbase = lib._stm_get_segment_base
-        assert markers[0] == (self.tls[1], segbase(2), i1, o1)
-        assert markers[1] == (self.tls[0], segbase(1), i2, o2)
+        assert marker == (i1, o1)
         if extra is None:
             assert len(seen) == 1
         else:
@@ -47,9 +40,7 @@ class TestMarker(BaseTest):
         assert int(ffi.cast("uintptr_t", x)) == 29
 
     def test_abort_marker_no_shadowstack(self):
-        self.recording(lib.STM_CONTENTION_WRITE_WRITE,
-                       lib.STM_WAIT_CONTENTION,
-                       lib.STM_ABORTING_OTHER_CONTENTION)
+        self.recording(lib.STM_CONTENTION_WRITE_READ)
         p = stm_allocate_old(16)
         #
         self.start_transaction()
@@ -57,9 +48,13 @@ class TestMarker(BaseTest):
         #
         self.switch(1)
         self.start_transaction()
-        py.test.raises(Conflict, stm_set_char, p, 'B')
+        stm_set_char(p, 'B')
         #
-        self.check_recording(0, ffi.NULL, 0, ffi.NULL)
+        self.switch(0)
+        self.commit_transaction()
+        #
+        py.test.raises(Conflict, self.switch, 1)
+        self.check_recording(0, ffi.NULL)
 
     def test_macros(self):
         self.start_transaction()
@@ -96,8 +91,9 @@ class TestMarker(BaseTest):
         py.test.raises(EmptyStack, self.pop_root)
 
     def test_double_abort_markers_cb_write_write(self):
-        self.recording(lib.STM_CONTENTION_WRITE_WRITE)
+        self.recording(lib.STM_CONTENTION_WRITE_READ)
         p = stm_allocate_old(16)
+        p2 = stm_allocate_old(16)
         #
         self.start_transaction()
         self.push_root(ffi.cast("object_t *", 19))
@@ -107,15 +103,21 @@ class TestMarker(BaseTest):
         self.pop_root()
         self.push_root(ffi.cast("object_t *", 17))
         self.push_root(ffi.cast("object_t *", ffi.NULL))
+        stm_set_char(p, 'B')
+        stm_set_char(p2, 'C')
         stm_minor_collect()
         #
         self.switch(1)
         self.start_transaction()
         self.push_root(ffi.cast("object_t *", 21))
         self.push_root(ffi.cast("object_t *", ffi.NULL))
-        py.test.raises(Conflict, stm_set_char, p, 'B')
+        stm_set_char(p, 'B')
         #
-        self.check_recording(21, ffi.NULL, 19, ffi.NULL)
+        self.switch(0)
+        self.commit_transaction()
+        #
+        py.test.raises(Conflict, self.switch, 1)
+        self.check_recording(19, ffi.NULL)
 
     def test_double_abort_markers_cb_inevitable(self):
         self.recording(lib.STM_CONTENTION_INEVITABLE)

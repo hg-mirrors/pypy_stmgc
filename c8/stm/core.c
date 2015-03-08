@@ -369,6 +369,8 @@ static bool _stm_validate()
                     struct stm_undo_s *undo = cl->written;
                     struct stm_undo_s *end = cl->written + cl->written_count;
                     for (; undo < end; undo++) {
+                        if (undo->type == TYPE_POSITION_MARKER)
+                            continue;
                         if (_stm_was_read(undo->object)) {
                             /* first reset all modified objects from the backup
                                copies as soon as the first conflict is detected;
@@ -1031,6 +1033,8 @@ static void reset_wb_executed_flags(void)
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         obj->stm_flags &= ~GCFLAG_WB_EXECUTED;
     }
@@ -1044,6 +1048,8 @@ static void readd_wb_executed_flags(void)
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         obj->stm_flags |= GCFLAG_WB_EXECUTED;
     }
@@ -1163,6 +1169,8 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
     struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         struct object_s *dst = (struct object_s*)REAL_ADDRESS(segbase, obj);
         assert(dst->stm_flags & GCFLAG_WRITE_BARRIER);
