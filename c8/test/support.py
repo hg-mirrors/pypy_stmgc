@@ -149,10 +149,6 @@ enum stm_event_e {
 };
 
 typedef struct {
-    stm_thread_local_t *tl;
-    /* If segment_base==NULL, the remaining fields are undefined.  If non-NULL,
-       the rest is a marker to interpret from this segment_base addr. */
-    char *segment_base;
     uintptr_t odd_number;
     object_t *object;
 } stm_loc_marker_t;
@@ -162,8 +158,10 @@ typedef void (*stmcb_timing_event_fn)(stm_thread_local_t *tl,
                                       stm_loc_marker_t *markers);
 stmcb_timing_event_fn stmcb_timing_event;
 
-int stm_set_timing_log(const char *profiling_file_name, int prof_mode,
-                       int expand_marker(stm_loc_marker_t *, char *, int));
+typedef int (*stm_expand_marker_fn)(char *seg_base, stm_loc_marker_t *marker,
+                                    char *output, int output_size);
+int stm_set_timing_log(const char *profiling_file_name, int fork_mode,
+                       stm_expand_marker_fn expand_marker);
 
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);

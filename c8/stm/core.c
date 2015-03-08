@@ -49,6 +49,8 @@ static void import_objects(
 
     DEBUG_EXPECT_SEGFAULT(false);
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
         uintptr_t current_page_num = ((uintptr_t)oslice) / 4096;
@@ -269,6 +271,11 @@ void _dbg_print_commit_log()
         struct stm_undo_s *undo = cl->written;
         struct stm_undo_s *end = undo + cl->written_count;
         for (; undo < end; undo++) {
+            if (undo->type == TYPE_POSITION_MARKER) {
+                fprintf(stderr, "    marker %p %lu\n",
+                        undo->marker_object, undo->marker_odd_number);
+                continue;
+            }
             fprintf(stderr, "    obj %p, size %d, ofs %lu: ", undo->object,
                     SLICE_SIZE(undo->slice), SLICE_OFFSET(undo->slice));
             /* long i; */
@@ -369,6 +376,7 @@ static bool _stm_validate()
                                the old (but unmodified) version to the newer version.
                             */
                             reset_modified_from_backup_copies(my_segnum);
+                            timing_write_read_contention(cl->written, undo);
                             needs_abort = true;
 
                             dprintf(("_stm_validate() failed for obj %p\n", undo->object));
@@ -528,7 +536,6 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
         STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
 
         list_clear(STM_PSEGMENT->modified_old_objects);
-        list_clear(STM_PSEGMENT->modified_old_objects_markers);
         STM_PSEGMENT->last_commit_log_entry = new;
         release_modification_lock(STM_SEGMENT->segment_num);
     }
@@ -558,7 +565,6 @@ static void _validate_and_add_to_commit_log(void)
         STM_PSEGMENT->transaction_state = TS_NONE;
         STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
         list_clear(STM_PSEGMENT->modified_old_objects);
-        list_clear(STM_PSEGMENT->modified_old_objects_markers);
         STM_PSEGMENT->last_commit_log_entry = new;
 
         /* do it: */
@@ -601,6 +607,8 @@ static void make_bk_slices_for_range(
 {
     dprintf(("make_bk_slices_for_range(%p, %lu, %lu)\n",
              obj, start - (stm_char*)obj, end - start));
+    timing_record_write_position();
+
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     uintptr_t first_page = ((uintptr_t)start) / 4096UL;
     uintptr_t end_page = ((uintptr_t)end) / 4096UL;
@@ -632,7 +640,6 @@ static void make_bk_slices_for_range(
             (uintptr_t)obj,     /* obj */
             (uintptr_t)bk_slice,  /* bk_addr */
             NEW_SLICE(slice_off, slice_sz));
-        timing_record_write();
         dprintf(("> append slice %p, off=%lu, sz=%lu\n", bk_slice, slice_off, slice_sz));
         release_modification_lock(STM_SEGMENT->segment_num);
 
@@ -1075,7 +1082,6 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
-    assert(list_is_empty(STM_PSEGMENT->modified_old_objects_markers));
     assert(list_is_empty(STM_PSEGMENT->large_overflow_objects));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
@@ -1087,7 +1093,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     assert(STM_PSEGMENT->finalizers == NULL);
 #ifndef NDEBUG
     /* this should not be used when objects_pointing_to_nursery == NULL */
-    STM_PSEGMENT->modified_old_objects_markers_num_old = 99999999999999999L;
+    STM_PSEGMENT->position_markers_len_old = 99999999999999999L;
 #endif
 
     check_nursery_at_transaction_start();
@@ -1270,6 +1276,8 @@ static void reset_modified_from_backup_copies(int segment_num)
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         char *dst = REAL_ADDRESS(pseg->pub.segment_base, obj);
 

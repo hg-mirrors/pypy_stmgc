@@ -36,5 +36,6 @@
 #include "stm/extra.c"
 #include "stm/fprintcolor.c"
 #include "stm/marker.c"
+#include "stm/prof.c"
 #include "stm/rewind_setjmp.c"
 #include "stm/finalizer.c"

@@ -100,7 +100,6 @@ void stm_setup(void)
         pr->pub.segment_num = i;
         pr->pub.segment_base = segment_base;
         pr->modified_old_objects = list_create();
-        pr->modified_old_objects_markers = list_create();
         pr->large_overflow_objects = list_create();
         pr->young_weakrefs = list_create();
         pr->old_weakrefs = list_create();
@@ -153,7 +152,6 @@ void stm_teardown(void)
         list_free(pr->objects_pointing_to_nursery);
         list_free(pr->old_objects_with_cards_set);
         list_free(pr->modified_old_objects);
-        list_free(pr->modified_old_objects_markers);
         assert(list_is_empty(pr->large_overflow_objects));
         list_free(pr->large_overflow_objects);
         list_free(pr->young_weakrefs);
@@ -223,6 +221,8 @@ static pthread_t *_get_cpth(stm_thread_local_t *tl)
     return (pthread_t *)(tl->creating_pthread);
 }
 
+static int thread_local_counters = 0;
+
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
     int num;
@@ -244,6 +244,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
        numbers automatically. */
     tl->associated_segment_num = -1;
     tl->last_associated_segment_num = num + 1;
+    tl->thread_local_counter = ++thread_local_counters;
     *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num + 1));
