@@ -1,5 +1,9 @@
 
 
+/* when to trigger a CLE collection */
+#define CLE_COLLECT_BOUND (1*1024*1024) /* 1 MiB */
+
+
 /* Commit Log things */
 struct stm_undo_s {
     object_t *object;   /* the object that is modified */
@@ -33,8 +37,13 @@ struct stm_commit_log_entry_s {
 static struct stm_commit_log_entry_s commit_log_root;
 
 
+static char *malloc_bk(size_t bk_size);
 static void free_bk(struct stm_undo_s *undo);
 static struct stm_commit_log_entry_s *malloc_cle(long entries);
 static void free_cle(struct stm_commit_log_entry_s *e);
 
 void _dbg_print_commit_log();
+
+#ifdef STM_TESTS
+uint64_t _stm_cle_allocated(void);
+#endif
