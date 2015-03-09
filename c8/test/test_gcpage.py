@@ -150,7 +150,8 @@ class TestGCPage(BaseTest):
         assert last_commit_log_entry_objs() == []
         # 2 CLEs, 1 old object
         assert lib._stm_total_allocated() == 5008 + LMO
-        assert lib._stm_cle_allocated() == 2*CLEO
+        # however, on commit, we could free 1/2 CLE
+        assert lib._stm_cle_allocated() == 1*CLEO
 
         self.start_transaction()
         o = self.pop_root()
@@ -158,18 +159,18 @@ class TestGCPage(BaseTest):
         self.push_root(o)
         self.commit_transaction()
         assert last_commit_log_entry_objs() == [o]*2
-        # 3 CLEs, 1 old object
+        # 2 CLEs, 1 old object
         # also, 2 slices of bk_copy and thus 2 CLE entries
         assert lib._stm_total_allocated() == 5008+LMO
-        assert lib._stm_cle_allocated() == 3*CLEO + (5008 + CLEEO*2)
+        # however, on commit, we could free 1/2 CLE
+        assert lib._stm_cle_allocated() == 1*CLEO + (5008 + CLEEO*2)
 
         self.start_transaction()
         assert lib._stm_total_allocated() == 5008+LMO
-        assert lib._stm_cle_allocated() == 3*CLEO + (5008 + CLEEO*2)
+        assert lib._stm_cle_allocated() == 1*CLEO + (5008 + CLEEO*2)
         stm_major_collect()
-        # all CLE and CLE entries freed:
         assert lib._stm_total_allocated() == (5008+LMO)
-        assert lib._stm_cle_allocated() == 0
+        assert lib._stm_cle_allocated() == 1*CLEO + (5008 + CLEEO*2)
         self.commit_transaction()
 
 
@@ -456,14 +457,16 @@ class TestGCPage(BaseTest):
         self.start_transaction()
         stm_major_collect()
         self.commit_transaction()
+        assert count_commit_log_entries() == 1
 
         self.switch(1)
         self.start_transaction()
         self.commit_transaction()
+        assert count_commit_log_entries() == 1
 
+        py.test.xfail("XXX: we never completely free the CLEs anymore")
         self.switch(0)
         self.start_transaction()
-        assert count_commit_log_entries() == 2
         stm_major_collect()
         assert count_commit_log_entries() == 0
 

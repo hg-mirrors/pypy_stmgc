@@ -1,7 +1,11 @@
 
 
 /* when to trigger a CLE collection */
-#define CLE_COLLECT_BOUND (1*1024*1024) /* 1 MiB */
+#ifndef STM_TESTS
+#define CLE_COLLECT_BOUND (30*1024*1024) /* 30 MiB */
+#else
+#define CLE_COLLECT_BOUND 0 /* ASAP! */
+#endif
 
 
 /* Commit Log things */
@@ -36,6 +40,8 @@ struct stm_commit_log_entry_s {
 };
 static struct stm_commit_log_entry_s commit_log_root;
 
+
+static bool is_cle_collection_requested(void);
 
 static char *malloc_bk(size_t bk_size);
 static void free_bk(struct stm_undo_s *undo);

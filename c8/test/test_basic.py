@@ -40,7 +40,7 @@ class TestBasic(BaseTest):
 
         self.commit_transaction()
         assert last_commit_log_entry_objs() == []
-        assert count_commit_log_entries() == 2
+        assert count_commit_log_entries() == 1
 
     def test_simple_read(self):
         self.start_transaction()

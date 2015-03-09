@@ -533,7 +533,6 @@ def stm_minor_collect():
 
 def stm_major_collect():
     res = lib._check_stm_collect(1)
-    assert count_commit_log_entries() == 0
     if res == 1:
         raise Conflict()
     return res

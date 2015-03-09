@@ -573,62 +573,6 @@ static void sweep_small_objects(void)
     _stm_smallmalloc_sweep();
 }
 
-static void clean_up_commit_log_entries()
-{
-    struct stm_commit_log_entry_s *cl, *next;
-
-#ifndef NDEBUG
-    /* check that all segments are at the same revision: */
-    cl = get_priv_segment(0)->last_commit_log_entry;
-    for (long i = 0; i < NB_SEGMENTS; i++) {
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
-        assert(pseg->last_commit_log_entry == cl);
-    }
-#endif
-
-    /* if there is only one element, we don't have to do anything: */
-    cl = &commit_log_root;
-
-    if (cl->next == NULL || cl->next == INEV_RUNNING) {
-        assert(get_priv_segment(0)->last_commit_log_entry == cl);
-        return;
-    }
-
-    bool was_inev = false;
-    uint64_t rev_num = -1;
-
-    next = cl->next;   /* guaranteed to exist */
-    do {
-        cl = next;
-        rev_num = cl->rev_num;
-
-        /* free bk copies of entries: */
-        long count = cl->written_count;
-        while (count-->0) {
-            free_bk(&cl->written[count]);
-        }
-
-        next = cl->next;
-        free_cle(cl);
-        if (next == INEV_RUNNING) {
-            was_inev = true;
-            break;
-        }
-    } while (next != NULL);
-
-    /* set the commit_log_root to the last, common cl entry: */
-    commit_log_root.next = was_inev ? INEV_RUNNING : NULL;
-    commit_log_root.rev_num = rev_num;
-
-    /* update in all segments: */
-    for (long i = 0; i < NB_SEGMENTS; i++) {
-        get_priv_segment(i)->last_commit_log_entry = &commit_log_root;
-    }
-
-    assert(_stm_count_cl_entries() == 0);
-}
-
-
 
 static void major_collection_now_at_safe_point(void)
 {
@@ -643,37 +587,6 @@ static void major_collection_now_at_safe_point(void)
              (long)pages_ctl.total_allocated));
     dprintf((" | commit log entries before: %ld\n",
              _stm_count_cl_entries()));
-
-
-    /* free all commit log entries. all segments are on the most recent
-       revision now. */
-    uint64_t allocd_before = pages_ctl.total_allocated;
-    clean_up_commit_log_entries();
-    /* check if freeing the log entries actually freed a considerable
-       amount itself. Then we don't want to also trace the whole heap
-       and just leave major gc right here.
-       The problem is apparent from raytrace.py, but may disappear if
-       we have card marking that also reduces the size of commit log
-       entries */
-    if ((pages_ctl.total_allocated < pages_ctl.total_allocated_bound)
-        && (allocd_before - pages_ctl.total_allocated > 0.3 * allocd_before)) {
-        /* 0.3 should mean that we are at about 50% of the way to the
-           allocated_bound again */
-#ifndef STM_TESTS
-        /* we freed a considerable amount just by freeing commit log entries */
-        pages_ctl.major_collection_requested = false; // reset_m_gc_requested
-
-        dprintf(("STOP AFTER FREEING CL ENTRIES: -%ld\n",
-                 (long)(allocd_before - pages_ctl.total_allocated)));
-        dprintf((" | used after collection:  %ld\n",
-                (long)pages_ctl.total_allocated));
-        dprintf((" `----------------------------------------------\n"));
-        if (must_abort())
-            abort_with_mutex();
-
-        return;
-#endif
-    }
 
     /* only necessary because of assert that fails otherwise (XXX) */
     acquire_all_privatization_locks();
