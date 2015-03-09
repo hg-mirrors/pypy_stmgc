@@ -1268,11 +1268,7 @@ void stm_commit_transaction(void)
 
     /* if a major collection is required, do it here */
     if (is_major_collection_requested()) {
-        synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
-
-        if (is_major_collection_requested()) {   /* if *still* true */
-            major_collection_now_at_safe_point();
-        }
+        major_collection_with_mutex();
     }
 
     _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));

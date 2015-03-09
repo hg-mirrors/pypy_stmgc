@@ -362,6 +362,7 @@ enum stm_event_e {
 
     /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE */
     STM_WAIT_FREE_SEGMENT,
+    STM_WAIT_SYNC_PAUSE,
     STM_WAIT_OTHER_INEVITABLE,
     STM_WAIT_DONE,
 

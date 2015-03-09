@@ -563,7 +563,11 @@ static void minor_collection(bool commit)
 
     stm_safe_point();
 
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_START);
+
     _do_minor_collection(commit);
+
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_DONE);
 }
 
 void stm_collect(long level)
