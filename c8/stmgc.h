@@ -138,6 +138,7 @@ long _stm_count_cl_entries();
 long _stm_count_old_objects_with_cards_set(void);
 object_t *_stm_enum_old_objects_with_cards_set(long index);
 uint64_t _stm_total_allocated(void);
+uint64_t _stm_cle_allocated(void);
 #endif
 
 /* ==================== HELPERS ==================== */

@@ -78,10 +78,6 @@ void stm_setup(void)
     setup_protection_settings();
     setup_signal_handler();
 
-    commit_log_root.next = NULL;
-    commit_log_root.segment_num = -1;
-    commit_log_root.rev_num = 0;
-    commit_log_root.written_count = 0;
 
     long i;
     /* including seg0 */
@@ -133,6 +129,7 @@ void stm_setup(void)
     setup_pages();
     setup_forksupport();
     setup_finalizer();
+    setup_commitlog();
 
     set_gs_register(get_segment_base(0));
 }
@@ -166,14 +163,13 @@ void stm_teardown(void)
 
     munmap(stm_object_pages, TOTAL_MEMORY);
     stm_object_pages = NULL;
-    commit_log_root.next = NULL; /* xxx:free them */
-    commit_log_root.segment_num = -1;
 
     teardown_finalizer();
     teardown_sync();
     teardown_gcpage();
     teardown_smallmalloc();
     teardown_pages();
+    teardown_commitlog();
 }
 
 static void _shadowstack_trap_page(char *start, int prot)

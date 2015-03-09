@@ -231,7 +231,6 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
     /* now return and retry */
 }
 
-/* ############# commit log ############# */
 
 
 
@@ -573,8 +572,7 @@ static void make_bk_slices_for_range(
         in_page_offset = (in_page_offset + slice_sz) % 4096UL; /* mostly 0 */
 
         /* make backup slice: */
-        char *bk_slice = malloc(slice_sz);
-        increment_total_allocated(slice_sz);
+        char *bk_slice = malloc_bk(slice_sz);
         memcpy(bk_slice, realobj + slice_off, slice_sz);
 
         acquire_modification_lock(STM_SEGMENT->segment_num);

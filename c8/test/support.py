@@ -104,6 +104,7 @@ object_t* _get_weakref(object_t *obj);
 /* void stm_collect(long level); */
 long _check_stm_collect(long level);
 uint64_t _stm_total_allocated(void);
+uint64_t _stm_cle_allocated(void);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
 void _stm_largemalloc_init_arena(char *data_start, size_t data_size);

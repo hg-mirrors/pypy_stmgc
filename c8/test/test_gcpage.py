@@ -140,7 +140,8 @@ class TestGCPage(BaseTest):
     def test_account_for_everything(self):
         self.start_transaction()
         self.commit_transaction()
-        assert lib._stm_total_allocated() == CLEO
+        assert lib._stm_total_allocated() == 0
+        assert lib._stm_cle_allocated() == CLEO
 
         self.start_transaction()
         o = stm_allocate(5008)
@@ -148,7 +149,8 @@ class TestGCPage(BaseTest):
         self.commit_transaction()
         assert last_commit_log_entry_objs() == []
         # 2 CLEs, 1 old object
-        assert lib._stm_total_allocated() == 2*CLEO + (5008 + LMO)
+        assert lib._stm_total_allocated() == 5008 + LMO
+        assert lib._stm_cle_allocated() == 2*CLEO
 
         self.start_transaction()
         o = self.pop_root()
@@ -158,13 +160,16 @@ class TestGCPage(BaseTest):
         assert last_commit_log_entry_objs() == [o]*2
         # 3 CLEs, 1 old object
         # also, 2 slices of bk_copy and thus 2 CLE entries
-        assert lib._stm_total_allocated() == 3*CLEO + (5008+LMO) + (5008 + CLEEO*2)
+        assert lib._stm_total_allocated() == 5008+LMO
+        assert lib._stm_cle_allocated() == 3*CLEO + (5008 + CLEEO*2)
 
         self.start_transaction()
-        assert lib._stm_total_allocated() == 3*CLEO + (5008+LMO) + (5008 + CLEEO*2)
+        assert lib._stm_total_allocated() == 5008+LMO
+        assert lib._stm_cle_allocated() == 3*CLEO + (5008 + CLEEO*2)
         stm_major_collect()
         # all CLE and CLE entries freed:
         assert lib._stm_total_allocated() == (5008+LMO)
+        assert lib._stm_cle_allocated() == 0
         self.commit_transaction()
 
 
@@ -202,12 +207,14 @@ class TestGCPage(BaseTest):
         stm_set_char(x, 'a', 4999)
         self.push_root(x)
         self.commit_transaction()
-        assert lib._stm_total_allocated() == 5008 + LMO + CLEO
+        assert lib._stm_total_allocated() == 5008 + LMO
+        assert lib._stm_cle_allocated() == CLEO
 
         self.start_transaction()
         x = self.pop_root()
         self.push_root(x)
-        assert lib._stm_total_allocated() == 5008 + LMO + CLEO
+        assert lib._stm_total_allocated() == 5008 + LMO
+        assert lib._stm_cle_allocated() == CLEO
         stm_set_char(x, 'B')
         stm_set_char(x, 'b', 4999)
 
