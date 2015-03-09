@@ -5,6 +5,7 @@
 /* *** MISC *** */
 static void free_bk(struct stm_undo_s *undo)
 {
+    assert(undo->type != TYPE_POSITION_MARKER);
     free(undo->backup);
     assert(undo->backup = (char*)-88);
     increment_total_allocated(-SLICE_SIZE(undo->slice));
@@ -455,6 +456,17 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 }
 
 
+static void wait_for_other_inevitable(struct stm_commit_log_entry_s *old)
+{
+    timing_wait_other_inevitable();
+
+    while (old->next == INEV_RUNNING && !safe_point_requested()) {
+        spin_loop();
+        usleep(10);    /* XXXXXX */
+    }
+    timing_event(STM_SEGMENT->running_thread, STM_WAIT_DONE);
+}
+
 static void reset_wb_executed_flags(void);
 static void readd_wb_executed_flags(void);
 static void check_all_write_barrier_flags(char *segbase, struct list_s *list);
@@ -506,13 +518,6 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 
             if (__sync_bool_compare_and_swap(&old->next, NULL, new))
                 break;   /* success! */
-        } else if (old->next == INEV_RUNNING) {
-            /* we failed because there is an INEV transaction running */
-            /* XXXXXX for now just sleep (XXX with the lock acquired?
-               isn't it a bad idea?).  We should really ask to inev
-               transaction to do the commit for us, and then we can
-               continue running. */
-            usleep(10);
         }
 
         if (is_commit) {
@@ -521,6 +526,16 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
                we have to re-add the WB_EXECUTED flags before we try to
                validate again because of said condition (s.a) */
             readd_wb_executed_flags();
+        }
+
+        if (old->next == INEV_RUNNING && !safe_point_requested()) {
+            /* we failed because there is an INEV transaction running */
+            /* XXXXXX for now just sleep.  We should really ask to inev
+               transaction to do the commit for us, and then we can
+               continue running. */
+            dprintf(("_validate_and_attach(%p) failed, "
+                     "waiting for inevitable\n", new));
+            wait_for_other_inevitable(old);
         }
 
         dprintf(("_validate_and_attach(%p) failed, enter safepoint\n", new));
@@ -1150,7 +1165,7 @@ int stm_is_inevitable(void)
 
 /************************************************************/
 
-static void _finish_transaction(enum stm_event_e event)
+static void _finish_transaction(enum stm_event_e event, bool was_inev)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
 
@@ -1161,7 +1176,10 @@ static void _finish_transaction(enum stm_event_e event)
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
     list_clear(STM_PSEGMENT->old_objects_with_cards_set);
     list_clear(STM_PSEGMENT->large_overflow_objects);
-    timing_event(tl, event);
+    if (was_inev)
+        timing_commit_inev_position();
+    else
+        timing_event(tl, event);
 
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
@@ -1223,6 +1241,7 @@ void stm_commit_transaction(void)
 
     push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
+
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
 
@@ -1264,7 +1283,7 @@ void stm_commit_transaction(void)
 
     /* done */
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
-    _finish_transaction(STM_TRANSACTION_COMMIT);
+    _finish_transaction(STM_TRANSACTION_COMMIT, was_inev);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
@@ -1399,7 +1418,7 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
                                                    : NURSERY_END;
     }
 
-    _finish_transaction(STM_TRANSACTION_ABORT);
+    _finish_transaction(STM_TRANSACTION_ABORT, false);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     return tl;
@@ -1441,6 +1460,8 @@ void _stm_become_inevitable(const char *msg)
 
         _validate_and_turn_inevitable();
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
+        timing_record_inev_position();
+
         stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
         invoke_and_clear_user_callbacks(0);   /* for commit */
     }

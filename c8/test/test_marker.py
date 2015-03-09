@@ -119,20 +119,25 @@ class TestMarker(BaseTest):
         py.test.raises(Conflict, self.switch, 1)
         self.check_recording(19, ffi.NULL)
 
-    def test_double_abort_markers_cb_inevitable(self):
-        self.recording(lib.STM_CONTENTION_INEVITABLE)
+    def test_commit_marker_for_inev(self):
+        self.recording(lib.STM_TRANSACTION_COMMIT)
         #
+        self.switch(1)
         self.start_transaction()
-        p = stm_allocate(16)
-        stm_set_char(p, 'A')
         self.push_root(ffi.cast("object_t *", 19))
-        self.push_root(ffi.cast("object_t *", p))
+        self.push_root(ffi.cast("object_t *", ffi.NULL))
         self.become_inevitable()
         self.pop_root()
         self.pop_root()
-        self.push_root(ffi.cast("object_t *", 17))
-        self.push_root(ffi.cast("object_t *", ffi.NULL))
-        stm_minor_collect()
+        self.commit_transaction()
+        #
+        self.check_recording(19, ffi.NULL)
+
+    def test_abort_markers_cb_inevitable(self):
+        self.recording(lib.STM_WAIT_OTHER_INEVITABLE)
+        #
+        self.start_transaction()
+        self.become_inevitable()
         #
         self.switch(1)
         self.start_transaction()
@@ -142,7 +147,9 @@ class TestMarker(BaseTest):
         self.push_root(ffi.cast("object_t *", p))
         py.test.raises(Conflict, self.become_inevitable)
         #
-        self.check_recording(21, p, 19, p)
+        py.test.skip("XXX only during tests does become_inevitable() abort"
+                     " and then it doesn't record anything")
+        self.check_recording(21, p)
 
     def test_read_write_contention(self):
         self.recording(lib.STM_CONTENTION_WRITE_READ)
@@ -166,63 +173,6 @@ class TestMarker(BaseTest):
         #
         py.test.raises(Conflict, self.switch, 1)
         self.check_recording(19, ffi.NULL)
-
-    def test_double_remote_markers_cb_write_write(self):
-        self.recording(lib.STM_CONTENTION_WRITE_WRITE,
-                       lib.STM_ABORTING_OTHER_CONTENTION)
-        p = stm_allocate_old(16)
-        #
-        self.start_transaction()
-        self.push_root(ffi.cast("object_t *", 19))
-        self.push_root(ffi.cast("object_t *", ffi.NULL))
-        stm_set_char(p, 'A')
-        self.pop_root()
-        self.pop_root()
-        self.push_root(ffi.cast("object_t *", 17))
-        self.push_root(ffi.cast("object_t *", ffi.NULL))
-        tl0 = self.get_stm_thread_local()
-        #
-        self.switch(1)
-        self.start_transaction()
-        self.become_inevitable()
-        self.push_root(ffi.cast("object_t *", 21))
-        self.push_root(ffi.cast("object_t *", ffi.NULL))
-        stm_set_char(p, 'B')    # aborts in #0
-        self.pop_root()
-        self.pop_root()
-        self.push_root(ffi.cast("object_t *", 23))
-        self.push_root(ffi.cast("object_t *", ffi.NULL))
-        #
-        py.test.raises(Conflict, self.switch, 0)
-        #
-        self.check_recording(21, ffi.NULL, 19, ffi.NULL,
-                             extra=lib.STM_ABORTING_OTHER_CONTENTION)
-
-    def test_double_remote_markers_cb_write_read(self):
-        self.recording(lib.STM_CONTENTION_WRITE_READ,
-                       lib.STM_ABORTING_OTHER_CONTENTION)
-        p = stm_allocate_old(16)
-        #
-        self.start_transaction()
-        assert stm_get_char(p) == '\x00'    # read
-        tl0 = self.get_stm_thread_local()
-        #
-        self.switch(1)
-        self.start_transaction()
-        self.become_inevitable()
-        self.push_root(ffi.cast("object_t *", 21))
-        self.push_root(ffi.cast("object_t *", ffi.NULL))
-        stm_set_char(p, 'B')                # write, will abort #0
-        self.pop_root()
-        self.pop_root()
-        self.push_root(ffi.cast("object_t *", 23))
-        self.push_root(ffi.cast("object_t *", ffi.NULL))
-        self.commit_transaction()
-        #
-        py.test.raises(Conflict, self.switch, 0)
-        #
-        self.check_recording(21, ffi.NULL, 0, ffi.NULL,
-                             extra=lib.STM_ABORTING_OTHER_CONTENTION)
 
     def test_all(self):
         self.recording()     # all events
