@@ -135,6 +135,13 @@ enum stm_event_e {
        saying where the write was done.  Followed by STM_TRANSACTION_ABORT. */
     STM_CONTENTION_WRITE_READ,
 
+    /* inevitable contention: all threads that try to become inevitable
+       have a STM_BECOME_INEVITABLE event with a position marker.  Then,
+       if it waits it gets a STM_WAIT_OTHER_INEVITABLE.  It is possible
+       that a thread gets STM_BECOME_INEVITABLE followed by
+       STM_TRANSACTION_ABORT if it fails to become inevitable. */
+    STM_BECOME_INEVITABLE,
+
     /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE */
     STM_WAIT_FREE_SEGMENT,
     STM_WAIT_SYNC_PAUSE,
