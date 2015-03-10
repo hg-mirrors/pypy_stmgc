@@ -19,16 +19,13 @@ class TestMarker(BaseTest):
         self.timing_event_keepalive = timing_event
         self.seen = seen
 
-    def check_recording(self, i1, o1, extra=None):
+    def check_recording(self, i1, o1, generating_thread_num=1):
         seen = self.seen
         tl, event, marker = seen[0]
-        assert tl == self.tls[1]
+        assert tl == self.tls[generating_thread_num]
         assert marker == (i1, o1)
-        if extra is None:
-            assert len(seen) == 1
-        else:
-            assert seen[1] == (self.tls[1], extra, None)
-            assert len(seen) == 2
+        assert len(seen) == 1
+        del self.seen[:]
 
     def test_marker_odd_simple(self):
         self.start_transaction()
@@ -119,25 +116,23 @@ class TestMarker(BaseTest):
         py.test.raises(Conflict, self.switch, 1)
         self.check_recording(19, ffi.NULL)
 
-    def test_commit_marker_for_inev(self):
-        self.recording(lib.STM_TRANSACTION_COMMIT)
+    def test_become_inevitable_marker(self):
+        self.recording(lib.STM_BECOME_INEVITABLE)
         #
         self.switch(1)
         self.start_transaction()
         self.push_root(ffi.cast("object_t *", 19))
         self.push_root(ffi.cast("object_t *", ffi.NULL))
         self.become_inevitable()
-        self.pop_root()
-        self.pop_root()
-        self.commit_transaction()
         #
         self.check_recording(19, ffi.NULL)
 
     def test_abort_markers_cb_inevitable(self):
-        self.recording(lib.STM_WAIT_OTHER_INEVITABLE)
+        self.recording(lib.STM_BECOME_INEVITABLE)
         #
         self.start_transaction()
         self.become_inevitable()
+        self.check_recording(0, ffi.NULL, generating_thread_num=0)
         #
         self.switch(1)
         self.start_transaction()
@@ -147,9 +142,10 @@ class TestMarker(BaseTest):
         self.push_root(ffi.cast("object_t *", p))
         py.test.raises(Conflict, self.become_inevitable)
         #
-        py.test.skip("XXX only during tests does become_inevitable() abort"
-                     " and then it doesn't record anything")
-        self.check_recording(21, p)
+        # only during tests does become_inevitable() abort because
+        # another thread is already inevitable; but it should have
+        # recorded the marker first
+        self.check_recording(21, p, generating_thread_num=1)
 
     def test_read_write_contention(self):
         self.recording(lib.STM_CONTENTION_WRITE_READ)
