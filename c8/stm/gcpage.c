@@ -131,6 +131,19 @@ object_t *_stm_allocate_old(ssize_t size_rounded_up)
 /************************************************************/
 
 
+static void major_collection_with_mutex(void)
+{
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MAJOR_START);
+
+    synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
+
+    if (is_major_collection_requested()) {   /* if *still* true */
+        major_collection_now_at_safe_point();
+    }
+
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MAJOR_DONE);
+}
+
 static void major_collection_if_requested(void)
 {
     assert(!_has_mutex());
@@ -140,13 +153,7 @@ static void major_collection_if_requested(void)
     s_mutex_lock();
 
     if (is_major_collection_requested()) {   /* if still true */
-
-        synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
-
-        if (is_major_collection_requested()) {   /* if *still* true */
-            major_collection_now_at_safe_point();
-        }
-
+        major_collection_with_mutex();
     }
 
     s_mutex_unlock();
@@ -348,6 +355,8 @@ static void mark_visit_from_modified_objects(void)
         struct stm_undo_s *modified = (struct stm_undo_s *)lst->items;
         struct stm_undo_s *end = (struct stm_undo_s *)(lst->items + lst->count);
         for (; modified < end; modified++) {
+            if (modified->type == TYPE_POSITION_MARKER)
+                continue;
             object_t *obj = modified->object;
             struct object_s *dst = (struct object_s*)REAL_ADDRESS(base, obj);
 
@@ -384,6 +393,22 @@ static void mark_visit_from_modified_objects(void)
         list_clear(uniques);
     }
     LIST_FREE(uniques);
+}
+
+static void mark_visit_from_markers(void)
+{
+    long i;
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+        struct list_s *lst = get_priv_segment(i)->modified_old_objects;
+
+        struct stm_undo_s *modified = (struct stm_undo_s *)lst->items;
+        struct stm_undo_s *end = (struct stm_undo_s *)(lst->items + lst->count);
+        for (; modified < end; modified++) {
+            if (modified->type == TYPE_POSITION_MARKER)
+                mark_visit_possibly_new_object(modified->marker_object, pseg);
+        }
+    }
 }
 
 static void mark_visit_from_roots(void)
@@ -605,7 +630,8 @@ static void clean_up_commit_log_entries()
         /* free bk copies of entries: */
         long count = cl->written_count;
         while (count-->0) {
-            free_bk(&cl->written[count]);
+            if (cl->written[count].type != TYPE_POSITION_MARKER)
+                free_bk(&cl->written[count]);
         }
 
         next = cl->next;
@@ -683,6 +709,7 @@ static void major_collection_now_at_safe_point(void)
     /* marking */
     LIST_CREATE(marked_objects_to_trace);
     mark_visit_from_modified_objects();
+    mark_visit_from_markers();
     mark_visit_from_roots();
     mark_visit_from_finalizer_pending();
 
