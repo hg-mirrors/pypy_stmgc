@@ -124,6 +124,56 @@ void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
 long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
+/* Profiling events.  In the comments: content of the markers, if any */
+enum stm_event_e {
+    /* always STM_TRANSACTION_START followed later by one of COMMIT or ABORT */
+    STM_TRANSACTION_START,
+    STM_TRANSACTION_COMMIT,
+    STM_TRANSACTION_ABORT,
+
+    /* write-read contention: a "marker" is included in the PYPYSTM file
+       saying where the write was done.  Followed by STM_TRANSACTION_ABORT. */
+    STM_CONTENTION_WRITE_READ,
+
+    /* inevitable contention: all threads that try to become inevitable
+       have a STM_BECOME_INEVITABLE event with a position marker.  Then,
+       if it waits it gets a STM_WAIT_OTHER_INEVITABLE.  It is possible
+       that a thread gets STM_BECOME_INEVITABLE followed by
+       STM_TRANSACTION_ABORT if it fails to become inevitable. */
+    STM_BECOME_INEVITABLE,
+
+    /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE */
+    STM_WAIT_FREE_SEGMENT,
+    STM_WAIT_SYNC_PAUSE,
+    STM_WAIT_OTHER_INEVITABLE,
+    STM_WAIT_DONE,
+
+    /* start and end of GC cycles */
+    STM_GC_MINOR_START,
+    STM_GC_MINOR_DONE,
+    STM_GC_MAJOR_START,
+    STM_GC_MAJOR_DONE,
+    ...
+};
+
+typedef struct {
+    uintptr_t odd_number;
+    object_t *object;
+} stm_loc_marker_t;
+
+typedef void (*stmcb_timing_event_fn)(stm_thread_local_t *tl,
+                                      enum stm_event_e event,
+                                      stm_loc_marker_t *markers);
+stmcb_timing_event_fn stmcb_timing_event;
+
+typedef int (*stm_expand_marker_fn)(char *seg_base, stm_loc_marker_t *marker,
+                                    char *output, int output_size);
+int stm_set_timing_log(const char *profiling_file_name, int fork_mode,
+                       stm_expand_marker_fn expand_marker);
+
+void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
+void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
+void stm_pop_marker(stm_thread_local_t *);
 
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
@@ -147,7 +197,6 @@ void (*stmcb_light_finalizer)(object_t *);
 void stm_enable_light_finalizer(object_t *);
 
 void (*stmcb_finalizer)(object_t *);
-
 """)
 
 
@@ -372,6 +421,21 @@ void stmcb_get_card_base_itemsize(struct object_s *obj,
         offset_itemsize[0] = sizeof(struct myobj_s);
         offset_itemsize[1] = sizeof(object_t *);
     }
+}
+
+void stm_push_marker(stm_thread_local_t *tl, uintptr_t onum, object_t *ob)
+{
+    STM_PUSH_MARKER(*tl, onum, ob);
+}
+
+void stm_update_marker_num(stm_thread_local_t *tl, uintptr_t onum)
+{
+    STM_UPDATE_MARKER_NUM(*tl, onum);
+}
+
+void stm_pop_marker(stm_thread_local_t *tl)
+{
+    STM_POP_MARKER(*tl);
 }
 
 long current_segment_num(void)

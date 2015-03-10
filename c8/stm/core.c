@@ -5,6 +5,7 @@
 /* *** MISC *** */
 static void free_bk(struct stm_undo_s *undo)
 {
+    assert(undo->type != TYPE_POSITION_MARKER);
     free(undo->backup);
     assert(undo->backup = (char*)-88);
     increment_total_allocated(-SLICE_SIZE(undo->slice));
@@ -49,6 +50,8 @@ static void import_objects(
 
     DEBUG_EXPECT_SEGFAULT(false);
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
         uintptr_t current_page_num = ((uintptr_t)oslice) / 4096;
@@ -269,6 +272,11 @@ void _dbg_print_commit_log()
         struct stm_undo_s *undo = cl->written;
         struct stm_undo_s *end = undo + cl->written_count;
         for (; undo < end; undo++) {
+            if (undo->type == TYPE_POSITION_MARKER) {
+                fprintf(stderr, "    marker %p %lu\n",
+                        undo->marker_object, undo->marker_odd_number);
+                continue;
+            }
             fprintf(stderr, "    obj %p, size %d, ofs %lu: ", undo->object,
                     SLICE_SIZE(undo->slice), SLICE_OFFSET(undo->slice));
             /* long i; */
@@ -311,6 +319,12 @@ static bool _stm_validate()
     }
 
     bool needs_abort = false;
+
+    if (STM_PSEGMENT->transaction_state == TS_NONE) {
+        /* can be seen from major_do_validation_and_minor_collections();
+           don't try to detect pseudo-conflicts in this case */
+        needs_abort = true;
+    }
 
     while(1) {
         /* retry IF: */
@@ -362,6 +376,8 @@ static bool _stm_validate()
                     struct stm_undo_s *undo = cl->written;
                     struct stm_undo_s *end = cl->written + cl->written_count;
                     for (; undo < end; undo++) {
+                        if (undo->type == TYPE_POSITION_MARKER)
+                            continue;
                         if (_stm_was_read(undo->object)) {
                             /* first reset all modified objects from the backup
                                copies as soon as the first conflict is detected;
@@ -369,6 +385,7 @@ static bool _stm_validate()
                                the old (but unmodified) version to the newer version.
                             */
                             reset_modified_from_backup_copies(my_segnum);
+                            timing_write_read_contention(cl->written, undo);
                             needs_abort = true;
 
                             dprintf(("_stm_validate() failed for obj %p\n", undo->object));
@@ -445,6 +462,17 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 }
 
 
+static void wait_for_other_inevitable(struct stm_commit_log_entry_s *old)
+{
+    timing_event(STM_SEGMENT->running_thread, STM_WAIT_OTHER_INEVITABLE);
+
+    while (old->next == INEV_RUNNING && !safe_point_requested()) {
+        spin_loop();
+        usleep(10);    /* XXXXXX */
+    }
+    timing_event(STM_SEGMENT->running_thread, STM_WAIT_DONE);
+}
+
 static void reset_wb_executed_flags(void);
 static void readd_wb_executed_flags(void);
 static void check_all_write_barrier_flags(char *segbase, struct list_s *list);
@@ -496,13 +524,6 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 
             if (__sync_bool_compare_and_swap(&old->next, NULL, new))
                 break;   /* success! */
-        } else if (old->next == INEV_RUNNING) {
-            /* we failed because there is an INEV transaction running */
-            /* XXXXXX for now just sleep (XXX with the lock acquired?
-               isn't it a bad idea?).  We should really ask to inev
-               transaction to do the commit for us, and then we can
-               continue running. */
-            usleep(10);
         }
 
         if (is_commit) {
@@ -511,6 +532,16 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
                we have to re-add the WB_EXECUTED flags before we try to
                validate again because of said condition (s.a) */
             readd_wb_executed_flags();
+        }
+
+        if (old->next == INEV_RUNNING && !safe_point_requested()) {
+            /* we failed because there is an INEV transaction running */
+            /* XXXXXX for now just sleep.  We should really ask to inev
+               transaction to do the commit for us, and then we can
+               continue running. */
+            dprintf(("_validate_and_attach(%p) failed, "
+                     "waiting for inevitable\n", new));
+            wait_for_other_inevitable(old);
         }
 
         dprintf(("_validate_and_attach(%p) failed, enter safepoint\n", new));
@@ -603,6 +634,8 @@ static void make_bk_slices_for_range(
 {
     dprintf(("make_bk_slices_for_range(%p, %lu, %lu)\n",
              obj, start - (stm_char*)obj, end - start));
+    timing_record_write_position();
+
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     uintptr_t first_page = ((uintptr_t)start) / 4096UL;
     uintptr_t end_page = ((uintptr_t)end) / 4096UL;
@@ -1025,6 +1058,8 @@ static void reset_wb_executed_flags(void)
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         obj->stm_flags &= ~GCFLAG_WB_EXECUTED;
     }
@@ -1038,6 +1073,8 @@ static void readd_wb_executed_flags(void)
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         obj->stm_flags |= GCFLAG_WB_EXECUTED;
     }
@@ -1055,6 +1092,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
 
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
+    timing_event(tl, STM_TRANSACTION_START);
     STM_PSEGMENT->transaction_state = TS_REGULAR;
     STM_PSEGMENT->safe_point = SP_RUNNING;
 #ifndef NDEBUG
@@ -1084,6 +1122,10 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[1]));
     assert(list_is_empty(STM_PSEGMENT->young_objects_with_light_finalizers));
     assert(STM_PSEGMENT->finalizers == NULL);
+#ifndef NDEBUG
+    /* this should not be used when objects_pointing_to_nursery == NULL */
+    STM_PSEGMENT->position_markers_len_old = 99999999999999999L;
+#endif
 
     check_nursery_at_transaction_start();
 
@@ -1129,7 +1171,7 @@ int stm_is_inevitable(void)
 
 /************************************************************/
 
-static void _finish_transaction()
+static void _finish_transaction(enum stm_event_e event)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
 
@@ -1140,6 +1182,7 @@ static void _finish_transaction()
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
     list_clear(STM_PSEGMENT->old_objects_with_cards_set);
     list_clear(STM_PSEGMENT->large_overflow_objects);
+    timing_event(tl, event);
 
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
@@ -1151,6 +1194,8 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
     struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         struct object_s *dst = (struct object_s*)REAL_ADDRESS(segbase, obj);
         assert(dst->stm_flags & GCFLAG_WRITE_BARRIER);
@@ -1199,6 +1244,7 @@ void stm_commit_transaction(void)
 
     push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
+
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
 
@@ -1225,11 +1271,7 @@ void stm_commit_transaction(void)
 
     /* if a major collection is required, do it here */
     if (is_major_collection_requested()) {
-        synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
-
-        if (is_major_collection_requested()) {   /* if *still* true */
-            major_collection_now_at_safe_point();
-        }
+        major_collection_with_mutex();
     }
 
     _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
@@ -1240,7 +1282,7 @@ void stm_commit_transaction(void)
 
     /* done */
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
-    _finish_transaction();
+    _finish_transaction(STM_TRANSACTION_COMMIT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
@@ -1264,6 +1306,8 @@ static void reset_modified_from_backup_copies(int segment_num)
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         char *dst = REAL_ADDRESS(pseg->pub.segment_base, obj);
 
@@ -1373,7 +1417,7 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
                                                    : NURSERY_END;
     }
 
-    _finish_transaction();
+    _finish_transaction(STM_TRANSACTION_ABORT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     return tl;
@@ -1412,9 +1456,11 @@ void _stm_become_inevitable(const char *msg)
     if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
         dprintf(("become_inevitable: %s\n", msg));
         _stm_collectable_safe_point();
+        timing_become_inevitable();
 
         _validate_and_turn_inevitable();
         STM_PSEGMENT->transaction_state = TS_INEVITABLE;
+
         stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
         invoke_and_clear_user_callbacks(0);   /* for commit */
     }

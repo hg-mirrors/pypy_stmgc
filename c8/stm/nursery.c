@@ -185,6 +185,8 @@ static void _verify_cards_cleared_in_all_lists(struct stm_priv_segment_info_s *p
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         _cards_cleared_in_object(pseg, undo->object, false);
     }
     LIST_FOREACH_R(
@@ -410,6 +412,20 @@ static void collect_cardrefs_to_nursery(void)
     }
 }
 
+static void collect_roots_from_markers(uintptr_t len_old)
+{
+    dprintf(("collect_roots_from_markers\n"));
+
+    /* visit the marker objects */
+    struct list_s *list = STM_PSEGMENT->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)(list->items + len_old);
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+
+    for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            minor_trace_if_young(&undo->marker_object);
+    }
+}
 
 static void collect_objs_still_young_but_with_finalizers(void)
 {
@@ -494,13 +510,24 @@ static void _do_minor_collection(bool commit)
     dprintf(("minor_collection commit=%d\n", (int)commit));
 
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
+
+    uintptr_t len_old;
+    if (STM_PSEGMENT->overflow_number_has_been_used)
+        len_old = STM_PSEGMENT->position_markers_len_old;
+    else
+        len_old = 0;
+
     if (!commit) {
         /* 'STM_PSEGMENT->overflow_number' is used now by this collection,
            in the sense that it's copied to the overflow objects */
         STM_PSEGMENT->overflow_number_has_been_used = true;
+        STM_PSEGMENT->position_markers_len_old =
+            list_count(STM_PSEGMENT->modified_old_objects);
     }
 
     collect_cardrefs_to_nursery();
+
+    collect_roots_from_markers(len_old);
 
     collect_roots_in_nursery();
 
@@ -529,7 +556,11 @@ static void minor_collection(bool commit)
 
     stm_safe_point();
 
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_START);
+
     _do_minor_collection(commit);
+
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_DONE);
 }
 
 void stm_collect(long level)
@@ -652,14 +683,13 @@ static void major_do_validation_and_minor_collections(void)
         assert(get_priv_segment(i)->last_commit_log_entry->next == NULL
                || get_priv_segment(i)->last_commit_log_entry->next == INEV_RUNNING);
         if (!ok) {
-            assert(i != 0);     /* sharing seg0 should never need an abort */
-
             if (STM_PSEGMENT->transaction_state == TS_NONE) {
                 /* we found a segment that has stale read-marker data and thus
                    is in conflict with committed objs. Since it is not running
                    currently, it's fine to ignore it. */
                 continue;
             }
+            assert(i != 0);     /* sharing seg0 should never need an abort */
 
             /* tell it to abort when continuing */
             STM_PSEGMENT->pub.nursery_end = NSE_SIGABORT;
@@ -671,7 +701,7 @@ static void major_do_validation_and_minor_collections(void)
         }
 
 
-        if (MINOR_NOTHING_TO_DO(STM_PSEGMENT))  /*TS_NONE segments have NOTHING_TO_DO*/
+        if (MINOR_NOTHING_TO_DO(STM_PSEGMENT))
             continue;
 
         assert(STM_PSEGMENT->transaction_state != TS_NONE);
