@@ -284,6 +284,17 @@ static void synchronize_objects_flush(void);
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
 static bool _stm_validate();
 
+static inline bool was_read_remote(char *base, object_t *obj)
+{
+    uint8_t other_transaction_read_version =
+        ((struct stm_segment_info_s *)REAL_ADDRESS(base, STM_PSEGMENT))
+            ->transaction_read_version;
+    uint8_t rm = ((struct stm_read_marker_s *)
+                  (base + (((uintptr_t)obj) >> 4)))->rm;
+    assert(rm <= other_transaction_read_version);
+    return rm == other_transaction_read_version;
+}
+
 static inline void _duck(void) {
     /* put a call to _duck() between two instructions that set 0 into
        a %gs-prefixed address and that may otherwise be replaced with
