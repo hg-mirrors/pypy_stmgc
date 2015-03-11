@@ -146,13 +146,13 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
     memcpy(dest, initial_data, size_rounded_up);
     ((struct object_s *)dest)->stm_flags = GCFLAG_WRITE_BARRIER;
 
-    acquire_all_privatization_locks();
-
     long j;
     for (j = 1; j <= NB_SEGMENTS; j++) {
         const char *src = initial_data;
         char *dest = get_segment_base(j) + nobj;
         char *end = dest + size_rounded_up;
+
+        acquire_privatization_lock(j);
 
         while (((uintptr_t)dest) / 4096 != ((uintptr_t)end - 1) / 4096) {
             uintptr_t count = 4096 - ((uintptr_t)dest) / 4096;
@@ -169,9 +169,8 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
             assert(!was_read_remote(get_segment_base(j), (object_t *)nobj));
         }
 #endif
+        release_privatization_lock(j);
     }
-
-    release_all_privatization_locks();
 
     write_fence();     /* make sure 'nobj' is fully initialized from
                           all threads here */
