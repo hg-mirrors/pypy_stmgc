@@ -1,0 +1,30 @@
+
+- improve sync of small objs on commit (see FLAG_SYNC_LARGE in nursery.c)
+
+- non-zeroed nursery:
+  read-the-docs benchmark shows 8% time spent in memset of throw_away_nursery
+
+- reshare pages:
+  make seg0 MAP_SHARED in order to re-share private pages during major GC
+
+- avoid usleep(10) when waiting for an inevitable transaction:
+  we do this sleep when we try to commit and another inev transaction is
+  currently running. idea: signal the inev transaction to do the commit
+  for us
+
+- maybe re-implement the "please commit soon" signal
+
+- the highest_overflow_number can overflow after 2**30 non-collect-time
+  minor collections
+
+- privatize (multiple) pages at once in the write barrier instead of
+  triggering segfaults
+
+- possibly messy too, but think about not using N+1 segments but only N
+
+- kill "atomic" and use regular lock elision?
+
+- increase the memory limit
+
+- avoid __builtin_frame_address(0) in precisely the performance-critical
+  functions like the interpreter main loop
