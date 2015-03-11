@@ -231,10 +231,14 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
                            sizeof(struct node_s) + 4096*70};
         size_t size = sizes[get_rand(4)];
         p = stm_allocate(size);
-        ((nodeptr_t)p)->sig = SIGNATURE;
-        ((nodeptr_t)p)->my_size = size;
-        ((nodeptr_t)p)->my_id = 0;
-        ((nodeptr_t)p)->my_hash = 0;
+        nodeptr_t n = (nodeptr_t)p;
+        n->sig = SIGNATURE;
+        n->my_size = size;
+        n->my_id = 0;
+        n->my_hash = 0;
+        nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n + n->my_size - sizeof(void*));
+        n->next = NULL;
+        *last_next = NULL;
         pop_roots();
         /* reload_roots not necessary, all are old after start_transaction */
         break;
