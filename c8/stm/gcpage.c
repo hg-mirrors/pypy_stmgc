@@ -142,13 +142,15 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
     uintptr_t nobj = (uintptr_t)np;
     dprintf(("allocate_preexisting: %p\n", (object_t *)nobj));
 
-    char *dest = stm_object_pages + nobj;
-    memcpy(dest, initial_data, size_rounded_up);
-    ((struct object_s *)dest)->stm_flags = GCFLAG_WRITE_BARRIER;
+    DEBUG_EXPECT_SEGFAULT(false);
+
+    char *nobj_seg0 = stm_object_pages + nobj;
+    memcpy(nobj_seg0, initial_data, size_rounded_up);
+    ((struct object_s *)nobj_seg0)->stm_flags = GCFLAG_WRITE_BARRIER;
 
     long j;
     for (j = 1; j < NB_SEGMENTS; j++) {
-        const char *src = initial_data;
+        const char *src = nobj_seg0;
         char *dest = get_segment_base(j) + nobj;
         char *end = dest + size_rounded_up;
 
@@ -174,6 +176,7 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
 
     write_fence();     /* make sure 'nobj' is fully initialized from
                           all threads here */
+    DEBUG_EXPECT_SEGFAULT(true);
     return (object_t *)nobj;
 }
 
