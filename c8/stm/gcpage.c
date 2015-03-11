@@ -147,7 +147,7 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
     ((struct object_s *)dest)->stm_flags = GCFLAG_WRITE_BARRIER;
 
     long j;
-    for (j = 1; j <= NB_SEGMENTS; j++) {
+    for (j = 1; j < NB_SEGMENTS; j++) {
         const char *src = initial_data;
         char *dest = get_segment_base(j) + nobj;
         char *end = dest + size_rounded_up;
