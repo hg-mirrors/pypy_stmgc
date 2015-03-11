@@ -448,6 +448,7 @@ long current_segment_num(void)
                     ('STM_LARGEMALLOC_TEST', '1'),
                     ('STM_NO_COND_WAIT', '1'),
                     ('STM_DEBUGPRINT', '1'),
+                    ('_STM_NURSERY_ZEROED', '1'),
                     ('GC_N_SMALL_REQUESTS', str(GC_N_SMALL_REQUESTS)), #check
                     ],
      undef_macros=['NDEBUG'],
