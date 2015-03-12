@@ -460,8 +460,8 @@ static void mark_visit_from_markers(void)
         struct stm_undo_s *modified = (struct stm_undo_s *)lst->items;
         struct stm_undo_s *end = (struct stm_undo_s *)(lst->items + lst->count);
         for (; modified < end; modified++) {
-            /* this logic also works if type2 == TYPE_MODIFIED_HASHTABLE */
-            if (modified->type == TYPE_POSITION_MARKER)
+            if (modified->type == TYPE_POSITION_MARKER &&
+                    modified->type2 != TYPE_MODIFIED_HASHTABLE)
                 mark_visit_possibly_new_object(modified->marker_object, pseg);
         }
     }
@@ -593,6 +593,31 @@ static void clean_up_segment_lists(void)
                     _reset_object_cards(pseg, obj, CARD_CLEAR, false, true);
                 list_set_item(lst, n, list_pop_item(lst));
             }
+        }
+
+        /* Remove from 'modified_old_objects' all old hashtables that die */
+        {
+            lst = pseg->modified_old_objects;
+            uintptr_t j, k = 0, limit = list_count(lst);
+            for (j = 0; j < limit; j += 3) {
+                uintptr_t e0 = list_item(lst, j + 0);
+                uintptr_t e1 = list_item(lst, j + 1);
+                uintptr_t e2 = list_item(lst, j + 2);
+                if (e0 == TYPE_POSITION_MARKER &&
+                    e1 == TYPE_MODIFIED_HASHTABLE &&
+                    !mark_visited_test((object_t *)e2)) {
+                    /* hashtable object dies */
+                }
+                else {
+                    if (j != k) {
+                        list_set_item(lst, k + 0, e0);
+                        list_set_item(lst, k + 1, e1);
+                        list_set_item(lst, k + 2, e2);
+                    }
+                    k += 3;
+                }
+            }
+            lst->count = k;
         }
     }
 #pragma pop_macro("STM_SEGMENT")
