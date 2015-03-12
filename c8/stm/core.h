@@ -190,9 +190,15 @@ struct stm_undo_s {
         uintptr_t marker_odd_number; /* the odd number part of the marker */
         object_t *marker_object;     /* the object part of the marker */
     };
+    struct {
+        intptr_t type1;             /* TYPE_POSITION_MARKER (again) */
+        intptr_t type2;             /* TYPE_MODIFIED_HASHTABLE */
+        object_t *modif_hashtable;  /* modified entry is previous stm_undo_s */
+    };
   };
 };
 #define TYPE_POSITION_MARKER    (-1)
+#define TYPE_MODIFIED_HASHTABLE (-2)
 #define SLICE_OFFSET(slice)  ((slice) >> 16)
 #define SLICE_SIZE(slice)    ((int)((slice) & 0xFFFF))
 #define NEW_SLICE(offset, size) (((uint64_t)(offset)) << 16 | (size))

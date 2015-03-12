@@ -457,6 +457,7 @@ static void mark_visit_from_markers(void)
         struct stm_undo_s *modified = (struct stm_undo_s *)lst->items;
         struct stm_undo_s *end = (struct stm_undo_s *)(lst->items + lst->count);
         for (; modified < end; modified++) {
+            /* this logic also works if type2 == TYPE_MODIFIED_HASHTABLE */
             if (modified->type == TYPE_POSITION_MARKER)
                 mark_visit_possibly_new_object(modified->marker_object, pseg);
         }

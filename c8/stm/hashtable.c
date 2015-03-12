@@ -351,27 +351,35 @@ object_t *stm_hashtable_read(object_t *hobj, stm_hashtable_t *hashtable,
 void stm_hashtable_write_entry(object_t *hobj, stm_hashtable_entry_t *entry,
                                object_t *nvalue)
 {
-    if (stm_write((object_t *)entry)) {
+    if (_STM_WRITE_CHECK_SLOWPATH((object_t *)entry)) {
+
+        stm_write((object_t *)entry);
+
         uintptr_t i = list_count(STM_PSEGMENT->modified_old_objects);
-        if (i > 0 && list_item(STM_PSEGMENT->modified_old_objects, i - 1)
+        if (i > 0 && list_item(STM_PSEGMENT->modified_old_objects, i - 3)
                      == (uintptr_t)entry) {
-            /* 'modified_old_hashtables' is always obtained by taking
-               a subset of 'modified_old_objects' which contains only
-               stm_hashtable_entry_t objects, and then replacing the
-               stm_hashtable_entry_t objects with the hobj they come
-               from.  It's possible to have duplicates in
-               'modified_old_hashtables'; here we only try a bit to
-               avoid them --- at least the list should never be longer
-               than 'modified_old_objects'. */
-            i = list_count(STM_PSEGMENT->modified_old_hashtables);
-            if (i > 0 && list_item(STM_PSEGMENT->modified_old_hashtables, i - 2)
-                         == (uintptr_t)hobj) {
-                /* already added */
-            }
-            else {
-                LIST_APPEND2(STM_PSEGMENT->modified_old_hashtables,
-                             hobj, entry);
-            }
+            /* The stm_write() above recorded a write to 'entry'.  Here,
+               we add another stm_undo_s to modified_old_objects with
+               TYPE_MODIFIED_HASHTABLE.  It is ignored everywhere except
+               in _stm_validate().
+
+               The goal is that this TYPE_MODIFIED_HASHTABLE ends up in
+               the commit log's 'cl_written' array.  Later, another
+               transaction validating that log will check two things:
+
+               - the regular stm_undo_s entry put by stm_write() above
+                 will make the other transaction check that it didn't
+                 read the same 'entry' object;
+
+                 - the TYPE_MODIFIED_HASHTABLE entry we're adding now
+                   will make the other transaction check that it didn't
+                   do any stm_hashtable_list() on the complete hashtable.
+            */
+            STM_PSEGMENT->modified_old_objects = list_append3(
+                STM_PSEGMENT->modified_old_objects,
+                TYPE_POSITION_MARKER,      /* type1 */
+                TYPE_MODIFIED_HASHTABLE,   /* type2 */
+                (uintptr_t)hobj);          /* modif_hashtable */
         }
     }
     entry->object = nvalue;

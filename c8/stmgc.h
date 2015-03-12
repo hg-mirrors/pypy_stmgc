@@ -192,10 +192,13 @@ static inline void stm_read(object_t *obj)
         STM_SEGMENT->transaction_read_version;
 }
 
+#define _STM_WRITE_CHECK_SLOWPATH(obj)  \
+    UNLIKELY(((obj)->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0)
+
 __attribute__((always_inline))
 static inline void stm_write(object_t *obj)
 {
-    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0))
+    if (_STM_WRITE_CHECK_SLOWPATH(obj))
         _stm_write_slowpath(obj);
 }
 
@@ -204,7 +207,7 @@ __attribute__((always_inline))
 static inline void stm_write_card(object_t *obj, uintptr_t index)
 {
     /* if GCFLAG_WRITE_BARRIER is set, then don't do anything more. */
-    if (UNLIKELY((obj->stm_flags & _STM_GCFLAG_WRITE_BARRIER) != 0)) {
+    if (_STM_WRITE_CHECK_SLOWPATH(obj)) {
 
         /* GCFLAG_WRITE_BARRIER is not set.  This might be because
            it's the first time we see a given small array; or it might
