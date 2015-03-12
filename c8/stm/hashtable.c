@@ -150,7 +150,7 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
                                   uintptr_t biggercount,
                                   int remove_unread_from_seg)
 {
-    dprintf(("rehash %p to %ld, remove_unread_from_seg=%d\n",
+    dprintf(("rehash %p to size %ld, remove_unread_from_seg=%d\n",
              hashtable, biggercount, remove_unread_from_seg));
 
     size_t size = (offsetof(stm_hashtable_table_t, items)
