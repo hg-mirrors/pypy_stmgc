@@ -148,10 +148,10 @@ static void _insert_clean(stm_hashtable_table_t *table,
 
 static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
                                   uintptr_t biggercount,
-                                  int remove_unread_from_seg)
+                                  char *segment_base)
 {
-    dprintf(("rehash %p to size %ld, remove_unread_from_seg=%d\n",
-             hashtable, biggercount, remove_unread_from_seg));
+    dprintf(("rehash %p to size %ld, segment_base=%p\n",
+             hashtable, biggercount, segment_base));
 
     size_t size = (offsetof(stm_hashtable_table_t, items)
                    + biggercount * sizeof(stm_hashtable_entry_t *));
@@ -169,12 +169,11 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
 
     uintptr_t j, mask = table->mask;
     uintptr_t rc = biggertable->resize_counter;
-    char *segment_base = get_segment_base(remove_unread_from_seg);
     for (j = 0; j <= mask; j++) {
         stm_hashtable_entry_t *entry = table->items[j];
         if (entry == NULL)
             continue;
-        if (remove_unread_from_seg != 0) {
+        if (segment_base != NULL) {
             if (((struct stm_hashtable_entry_s *)
                        REAL_ADDRESS(segment_base, entry))->object == NULL &&
                    !_stm_was_read_by_anybody((object_t *)entry)) {
@@ -184,7 +183,7 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
         }
 
         uintptr_t eindex;
-        if (remove_unread_from_seg == 0)
+        if (segment_base == NULL)
             eindex = entry->index;   /* read from STM_SEGMENT */
         else
             eindex = ((struct stm_hashtable_entry_s *)
@@ -289,7 +288,6 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             entry->userdata = stm_hashtable_entry_userdata;
             entry->index = index;
             entry->object = NULL;
-            hashtable->additions = STM_SEGMENT->segment_num;
         }
         else {
             /* for a non-nursery 'hashtableobj', we pretend that the
@@ -320,7 +318,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             entry = (stm_hashtable_entry_t *)
                 stm_allocate_preexisting(sizeof(stm_hashtable_entry_t),
                                          (char *)&initial.header);
-            hashtable->additions += 0x100;
+            hashtable->additions++;
         }
         table->items[i] = entry;
         write_fence();     /* make sure 'table->items' is written here */
@@ -335,7 +333,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             biggercount *= 4;
         else
             biggercount *= 2;
-        _stm_rehash_hashtable(hashtable, biggercount, /*remove_unread=*/0);
+        _stm_rehash_hashtable(hashtable, biggercount, /*segment_base=*/NULL);
         goto restart;
     }
 }
@@ -460,16 +458,27 @@ long stm_hashtable_list(object_t *hobj, stm_hashtable_t *hashtable,
     return nresult;
 }
 
-static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
+static void _stm_compact_hashtable(struct object_s *hobj,
+                                   stm_hashtable_t *hashtable)
 {
     stm_hashtable_table_t *table = hashtable->table;
     uintptr_t rc = table->resize_counter;
     assert(!IS_EVEN(rc));
 
-    if ((hashtable->additions >> 8) * 4 > table->mask) {
-        int segment_num = (hashtable->additions & 0xFF);
-        if (!segment_num) segment_num = 1;
-        hashtable->additions = segment_num;
+    if (hashtable->additions * 4 > table->mask) {
+        hashtable->additions = 0;
+
+        /* If 'hobj' was created in some current transaction, i.e. if it is
+           now an overflow object, then we have the risk that some of its
+           entry objects were not created with stm_allocate_preexisting().
+           In that situation, a valid workaround is to read all entry
+           objects in the segment of the running transaction.  Otherwise,
+           the base case is to read them all from segment zero.
+        */
+        long segnum = get_num_segment_containing_address((char *)hobj);
+        if (!IS_OVERFLOW_OBJ(get_priv_segment(segnum), hobj))
+            segnum = 0;
+
         uintptr_t initial_rc = (table->mask + 1) * 4 + 1;
         uintptr_t num_entries_times_6 = initial_rc - rc;
         uintptr_t count = INITIAL_HASHTABLE_SIZE;
@@ -480,7 +489,7 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
         assert(count <= table->mask + 1);
 
         dprintf(("compact with %ld items:\n", num_entries_times_6 / 6));
-        _stm_rehash_hashtable(hashtable, count, /*remove_unread=*/segment_num);
+        _stm_rehash_hashtable(hashtable, count, get_segment_base(segnum));
     }
 
     table = hashtable->table;
@@ -503,10 +512,11 @@ static void _stm_compact_hashtable(stm_hashtable_t *hashtable)
     }
 }
 
-void stm_hashtable_tracefn(stm_hashtable_t *hashtable, void trace(object_t **))
+void stm_hashtable_tracefn(struct object_s *hobj, stm_hashtable_t *hashtable,
+                           void trace(object_t **))
 {
     if (trace == TRACE_FOR_MAJOR_COLLECTION)
-        _stm_compact_hashtable(hashtable);
+        _stm_compact_hashtable(hobj, hashtable);
 
     stm_hashtable_table_t *table;
     table = VOLATILE_HASHTABLE(hashtable)->table;
