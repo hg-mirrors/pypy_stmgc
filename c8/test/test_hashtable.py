@@ -297,19 +297,27 @@ class TestHashtable(BaseTestHashtable):
         h = self.allocate_hashtable()
         self.push_root(h)
         self.commit_transaction()
-        h = self.pop_root()
         #
         self.start_transaction()
-        assert htlen(h) == 0
+        h = self.pop_root()
+        self.push_root(h)
+        tl0 = self.tls[self.current_thread]
+        htset(h, 10, stm_allocate(32), tl0)
         #
         self.switch(1)
         self.start_transaction()
-        tl0 = self.tls[self.current_thread]
-        htset(h, 10, stm_allocate(32), tl0)
-        py.test.raises(Conflict, self.commit_transaction)
+        assert htlen(h) == 0
         #
         self.switch(0)
+        self.commit_transaction()
+        #
+        py.test.raises(Conflict, self.switch, 1)
+        #
+        self.switch(0)
+        self.start_transaction()
+        self.pop_root()
         stm_major_collect()       # to get rid of the hashtable object
+        self.commit_transaction()
 
     def test_grow_without_conflict(self):
         self.start_transaction()
