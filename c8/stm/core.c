@@ -1107,16 +1107,6 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
     STM_PSEGMENT->threadlocal_at_start_of_transaction = tl->thread_local_obj;
 
-    enter_safe_point_if_requested();
-    dprintf(("> start_transaction\n"));
-
-    s_mutex_unlock();   // XXX it's probably possible to not acquire this here
-
-    uint8_t old_rv = STM_SEGMENT->transaction_read_version;
-    STM_SEGMENT->transaction_read_version = old_rv + 1;
-    if (UNLIKELY(old_rv == 0xff)) {
-        reset_transaction_read_version();
-    }
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->large_overflow_objects));
@@ -1134,6 +1124,19 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
 #endif
 
     check_nursery_at_transaction_start();
+
+    /* Warning: this safe-point may run light finalizers and register
+       commit/abort callbacks if a major GC is triggered here */
+    enter_safe_point_if_requested();
+    dprintf(("> start_transaction\n"));
+
+    s_mutex_unlock();   // XXX it's probably possible to not acquire this here
+
+    uint8_t old_rv = STM_SEGMENT->transaction_read_version;
+    STM_SEGMENT->transaction_read_version = old_rv + 1;
+    if (UNLIKELY(old_rv == 0xff)) {
+        reset_transaction_read_version();
+    }
 
     stm_validate();
 }
