@@ -148,13 +148,13 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
     memcpy(nobj_seg0, initial_data, size_rounded_up);
     ((struct object_s *)nobj_seg0)->stm_flags = GCFLAG_WRITE_BARRIER;
 
+    acquire_privatization_lock(STM_SEGMENT->segment_num);
+
     long j;
     for (j = 1; j < NB_SEGMENTS; j++) {
         const char *src = nobj_seg0;
         char *dest = get_segment_base(j) + nobj;
         char *end = dest + size_rounded_up;
-
-        acquire_privatization_lock(j);
 
         while (((uintptr_t)dest) / 4096 != ((uintptr_t)end - 1) / 4096) {
             uintptr_t count = 4096 - ((uintptr_t)dest) / 4096;
@@ -171,8 +171,9 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
             assert(!was_read_remote(get_segment_base(j), (object_t *)nobj));
         }
 #endif
-        release_privatization_lock(j);
     }
+
+    release_privatization_lock(STM_SEGMENT->segment_num);
 
     write_fence();     /* make sure 'nobj' is fully initialized from
                           all threads here */
@@ -297,6 +298,8 @@ static inline void mark_record_trace(object_t **pobj)
     LIST_APPEND(marked_objects_to_trace, obj);
 }
 
+
+#define TRACE_FOR_MAJOR_COLLECTION  (&mark_record_trace)
 
 static void mark_and_trace(
     object_t *obj,
