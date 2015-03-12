@@ -157,7 +157,7 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
         char *end = dest + size_rounded_up;
 
         while (((uintptr_t)dest) / 4096 != ((uintptr_t)end - 1) / 4096) {
-            uintptr_t count = 4096 - ((uintptr_t)dest) / 4096;
+            uintptr_t count = 4096 - (((uintptr_t)dest) & 4095);
             _fill_preexisting_slice(j, dest, src, count);
             src += count;
             dest += count;
