@@ -492,7 +492,8 @@ long stm_hashtable_length_upper_bound(stm_hashtable_t *);
 long stm_hashtable_list(object_t *, stm_hashtable_t *,
                         stm_hashtable_entry_t **results);
 extern uint32_t stm_hashtable_entry_userdata;
-void stm_hashtable_tracefn(stm_hashtable_t *, void (object_t **));
+void stm_hashtable_tracefn(struct object_s *, stm_hashtable_t *,
+                           void (object_t **));
 
 struct stm_hashtable_entry_s {
     struct object_s header;

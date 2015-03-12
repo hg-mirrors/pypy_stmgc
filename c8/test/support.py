@@ -210,7 +210,8 @@ long stm_hashtable_length_upper_bound(stm_hashtable_t *);
 long stm_hashtable_list(object_t *, stm_hashtable_t *,
                         stm_hashtable_entry_t **results);
 uint32_t stm_hashtable_entry_userdata;
-void stm_hashtable_tracefn(stm_hashtable_t *, void (object_t **));
+void stm_hashtable_tracefn(struct object_s *, stm_hashtable_t *,
+                           void trace(object_t **));
 
 void _set_hashtable(object_t *obj, stm_hashtable_t *h);
 stm_hashtable_t *_get_hashtable(object_t *obj);
@@ -442,7 +443,7 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     if (myobj->type_id == 421419) {
         /* hashtable */
         stm_hashtable_t *h = *((stm_hashtable_t **)(myobj + 1));
-        stm_hashtable_tracefn(h, visit);
+        stm_hashtable_tracefn(obj, h, visit);
         return;
     }
     if (myobj->type_id == 421418) {
