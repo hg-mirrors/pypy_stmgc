@@ -145,9 +145,15 @@ class TestHashtable(BaseTestHashtable):
         self.switch(1)
         self.start_transaction()
         tl1 = self.tls[self.current_thread]
-        py.test.raises(Conflict, "htset(h, 1234, lp2, tl1)")
+        htset(h, 1234, lp2, tl1)
         #
         self.switch(0)
+        self.commit_transaction()
+        #
+        py.test.raises(Conflict, self.switch, 1)
+        #
+        self.switch(0)
+        self.start_transaction()
         self.pop_root()
         stm_major_collect()       # to get rid of the hashtable object
         self.commit_transaction()
