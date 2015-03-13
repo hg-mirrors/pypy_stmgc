@@ -640,6 +640,11 @@ object_t *_stm_allocate_external(ssize_t size_rounded_up)
 #if _STM_NURSERY_ZEROED
     memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
 #else
+
+#ifndef NDEBUG
+    memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0xb0, size_rounded_up);
+#endif
+
     o->stm_flags = 0;
     /* make all pages of 'o' accessible as synchronize_obj_flush() in minor
        collections assumes all young objs are fully accessible. */
