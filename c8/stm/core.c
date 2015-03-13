@@ -48,6 +48,7 @@ static void import_objects(
     assert(IMPLY(from_segnum >= 0, get_priv_segment(from_segnum)->modification_lock));
     assert(STM_PSEGMENT->modification_lock);
 
+    long my_segnum = STM_SEGMENT->segment_num;
     DEBUG_EXPECT_SEGFAULT(false);
     for (; undo < end; undo++) {
         if (undo->type == TYPE_POSITION_MARKER)
@@ -57,18 +58,19 @@ static void import_objects(
         uintptr_t current_page_num = ((uintptr_t)oslice) / 4096;
 
         if (pagenum == -1) {
-            if (get_page_status_in(STM_SEGMENT->segment_num,
-                                   current_page_num) == PAGE_NO_ACCESS)
+            if (get_page_status_in(my_segnum, current_page_num) == PAGE_NO_ACCESS)
                 continue;
-        }
-        else {
-            if (current_page_num != pagenum)
-                continue;
+        } else if (pagenum != current_page_num) {
+            continue;
         }
 
-        if (from_segnum == -2 && _stm_was_read(obj) && (obj->stm_flags & GCFLAG_WB_EXECUTED)) {
+        if (from_segnum == -2
+            && _stm_was_read(obj)
+            && (get_page_status_in(my_segnum, (uintptr_t)obj / 4096) == PAGE_ACCESSIBLE)
+            && (obj->stm_flags & GCFLAG_WB_EXECUTED)) {
             /* called from stm_validate():
                 > if not was_read(), we certainly didn't modify
+                > if obj->stm_flags is not accessible, WB_EXECUTED cannot be set
                 > if not WB_EXECUTED, we may have read from the obj in a different page but
                   did not modify it (should not occur right now, but future proof!)
                only the WB_EXECUTED alone is not enough, since we may have imported from a
@@ -79,8 +81,7 @@ static void import_objects(
 
         /* XXX: if the next assert is always true, we should never get a segfault
            in this function at all. So the DEBUG_EXPECT_SEGFAULT is correct. */
-        assert((get_page_status_in(STM_SEGMENT->segment_num,
-                                   current_page_num) != PAGE_NO_ACCESS));
+        assert((get_page_status_in(my_segnum, current_page_num) != PAGE_NO_ACCESS));
 
         /* dprintf(("import slice seg=%d obj=%p off=%lu sz=%d pg=%lu\n", */
         /*          from_segnum, obj, SLICE_OFFSET(undo->slice), */
@@ -95,7 +96,8 @@ static void import_objects(
 
         if (src_segment_base == NULL && SLICE_OFFSET(undo->slice) == 0) {
             /* check that restored obj doesn't have WB_EXECUTED */
-            assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
+            assert((get_page_status_in(my_segnum, (uintptr_t)obj / 4096) == PAGE_NO_ACCESS)
+                   || !(obj->stm_flags & GCFLAG_WB_EXECUTED));
         }
     }
     DEBUG_EXPECT_SEGFAULT(true);
