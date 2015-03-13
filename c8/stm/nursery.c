@@ -461,16 +461,20 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     }
     OPT_ASSERT((nursery_used & 7) == 0);
 
-
-#if _STM_NURSERY_ZEROED
+#ifndef NDEBUG
     /* reset the nursery by zeroing it */
     char *realnursery;
     realnursery = REAL_ADDRESS(pseg->pub.segment_base, _stm_nursery_start);
+#if _STM_NURSERY_ZEROED
     memset(realnursery, 0, nursery_used);
 
     /* assert that the rest of the nursery still contains only zeroes */
     assert_memset_zero(realnursery + nursery_used,
                        (NURSERY_END - _stm_nursery_start) - nursery_used);
+
+#else
+    memset(realnursery, 0xa0, nursery_used);
+#endif
 #endif
 
     pseg->pub.nursery_current = (stm_char *)_stm_nursery_start;
