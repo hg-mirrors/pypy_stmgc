@@ -332,6 +332,10 @@ long stm_start_transaction(stm_thread_local_t *tl);
 void stm_start_inevitable_transaction(stm_thread_local_t *tl);
 void stm_commit_transaction(void);
 
+/* Temporary fix?  Call this outside a transaction.  If there is an
+   inevitable transaction running somewhere else, wait until it finishes. */
+void stm_wait_for_current_inevitable_transaction(void);
+
 /* Abort the currently running transaction.  This function never
    returns: it jumps back to the stm_start_transaction(). */
 void stm_abort_transaction(void) __attribute__((noreturn));
