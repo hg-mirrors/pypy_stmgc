@@ -15,6 +15,7 @@ which you get from:
  mkdir llvm-build
  cd llvm-build
  ../llvm/configure --enable-optimized      # requires gcc >= 4.7!
+                   --disable-assertions    # optional
  make
 
 
