@@ -2,6 +2,11 @@
 # error "must be compiled via stmgc.c"
 #endif
 
+char *stm_object_pages;
+long _stm_segment_nb_pages = NB_PAGES;
+int _stm_nb_segments = NB_SEGMENTS;
+int _stm_psegment_ofs = (int)(uintptr_t)STM_PSEGMENT;
+
 /* *** MISC *** */
 static void free_bk(struct stm_undo_s *undo)
 {
@@ -1127,6 +1132,14 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
 
     check_nursery_at_transaction_start();
 
+    /* Change read-version here, because if we do stm_validate in the
+       safe-point below, we should not see our old reads from the last
+       transaction. */
+    uint8_t rv = STM_SEGMENT->transaction_read_version;
+    if (rv < 0xff)   /* else, rare (maybe impossible?) case: we did already */
+        rv++;        /* incr it but enter_safe_point_if_requested() aborted */
+    STM_SEGMENT->transaction_read_version = rv;
+
     /* Warning: this safe-point may run light finalizers and register
        commit/abort callbacks if a major GC is triggered here */
     enter_safe_point_if_requested();
@@ -1134,9 +1147,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
 
     s_mutex_unlock();   // XXX it's probably possible to not acquire this here
 
-    uint8_t old_rv = STM_SEGMENT->transaction_read_version;
-    STM_SEGMENT->transaction_read_version = old_rv + 1;
-    if (UNLIKELY(old_rv == 0xff)) {
+    if (UNLIKELY(rv == 0xff)) {
         reset_transaction_read_version();
     }
 
