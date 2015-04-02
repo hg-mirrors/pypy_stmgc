@@ -318,10 +318,16 @@ class TestGCPage(BaseTest):
 
     def test_keepalive_prebuilt(self):
         stm_allocate_old(64)
+        big = GC_LAST_SMALL_SIZE+64
+        stm_allocate_old(big)
+
+        # see allocate_outside_nursery_large:
+        actual_big = (big + 15 ) & ~15
+
         self.start_transaction()
-        assert lib._stm_total_allocated() == 64 + LMO # large malloc'd
+        assert lib._stm_total_allocated() == 64 + (actual_big + LMO) # large malloc'd
         stm_major_collect()
-        assert lib._stm_total_allocated() == 64 + LMO # large malloc'd
+        assert lib._stm_total_allocated() == 64 + (actual_big + LMO) # large malloc'd
         self.commit_transaction()
 
     def test_bug(self):
