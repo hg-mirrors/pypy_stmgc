@@ -53,3 +53,19 @@ Essential "readers":
 - _stm_validate()
 - push_large_overflow_objects_to_other_segments()
 - nursery.c calling synchronize_object_enqueue()
+
+
+
+mutex and conditions
+====================
+
+There is also one global mutex and a few condition codes.  It's
+unclear if these are still the best solution.
+
+The mutex is acquired in stm_start_transaction() and in
+stm_commit_transaction().  The main purpose is to wait for or signal
+the C_SEGMENT_FREE condition code.
+
+The C_AT_SAFE_POINT and C_REQUEST_REMOVED condition codes are used by
+synchronize_all_threads().  That's used only in rare cases, for
+example because we want to start a major collection.
