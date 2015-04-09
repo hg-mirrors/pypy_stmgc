@@ -1,0 +1,55 @@
+
+
+main lock-free operation
+========================
+
+The main lock-free operation is at commit time: the compare-and-swap
+that attaches a new log entry after 'last_commit_log_entry'.
+
+
+
+modification_lock
+=================
+
+one per segment.
+
+acquired on segment N when we want to read or write the segment N's
+copy of 'modified_old_objects', the backup copies, etc.
+
+an important user is _stm_validate(): it locks the current segment,
+and all the other segments out of which it is going to read data
+
+could be improved, because _stm_validate() writes into the current
+segment but only reads the other ones.  So far it mostly serializes
+calls to _stm_validate(): if we have two of them starting at roughly
+the same time, they need both to acquire the modification_lock of at
+least the segment that did the most recent commit --- even though it
+could proceed in parallel if they could both realize that they only
+want to read from that same segment.
+
+same, handle_segfault_in_page() acquires two modification_locks: the
+current segment (which needs to be written to), and the
+'copy_from_segnum' (which only needs to be read from).
+
+the current segment modification_lock is also acquired briefly
+whenever we change our segment's 'modified_old_objects'.
+
+
+
+privatization_lock
+==================
+
+one per segment.  Works like a single "reader-writer" lock: each
+segment acquires either only its copy ("reader") or all of them
+("writer").
+
+"Reader" status is needed to call get_page_status_in().
+"Writer" status is needed to call set_page_status_in/page_mark_(in)accessible.
+
+Essential "writers":
+- handle_segfault_in_page(), but it only writes the status for the current seg
+
+Essential "readers":
+- _stm_validate()
+- push_large_overflow_objects_to_other_segments()
+- nursery.c calling synchronize_object_enqueue()
