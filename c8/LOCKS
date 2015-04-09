@@ -34,6 +34,12 @@ current segment (which needs to be written to), and the
 the current segment modification_lock is also acquired briefly
 whenever we change our segment's 'modified_old_objects'.
 
+_validate_and_attach() needs to have its own segment's
+modification_lock *around* the compare-and-swap, so that
+_stm_validate() sees either the commit not done and the backup copies
+still in modified_old_objects, or the commit done and no backup copies
+any more.
+
 
 
 privatization_lock
@@ -69,6 +75,9 @@ the C_SEGMENT_FREE condition code.
 The C_AT_SAFE_POINT and C_REQUEST_REMOVED condition codes are used by
 synchronize_all_threads().  That's used only in rare cases, for
 example because we want to start a major collection.
+
+The mutex also needs to be acquired for rewind_longjmp's setjmp() and
+longjmp() equivalent.
 
 
 
