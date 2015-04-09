@@ -69,3 +69,13 @@ the C_SEGMENT_FREE condition code.
 The C_AT_SAFE_POINT and C_REQUEST_REMOVED condition codes are used by
 synchronize_all_threads().  That's used only in rare cases, for
 example because we want to start a major collection.
+
+
+
+usleep loop
+===========
+
+core.c: wait_for_other_inevitable()
+sync.c: stm_wait_for_current_inevitable_transaction()
+
+Must be fixed!
