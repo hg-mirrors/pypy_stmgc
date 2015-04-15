@@ -340,8 +340,6 @@ void stm_wait_for_current_inevitable_transaction(void);
    returns: it jumps back to the stm_start_transaction(). */
 void stm_abort_transaction(void) __attribute__((noreturn));
 
-/* Turn the current transaction inevitable.
-   The stm_become_inevitable() itself may still abort. */
 #ifdef STM_NO_AUTOMATIC_SETJMP
 int stm_is_inevitable(void);
 #else
@@ -349,6 +347,10 @@ static inline int stm_is_inevitable(void) {
     return !rewind_jmp_armed(&STM_SEGMENT->running_thread->rjthread);
 }
 #endif
+
+/* Turn the current transaction inevitable.
+   stm_become_inevitable() itself may still abort the transaction instead
+   of returning. */
 static inline void stm_become_inevitable(stm_thread_local_t *tl,
                                          const char* msg) {
     assert(STM_SEGMENT->running_thread == tl);
