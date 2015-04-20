@@ -25,7 +25,12 @@ import gdb
 def gdb_function(func):
     class Func(gdb.Function):
         __doc__ = func.__doc__
-        invoke = staticmethod(func)
+        def invoke(self, *args, **kwds):
+            try:
+                func(*args, **kwds)
+            except:
+                import traceback
+                traceback.print_exc()
     Func(func.__name__)
 
 # -------------------------------------------------------
