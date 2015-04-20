@@ -27,10 +27,11 @@ def gdb_function(func):
         __doc__ = func.__doc__
         def invoke(self, *args, **kwds):
             try:
-                func(*args, **kwds)
+                return func(*args, **kwds)
             except:
                 import traceback
                 traceback.print_exc()
+                raise
     Func(func.__name__)
 
 # -------------------------------------------------------
