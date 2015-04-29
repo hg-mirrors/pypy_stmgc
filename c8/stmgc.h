@@ -94,13 +94,13 @@ void _stm_write_slowpath_card(object_t *, uintptr_t);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 void _stm_become_inevitable(const char*);
-void _stm_collectable_safe_point();
+void _stm_collectable_safe_point(void);
 
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
 #include <stdbool.h>
-uint8_t _stm_get_transaction_read_version();
+uint8_t _stm_get_transaction_read_version(void);
 uint8_t _stm_get_card_value(object_t *obj, long idx);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
@@ -137,9 +137,9 @@ long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
 object_t *_stm_enum_modified_old_objects(long index);
 object_t *_stm_enum_objects_pointing_to_nursery(long index);
-object_t *_stm_next_last_cl_entry();
-void _stm_start_enum_last_cl_entry();
-long _stm_count_cl_entries();
+object_t *_stm_next_last_cl_entry(void);
+void _stm_start_enum_last_cl_entry(void);
+long _stm_count_cl_entries(void);
 long _stm_count_old_objects_with_cards_set(void);
 object_t *_stm_enum_old_objects_with_cards_set(long index);
 uint64_t _stm_total_allocated(void);
