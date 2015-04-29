@@ -297,7 +297,7 @@ static void synchronize_object_enqueue(object_t *obj);
 static void synchronize_objects_flush(void);
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
-static bool _stm_validate();
+static bool _stm_validate(void);
 
 static inline bool was_read_remote(char *base, object_t *obj)
 {
@@ -329,7 +329,7 @@ static inline void release_privatization_lock(int segnum)
     spinlock_release(get_priv_segment(segnum)->privatization_lock);
 }
 
-static inline bool all_privatization_locks_acquired()
+static inline bool all_privatization_locks_acquired(void)
 {
 #ifndef NDEBUG
     long l;
@@ -343,7 +343,7 @@ static inline bool all_privatization_locks_acquired()
 #endif
 }
 
-static inline void acquire_all_privatization_locks()
+static inline void acquire_all_privatization_locks(void)
 {
     /* XXX: don't do for the sharing seg0 */
     long l;
@@ -352,7 +352,7 @@ static inline void acquire_all_privatization_locks()
     }
 }
 
-static inline void release_all_privatization_locks()
+static inline void release_all_privatization_locks(void)
 {
     long l;
     for (l = NB_SEGMENTS-1; l >= 0; l--) {

@@ -308,7 +308,7 @@ void _dbg_print_commit_log()
 
 static void reset_modified_from_backup_copies(int segment_num);  /* forward */
 
-static bool _stm_validate()
+static bool _stm_validate(void)
 {
     /* returns true if we reached a valid state, or false if
        we need to abort now */
