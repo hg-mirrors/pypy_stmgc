@@ -38,11 +38,11 @@ struct stm_read_marker_s {
        'STM_SEGMENT->transaction_read_version' if and only if the
        object was read in the current transaction.  The nurseries
        also have corresponding read markers, but they are never used. */
-    uint8_t rm;
+    unsigned rm:8;
 };
 
 struct stm_segment_info_s {
-    uint8_t transaction_read_version;
+    unsigned int transaction_read_version;
     int segment_num;
     char *segment_base;
     stm_char *nursery_current;
