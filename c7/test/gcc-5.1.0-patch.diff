@@ -1,0 +1,120 @@
+Index: gcc/config/i386/i386-c.c
+===================================================================
+--- gcc/config/i386/i386-c.c	(revision 223607)
++++ gcc/config/i386/i386-c.c	(working copy)
+@@ -572,6 +572,8 @@
+ 			       ix86_tune,
+ 			       ix86_fpmath,
+ 			       cpp_define);
++
++  cpp_define (parse_in, "__SEG_GS");
+ }
+ 
+ 
+@@ -586,6 +588,8 @@
+   /* Update pragma hook to allow parsing #pragma GCC target.  */
+   targetm.target_option.pragma_parse = ix86_pragma_target_parse;
+ 
++  c_register_addr_space ("__seg_gs", ADDR_SPACE_SEG_GS);
++
+ #ifdef REGISTER_SUBTARGET_PRAGMAS
+   REGISTER_SUBTARGET_PRAGMAS ();
+ #endif
+Index: gcc/config/i386/i386.c
+===================================================================
+--- gcc/config/i386/i386.c	(revision 223607)
++++ gcc/config/i386/i386.c	(working copy)
+@@ -13473,6 +13473,11 @@
+       && GET_MODE (base) != GET_MODE (index))
+     return false;
+ 
++  /**** <AR> ****/
++  if (seg == SEG_GS)
++    ;    /* assume it's fine */
++  else
++  /**** </AR> ****/
+   /* Address override works only on the (%reg) part of %fs:(%reg).  */
+   if (seg != SEG_DEFAULT
+       && ((base && GET_MODE (base) != word_mode)
+@@ -15963,6 +15968,15 @@
+ 	  fputs (" PTR ", file);
+ 	}
+ 
++      /**** <AR> ****/
++      if (MEM_P(x) && MEM_ADDR_SPACE(x) == ADDR_SPACE_SEG_GS)
++	{
++	  if (ASSEMBLER_DIALECT == ASM_ATT)
++	    putc ('%', file);
++	  fputs ("gs:", file);
++	}
++      /**** </AR> ****/
++
+       x = XEXP (x, 0);
+       /* Avoid (%rip) for call operands.  */
+       if (CONSTANT_ADDRESS_P (x) && code == 'P'
+@@ -51816,6 +51830,50 @@
+ }
+ #endif
+ 
++
++/***** <AR> *****/
++
++/*** GS segment register addressing mode ***/
++
++static machine_mode
++ix86_addr_space_pointer_mode (addr_space_t addrspace)
++{
++  gcc_assert (ADDR_SPACE_GENERIC_P (addrspace) ||
++	      addrspace == ADDR_SPACE_SEG_GS);
++  return ptr_mode;
++}
++
++/* Return the appropriate mode for a named address address.  */
++static machine_mode
++ix86_addr_space_address_mode (addr_space_t addrspace)
++{
++  gcc_assert (ADDR_SPACE_GENERIC_P (addrspace) ||
++	      addrspace == ADDR_SPACE_SEG_GS);
++  return Pmode;
++}
++
++/* Like ix86_legitimate_address_p, except with named addresses.  */
++static bool
++ix86_addr_space_legitimate_address_p (machine_mode mode, rtx x,
++				      bool reg_ok_strict, addr_space_t as)
++{
++  (void)as;
++  return ix86_legitimate_address_p (mode, x, reg_ok_strict);
++}
++
++#undef TARGET_ADDR_SPACE_POINTER_MODE
++#define TARGET_ADDR_SPACE_POINTER_MODE ix86_addr_space_pointer_mode
++
++#undef TARGET_ADDR_SPACE_ADDRESS_MODE
++#define TARGET_ADDR_SPACE_ADDRESS_MODE ix86_addr_space_address_mode
++
++#undef TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P
++#define TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P \
++  ix86_addr_space_legitimate_address_p
++
++/***** </AR> *****/
++
++
+ /* Initialize the GCC target structure.  */
+ #undef TARGET_RETURN_IN_MEMORY
+ #define TARGET_RETURN_IN_MEMORY ix86_return_in_memory
+Index: gcc/config/i386/i386.h
+===================================================================
+--- gcc/config/i386/i386.h	(revision 223607)
++++ gcc/config/i386/i386.h	(working copy)
+@@ -2568,6 +2568,10 @@
+ /* For switching between functions with different target attributes.  */
+ #define SWITCHABLE_TARGET 1
+ 
++enum {
++  ADDR_SPACE_SEG_GS = 1
++};
++
+ /*
+ Local variables:
+ version-control: t
