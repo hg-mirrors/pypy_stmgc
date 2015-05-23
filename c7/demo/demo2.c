@@ -216,7 +216,7 @@ void setup_list(void)
 
 void teardown_list(void)
 {
-    STM_POP_ROOT_RET(stm_thread_local);
+    STM_POP_ROOT_DROP(stm_thread_local);
 }
 
 

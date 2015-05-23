@@ -20,7 +20,11 @@
 #endif
 
 
-#define TLPREFIX __attribute__((address_space(256)))
+#ifdef __SEG_GS     /* on a custom patched gcc */
+#  define TLPREFIX __seg_gs
+#else
+#  define TLPREFIX __attribute__((address_space(256)))
+#endif
 
 typedef TLPREFIX struct object_s object_t;
 typedef TLPREFIX struct stm_segment_info_s stm_segment_info_t;
@@ -288,6 +292,7 @@ void stm_teardown(void);
 #define STM_PUSH_ROOT(tl, p)   ((tl).shadowstack++->ss = (object_t *)(p))
 #define STM_POP_ROOT(tl, p)    ((p) = (typeof(p))((--(tl).shadowstack)->ss))
 #define STM_POP_ROOT_RET(tl)   ((--(tl).shadowstack)->ss)
+#define STM_POP_ROOT_DROP(tl)  ((void)(--(tl).shadowstack))
 
 
 /* Every thread needs to have a corresponding stm_thread_local_t
@@ -506,7 +511,7 @@ int stm_set_timing_log(const char *profiling_file_name, int fork_mode,
 
 #define STM_POP_MARKER(tl)   ({                 \
     object_t *_popped = STM_POP_ROOT_RET(tl);   \
-    STM_POP_ROOT_RET(tl);                       \
+    STM_POP_ROOT_DROP(tl);                      \
     _popped;                                    \
 })
 

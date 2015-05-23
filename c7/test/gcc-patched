@@ -1,0 +1,4 @@
+#!/bin/bash
+
+# TEMPORARY
+exec /home/arigo/svn/gcc/build/gcc/xgcc -B /home/arigo/svn/gcc/build/gcc "$@"
