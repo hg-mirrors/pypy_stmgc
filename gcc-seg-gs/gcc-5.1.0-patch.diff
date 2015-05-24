@@ -40,7 +40,7 @@ Index: gcc/config/i386/i386.c
        x = XEXP (x, 0);
        /* Avoid (%rip) for call operands.  */
        if (CONSTANT_ADDRESS_P (x) && code == 'P'
-@@ -51816,6 +51825,92 @@
+@@ -51816,6 +51825,111 @@
  }
  #endif
  
@@ -50,19 +50,17 @@ Index: gcc/config/i386/i386.c
 +/*** GS segment register addressing mode ***/
 +
 +static machine_mode
-+ix86_addr_space_pointer_mode (addr_space_t addrspace)
++ix86_addr_space_pointer_mode (addr_space_t as)
 +{
-+  gcc_assert (ADDR_SPACE_GENERIC_P (addrspace) ||
-+	      addrspace == ADDR_SPACE_SEG_GS);
++  gcc_assert (ADDR_SPACE_GENERIC_P (as) || as == ADDR_SPACE_SEG_GS);
 +  return ptr_mode;
 +}
 +
 +/* Return the appropriate mode for a named address address.  */
 +static machine_mode
-+ix86_addr_space_address_mode (addr_space_t addrspace)
++ix86_addr_space_address_mode (addr_space_t as)
 +{
-+  gcc_assert (ADDR_SPACE_GENERIC_P (addrspace) ||
-+	      addrspace == ADDR_SPACE_SEG_GS);
++  gcc_assert (ADDR_SPACE_GENERIC_P (as) || as == ADDR_SPACE_SEG_GS);
 +  return Pmode;
 +}
 +
@@ -70,9 +68,7 @@ Index: gcc/config/i386/i386.c
 +static bool
 +ix86_addr_space_valid_pointer_mode (machine_mode mode, addr_space_t as)
 +{
-+  gcc_assert (ADDR_SPACE_GENERIC_P (as) ||
-+	      as == ADDR_SPACE_SEG_GS);
-+
++  gcc_assert (ADDR_SPACE_GENERIC_P (as) || as == ADDR_SPACE_SEG_GS);
 +  return targetm.valid_pointer_mode (mode);
 +}
 +
@@ -81,8 +77,7 @@ Index: gcc/config/i386/i386.c
 +ix86_addr_space_legitimate_address_p (machine_mode mode, rtx x,
 +				      bool reg_ok_strict, addr_space_t as)
 +{
-+  gcc_assert (ADDR_SPACE_GENERIC_P (as) ||
-+	      as == ADDR_SPACE_SEG_GS);
++  gcc_assert (ADDR_SPACE_GENERIC_P (as) || as == ADDR_SPACE_SEG_GS);
 +  return ix86_legitimate_address_p (mode, x, reg_ok_strict);
 +}
 +
@@ -91,9 +86,31 @@ Index: gcc/config/i386/i386.c
 +ix86_addr_space_legitimize_address (rtx x, rtx oldx,
 +				    machine_mode mode, addr_space_t as)
 +{
-+  gcc_assert (ADDR_SPACE_GENERIC_P (as) ||
-+	      as == ADDR_SPACE_SEG_GS);
++  gcc_assert (ADDR_SPACE_GENERIC_P (as) || as == ADDR_SPACE_SEG_GS);
 +  return ix86_legitimize_address (x, oldx, mode);
++}
++
++/* The default and the SEG_GS address spaces are subset of each other. */
++bool static 
++ix86_addr_space_subset_p (addr_space_t subset, addr_space_t superset)
++{
++  gcc_assert (ADDR_SPACE_GENERIC_P (subset) || subset == ADDR_SPACE_SEG_GS);
++  gcc_assert (ADDR_SPACE_GENERIC_P (superset) || superset==ADDR_SPACE_SEG_GS);
++  return true;
++}
++
++/* Convert from one address space to another: it is a no-op.
++   It is the C code's responsibility to write sensible casts. */
++static rtx
++ix86_addr_space_convert (rtx op, tree from_type, tree to_type)
++{
++  addr_space_t from_as = TYPE_ADDR_SPACE (TREE_TYPE (from_type));
++  addr_space_t to_as = TYPE_ADDR_SPACE (TREE_TYPE (to_type));
++
++  gcc_assert (ADDR_SPACE_GENERIC_P (from_as) || from_as == ADDR_SPACE_SEG_GS);
++  gcc_assert (ADDR_SPACE_GENERIC_P (to_as) || to_as == ADDR_SPACE_SEG_GS);
++
++  return op;
 +}
 +
 +static bool
@@ -101,10 +118,6 @@ Index: gcc/config/i386/i386.c
 +{
 +  return true;    /* all pointer and address modes are still Pmode/ptr_mode */
 +}
-+
-+/* Note that the default and the SEG_GS address spaces are not subset
-+   of each other, because there is no reasonable and general logic to
-+   convert from one to the other. */
 +
 +#undef TARGET_ADDR_SPACE_POINTER_MODE
 +#define TARGET_ADDR_SPACE_POINTER_MODE ix86_addr_space_pointer_mode
@@ -122,6 +135,12 @@ Index: gcc/config/i386/i386.c
 +#undef TARGET_ADDR_SPACE_LEGITIMIZE_ADDRESS
 +#define TARGET_ADDR_SPACE_LEGITIMIZE_ADDRESS \
 +  ix86_addr_space_legitimize_address
++
++#undef TARGET_ADDR_SPACE_SUBSET_P
++#define TARGET_ADDR_SPACE_SUBSET_P ix86_addr_space_subset_p
++
++#undef TARGET_ADDR_SPACE_CONVERT
++#define TARGET_ADDR_SPACE_CONVERT ix86_addr_space_convert
 +
 +#undef TARGET_ADDR_SPACE_DEFAULT_POINTER_ADDRESS_MODES_P
 +#define TARGET_ADDR_SPACE_DEFAULT_POINTER_ADDRESS_MODES_P \
