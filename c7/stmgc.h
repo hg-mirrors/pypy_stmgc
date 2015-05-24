@@ -23,9 +23,11 @@
 #ifdef __SEG_GS     /* on a custom patched gcc */
 #  define TLPREFIX __seg_gs
 #  define _STM_RM_SUFFIX  :8
-#else
+#elif defined(__clang__)   /* on a clang, hopefully made bug-free */
 #  define TLPREFIX __attribute__((address_space(256)))
 #  define _STM_RM_SUFFIX  /* nothing */
+#else
+#  error "needs either a GCC with __seg_gs support, or a bug-freed clang"
 #endif
 
 typedef TLPREFIX struct object_s object_t;
