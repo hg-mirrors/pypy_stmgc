@@ -19,7 +19,7 @@ C_FILES = ../stmgc.c ../stm/*.c
 
 COMMON = -I.. -pthread -lrt -g -Wall -Werror -DSTM_LARGEMALLOC_TEST
 
-CC = ../test/gcc-patched
+CC = gcc-seg-gs
 
 
 # note that 'build' is partially optimized but still contains all asserts
