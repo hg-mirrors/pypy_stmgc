@@ -24,24 +24,12 @@ Index: gcc/config/i386/i386.c
 ===================================================================
 --- gcc/config/i386/i386.c	(revision 223607)
 +++ gcc/config/i386/i386.c	(working copy)
-@@ -13473,6 +13473,11 @@
-       && GET_MODE (base) != GET_MODE (index))
-     return false;
- 
-+  /**** <AR> ****/
-+  if (seg == SEG_GS)
-+    ;    /* assume it's fine */
-+  else
-+  /**** </AR> ****/
-   /* Address override works only on the (%reg) part of %fs:(%reg).  */
-   if (seg != SEG_DEFAULT
-       && ((base && GET_MODE (base) != word_mode)
-@@ -15963,6 +15968,15 @@
+@@ -15963,6 +15963,15 @@
  	  fputs (" PTR ", file);
  	}
  
 +      /**** <AR> ****/
-+      if (MEM_P(x) && MEM_ADDR_SPACE(x) == ADDR_SPACE_SEG_GS)
++      if (MEM_ADDR_SPACE(x) == ADDR_SPACE_SEG_GS)
 +	{
 +	  if (ASSEMBLER_DIALECT == ASM_ATT)
 +	    putc ('%', file);
@@ -52,7 +40,7 @@ Index: gcc/config/i386/i386.c
        x = XEXP (x, 0);
        /* Avoid (%rip) for call operands.  */
        if (CONSTANT_ADDRESS_P (x) && code == 'P'
-@@ -51816,6 +51830,50 @@
+@@ -51816,6 +51825,92 @@
  }
  #endif
  
@@ -78,14 +66,45 @@ Index: gcc/config/i386/i386.c
 +  return Pmode;
 +}
 +
++/* Named address space version of valid_pointer_mode.  */
++static bool
++ix86_addr_space_valid_pointer_mode (machine_mode mode, addr_space_t as)
++{
++  gcc_assert (ADDR_SPACE_GENERIC_P (as) ||
++	      as == ADDR_SPACE_SEG_GS);
++
++  return targetm.valid_pointer_mode (mode);
++}
++
 +/* Like ix86_legitimate_address_p, except with named addresses.  */
 +static bool
 +ix86_addr_space_legitimate_address_p (machine_mode mode, rtx x,
 +				      bool reg_ok_strict, addr_space_t as)
 +{
-+  (void)as;
++  gcc_assert (ADDR_SPACE_GENERIC_P (as) ||
++	      as == ADDR_SPACE_SEG_GS);
 +  return ix86_legitimate_address_p (mode, x, reg_ok_strict);
 +}
++
++/* Named address space version of LEGITIMIZE_ADDRESS.  */
++static rtx
++ix86_addr_space_legitimize_address (rtx x, rtx oldx,
++				    machine_mode mode, addr_space_t as)
++{
++  gcc_assert (ADDR_SPACE_GENERIC_P (as) ||
++	      as == ADDR_SPACE_SEG_GS);
++  return ix86_legitimize_address (x, oldx, mode);
++}
++
++static bool
++ix86_addr_space_default_pointer_address_modes_p (void)
++{
++  return true;    /* all pointer and address modes are still Pmode/ptr_mode */
++}
++
++/* Note that the default and the SEG_GS address spaces are not subset
++   of each other, because there is no reasonable and general logic to
++   convert from one to the other. */
 +
 +#undef TARGET_ADDR_SPACE_POINTER_MODE
 +#define TARGET_ADDR_SPACE_POINTER_MODE ix86_addr_space_pointer_mode
@@ -93,9 +112,20 @@ Index: gcc/config/i386/i386.c
 +#undef TARGET_ADDR_SPACE_ADDRESS_MODE
 +#define TARGET_ADDR_SPACE_ADDRESS_MODE ix86_addr_space_address_mode
 +
++#undef TARGET_ADDR_SPACE_VALID_POINTER_MODE
++#define TARGET_ADDR_SPACE_VALID_POINTER_MODE ix86_addr_space_valid_pointer_mode
++
 +#undef TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P
 +#define TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P \
 +  ix86_addr_space_legitimate_address_p
++
++#undef TARGET_ADDR_SPACE_LEGITIMIZE_ADDRESS
++#define TARGET_ADDR_SPACE_LEGITIMIZE_ADDRESS \
++  ix86_addr_space_legitimize_address
++
++#undef TARGET_ADDR_SPACE_DEFAULT_POINTER_ADDRESS_MODES_P
++#define TARGET_ADDR_SPACE_DEFAULT_POINTER_ADDRESS_MODES_P \
++  ix86_addr_space_default_pointer_address_modes_p
 +
 +/***** </AR> *****/
 +
@@ -118,3 +148,41 @@ Index: gcc/config/i386/i386.h
  /*
  Local variables:
  version-control: t
+Index: gcc/target.def
+===================================================================
+--- gcc/target.def	(revision 223607)
++++ gcc/target.def	(working copy)
+@@ -3164,6 +3164,19 @@
+  rtx, (rtx op, tree from_type, tree to_type),
+  default_addr_space_convert)
+ 
++/* True if all pointer or address modes are the standard Pmode and ptr_mode. */
++DEFHOOK
++(default_pointer_address_modes_p,
++ "Some places still assume that all pointer or address modes are the\n\
++standard Pmode and ptr_mode.  These optimizations become invalid if\n\
++the target actually supports multiple different modes.  This hook returns\n\
++true if all pointers and addresses are Pmode and ptr_mode, and false\n\
++otherwise.  Called via target_default_pointer_address_modes_p().  The\n\
++default NULL for the hook makes this function return true if the two hooks\n\
++@code{TARGET_ADDR_SPACE_POINTER_MODE}, @code{TARGET_ADDR_SPACE_ADDRESS_MODE}\n\
++are undefined, and false otherwise.",
++ bool, (void), NULL)
++
+ HOOK_VECTOR_END (addr_space)
+ 
+ #undef HOOK_PREFIX
+Index: gcc/targhooks.c
+===================================================================
+--- gcc/targhooks.c	(revision 223607)
++++ gcc/targhooks.c	(working copy)
+@@ -1228,6 +1228,9 @@
+ bool
+ target_default_pointer_address_modes_p (void)
+ {
++  if (targetm.addr_space.default_pointer_address_modes_p != NULL)
++    return targetm.addr_space.default_pointer_address_modes_p();
++
+   if (targetm.addr_space.address_mode != default_addr_space_address_mode)
+     return false;
+   if (targetm.addr_space.pointer_mode != default_addr_space_pointer_mode)
