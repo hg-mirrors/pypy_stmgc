@@ -22,8 +22,10 @@
 
 #ifdef __SEG_GS     /* on a custom patched gcc */
 #  define TLPREFIX __seg_gs
+#  define _STM_RM_SUFFIX  :8
 #else
 #  define TLPREFIX __attribute__((address_space(256)))
+#  define _STM_RM_SUFFIX  /* nothing */
 #endif
 
 typedef TLPREFIX struct object_s object_t;
@@ -38,7 +40,7 @@ struct stm_read_marker_s {
        'STM_SEGMENT->transaction_read_version' if and only if the
        object was read in the current transaction.  The nurseries
        also have corresponding read markers, but they are never used. */
-    unsigned char rm:8;
+    unsigned char rm _STM_RM_SUFFIX;
 };
 
 struct stm_segment_info_s {
