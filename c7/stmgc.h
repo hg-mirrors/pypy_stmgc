@@ -311,7 +311,12 @@ void stm_unregister_thread_local(stm_thread_local_t *tl);
 
 /* At some key places, like the entry point of the thread and in the
    function with the interpreter's dispatch loop, you need to declare
-   a local variable of type 'rewind_jmp_buf' and call these macros. */
+   a local variable of type 'rewind_jmp_buf' and call these macros.
+   IMPORTANT: a function in which you call stm_rewind_jmp_enterframe()
+   must never change the value of its own arguments!  If they are
+   passed on the stack, gcc can change the value directly there, but
+   we're missing the logic to save/restore this part!
+*/
 #define stm_rewind_jmp_enterprepframe(tl, rjbuf)   \
     rewind_jmp_enterprepframe(&(tl)->rjthread, rjbuf, (tl)->shadowstack)
 #define stm_rewind_jmp_enterframe(tl, rjbuf)       \
