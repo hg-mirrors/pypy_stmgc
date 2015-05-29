@@ -1,6 +1,79 @@
+Index: gcc/doc/tm.texi.in
+===================================================================
+--- gcc/doc/tm.texi.in	(revision 223859)
++++ gcc/doc/tm.texi.in	(working copy)
+@@ -7424,6 +7424,8 @@
+ 
+ @hook TARGET_ADDR_SPACE_CONVERT
+ 
++@hook TARGET_ADDR_SPACE_DEFAULT_POINTER_ADDRESS_MODES_P
++
+ @node Misc
+ @section Miscellaneous Parameters
+ @cindex parameters, miscellaneous
+Index: gcc/doc/tm.texi
+===================================================================
+--- gcc/doc/tm.texi	(revision 223859)
++++ gcc/doc/tm.texi	(working copy)
+@@ -10290,6 +10290,17 @@
+ as determined by the @code{TARGET_ADDR_SPACE_SUBSET_P} target hook.
+ @end deftypefn
+ 
++@deftypefn {Target Hook} bool TARGET_ADDR_SPACE_DEFAULT_POINTER_ADDRESS_MODES_P (void)
++Some places still assume that all pointer or address modes are the
++standard Pmode and ptr_mode.  These optimizations become invalid if
++the target actually supports multiple different modes.  This hook returns
++true if all pointers and addresses are Pmode and ptr_mode, and false
++otherwise.  Called via target_default_pointer_address_modes_p().  The
++default NULL for the hook makes this function return true if the two hooks
++@code{TARGET_ADDR_SPACE_POINTER_MODE}, @code{TARGET_ADDR_SPACE_ADDRESS_MODE}
++are undefined, and false otherwise.
++@end deftypefn
++
+ @node Misc
+ @section Miscellaneous Parameters
+ @cindex parameters, miscellaneous
+Index: gcc/target.def
+===================================================================
+--- gcc/target.def	(revision 223859)
++++ gcc/target.def	(working copy)
+@@ -3164,6 +3164,19 @@
+  rtx, (rtx op, tree from_type, tree to_type),
+  default_addr_space_convert)
+ 
++/* True if all pointer or address modes are the standard Pmode and ptr_mode. */
++DEFHOOK
++(default_pointer_address_modes_p,
++ "Some places still assume that all pointer or address modes are the\n\
++standard Pmode and ptr_mode.  These optimizations become invalid if\n\
++the target actually supports multiple different modes.  This hook returns\n\
++true if all pointers and addresses are Pmode and ptr_mode, and false\n\
++otherwise.  Called via target_default_pointer_address_modes_p().  The\n\
++default NULL for the hook makes this function return true if the two hooks\n\
++@code{TARGET_ADDR_SPACE_POINTER_MODE}, @code{TARGET_ADDR_SPACE_ADDRESS_MODE}\n\
++are undefined, and false otherwise.",
++ bool, (void), NULL)
++
+ HOOK_VECTOR_END (addr_space)
+ 
+ #undef HOOK_PREFIX
+Index: gcc/targhooks.c
+===================================================================
+--- gcc/targhooks.c	(revision 223859)
++++ gcc/targhooks.c	(working copy)
+@@ -1228,6 +1228,9 @@
+ bool
+ target_default_pointer_address_modes_p (void)
+ {
++  if (targetm.addr_space.default_pointer_address_modes_p != NULL)
++    return targetm.addr_space.default_pointer_address_modes_p();
++
+   if (targetm.addr_space.address_mode != default_addr_space_address_mode)
+     return false;
+   if (targetm.addr_space.pointer_mode != default_addr_space_pointer_mode)
 Index: gcc/config/i386/i386-c.c
 ===================================================================
---- gcc/config/i386/i386-c.c	(revision 223607)
+--- gcc/config/i386/i386-c.c	(revision 223859)
 +++ gcc/config/i386/i386-c.c	(working copy)
 @@ -572,6 +572,9 @@
  			       ix86_tune,
@@ -24,7 +97,7 @@ Index: gcc/config/i386/i386-c.c
  #endif
 Index: gcc/config/i386/i386.c
 ===================================================================
---- gcc/config/i386/i386.c	(revision 223607)
+--- gcc/config/i386/i386.c	(revision 223859)
 +++ gcc/config/i386/i386.c	(working copy)
 @@ -15963,6 +15963,20 @@
  	  fputs (" PTR ", file);
@@ -180,7 +253,7 @@ Index: gcc/config/i386/i386.c
  #define TARGET_RETURN_IN_MEMORY ix86_return_in_memory
 Index: gcc/config/i386/i386.h
 ===================================================================
---- gcc/config/i386/i386.h	(revision 223607)
+--- gcc/config/i386/i386.h	(revision 223859)
 +++ gcc/config/i386/i386.h	(working copy)
 @@ -2568,6 +2568,11 @@
  /* For switching between functions with different target attributes.  */
@@ -194,41 +267,3 @@ Index: gcc/config/i386/i386.h
  /*
  Local variables:
  version-control: t
-Index: gcc/target.def
-===================================================================
---- gcc/target.def	(revision 223607)
-+++ gcc/target.def	(working copy)
-@@ -3164,6 +3164,19 @@
-  rtx, (rtx op, tree from_type, tree to_type),
-  default_addr_space_convert)
- 
-+/* True if all pointer or address modes are the standard Pmode and ptr_mode. */
-+DEFHOOK
-+(default_pointer_address_modes_p,
-+ "Some places still assume that all pointer or address modes are the\n\
-+standard Pmode and ptr_mode.  These optimizations become invalid if\n\
-+the target actually supports multiple different modes.  This hook returns\n\
-+true if all pointers and addresses are Pmode and ptr_mode, and false\n\
-+otherwise.  Called via target_default_pointer_address_modes_p().  The\n\
-+default NULL for the hook makes this function return true if the two hooks\n\
-+@code{TARGET_ADDR_SPACE_POINTER_MODE}, @code{TARGET_ADDR_SPACE_ADDRESS_MODE}\n\
-+are undefined, and false otherwise.",
-+ bool, (void), NULL)
-+
- HOOK_VECTOR_END (addr_space)
- 
- #undef HOOK_PREFIX
-Index: gcc/targhooks.c
-===================================================================
---- gcc/targhooks.c	(revision 223607)
-+++ gcc/targhooks.c	(working copy)
-@@ -1228,6 +1228,9 @@
- bool
- target_default_pointer_address_modes_p (void)
- {
-+  if (targetm.addr_space.default_pointer_address_modes_p != NULL)
-+    return targetm.addr_space.default_pointer_address_modes_p();
-+
-   if (targetm.addr_space.address_mode != default_addr_space_address_mode)
-     return false;
-   if (targetm.addr_space.pointer_mode != default_addr_space_pointer_mode)
