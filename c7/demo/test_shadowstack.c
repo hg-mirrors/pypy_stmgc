@@ -54,7 +54,7 @@ int main(void)
        then do a major collection.  It should still be found by the
        tracing logic. */
     stm_start_transaction(&stm_thread_local);
-    STM_POP_ROOT_DROP(stm_thread_local);
+    STM_POP_ROOT_RET(stm_thread_local);
     STM_POP_ROOT(stm_thread_local, node);
     assert(node->value == 129821);
     STM_PUSH_ROOT(stm_thread_local, NULL);

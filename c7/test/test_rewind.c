@@ -174,25 +174,11 @@ __attribute__((noinline))
 void foo(int *x) { ++*x; }
 
 __attribute__((noinline))
-void f6(int c1, int c2, int c3, int c4, int c5, int c6, int c7,
-        int c8, int c9, int c10, int c11, int c12, int c13)
+void f6(int a1, int a2, int a3, int a4, int a5, int a6, int a7,
+        int a8, int a9, int a10, int a11, int a12, int a13)
 {
     rewind_jmp_buf buf;
     rewind_jmp_enterframe(&gthread, &buf, NULL);
-
-    int a1 = c1;
-    int a2 = c2;
-    int a3 = c3;
-    int a4 = c4;
-    int a5 = c5;
-    int a6 = c6;
-    int a7 = c7;
-    int a8 = c8;
-    int a9 = c9;
-    int a10 = c10;
-    int a11 = c11;
-    int a12 = c12;
-    int a13 = c13;
 
     rewind_jmp_setjmp(&gthread, NULL);
     gevent(a1); gevent(a2); gevent(a3); gevent(a4);
