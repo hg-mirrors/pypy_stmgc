@@ -58,7 +58,7 @@ static void forksupport_prepare(void)
     /* Make a new mmap at some other address, but of the same size as
        the standard mmap at stm_object_pages
     */
-    int big_copy_fd = -1;
+    int big_copy_fd;
     char *big_copy = setup_mmap("stmgc's fork support", &big_copy_fd);
 
     /* Copy all the data from the two ranges of objects (large, small)
