@@ -41,6 +41,9 @@ still in modified_old_objects, or the commit done and no backup copies
 any more.
 
 
+--- UPDATE: modification_lock is now done with pthread_rwlock_xxx().
+
+
 
 privatization_lock
 ==================
