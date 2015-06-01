@@ -1,0 +1,93 @@
+
+
+main lock-free operation
+========================
+
+The main lock-free operation is at commit time: the compare-and-swap
+that attaches a new log entry after 'last_commit_log_entry'.
+
+
+
+modification_lock
+=================
+
+one per segment.
+
+acquired on segment N when we want to read or write the segment N's
+copy of 'modified_old_objects', the backup copies, etc.
+
+an important user is _stm_validate(): it locks the current segment,
+and all the other segments out of which it is going to read data
+
+could be improved, because _stm_validate() writes into the current
+segment but only reads the other ones.  So far it mostly serializes
+calls to _stm_validate(): if we have two of them starting at roughly
+the same time, they need both to acquire the modification_lock of at
+least the segment that did the most recent commit --- even though it
+could proceed in parallel if they could both realize that they only
+want to read from that same segment.
+
+same, handle_segfault_in_page() acquires two modification_locks: the
+current segment (which needs to be written to), and the
+'copy_from_segnum' (which only needs to be read from).
+
+the current segment modification_lock is also acquired briefly
+whenever we change our segment's 'modified_old_objects'.
+
+_validate_and_attach() needs to have its own segment's
+modification_lock *around* the compare-and-swap, so that
+_stm_validate() sees either the commit not done and the backup copies
+still in modified_old_objects, or the commit done and no backup copies
+any more.
+
+
+--- UPDATE: modification_lock is now done with pthread_rwlock_xxx().
+
+
+
+privatization_lock
+==================
+
+one per segment.  Works like a single "reader-writer" lock: each
+segment acquires either only its copy ("reader") or all of them
+("writer").
+
+"Reader" status is needed to call get_page_status_in().
+"Writer" status is needed to call set_page_status_in/page_mark_(in)accessible.
+
+Essential "writers":
+- handle_segfault_in_page(), but it only writes the status for the current seg
+
+Essential "readers":
+- _stm_validate()
+- push_large_overflow_objects_to_other_segments()
+- nursery.c calling synchronize_object_enqueue()
+
+
+
+mutex and conditions
+====================
+
+There is also one global mutex and a few condition codes.  It's
+unclear if these are still the best solution.
+
+The mutex is acquired in stm_start_transaction() and in
+stm_commit_transaction().  The main purpose is to wait for or signal
+the C_SEGMENT_FREE condition code.
+
+The C_AT_SAFE_POINT and C_REQUEST_REMOVED condition codes are used by
+synchronize_all_threads().  That's used only in rare cases, for
+example because we want to start a major collection.
+
+The mutex also needs to be acquired for rewind_longjmp's setjmp() and
+longjmp() equivalent.
+
+
+
+usleep loop
+===========
+
+core.c: wait_for_other_inevitable()
+sync.c: stm_wait_for_current_inevitable_transaction()
+
+Must be fixed!
