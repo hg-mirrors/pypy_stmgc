@@ -1,9 +1,6 @@
 
 - improve sync of small objs on commit (see FLAG_SYNC_LARGE in nursery.c)
 
-- non-zeroed nursery:
-  read-the-docs benchmark shows 8% time spent in memset of throw_away_nursery
-
 - reshare pages:
   make seg0 MAP_SHARED in order to re-share private pages during major GC
 
@@ -28,3 +25,9 @@
 
 - avoid __builtin_frame_address(0) in precisely the performance-critical
   functions like the interpreter main loop
+
+
+---------------------------
+DONE:
+- non-zeroed nursery:
+  read-the-docs benchmark shows 8% time spent in memset of throw_away_nursery
