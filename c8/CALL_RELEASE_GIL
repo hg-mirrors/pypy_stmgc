@@ -28,6 +28,11 @@ CALL_RELEASE_GIL.  This is how it works in default (with shadowstack):
 
   - otherwise, we swap rpy_fastgil back to 1 and we're done.
 
+- if the external call is long enough, a different thread will notice
+  that rpy_fastgil == 0 by regular polling, and grab the GIL for
+  itself by swapping it back to 1.  (The changes from 0 to 1 are done
+  with atomic instructions.)
+
 - a different mechanism is used when we voluntarily release the GIL,
   based on the mutex mentioned above.  The mutex is also used by the
   the reacqgil_addr() function if it actually needs to wait.
@@ -74,7 +79,9 @@ Plan for porting this idea to stmgc:
   thread; we need to fix a few things like the shadowstack and %gs but
   then we can continue running this reattached inevitable transaction.
   If old == NULL, we need to fall back to the current
-  stm_start_transaction().
+  stm_start_transaction().  (A priori, there is no need to wait at
+  this point.  The waiting point is later, in the optional
+  stm_become_inevitable()).
 
 - _stm_detach_noninevitable_transaction(): we try to make the
   transaction inevitable.  If it works we can then use
@@ -85,4 +92,29 @@ Plan for porting this idea to stmgc:
 
 - other place to fix: major collections.  Maybe simply look inside
   stm_detached_inevitable_from_thread, and if not NULL, grab the
-  inevitable transaction and commit it now.
+  inevitable transaction and commit it now.  Or maybe not.  The point
+  is that we need to prevent a thread from asynchronously grabbing it
+  by an atomic swap of stm_detached_inevitable_from_thread; instead,
+  the parallel threads that finish their external calls should all
+  find NULL in this variable and call _stm_reattach_transaction()
+  which will wait for the major GC to end.
+
+- stm_become_inevitable(): if it finds a detached inevitable
+  transaction, it should attach and commit it as a way to get rid of
+  it.  This is why it might be better to call directly
+  stm_start_inevitable_transaction() when possible: that one is
+  allowed to attach to a detached inevitable transaction and simply
+  return, unlike stm_become_inevitable() which must continue running
+  the existing transaction.
+
+- the commit logic of a non-inevitable transaction waits if there is
+  an inevitable transaction.  Here too, if the inevitable transaction
+  is found to be detached, we could just commit it now.  Or, a better
+  approach: if we find a detached inevitable transaction we grab it
+  temporarily, and commit only the *non-inevitable* transaction if it
+  doesn't conflict.  The inevitable transaction is then detached
+  again.  (Note that the conflict detection is: we don't commit any
+  write to any of the objects in the inevitable transaction's
+  read-set.  This relies on inevitable threads maintaining their
+  read-set correctly, which should be the case in PyPy, but needs to
+  be checked.)
