@@ -73,7 +73,7 @@ Plan for porting this idea to stmgc:
   Otherwise it calls a helper, _stm_detach_noninevitable_transaction().
 
 - _stm_reattach_transaction(old): called with the old value from
-  stm_detach_inevitable_transaction (which was swapped to be NULL just
+  stm_detached_inevitable_from_thread (which was swapped to be NULL just
   now).  If old != NULL, this swap had the effect that we took over
   the inevitable transaction originally detached from a different
   thread; we need to fix a few things like the shadowstack and %gs but
@@ -107,7 +107,7 @@ Plan for porting this idea to stmgc:
   return, unlike stm_become_inevitable() which must continue running
   the existing transaction.
 
-- the commit logic of a non-inevitable transaction waits if there is
+- commit logic of a non-inevitable transaction: we wait if there is
   an inevitable transaction.  Here too, if the inevitable transaction
   is found to be detached, we could just commit it now.  Or, a better
   approach: if we find a detached inevitable transaction we grab it
