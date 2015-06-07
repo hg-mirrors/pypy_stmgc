@@ -29,7 +29,6 @@ typedef struct {
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
     long last_abort__bytes_in_nursery;
-    int associated_segment_num;
     int last_associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
@@ -798,8 +797,8 @@ class BaseTest(object):
         seen = set()
         for tl1 in self.tls:
             if lib._stm_in_transaction(tl1):
-                assert tl1.associated_segment_num not in seen
-                seen.add(tl1.associated_segment_num)
+                assert tl1.last_associated_segment_num not in seen
+                seen.add(tl1.last_associated_segment_num)
 
     def commit_transaction(self):
         tl = self.tls[self.current_thread]

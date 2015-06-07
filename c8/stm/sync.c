@@ -176,8 +176,10 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
     sync_ctl.in_use1[num+1] = 1;
     assert(STM_SEGMENT->segment_num == num+1);
     assert(STM_SEGMENT->running_thread == NULL);
-    tl->associated_segment_num = tl->last_associated_segment_num;
+    assert(tl->last_associated_segment_num == STM_SEGMENT->segment_num);
+    assert(!in_transaction(tl));
     STM_SEGMENT->running_thread = tl;
+    assert(in_transaction(tl));
     return true;
 }
 
@@ -188,9 +190,10 @@ static void release_thread_segment(stm_thread_local_t *tl)
     cond_signal(C_SEGMENT_FREE);
 
     assert(STM_SEGMENT->running_thread == tl);
-    assert(tl->associated_segment_num == tl->last_associated_segment_num);
-    tl->associated_segment_num = -1;
+    assert(tl->last_associated_segment_num == STM_SEGMENT->segment_num);
+    assert(in_transaction(tl));
     STM_SEGMENT->running_thread = NULL;
+    assert(!in_transaction(tl));
 
     assert(sync_ctl.in_use1[tl->last_associated_segment_num] == 1);
     sync_ctl.in_use1[tl->last_associated_segment_num] = 0;
@@ -204,22 +207,15 @@ static bool _seems_to_be_running_transaction(void)
 
 bool _stm_in_transaction(stm_thread_local_t *tl)
 {
-    if (tl->associated_segment_num == -1) {
-        return false;
-    }
-    else {
-        int num = tl->associated_segment_num;
-        OPT_ASSERT(1 <= num && num < NB_SEGMENTS);
-        OPT_ASSERT(num == tl->last_associated_segment_num);
-        OPT_ASSERT(get_segment(num)->running_thread == tl);
-        return true;
-    }
+    int num = tl->last_associated_segment_num;
+    OPT_ASSERT(1 <= num && num < NB_SEGMENTS);
+    return in_transaction(tl);
 }
 
 void _stm_test_switch(stm_thread_local_t *tl)
 {
     assert(_stm_in_transaction(tl));
-    set_gs_register(get_segment_base(tl->associated_segment_num));
+    set_gs_register(get_segment_base(tl->last_associated_segment_num));
     assert(STM_SEGMENT->running_thread == tl);
     exec_local_finalizers();
 }
