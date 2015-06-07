@@ -69,8 +69,7 @@ typedef struct stm_thread_local_s {
        (this field is not modified on a successful commit) */
     long last_abort__bytes_in_nursery;
     /* the next fields are handled internally by the library */
-    int associated_segment_num;
-    int last_associated_segment_num;
+    int last_associated_segment_num;   /* always a valid seg num */
     int thread_local_counter;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];

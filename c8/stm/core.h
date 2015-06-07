@@ -170,6 +170,10 @@ enum /* transaction_state */ {
     TS_INEVITABLE,
 };
 
+#define in_transaction(tl)                                              \
+    (get_segment((tl)->last_associated_segment_num)->running_thread == (tl))
+
+
 /* Commit Log things */
 struct stm_undo_s {
   union {
