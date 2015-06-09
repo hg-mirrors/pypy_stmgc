@@ -275,7 +275,7 @@ bool _checked_stm_write_card(object_t *object, uintptr_t index) {
 }
 
 bool _check_commit_transaction(void) {
-    CHECKED(stm_commit_transaction());
+    CHECKED(_stm_commit_transaction());
 }
 
 bool _check_stm_collect(long level) {
@@ -285,7 +285,7 @@ bool _check_stm_collect(long level) {
 long _check_start_transaction(stm_thread_local_t *tl) {
    void **jmpbuf = tl->rjthread.jmpbuf;                         \
     if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
-        stm_start_transaction(tl);                              \
+        stm_enter_transactional_zone(tl);                       \
         clear_jmpbuf(tl);                                       \
         return 0;                                               \
     }                                                           \

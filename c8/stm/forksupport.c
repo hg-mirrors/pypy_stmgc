@@ -40,7 +40,7 @@ static void forksupport_prepare(void)
 
     bool was_in_transaction = _stm_in_transaction(this_tl);
     if (!was_in_transaction)
-        stm_start_transaction(this_tl);
+        _stm_start_transaction(this_tl);
     assert(in_transaction(this_tl));
 
     stm_become_inevitable(this_tl, "fork");
@@ -73,7 +73,7 @@ static void forksupport_parent(void)
     s_mutex_unlock();
 
     if (!was_in_transaction) {
-        stm_commit_transaction();
+        _stm_commit_transaction();
     }
 
     dprintf(("forksupport_parent: continuing to run\n"));
@@ -159,7 +159,7 @@ static void forksupport_child(void)
     assert(STM_SEGMENT->segment_num == segnum);
 
     if (!fork_was_in_transaction) {
-        stm_commit_transaction();
+        _stm_commit_transaction();
     }
 
     /* Done */

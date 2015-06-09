@@ -134,6 +134,7 @@ void stm_setup(void)
     setup_pages();
     setup_forksupport();
     setup_finalizer();
+    setup_detach();
 
     set_gs_register(get_segment_base(0));
 }

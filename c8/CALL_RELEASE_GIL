@@ -50,12 +50,12 @@ Plan for porting this idea to stmgc:
   same or a different thread.
 
 - we add a global variable, "stm_detached_inevitable_from_thread".  It
-  is equal to the shadowstack pointer of the thread that detached
+  is equal to the stm_thread_local pointer of the thread that detached
   inevitable transaction (like rpy_fastgil == 0), or NULL if there is
   no detached inevitable transaction (like rpy_fastgil == 1).
 
 - the macro stm_detach_inevitable_transaction() simply writes the
-  current thread's shadowstack pointer into the global variable
+  current thread's stm_thread_local pointer into the global variable
   stm_detached_inevitable_from_thread.  It can only be used if the
   current transaction is inevitable (and in particular the inevitable
   transaction was not detached already, because we're running it).
@@ -65,7 +65,7 @@ Plan for porting this idea to stmgc:
 
 - the macro stm_reattach_transaction() does an atomic swap on
   stm_detached_inevitable_from_thread to change it to NULL.  If the
-  old value was equal to our own shadowstack pointer, we are done.  If
+  old value was equal to our own stm_thread_local pointer, we are done.  If
   not, we call a helper, _stm_reattach_transaction().
 
 - we also add the macro stm_detach_transation().  If the current
@@ -76,7 +76,7 @@ Plan for porting this idea to stmgc:
   stm_detached_inevitable_from_thread (which was swapped to be NULL just
   now).  If old != NULL, this swap had the effect that we took over
   the inevitable transaction originally detached from a different
-  thread; we need to fix a few things like the shadowstack and %gs but
+  thread; we need to fix a few things like the stm_thread_local and %gs but
   then we can continue running this reattached inevitable transaction.
   If old == NULL, we need to fall back to the current
   stm_start_transaction().  (A priori, there is no need to wait at
