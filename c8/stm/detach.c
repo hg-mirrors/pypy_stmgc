@@ -65,12 +65,12 @@ static void fully_detach_thread(void)
     */
     assert(_has_mutex());
 
- restart:
-    stm_thread_local_t *old = stm_detached_inevitable_from_thread;
+ restart:;
+    stm_thread_local_t *old = _stm_detached_inevitable_from_thread;
     if (old == NULL || old == DETACHED_NO_THREAD)
         return;
 
-    if (!__sync_bool_compare_and_swap(&stm_detached_inevitable_from_thread,
+    if (!__sync_bool_compare_and_swap(&_stm_detached_inevitable_from_thread,
                                       old, DETACHED_NO_THREAD))
         goto restart;
 }

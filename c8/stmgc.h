@@ -419,13 +419,13 @@ static inline int stm_is_inevitable(void) {
    far more efficient than constantly starting and committing
    transactions.
 */
-inline void stm_enter_transactional_zone(stm_thread_local_t *tl) {
+static inline void stm_enter_transactional_zone(stm_thread_local_t *tl) {
     stm_thread_local_t *old = __sync_lock_test_and_set(    /* XCHG */
         &_stm_detached_inevitable_from_thread, NULL);
     if (old != (tl))
         _stm_reattach_transaction(old, tl);
 }
-inline void stm_leave_transactional_zone(stm_thread_local_t *tl) {
+static inline void stm_leave_transactional_zone(stm_thread_local_t *tl) {
     assert(STM_SEGMENT->running_thread == tl);
     if (stm_is_inevitable())
         _stm_detach_inevitable_transaction(tl);
