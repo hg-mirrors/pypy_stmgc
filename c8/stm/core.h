@@ -170,6 +170,8 @@ enum /* transaction_state */ {
     TS_INEVITABLE,
 };
 
+#define MSG_INEV_DONT_SLEEP  ((const char *)1)
+
 #define in_transaction(tl)                                              \
     (get_segment((tl)->last_associated_segment_num)->running_thread == (tl))
 

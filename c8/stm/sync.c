@@ -103,6 +103,7 @@ static inline void cond_broadcast(enum cond_type_e ctype)
 /************************************************************/
 
 
+#if 0
 void stm_wait_for_current_inevitable_transaction(void)
 {
  restart:
@@ -125,7 +126,7 @@ void stm_wait_for_current_inevitable_transaction(void)
     }
     s_mutex_unlock();
 }
-
+#endif
 
 
 static bool acquire_thread_segment(stm_thread_local_t *tl)
@@ -263,6 +264,7 @@ static void signal_everybody_to_pause_running(void)
     }
     assert(!pause_signalled);
     pause_signalled = true;
+    fully_detach_thread();
 }
 
 static inline long count_other_threads_sp_running(void)

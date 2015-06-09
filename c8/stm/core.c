@@ -509,7 +509,8 @@ static void reset_wb_executed_flags(void);
 static void readd_wb_executed_flags(void);
 static void check_all_write_barrier_flags(char *segbase, struct list_s *list);
 
-static void _validate_and_attach(struct stm_commit_log_entry_s *new)
+static bool _validate_and_attach(struct stm_commit_log_entry_s *new,
+                                 bool can_sleep)
 {
     struct stm_commit_log_entry_s *old;
 
@@ -571,6 +572,8 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
             /* XXXXXX for now just sleep.  We should really ask to inev
                transaction to do the commit for us, and then we can
                continue running. */
+            if (!can_sleep)
+                return false;
             dprintf(("_validate_and_attach(%p) failed, "
                      "waiting for inevitable\n", new));
             wait_for_other_inevitable(old);
@@ -598,11 +601,13 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
         STM_PSEGMENT->last_commit_log_entry = new;
         release_modification_lock_wr(STM_SEGMENT->segment_num);
     }
+    return true;
 }
 
-static void _validate_and_turn_inevitable(void)
+static bool _validate_and_turn_inevitable(bool can_sleep)
 {
-    _validate_and_attach((struct stm_commit_log_entry_s *)INEV_RUNNING);
+    return _validate_and_attach((struct stm_commit_log_entry_s *)INEV_RUNNING,
+                                can_sleep);
 }
 
 static void _validate_and_add_to_commit_log(void)
@@ -631,7 +636,7 @@ static void _validate_and_add_to_commit_log(void)
         OPT_ASSERT(yes);
     }
     else {
-        _validate_and_attach(new);
+        _validate_and_attach(new, /*can_sleep=*/true);
     }
 }
 
@@ -1123,7 +1128,7 @@ static void readd_wb_executed_flags(void)
 
 
 
-static void _stm_start_transaction(stm_thread_local_t *tl)
+static void _do_start_transaction(stm_thread_local_t *tl)
 {
     assert(!_stm_in_transaction(tl));
 
@@ -1181,7 +1186,7 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     stm_validate();
 }
 
-long stm_start_transaction(stm_thread_local_t *tl)
+long _stm_start_transaction(stm_thread_local_t *tl)
 {
     s_mutex_lock();
 #ifdef STM_NO_AUTOMATIC_SETJMP
@@ -1189,21 +1194,8 @@ long stm_start_transaction(stm_thread_local_t *tl)
 #else
     long repeat_count = stm_rewind_jmp_setjmp(tl);
 #endif
-    _stm_start_transaction(tl);
+    _do_start_transaction(tl);
     return repeat_count;
-}
-
-void stm_start_inevitable_transaction(stm_thread_local_t *tl)
-{
-    /* used to be more efficient, starting directly an inevitable transaction,
-       but there is no real point any more, I believe */
-    rewind_jmp_buf rjbuf;
-    stm_rewind_jmp_enterframe(tl, &rjbuf);
-
-    stm_start_transaction(tl);
-    stm_become_inevitable(tl, "start_inevitable_transaction");
-
-    stm_rewind_jmp_leaveframe(tl, &rjbuf);
 }
 
 #ifdef STM_NO_AUTOMATIC_SETJMP
@@ -1280,7 +1272,7 @@ static void push_large_overflow_objects_to_other_segments(void)
 }
 
 
-void stm_commit_transaction(void)
+void _stm_commit_transaction(void)
 {
     exec_local_finalizers();
 
@@ -1502,20 +1494,23 @@ void stm_abort_transaction(void)
 
 void _stm_become_inevitable(const char *msg)
 {
-    if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
+    assert(STM_PSEGMENT->transaction_state == TS_REGULAR);
+    _stm_collectable_safe_point();
+
+    if (msg != MSG_INEV_DONT_SLEEP) {
         dprintf(("become_inevitable: %s\n", msg));
-        _stm_collectable_safe_point();
         timing_become_inevitable();
-
-        _validate_and_turn_inevitable();
-        STM_PSEGMENT->transaction_state = TS_INEVITABLE;
-
-        stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
-        invoke_and_clear_user_callbacks(0);   /* for commit */
+        _validate_and_turn_inevitable(/*can_sleep=*/true);
     }
     else {
-        assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE);
+        if (!_validate_and_turn_inevitable(/*can_sleep=*/false))
+            return;
+        timing_become_inevitable();
     }
+    STM_PSEGMENT->transaction_state = TS_INEVITABLE;
+
+    stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+    invoke_and_clear_user_callbacks(0);   /* for commit */
 }
 
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
