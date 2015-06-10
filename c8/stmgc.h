@@ -84,15 +84,15 @@ void _stm_write_slowpath_card(object_t *, uintptr_t);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 
-extern stm_thread_local_t *volatile _stm_detached_inevitable_from_thread;
+extern volatile uintptr_t _stm_detached_inevitable_from_thread;
 long _stm_start_transaction(stm_thread_local_t *tl);
 void _stm_commit_transaction(void);
 void _stm_leave_noninevitable_transactional_zone(void);
-#define _stm_detach_inevitable_transaction(tl)  do {    \
-    write_fence();                                      \
-    _stm_detached_inevitable_from_thread = (tl);        \
+#define _stm_detach_inevitable_transaction(tl)  do {            \
+    write_fence();                                              \
+    _stm_detached_inevitable_from_thread = (uintptr_t)(tl);     \
 } while (0)
-void _stm_reattach_transaction(stm_thread_local_t *old, stm_thread_local_t *tl);
+void _stm_reattach_transaction(uintptr_t old, stm_thread_local_t *tl);
 void _stm_become_inevitable(const char*);
 void _stm_collectable_safe_point(void);
 
@@ -420,9 +420,9 @@ static inline int stm_is_inevitable(void) {
    transactions.
 */
 static inline void stm_enter_transactional_zone(stm_thread_local_t *tl) {
-    stm_thread_local_t *old = __sync_lock_test_and_set(    /* XCHG */
-        &_stm_detached_inevitable_from_thread, NULL);
-    if (old != (tl))
+    uintptr_t old = __sync_lock_test_and_set(    /* XCHG */
+        &_stm_detached_inevitable_from_thread, 0);
+    if (old != (uintptr_t)(tl))
         _stm_reattach_transaction(old, tl);
 }
 static inline void stm_leave_transactional_zone(stm_thread_local_t *tl) {
@@ -455,7 +455,7 @@ static inline void stm_become_inevitable(stm_thread_local_t *tl,
     if (!stm_is_inevitable())
         _stm_become_inevitable(msg);
     /* now, we're running the inevitable transaction, so: */
-    assert(_stm_detached_inevitable_from_thread == NULL);
+    assert(_stm_detached_inevitable_from_thread == 0);
 }
 
 /* Forces a safe-point if needed.  Normally not needed: this is
