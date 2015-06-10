@@ -496,11 +496,23 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 
 static void wait_for_other_inevitable(struct stm_commit_log_entry_s *old)
 {
+    int detached = fetch_detached_transaction();
+    if (detached >= 0) {
+        commit_fetched_detached_transaction(detached);
+        return;
+    }
+
     timing_event(STM_SEGMENT->running_thread, STM_WAIT_OTHER_INEVITABLE);
 
     while (old->next == INEV_RUNNING && !safe_point_requested()) {
         spin_loop();
         usleep(10);    /* XXXXXX */
+
+        detached = fetch_detached_transaction();
+        if (detached >= 0) {
+            commit_fetched_detached_transaction(detached);
+            break;
+        }
     }
     timing_event(STM_SEGMENT->running_thread, STM_WAIT_DONE);
 }
@@ -1278,7 +1290,8 @@ void _stm_commit_transaction(void)
 
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
-    assert(STM_PSEGMENT->running_pthread == pthread_self());
+    //assert(STM_PSEGMENT->running_pthread == pthread_self());
+    // ^^^ fails if detach.c commits a detached inevitable transaction
 
     dprintf(("> stm_commit_transaction()\n"));
     minor_collection(1);
