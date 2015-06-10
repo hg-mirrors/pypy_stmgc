@@ -3,15 +3,25 @@
 #endif
 
 
-#define DETACHED_NO_THREAD  ((stm_thread_local_t *)-1)
+/* _stm_detached_inevitable_from_thread is:
 
+   - NULL: there is no inevitable transaction, or it is not detached
 
-stm_thread_local_t *volatile _stm_detached_inevitable_from_thread;
+   - a stm_thread_local_t pointer: this thread-local has detached its
+     own inevitable transaction, and might concurrently reattach to it
+     at any time
+
+   - a stm_thread_local_t pointer with the last bit set to 1: another
+     thread ran synchronize_all_threads(), so in order to reattach,
+     the detaching thread must first go through
+     s_mutex_lock()/s_mutex_unlock().
+*/
+volatile uintptr_t _stm_detached_inevitable_from_thread;
 
 
 static void setup_detach(void)
 {
-    _stm_detached_inevitable_from_thread = NULL;
+    _stm_detached_inevitable_from_thread = 0;
 }
 
 
@@ -28,20 +38,31 @@ void _stm_leave_noninevitable_transactional_zone(void)
     }
 }
 
-void _stm_reattach_transaction(stm_thread_local_t *old, stm_thread_local_t *tl)
+void _stm_reattach_transaction(uintptr_t old, stm_thread_local_t *tl)
 {
-    if (old != NULL) {
+    if (old & 1) {
+        /* The detached transaction was fetched; wait until the s_mutex_lock
+           is free. 
+         */
+        stm_thread_local_t *old_tl;
+        struct stm_priv_segment_info_s *pseg;
+
+        old_tl = (stm_thread_local_t *)(--old);
+        pseg = get_priv_segment(old_tl->last_associated_segment_num);
+        assert(pseg->safe_point = SP_RUNNING_DETACHED_FETCHED);
+
+        s_mutex_lock();
+        pseg->safe_point = SP_RUNNING;
+        s_mutex_unlock();
+    }
+
+    if (old != 0) {
         /* We took over the inevitable transaction originally detached
            from a different thread.  We have to fix the %gs register if
-           it is incorrect.  Careful, 'old' might be DETACHED_NO_THREAD.
+           it is incorrect.
         */
-        int mysegnum = tl->last_associated_segment_num;
-
-        if (STM_SEGMENT->segment_num != mysegnum) {
-            set_gs_register(get_segment_base(mysegnum));
-            assert(STM_SEGMENT->segment_num == mysegnum);
-        }
-        assert(old == DETACHED_NO_THREAD || STM_SEGMENT->running_thread == old);
+        ensure_gs_register(tl->last_associated_segment_num);
+        assert(STM_SEGMENT->running_thread == (stm_thread_local_t *)old);
         STM_SEGMENT->running_thread = tl;
 
         stm_safe_point();
@@ -52,25 +73,38 @@ void _stm_reattach_transaction(stm_thread_local_t *old, stm_thread_local_t *tl)
     }
 }
 
-static void fully_detach_thread(void)
+static bool fetch_detached_transaction(void)
 {
-    /* If there is a detached inevitable transaction, then make sure
-       that it is "fully" detached.  The point is to make sure that
-       the fast path of stm_enter_transactional_zone() will fail, and
-       we'll call _stm_reattach_transaction(), which will in turn call
-       stm_safe_point().  So a "fully detached" transaction will enter
-       a safe point as soon as it is reattached.
-
-       XXX THINK about concurrent threads here!
+    /* returns True if there is a detached transaction; afterwards, it
+       is not necessary to call fetch_detached_transaction() again
+       regularly.
     */
-    assert(_has_mutex());
+    uintptr_t old;
+    stm_thread_local_t *tl;
+    struct stm_priv_segment_info_s *pseg;
+    assert(_has_mutex_here);
 
- restart:;
-    stm_thread_local_t *old = _stm_detached_inevitable_from_thread;
-    if (old == NULL || old == DETACHED_NO_THREAD)
-        return;
+ restart:
+    old = _stm_detached_inevitable_from_thread;
+    if (old == 0)
+        return false;
+    if (old & 1) {
+        /* we have the mutex here, so this detached transaction with the
+           last bit set cannot reattach in parallel */
+        tl = (stm_thread_local_t *)(old - 1);
+        pseg = get_priv_segment(tl->last_associated_segment_num);
+        assert(pseg->safe_point == SP_RUNNING_DETACHED_FETCHED);
+        (void)pseg;
+        return true;
+    }
 
     if (!__sync_bool_compare_and_swap(&_stm_detached_inevitable_from_thread,
-                                      old, DETACHED_NO_THREAD))
+                                      old, old + 1))
         goto restart;
+
+    tl = (stm_thread_local_t *)old;
+    pseg = get_priv_segment(tl->last_associated_segment_num);
+    assert(pseg->safe_point == SP_RUNNING);
+    pseg->safe_point = SP_RUNNING_DETACHED_FETCHED;
+    return true;
 }
