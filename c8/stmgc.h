@@ -433,13 +433,13 @@ static inline void stm_leave_transactional_zone(stm_thread_local_t *tl) {
         _stm_leave_noninevitable_transactional_zone();
 }
 
-/* stm_break_transaction() is in theory equivalent to
+/* stm_force_transaction_break() is in theory equivalent to
    stm_leave_transactional_zone() immediately followed by
    stm_enter_transactional_zone(); however, it is supposed to be
    called in CPU-heavy threads that had a transaction run for a while,
    and so it *always* forces a commit and starts the next transaction.
    The new transaction is never inevitable. */
-void stm_break_transaction(stm_thread_local_t *tl);
+void stm_force_transaction_break(stm_thread_local_t *tl);
 
 /* Abort the currently running transaction.  This function never
    returns: it jumps back to the start of the transaction (which must
