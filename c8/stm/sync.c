@@ -66,6 +66,7 @@ static void set_gs_register(char *value)
 
 static void ensure_gs_register(long segnum)
 {
+    /* XXX use this instead of set_gs_register() in many places */
     if (STM_SEGMENT->segment_num != segnum) {
         set_gs_register(get_segment_base(segnum));
         assert(STM_SEGMENT->segment_num == segnum);
@@ -392,18 +393,7 @@ static void enter_safe_point_if_requested(void)
 
 static void synchronize_all_threads(enum sync_type_e sync_type)
 {
-    /* Regularly, we try fetch_detached_transaction(), which, if there
-       is a detached inevitable transaction, will take it out of the
-       global variable that reattaching tries to read, and put it in
-       our local 'detached_tl' variable.  The status of such a fetched
-       detached transaction is temporarily set from SP_RUNNING to
-       SP_RUNNING_DETACHED_FETCHED, which is not counted any more by
-       count_other_threads_sp_running().  'detached_tl' will be copied
-       back into '_stm_detached_inevitable_from_thread' by the other
-       thread running _stm_reattach_transaction(), later.
-    */
-    bool detached = fetch_detached_transaction();
-
+ restart:
     assert(_has_mutex());
     enter_safe_point_if_requested();
 
@@ -414,7 +404,6 @@ static void synchronize_all_threads(enum sync_type_e sync_type)
        enter_safe_point_if_requested() above.
     */
     if (UNLIKELY(globally_unique_transaction)) {
-        assert(!detached);
         assert(count_other_threads_sp_running() == 0);
         return;
     }
@@ -424,18 +413,17 @@ static void synchronize_all_threads(enum sync_type_e sync_type)
     /* If some other threads are SP_RUNNING, we cannot proceed now.
        Wait until all other threads are suspended. */
     while (count_other_threads_sp_running() > 0) {
+
+        int detached = fetch_detached_transaction();
+        if (detached >= 0) {
+            remove_requests_for_safe_point();    /* => C_REQUEST_REMOVED */
+            commit_fetched_detached_transaction(detached);
+            goto restart;
+        }
+
         STM_PSEGMENT->safe_point = SP_WAIT_FOR_C_AT_SAFE_POINT;
-        if (!detached) {
-            do {
-                detached = fetch_detached_transaction();
-                if (detached)
-                    break;
-            } while (!cond_wait_timeout(C_AT_SAFE_POINT, 0.00001));
-            /* every 10 microsec, try again fetch_detached_transaction() */
-        }
-        else {
-            cond_wait(C_AT_SAFE_POINT);
-        }
+        cond_wait_timeout(C_AT_SAFE_POINT, 0.00001);
+        /* every 10 microsec, try again fetch_detached_transaction() */
         STM_PSEGMENT->safe_point = SP_RUNNING;
 
         if (must_abort()) {

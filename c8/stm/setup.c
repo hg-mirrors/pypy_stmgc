@@ -264,9 +264,6 @@ void stm_register_thread_local(stm_thread_local_t *tl)
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)
 {
-    /* If we own the detached inevitable transaction, commit it now */
-    commit_own_inevitable_detached_transaction(tl);
-
     s_mutex_lock();
     assert(tl->prev != NULL);
     assert(tl->next != NULL);

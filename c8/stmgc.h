@@ -84,15 +84,16 @@ void _stm_write_slowpath_card(object_t *, uintptr_t);
 object_t *_stm_allocate_slowpath(ssize_t);
 object_t *_stm_allocate_external(ssize_t);
 
-extern volatile uintptr_t _stm_detached_inevitable_from_thread;
+extern volatile int _stm_detached_inevitable_seg_num;
 long _stm_start_transaction(stm_thread_local_t *tl);
 void _stm_commit_transaction(void);
 void _stm_leave_noninevitable_transactional_zone(void);
-#define _stm_detach_inevitable_transaction(tl)  do {            \
-    write_fence();                                              \
-    _stm_detached_inevitable_from_thread = (uintptr_t)(tl);     \
+#define _stm_detach_inevitable_transaction(tl)  do {                    \
+    write_fence();                                                      \
+    assert((tl)->last_associated_segment_num == STM_SEGMENT->segment_num); \
+    _stm_detached_inevitable_seg_num = STM_SEGMENT->segment_num;        \
 } while (0)
-void _stm_reattach_transaction(uintptr_t old, stm_thread_local_t *tl);
+void _stm_reattach_transaction(int old, stm_thread_local_t *tl);
 void _stm_become_inevitable(const char*);
 void _stm_collectable_safe_point(void);
 
@@ -420,9 +421,11 @@ static inline int stm_is_inevitable(void) {
    transactions.
 */
 static inline void stm_enter_transactional_zone(stm_thread_local_t *tl) {
-    uintptr_t old = __sync_lock_test_and_set(    /* XCHG */
-        &_stm_detached_inevitable_from_thread, 0);
-    if (old != (uintptr_t)(tl))
+    int old = __sync_lock_test_and_set(    /* XCHG */
+        &_stm_detached_inevitable_seg_num, -1);
+    if (old == tl->last_associated_segment_num)
+        STM_SEGMENT->running_thread = tl;
+    else
         _stm_reattach_transaction(old, tl);
 }
 static inline void stm_leave_transactional_zone(stm_thread_local_t *tl) {
@@ -455,7 +458,7 @@ static inline void stm_become_inevitable(stm_thread_local_t *tl,
     if (!stm_is_inevitable())
         _stm_become_inevitable(msg);
     /* now, we're running the inevitable transaction, so: */
-    assert(_stm_detached_inevitable_from_thread == 0);
+    assert(_stm_detached_inevitable_seg_num == -1);
 }
 
 /* Forces a safe-point if needed.  Normally not needed: this is
