@@ -5,17 +5,18 @@
 
 /* _stm_detached_inevitable_from_thread is:
 
-   - NULL: there is no inevitable transaction, or it is not detached
+   - 0: there is no inevitable transaction, or it is not detached
 
    - a stm_thread_local_t pointer: this thread-local has detached its
      own inevitable transaction, and might concurrently reattach to it
      at any time
 
-   - a stm_thread_local_t pointer with the last bit set to 1: another
-     thread ran synchronize_all_threads(), so in order to reattach,
-     the detaching thread must first go through
-     s_mutex_lock()/s_mutex_unlock().
+   - DETACHED_AND_FETCHED: another thread ran
+     synchronize_all_threads(), so in order to reattach, the detaching
+     thread must first go through s_mutex_lock()/s_mutex_unlock().
 */
+#define DETACHED_AND_FETCHED  1
+
 volatile uintptr_t _stm_detached_inevitable_from_thread;
 
 
@@ -38,6 +39,20 @@ void _stm_leave_noninevitable_transactional_zone(void)
     }
 }
 
+static struct stm_priv_segment_info_s *detached_and_fetched(void)
+{
+    long i;
+    struct stm_priv_segment_info_s *result = NULL;
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        if (get_priv_segment(i)->safe_point == SP_RUNNING_DETACHED_FETCHED) {
+            assert(result == NULL);
+            result = get_priv_segment(i);
+        }
+    }
+    assert(result != NULL);
+    return result;
+}
+
 void _stm_reattach_transaction(uintptr_t old, stm_thread_local_t *tl)
 {
     if (old == 0) {
@@ -46,19 +61,17 @@ void _stm_reattach_transaction(uintptr_t old, stm_thread_local_t *tl)
         return;
     }
 
-    if (old & 1) {
+    if (old == DETACHED_AND_FETCHED) {
         /* The detached transaction was fetched; wait until the s_mutex_lock
-           is free. 
+           is free.  The fetched transaction can only be reattached by the
+           code here; there should be no risk of its state changing while
+           we wait.
          */
-        stm_thread_local_t *old_tl;
         struct stm_priv_segment_info_s *pseg;
-
-        old_tl = (stm_thread_local_t *)(--old);
-        pseg = get_priv_segment(old_tl->last_associated_segment_num);
-        assert(pseg->safe_point = SP_RUNNING_DETACHED_FETCHED);
-
         s_mutex_lock();
+        pseg = detached_and_fetched();
         pseg->safe_point = SP_RUNNING;
+        old = (uintptr_t)pseg->running_thread;
         s_mutex_unlock();
     }
 
@@ -88,13 +101,11 @@ static bool fetch_detached_transaction(void)
     old = _stm_detached_inevitable_from_thread;
     if (old == 0)
         return false;
-    if (old & 1) {
-        /* we have the mutex here, so this detached transaction with the
-           last bit set cannot reattach in parallel */
-        tl = (stm_thread_local_t *)(old - 1);
-        pseg = get_priv_segment(tl->last_associated_segment_num);
-        assert(pseg->safe_point == SP_RUNNING_DETACHED_FETCHED);
-        (void)pseg;
+    if (old < NB_SEGMENTS) {
+        /* we have the mutex here, so this fetched detached transaction
+           cannot get reattached in parallel */
+        assert(get_priv_segment(old)->safe_point ==
+               SP_RUNNING_DETACHED_FETCHED);
         return true;
     }
 
@@ -115,3 +126,17 @@ void stm_force_transaction_break(stm_thread_local_t *tl)
     _stm_commit_transaction();
     _stm_start_transaction(tl);
 }
+
+static void commit_own_inevitable_detached_transaction(stm_thread_local_t *tl)
+{
+    uintptr_t cur = _stm_detached_inevitable_from_thread;
+    if ((cur & ~1) == (uintptr_t)tl) {
+        stm_enter_transactional_zone(tl);
+        _stm_commit_transaction();
+    }
+}
+
+REWRITE:. we need a function to grab and commit the detached inev transaction
+anyway.  So kill the special values of _stm_detached_inevitable_from_thread.
+And call that function from core.c when we wait for the inev transaction to
+finish
