@@ -40,6 +40,12 @@ void _stm_leave_noninevitable_transactional_zone(void)
 
 void _stm_reattach_transaction(uintptr_t old, stm_thread_local_t *tl)
 {
+    if (old == 0) {
+        /* there was no detached inevitable transaction */
+        _stm_start_transaction(tl);
+        return;
+    }
+
     if (old & 1) {
         /* The detached transaction was fetched; wait until the s_mutex_lock
            is free. 
@@ -56,21 +62,15 @@ void _stm_reattach_transaction(uintptr_t old, stm_thread_local_t *tl)
         s_mutex_unlock();
     }
 
-    if (old != 0) {
-        /* We took over the inevitable transaction originally detached
-           from a different thread.  We have to fix the %gs register if
-           it is incorrect.
-        */
-        ensure_gs_register(tl->last_associated_segment_num);
-        assert(STM_SEGMENT->running_thread == (stm_thread_local_t *)old);
-        STM_SEGMENT->running_thread = tl;
+    /* We took over the inevitable transaction originally detached
+       from a different thread.  We have to fix the %gs register if
+       it is incorrect.
+    */
+    ensure_gs_register(tl->last_associated_segment_num);
+    assert(STM_SEGMENT->running_thread == (stm_thread_local_t *)old);
+    STM_SEGMENT->running_thread = tl;
 
-        stm_safe_point();
-    }
-    else {
-        /* there was no detached inevitable transaction */
-        _stm_start_transaction(tl);
-    }
+    stm_safe_point();
 }
 
 static bool fetch_detached_transaction(void)
@@ -107,4 +107,11 @@ static bool fetch_detached_transaction(void)
     assert(pseg->safe_point == SP_RUNNING);
     pseg->safe_point = SP_RUNNING_DETACHED_FETCHED;
     return true;
+}
+
+void stm_force_transaction_break(stm_thread_local_t *tl)
+{
+    assert(STM_SEGMENT->running_thread == tl);
+    _stm_commit_transaction();
+    _stm_start_transaction(tl);
 }
