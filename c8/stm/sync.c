@@ -423,7 +423,9 @@ static void synchronize_all_threads(enum sync_type_e sync_type)
         intptr_t detached = fetch_detached_transaction();
         if (detached != 0) {
             remove_requests_for_safe_point();    /* => C_REQUEST_REMOVED */
+            s_mutex_unlock();
             commit_fetched_detached_transaction(detached);
+            s_mutex_lock();
             goto restart;
         }
 

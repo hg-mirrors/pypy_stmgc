@@ -162,7 +162,6 @@ enum /* safe_point */ {
 #ifdef STM_TESTS
     SP_WAIT_FOR_OTHER_THREAD,
 #endif
-    SP_RUNNING_DETACHED_FETCHED,
 };
 
 enum /* transaction_state */ {
