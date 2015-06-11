@@ -53,9 +53,11 @@ static void commit_external_inevitable_transaction(void)
     _core_commit_transaction(/*external=*/ true);
 }
 
-void _stm_reattach_transaction(intptr_t old, stm_thread_local_t *tl)
+void _stm_reattach_transaction(stm_thread_local_t *tl)
 {
+    intptr_t old;
  restart:
+    old = _stm_detached_inevitable_from_thread;
     if (old != 0) {
         if (old == -1) {
             /* busy-loop: wait until _stm_detached_inevitable_from_thread
@@ -65,9 +67,12 @@ void _stm_reattach_transaction(intptr_t old, stm_thread_local_t *tl)
                 spin_loop();
 
             /* then retry */
-            atomic_exchange(&_stm_detached_inevitable_from_thread, old, -1);
             goto restart;
         }
+
+        if (!__sync_bool_compare_and_swap(&_stm_detached_inevitable_from_thread,
+                                          old, -1))
+            goto restart;
 
         stm_thread_local_t *old_tl = (stm_thread_local_t *)old;
         int remote_seg_num = old_tl->last_associated_segment_num;
@@ -77,10 +82,6 @@ void _stm_reattach_transaction(intptr_t old, stm_thread_local_t *tl)
         tl->last_associated_segment_num = remote_seg_num;
         ensure_gs_register(remote_seg_num);
         commit_external_inevitable_transaction();
-    }
-    else {
-        assert(_stm_detached_inevitable_from_thread == -1);
-        _stm_detached_inevitable_from_thread = 0;
     }
     dprintf(("reattach_transaction: start a new transaction\n"));
     _stm_start_transaction(tl);
@@ -102,14 +103,6 @@ static intptr_t fetch_detached_transaction(void)
     if (cur == 0) {    /* fast-path */
         return 0;   /* _stm_detached_inevitable_from_thread not changed */
     }
-    if (cur != -1) {
-        atomic_exchange(&_stm_detached_inevitable_from_thread, cur, -1);
-        if (cur == 0) {
-            /* found 0, so change from -1 to 0 again and return */
-            _stm_detached_inevitable_from_thread = 0;
-            return 0;
-        }
-    }
     if (cur == -1) {
         /* busy-loop: wait until _stm_detached_inevitable_from_thread
            is reset to a value different from -1 */
@@ -117,6 +110,10 @@ static intptr_t fetch_detached_transaction(void)
             spin_loop();
         goto restart;
     }
+    if (!__sync_bool_compare_and_swap(&_stm_detached_inevitable_from_thread,
+                                      cur, -1))
+        goto restart;
+
     /* this is the only case where we grabbed a detached transaction.
        _stm_detached_inevitable_from_thread is still -1, until
        commit_fetched_detached_transaction() is called. */
