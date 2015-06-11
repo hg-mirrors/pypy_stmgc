@@ -367,7 +367,6 @@ void *demo_random(void *arg)
 
             long call_fork = (arg != NULL && *(long *)arg);
             if (call_fork == 0) {   /* common case */
-                td.num_roots_at_transaction_start = td.num_roots;
                 if (get_rand(100) < 50) {
                     stm_leave_transactional_zone(&stm_thread_local);
                     /* Nothing here; it's unlikely that a different thread
@@ -376,10 +375,13 @@ void *demo_random(void *arg)
                     fprintf(stderr, "sleep...\n");
                     usleep(1);
                     fprintf(stderr, "sleep done\n");
+                    td.num_roots_at_transaction_start = td.num_roots;
                     stm_enter_transactional_zone(&stm_thread_local);
                 }
                 else {
-                    stm_force_transaction_break(&stm_thread_local);
+                    _stm_commit_transaction();
+                    td.num_roots_at_transaction_start = td.num_roots;
+                    _stm_start_transaction(&stm_thread_local);
                 }
                 td.num_roots = td.num_roots_at_transaction_start;
                 p = NULL;
