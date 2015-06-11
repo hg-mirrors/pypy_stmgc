@@ -94,7 +94,7 @@ void _stm_leave_noninevitable_transactional_zone(void);
     assert(_stm_detached_inevitable_from_thread == 0);          \
     _stm_detached_inevitable_from_thread = (intptr_t)(tl);      \
 } while (0)
-void _stm_reattach_transaction(intptr_t old, stm_thread_local_t *tl);
+void _stm_reattach_transaction(stm_thread_local_t *tl);
 void _stm_become_inevitable(const char*);
 void _stm_collectable_safe_point(void);
 
@@ -421,24 +421,29 @@ static inline int stm_is_inevitable(void) {
    far more efficient than constantly starting and committing
    transactions.
 */
+#ifdef STM_DEBUGPRINT
 #include <stdio.h>
+#endif
 static inline void stm_enter_transactional_zone(stm_thread_local_t *tl) {
-    intptr_t old;
-    atomic_exchange(&_stm_detached_inevitable_from_thread, old, -1);
-    if (old == (intptr_t)tl) {
+    if (__sync_bool_compare_and_swap(&_stm_detached_inevitable_from_thread,
+                                     (intptr_t)tl, 0)) {
+#ifdef STM_DEBUGPRINT
         fprintf(stderr, "stm_enter_transactional_zone fast path\n");
-        _stm_detached_inevitable_from_thread = 0;
+#endif
     }
     else {
-        _stm_reattach_transaction(old, tl);
+        _stm_reattach_transaction(tl);
         /* _stm_detached_inevitable_from_thread should be 0 here, but
-           it can already have been changed from a parallel thread */
+           it can already have been changed from a parallel thread
+           (assuming we're not inevitable ourselves) */
     }
 }
 static inline void stm_leave_transactional_zone(stm_thread_local_t *tl) {
     assert(STM_SEGMENT->running_thread == tl);
     if (stm_is_inevitable()) {
+#ifdef STM_DEBUGPRINT
         fprintf(stderr, "stm_leave_transactional_zone fast path\n");
+#endif
         _stm_detach_inevitable_transaction(tl);
     }
     else {
@@ -467,9 +472,8 @@ static inline void stm_become_inevitable(stm_thread_local_t *tl,
     assert(STM_SEGMENT->running_thread == tl);
     if (!stm_is_inevitable())
         _stm_become_inevitable(msg);
-    /* now, we're running the inevitable transaction, so this var should
-       be 0 (but can occasionally be -1 for a tiny amount of time) */
-    assert(((_stm_detached_inevitable_from_thread + 1) & ~1) == 0);
+    /* now, we're running the inevitable transaction, so this var should be 0 */
+    assert(_stm_detached_inevitable_from_thread == 0);
 }
 
 /* Forces a safe-point if needed.  Normally not needed: this is

@@ -26,18 +26,18 @@
 
   static inline void spin_loop(void) { asm("pause" : : : "memory"); }
   static inline void write_fence(void) { asm("" : : : "memory"); }
-# define atomic_exchange(ptr, old, new)  do {           \
-        (old) = __sync_lock_test_and_set(ptr, new);     \
-    } while (0)
+/*# define atomic_exchange(ptr, old, new)  do {         \
+          (old) = __sync_lock_test_and_set(ptr, new);   \
+      } while (0)*/
 
 #else
 
   static inline void spin_loop(void) { asm("" : : : "memory"); }
   static inline void write_fence(void) { __sync_synchronize(); }
 
-# define atomic_exchange(ptr, old, new)  do {           \
-        (old) = *(ptr);                                 \
-    } while (UNLIKELY(!__sync_bool_compare_and_swap(ptr, old, new)));
+/*# define atomic_exchange(ptr, old, new)  do {           \
+          (old) = *(ptr);                                 \
+      } while (UNLIKELY(!__sync_bool_compare_and_swap(ptr, old, new))); */
 
 #endif
 

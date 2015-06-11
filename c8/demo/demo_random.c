@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 
 #include "stmgc.h"
+#include "stm/fprintcolor.h"
 
 #define NUMTHREADS 2
 #define STEPS_PER_THREAD 500
@@ -145,10 +146,10 @@ void pop_roots()
         }
     }
 
-    fprintf(stderr, "stm_is_inevitable() = %d\n", (int)stm_is_inevitable());
+    dprintf(("stm_is_inevitable() = %d\n", (int)stm_is_inevitable()));
     for (i = 0; i < td.num_roots_at_transaction_start; i++) {
         if (td.roots[i]) {
-            fprintf(stderr, "root %d: %p\n", i, td.roots[i]);
+            dprintf(("root %d: %p\n", i, td.roots[i]));
             STM_PUSH_ROOT(stm_thread_local, td.roots[i]);
         }
     }
@@ -390,9 +391,9 @@ void *demo_random(void *arg)
                     /* Nothing here; it's unlikely that a different thread
                        manages to steal the detached inev transaction.
                        Give them a little chance with a usleep(). */
-                    fprintf(stderr, "sleep...\n");
+                    dprintf(("sleep...\n"));
                     usleep(1);
-                    fprintf(stderr, "sleep done\n");
+                    dprintf(("sleep done\n"));
                     td.num_roots_at_transaction_start = td.num_roots;
                     stm_enter_transactional_zone(&stm_thread_local);
                 }
