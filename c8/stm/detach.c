@@ -49,26 +49,8 @@ void _stm_leave_noninevitable_transactional_zone(void)
 
 static void commit_external_inevitable_transaction(void)
 {
-    assert(!_has_mutex());
-    assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE); /* can't abort */
-
-    exec_local_finalizers();
-    minor_collection(1);
-
-    /* from this point on, unlink the original 'stm_thread_local_t *'
-       from its segment.  Better do it as soon as possible, because
-       other threads might be spin-looping, waiting for the -1 to
-       disappear.  XXX could be done even earlier, as soon as we have
-       read the shadowstack inside the minor collection. */
-    STM_SEGMENT->running_thread = NULL;
-
-    _core_commit_transaction();
-
-
-    write_fence();
-    assert(_stm_detached_inevitable_from_thread == -1);
-    _stm_detached_inevitable_from_thread = 0;
+    _core_commit_transaction(/*external=*/ true);
 }
 
 void _stm_reattach_transaction(intptr_t old, stm_thread_local_t *tl)
@@ -92,6 +74,7 @@ void _stm_reattach_transaction(intptr_t old, stm_thread_local_t *tl)
         dprintf(("reattach_transaction: commit detached from seg %d\n",
                  remote_seg_num));
 
+        tl->last_associated_segment_num = remote_seg_num;
         ensure_gs_register(remote_seg_num);
         commit_external_inevitable_transaction();
     }
