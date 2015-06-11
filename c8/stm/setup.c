@@ -264,6 +264,8 @@ void stm_register_thread_local(stm_thread_local_t *tl)
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)
 {
+    commit_detached_transaction_if_from(tl);
+
     s_mutex_lock();
     assert(tl->prev != NULL);
     assert(tl->next != NULL);

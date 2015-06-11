@@ -300,6 +300,7 @@ static void synchronize_objects_flush(void);
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
 static bool _stm_validate(void);
+static void _core_commit_transaction(void);
 
 static inline bool was_read_remote(char *base, object_t *obj)
 {

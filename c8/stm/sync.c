@@ -215,10 +215,12 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
         num = (num+1) % (NB_SEGMENTS-1);
         if (sync_ctl.in_use1[num+1] == 0) {
             /* we're getting 'num', a different number. */
-            dprintf(("acquired different segment: %d->%d\n",
-                     tl->last_associated_segment_num, num+1));
+            int old_num = tl->last_associated_segment_num;
+            dprintf(("acquired different segment: %d->%d\n", old_num, num+1));
             tl->last_associated_segment_num = num+1;
             set_gs_register(get_segment_base(num+1));
+            dprintf(("                            %d->%d\n", old_num, num+1));
+            (void)old_num;
             goto got_num;
         }
     }
@@ -245,18 +247,22 @@ static bool acquire_thread_segment(stm_thread_local_t *tl)
 
 static void release_thread_segment(stm_thread_local_t *tl)
 {
+    int segnum;
     assert(_has_mutex());
 
     cond_signal(C_SEGMENT_FREE);
 
     assert(STM_SEGMENT->running_thread == tl);
-    assert(tl->last_associated_segment_num == STM_SEGMENT->segment_num);
-    assert(in_transaction(tl));
-    STM_SEGMENT->running_thread = NULL;
-    assert(!in_transaction(tl));
+    segnum = STM_SEGMENT->segment_num;
+    if (tl != NULL) {
+        assert(tl->last_associated_segment_num == segnum);
+        assert(in_transaction(tl));
+        STM_SEGMENT->running_thread = NULL;
+        assert(!in_transaction(tl));
+    }
 
-    assert(sync_ctl.in_use1[tl->last_associated_segment_num] == 1);
-    sync_ctl.in_use1[tl->last_associated_segment_num] = 0;
+    assert(sync_ctl.in_use1[segnum] == 1);
+    sync_ctl.in_use1[segnum] = 0;
 }
 
 __attribute__((unused))
@@ -414,8 +420,8 @@ static void synchronize_all_threads(enum sync_type_e sync_type)
        Wait until all other threads are suspended. */
     while (count_other_threads_sp_running() > 0) {
 
-        int detached = fetch_detached_transaction();
-        if (detached >= 0) {
+        intptr_t detached = fetch_detached_transaction();
+        if (detached != 0) {
             remove_requests_for_safe_point();    /* => C_REQUEST_REMOVED */
             commit_fetched_detached_transaction(detached);
             goto restart;

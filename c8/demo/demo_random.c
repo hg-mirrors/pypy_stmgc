@@ -347,7 +347,7 @@ void *demo_random(void *arg)
 
     objptr_t p;
 
-    stm_start_transaction(&stm_thread_local);
+    stm_enter_transactional_zone(&stm_thread_local);
     assert(td.num_roots >= td.num_roots_at_transaction_start);
     td.num_roots = td.num_roots_at_transaction_start;
     p = NULL;
@@ -367,12 +367,19 @@ void *demo_random(void *arg)
 
             long call_fork = (arg != NULL && *(long *)arg);
             if (call_fork == 0) {   /* common case */
-                stm_commit_transaction();
                 td.num_roots_at_transaction_start = td.num_roots;
-                if (get_rand(100) < 98) {
-                    stm_start_transaction(&stm_thread_local);
-                } else {
-                    stm_start_inevitable_transaction(&stm_thread_local);
+                if (get_rand(100) < 50) {
+                    stm_leave_transactional_zone(&stm_thread_local);
+                    /* Nothing here; it's unlikely that a different thread
+                       manages to steal the detached inev transaction.
+                       Give them a little chance with a usleep(). */
+                    fprintf(stderr, "sleep...\n");
+                    usleep(1);
+                    fprintf(stderr, "sleep done\n");
+                    stm_enter_transactional_zone(&stm_thread_local);
+                }
+                else {
+                    stm_force_transaction_break(&stm_thread_local);
                 }
                 td.num_roots = td.num_roots_at_transaction_start;
                 p = NULL;
@@ -401,16 +408,16 @@ void *demo_random(void *arg)
         }
     }
     push_roots();
-    stm_commit_transaction();
+    stm_force_transaction_break(&stm_thread_local);
 
     /* even out the shadow stack before leaveframe: */
-    stm_start_inevitable_transaction(&stm_thread_local);
+    stm_become_inevitable(&stm_thread_local, "before leaveframe");
     while (td.num_roots > 0) {
         td.num_roots--;
         objptr_t t;
         STM_POP_ROOT(stm_thread_local, t);
     }
-    stm_commit_transaction();
+    stm_leave_transactional_zone(&stm_thread_local);
 
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     stm_unregister_thread_local(&stm_thread_local);
