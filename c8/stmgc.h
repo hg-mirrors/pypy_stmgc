@@ -40,6 +40,7 @@ struct stm_read_marker_s {
 
 struct stm_segment_info_s {
     uint8_t transaction_read_version;
+    uint8_t no_safe_point_here;    /* set from outside, triggers an assert */
     int segment_num;
     char *segment_base;
     stm_char *nursery_current;
@@ -420,10 +421,12 @@ static inline int stm_is_inevitable(void) {
    far more efficient than constantly starting and committing
    transactions.
 */
+#include <stdio.h>
 static inline void stm_enter_transactional_zone(stm_thread_local_t *tl) {
     intptr_t old;
     atomic_exchange(&_stm_detached_inevitable_from_thread, old, -1);
     if (old == (intptr_t)tl) {
+        fprintf(stderr, "stm_enter_transactional_zone fast path\n");
         _stm_detached_inevitable_from_thread = 0;
     }
     else {
@@ -434,10 +437,13 @@ static inline void stm_enter_transactional_zone(stm_thread_local_t *tl) {
 }
 static inline void stm_leave_transactional_zone(stm_thread_local_t *tl) {
     assert(STM_SEGMENT->running_thread == tl);
-    if (stm_is_inevitable())
+    if (stm_is_inevitable()) {
+        fprintf(stderr, "stm_leave_transactional_zone fast path\n");
         _stm_detach_inevitable_transaction(tl);
-    else
+    }
+    else {
         _stm_leave_noninevitable_transactional_zone();
+    }
 }
 
 /* stm_force_transaction_break() is in theory equivalent to
@@ -461,8 +467,9 @@ static inline void stm_become_inevitable(stm_thread_local_t *tl,
     assert(STM_SEGMENT->running_thread == tl);
     if (!stm_is_inevitable())
         _stm_become_inevitable(msg);
-    /* now, we're running the inevitable transaction, so: */
-    assert(_stm_detached_inevitable_from_thread == 0);
+    /* now, we're running the inevitable transaction, so this var should
+       be 0 (but can occasionally be -1 for a tiny amount of time) */
+    assert(((_stm_detached_inevitable_from_thread + 1) & ~1) == 0);
 }
 
 /* Forces a safe-point if needed.  Normally not needed: this is

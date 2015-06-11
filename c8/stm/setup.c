@@ -137,6 +137,9 @@ void stm_setup(void)
     setup_detach();
 
     set_gs_register(get_segment_base(0));
+
+    dprintf(("nursery: %p -> %p\n", (void *)NURSERY_START,
+                                    (void *)NURSERY_END));
 }
 
 void stm_teardown(void)

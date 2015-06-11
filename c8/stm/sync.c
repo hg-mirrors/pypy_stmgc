@@ -383,6 +383,7 @@ static void enter_safe_point_if_requested(void)
             break;    /* no safe point requested */
 
         dprintf(("enter safe point\n"));
+        assert(!STM_SEGMENT->no_safe_point_here);
         assert(STM_SEGMENT->nursery_end == NSE_SIGPAUSE);
         assert(pause_signalled);
 
@@ -397,6 +398,7 @@ static void enter_safe_point_if_requested(void)
         cond_wait(C_REQUEST_REMOVED);
         STM_PSEGMENT->safe_point = SP_RUNNING;
         timing_event(STM_SEGMENT->running_thread, STM_WAIT_DONE);
+        assert(!STM_SEGMENT->no_safe_point_here);
         dprintf(("left safe point\n"));
     }
 }
