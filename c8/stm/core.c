@@ -496,8 +496,8 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 
 static void wait_for_other_inevitable(struct stm_commit_log_entry_s *old)
 {
-    int detached = fetch_detached_transaction();
-    if (detached >= 0) {
+    intptr_t detached = fetch_detached_transaction();
+    if (detached != 0) {
         commit_fetched_detached_transaction(detached);
         return;
     }
@@ -509,7 +509,7 @@ static void wait_for_other_inevitable(struct stm_commit_log_entry_s *old)
         usleep(10);    /* XXXXXX */
 
         detached = fetch_detached_transaction();
-        if (detached >= 0) {
+        if (detached != 0) {
             commit_fetched_detached_transaction(detached);
             break;
         }
@@ -1235,7 +1235,8 @@ static void _finish_transaction(enum stm_event_e event)
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
     list_clear(STM_PSEGMENT->old_objects_with_cards_set);
     list_clear(STM_PSEGMENT->large_overflow_objects);
-    timing_event(tl, event);
+    if (tl != NULL)
+        timing_event(tl, event);
 
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
@@ -1290,19 +1291,24 @@ void _stm_commit_transaction(void)
 
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
-    //assert(STM_PSEGMENT->running_pthread == pthread_self());
-    // ^^^ fails if detach.c commits a detached inevitable transaction
+    assert(STM_PSEGMENT->running_pthread == pthread_self());
 
     dprintf(("> stm_commit_transaction()\n"));
     minor_collection(1);
 
+    _core_commit_transaction();
+}
+
+static void _core_commit_transaction(void)
+{
     push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
 
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
 
-    stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+    if (!was_inev)
+        stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
 
     /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
@@ -1343,7 +1349,8 @@ void _stm_commit_transaction(void)
 
     /* between transactions, call finalizers. this will execute
        a transaction itself */
-    invoke_general_finalizers(tl);
+    if (tl != NULL)
+        invoke_general_finalizers(tl);
 }
 
 static void reset_modified_from_backup_copies(int segment_num)
