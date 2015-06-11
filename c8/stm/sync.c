@@ -329,6 +329,7 @@ static void signal_everybody_to_pause_running(void)
     }
     assert(!pause_signalled);
     pause_signalled = true;
+    dprintf(("request to pause\n"));
 }
 
 static inline long count_other_threads_sp_running(void)
@@ -363,6 +364,7 @@ static void remove_requests_for_safe_point(void)
         if (get_segment(i)->nursery_end == NSE_SIGPAUSE)
             get_segment(i)->nursery_end = NURSERY_END;
     }
+    dprintf(("request removed\n"));
     cond_broadcast(C_REQUEST_REMOVED);
 }
 
@@ -380,6 +382,7 @@ static void enter_safe_point_if_requested(void)
         if (STM_SEGMENT->nursery_end == NURSERY_END)
             break;    /* no safe point requested */
 
+        dprintf(("enter safe point\n"));
         assert(STM_SEGMENT->nursery_end == NSE_SIGPAUSE);
         assert(pause_signalled);
 
@@ -394,6 +397,7 @@ static void enter_safe_point_if_requested(void)
         cond_wait(C_REQUEST_REMOVED);
         STM_PSEGMENT->safe_point = SP_RUNNING;
         timing_event(STM_SEGMENT->running_thread, STM_WAIT_DONE);
+        dprintf(("left safe point\n"));
     }
 }
 
