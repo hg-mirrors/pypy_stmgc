@@ -1287,28 +1287,41 @@ static void push_large_overflow_objects_to_other_segments(void)
 
 void _stm_commit_transaction(void)
 {
+    assert(STM_PSEGMENT->running_pthread == pthread_self());
+    _core_commit_transaction(/*external=*/ false);
+}
+
+static void _core_commit_transaction(bool external)
+{
     exec_local_finalizers();
 
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
-    assert(STM_PSEGMENT->running_pthread == pthread_self());
 
-    dprintf(("> stm_commit_transaction()\n"));
-    minor_collection(1);
+    dprintf(("> stm_commit_transaction(external=%d)\n", (int)external));
+    minor_collection(/*commit=*/ true, external);
 
-    _core_commit_transaction();
-}
-
-static void _core_commit_transaction(void)
-{
     push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
+
+    if (external) {
+        /* from this point on, unlink the original 'stm_thread_local_t *'
+           from its segment.  Better do it as soon as possible, because
+           other threads might be spin-looping, waiting for the -1 to
+           disappear. */
+        STM_SEGMENT->running_thread = NULL;
+        write_fence();
+        assert(_stm_detached_inevitable_from_thread == -1);
+        _stm_detached_inevitable_from_thread = 0;
+    }
 
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
 
-    if (!was_inev)
+    if (!was_inev) {
+        assert(!external);
         stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+    }
 
     /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
@@ -1326,12 +1339,14 @@ static void _core_commit_transaction(void)
     invoke_and_clear_user_callbacks(0);   /* for commit */
 
     /* >>>>> there may be a FORK() happening in the safepoint below <<<<<*/
-    enter_safe_point_if_requested();
-    assert(STM_SEGMENT->nursery_end == NURSERY_END);
+    if (!external) {
+        enter_safe_point_if_requested();
+        assert(STM_SEGMENT->nursery_end == NURSERY_END);
 
-    /* if a major collection is required, do it here */
-    if (is_major_collection_requested()) {
-        major_collection_with_mutex();
+        /* if a major collection is required, do it here */
+        if (is_major_collection_requested()) {
+            major_collection_with_mutex();
+        }
     }
 
     _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
@@ -1342,6 +1357,7 @@ static void _core_commit_transaction(void)
 
     /* done */
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+    assert(external == (tl == NULL));
     _finish_transaction(STM_TRANSACTION_COMMIT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
