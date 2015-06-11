@@ -376,6 +376,7 @@ void *demo_random(void *arg)
 
         assert(p == NULL || p_sig == SIGNATURE);
         (void)local_seg;
+        (void)p_sig;
 
         p = do_step(p);
 
