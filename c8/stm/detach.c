@@ -32,6 +32,7 @@ static void setup_detach(void)
 
 void _stm_leave_noninevitable_transactional_zone(void)
 {
+    dprintf(("leave_noninevitable_transactional_zone\n"));
     _stm_become_inevitable(MSG_INEV_DONT_SLEEP);
 
     /* did it work? */
@@ -61,11 +62,13 @@ static void commit_external_inevitable_transaction(void)
        disappear.  XXX could be done even earlier, as soon as we have
        read the shadowstack inside the minor collection. */
     STM_SEGMENT->running_thread = NULL;
+
+    _core_commit_transaction();
+
+
     write_fence();
     assert(_stm_detached_inevitable_from_thread == -1);
     _stm_detached_inevitable_from_thread = 0;
-
-    _core_commit_transaction();
 }
 
 void _stm_reattach_transaction(intptr_t old, stm_thread_local_t *tl)
@@ -75,6 +78,7 @@ void _stm_reattach_transaction(intptr_t old, stm_thread_local_t *tl)
         if (old == -1) {
             /* busy-loop: wait until _stm_detached_inevitable_from_thread
                is reset to a value different from -1 */
+            dprintf(("reattach_transaction: busy wait...\n"));
             while (_stm_detached_inevitable_from_thread == -1)
                 spin_loop();
 

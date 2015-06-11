@@ -58,14 +58,14 @@ void Du_TransactionRun(void)
     if (TLOBJ == NULL)
         return;
 
-    stm_start_inevitable_transaction(&stm_thread_local);
+    stm_enter_transactional_zone(&stm_thread_local);
 
     DuConsObject *root = du_pending_transactions;
     _du_write1(root);
     root->cdr = TLOBJ;
 
     TLOBJ = NULL;
-    stm_commit_transaction();
+    stm_leave_transactional_zone(&stm_thread_local);
 
     run_all_threads();
 }

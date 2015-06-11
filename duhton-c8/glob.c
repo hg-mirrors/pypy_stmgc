@@ -713,11 +713,12 @@ DuObject *du_run_transactions(DuObject *cons, DuObject *locals)
     //stm_collect(0);       /* hack... */
     //_du_restore1(stm_thread_local_obj);
 
-    stm_commit_transaction();
+    stm_leave_transactional_zone(&stm_thread_local);
 
     Du_TransactionRun();
 
-    stm_start_inevitable_transaction(&stm_thread_local);
+    stm_enter_transactional_zone(&stm_thread_local);
+    stm_become_inevitable(&stm_thread_local, "run-transactions finished");
     return Du_None;
 }
 
@@ -809,7 +810,8 @@ void Du_Initialize(int num_threads)
     /* prebuilt objs stay on the shadowstack forever */
 
     stm_register_thread_local(&stm_thread_local);
-    stm_start_inevitable_transaction(&stm_thread_local);
+    stm_enter_transactional_zone(&stm_thread_local);
+    stm_become_inevitable(&stm_thread_local, "initialization");
 
     all_threads_count = num_threads;
     all_threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);
@@ -857,7 +859,7 @@ void Du_Initialize(int num_threads)
     DuFrame_SetBuiltinMacro(Du_Globals, "pair?", du_pair);
     DuFrame_SetBuiltinMacro(Du_Globals, "assert", du_assert);
     DuFrame_SetSymbolStr(Du_Globals, "None", Du_None);
-    stm_commit_transaction();
+    stm_leave_transactional_zone(&stm_thread_local);
 }
 
 void Du_Finalize(void)
