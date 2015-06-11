@@ -318,9 +318,7 @@ objptr_t do_step(objptr_t p)
         stm_become_inevitable(&stm_thread_local, "please");
         pop_roots();
         return NULL;
-    } else if (0 &&            // XXXXXXXXXXXXXXXXXXXXX
-                                                       
-               get_rand(240) == 1) {
+    } else if (get_rand(240) == 1) {
         push_roots();
         stm_become_globally_unique_transaction(&stm_thread_local, "really");
         fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
@@ -384,9 +382,7 @@ void *demo_random(void *arg)
             push_roots();
 
             long call_fork = (arg != NULL && *(long *)arg);
-            if (1 ||   // XXXXXXXXXXXXXXXX
-                                          
-                call_fork == 0) {   /* common case */
+            if (call_fork == 0) {   /* common case */
                 if (get_rand(100) < 50) {
                     stm_leave_transactional_zone(&stm_thread_local);
                     /* Nothing here; it's unlikely that a different thread
