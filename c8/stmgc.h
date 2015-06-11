@@ -428,7 +428,8 @@ static inline void stm_enter_transactional_zone(stm_thread_local_t *tl) {
     }
     else {
         _stm_reattach_transaction(old, tl);
-        assert(_stm_detached_inevitable_from_thread == 0);
+        /* _stm_detached_inevitable_from_thread should be 0 here, but
+           it can already have been changed from a parallel thread */
     }
 }
 static inline void stm_leave_transactional_zone(stm_thread_local_t *tl) {
