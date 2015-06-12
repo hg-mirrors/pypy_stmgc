@@ -74,11 +74,13 @@ def get_psegment(segment_id, field=''):
 def thread_to_segment_id(thread_id):
     base = int(gdb.parse_and_eval('stm_object_pages'))
     for j in range(1, get_nb_segments() + 1):
-        ts = get_psegment(j, '->transaction_state')
-        if int(ts) != 0:
-            ti = get_psegment(j, '->pub.running_thread->creating_pthread[0]')
-            if int(ti) == thread_id:
-                return j
+        #ti = get_psegment(j, '->pub.running_thread->creating_pthread[0]')
+        ti = get_psegment(j, '->running_pthread')
+        if int(ti) == thread_id:
+            ts = get_psegment(j, '->transaction_state')
+            if int(ts) == 0:
+                print >> sys.stderr, "note: transaction_state == 0"
+            return j
     raise Exception("thread not found: %r" % (thread_id,))
 
 def interactive_segment_base(thread=None):
@@ -106,11 +108,13 @@ def gc(p=None, thread=None):
     sb = interactive_segment_base(thread)
     if p is not None and p.type.code == gdb.TYPE_CODE_PTR:
         return gdb.Value(sb + int(p)).cast(p.type).dereference()
-    elif p is None or int(p) == 0:
-        T = gdb.lookup_type('char').pointer()
-        return gdb.Value(sb).cast(T)
     else:
-        raise TypeError("gc() first argument must be a GC pointer or 0")
+        if p is None:
+            p = 0
+        else:
+            p = int(p)
+        T = gdb.lookup_type('char').pointer()
+        return gdb.Value(sb + p).cast(T)
 
 @gdb_function
 def psegment(thread=None):
