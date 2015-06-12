@@ -2,6 +2,9 @@
 # error "must be compiled via stmgc.c"
 #endif
 
+#include <errno.h>
+
+
 /* Idea: if stm_leave_transactional_zone() is quickly followed by
    stm_enter_transactional_zone() in the same thread, then we should
    simply try to have one inevitable transaction that does both sides.
@@ -32,6 +35,7 @@ static void setup_detach(void)
 
 void _stm_leave_noninevitable_transactional_zone(void)
 {
+    int saved_errno = errno;
     dprintf(("leave_noninevitable_transactional_zone\n"));
     _stm_become_inevitable(MSG_INEV_DONT_SLEEP);
 
@@ -45,6 +49,7 @@ void _stm_leave_noninevitable_transactional_zone(void)
         dprintf(("leave_noninevitable_transactional_zone: commit\n"));
         _stm_commit_transaction();
     }
+    errno = saved_errno;
 }
 
 static void commit_external_inevitable_transaction(void)
@@ -56,6 +61,7 @@ static void commit_external_inevitable_transaction(void)
 void _stm_reattach_transaction(stm_thread_local_t *tl)
 {
     intptr_t old;
+    int saved_errno = errno;
  restart:
     old = _stm_detached_inevitable_from_thread;
     if (old != 0) {
@@ -85,6 +91,7 @@ void _stm_reattach_transaction(stm_thread_local_t *tl)
     }
     dprintf(("reattach_transaction: start a new transaction\n"));
     _stm_start_transaction(tl);
+    errno = saved_errno;
 }
 
 void stm_force_transaction_break(stm_thread_local_t *tl)

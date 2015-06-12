@@ -420,6 +420,9 @@ static inline int stm_is_inevitable(void) {
    stm_enter_transactional_zone() will try to reattach to it.  This is
    far more efficient than constantly starting and committing
    transactions.
+
+   stm_enter_transactional_zone() and stm_leave_transactional_zone()
+   preserve the value of errno.
 */
 #ifdef STM_DEBUGPRINT
 #include <stdio.h>
