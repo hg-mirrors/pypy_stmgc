@@ -628,6 +628,8 @@ static void _validate_and_add_to_commit_log(void)
 
     new = _create_commit_log_entry();
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+        assert(_stm_detached_inevitable_from_thread == 0);  /* running it */
+
         old = STM_PSEGMENT->last_commit_log_entry;
         new->rev_num = old->rev_num + 1;
         OPT_ASSERT(old->next == INEV_RUNNING);
@@ -643,6 +645,8 @@ static void _validate_and_add_to_commit_log(void)
         list_clear(STM_PSEGMENT->modified_old_objects);
         STM_PSEGMENT->last_commit_log_entry = new;
 
+        usleep(100);  //XXX
+        
         /* do it: */
         bool yes = __sync_bool_compare_and_swap(&old->next, INEV_RUNNING, new);
         OPT_ASSERT(yes);
