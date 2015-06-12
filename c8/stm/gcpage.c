@@ -188,6 +188,13 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
 
 static void major_collection_with_mutex(void)
 {
+    /* XXX unclear: force-commit a detached transaction before major GC, for
+       the purpose of letting other threads notice that they are doomed anyway
+    */
+    //intptr_t detached = fetch_detached_transaction();
+    //if (detached != 0) {
+    //    commit_fetched_detached_transaction(detached);
+
     timing_event(STM_SEGMENT->running_thread, STM_GC_MAJOR_START);
 
     synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
