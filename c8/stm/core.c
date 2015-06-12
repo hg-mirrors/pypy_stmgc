@@ -1297,6 +1297,10 @@ static void _core_commit_transaction(bool external)
 
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
+    if (globally_unique_transaction) {
+        stm_fatalerror("cannot commit between stm_stop_all_other_threads "
+                       "and stm_resume_all_other_threads");
+    }
 
     dprintf(("> stm_commit_transaction(external=%d)\n", (int)external));
     minor_collection(/*commit=*/ true, external);
@@ -1350,10 +1354,6 @@ static void _core_commit_transaction(bool external)
     }
 
     _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
-
-    if (globally_unique_transaction && was_inev) {
-        committed_globally_unique_transaction();
-    }
 
     /* done */
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
@@ -1549,16 +1549,17 @@ void _stm_become_inevitable(const char *msg)
     invoke_and_clear_user_callbacks(0);   /* for commit */
 }
 
+#if 0
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
                                             const char *msg)
 {
-    stm_become_inevitable(tl, msg);   /* may still abort */
+    stm_become_inevitable(tl, msg);
 
     s_mutex_lock();
     synchronize_all_threads(STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE);
     s_mutex_unlock();
 }
-
+#endif
 
 void stm_stop_all_other_threads(void)
 {
