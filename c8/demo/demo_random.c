@@ -49,8 +49,10 @@ struct thread_data {
     int num_roots;
     int num_roots_at_transaction_start;
     int steps_left;
+    long globally_unique;
 };
 __thread struct thread_data td;
+static long progress = 1;
 
 struct thread_data *_get_td(void)
 {
@@ -300,6 +302,15 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
     return p;
 }
 
+static void end_gut(void)
+{
+    if (td.globally_unique != 0) {
+        fprintf(stderr, "[GUT END]");
+        assert(progress == td.globally_unique);
+        td.globally_unique = 0;
+        stm_resume_all_other_threads();
+    }
+}
 
 objptr_t do_step(objptr_t p)
 {
@@ -320,8 +331,14 @@ objptr_t do_step(objptr_t p)
         return NULL;
     } else if (get_rand(240) == 1) {
         push_roots();
-        stm_become_globally_unique_transaction(&stm_thread_local, "really");
-        fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
+        if (td.globally_unique == 0) {
+            stm_stop_all_other_threads();
+            td.globally_unique = progress;
+            fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
+        }
+        else {
+            end_gut();
+        }
         pop_roots();
         return NULL;
     }
@@ -376,10 +393,14 @@ void *demo_random(void *arg)
         (void)local_seg;
         (void)p_sig;
 
+        if (!td.globally_unique)
+            ++progress;   /* racy, but good enough */
+
         p = do_step(p);
 
         if (p == (objptr_t)-1) {
             push_roots();
+            end_gut();
 
             long call_fork = (arg != NULL && *(long *)arg);
             if (call_fork == 0) {   /* common case */
@@ -425,6 +446,7 @@ void *demo_random(void *arg)
         }
     }
     push_roots();
+    end_gut();
     stm_force_transaction_break(&stm_thread_local);
 
     /* even out the shadow stack before leaveframe: */

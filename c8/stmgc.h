@@ -528,8 +528,8 @@ long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
    other threads.  A very heavy-handed way to make sure that no other
    transaction is running concurrently.  Avoid as much as possible.
    Other transactions will continue running only after this transaction
-   commits.  (xxx deprecated and may be removed) */
-void stm_become_globally_unique_transaction(stm_thread_local_t *tl, const char *msg);
+   commits.  (deprecated, not working any more according to demo_random2) */
+//void stm_become_globally_unique_transaction(stm_thread_local_t *tl, const char *msg);
 
 /* Moves the transaction forward in time by validating the read and
    write set with all commits that happened since the last validation
