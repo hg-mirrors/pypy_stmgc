@@ -324,10 +324,7 @@ static bool _stm_validate(void)
     /* Don't check this 'cl'. This entry is already checked */
 
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
-        //assert(first_cl->next == INEV_RUNNING);
-        /* the above assert may fail when running a major collection
-           while the commit of the inevitable transaction is in progress
-           and the element is already attached */
+        assert(first_cl->next == INEV_RUNNING);
         return true;
     }
 
@@ -606,9 +603,6 @@ static bool _validate_and_attach(struct stm_commit_log_entry_s *new,
 
     if (is_commit) {
         /* compare with _validate_and_add_to_commit_log */
-        STM_PSEGMENT->transaction_state = TS_NONE;
-        STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
-
         list_clear(STM_PSEGMENT->modified_old_objects);
         STM_PSEGMENT->last_commit_log_entry = new;
         release_modification_lock_wr(STM_SEGMENT->segment_num);
@@ -640,16 +634,15 @@ static void _validate_and_add_to_commit_log(void)
                                       STM_PSEGMENT->modified_old_objects);
 
         /* compare with _validate_and_attach: */
-        STM_PSEGMENT->transaction_state = TS_NONE;
-        STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
+        acquire_modification_lock_wr(STM_SEGMENT->segment_num);
         list_clear(STM_PSEGMENT->modified_old_objects);
         STM_PSEGMENT->last_commit_log_entry = new;
 
-        usleep(100);  //XXX
-        
         /* do it: */
         bool yes = __sync_bool_compare_and_swap(&old->next, INEV_RUNNING, new);
         OPT_ASSERT(yes);
+
+        release_modification_lock_wr(STM_SEGMENT->segment_num);
     }
     else {
         _validate_and_attach(new, /*can_sleep=*/true);
@@ -1232,6 +1225,7 @@ static void _finish_transaction(enum stm_event_e event)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
 
+    assert(_has_mutex());
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
 
@@ -1241,6 +1235,13 @@ static void _finish_transaction(enum stm_event_e event)
     list_clear(STM_PSEGMENT->large_overflow_objects);
     if (tl != NULL)
         timing_event(tl, event);
+
+    /* If somebody is waiting for us to reach a safe point, we simply
+       signal it now and leave this transaction.  This should be enough
+       for synchronize_all_threads() to retry and notice that we are
+       no longer SP_RUNNING. */
+    if (STM_SEGMENT->nursery_end != NURSERY_END)
+        cond_signal(C_AT_SAFE_POINT);
 
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
@@ -1301,6 +1302,7 @@ static void _core_commit_transaction(bool external)
 
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
+    assert(STM_PSEGMENT->transaction_state != TS_NONE);
     if (globally_unique_transaction) {
         stm_fatalerror("cannot commit between stm_stop_all_other_threads "
                        "and stm_resume_all_other_threads");
@@ -1308,6 +1310,13 @@ static void _core_commit_transaction(bool external)
 
     dprintf(("> stm_commit_transaction(external=%d)\n", (int)external));
     minor_collection(/*commit=*/ true, external);
+    if (!external && is_major_collection_requested()) {
+        s_mutex_lock();
+        if (is_major_collection_requested()) {   /* if still true */
+            major_collection_with_mutex();
+        }
+        s_mutex_unlock();
+    }
 
     push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
@@ -1345,19 +1354,6 @@ static void _core_commit_transaction(bool external)
     }
 
     invoke_and_clear_user_callbacks(0);   /* for commit */
-
-    /* >>>>> there may be a FORK() happening in the safepoint below <<<<<*/
-    if (!external) {
-        enter_safe_point_if_requested();
-        assert(STM_SEGMENT->nursery_end == NURSERY_END);
-
-        /* if a major collection is required, do it here */
-        if (is_major_collection_requested()) {
-            major_collection_with_mutex();
-        }
-    }
-
-    _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
 
     /* done */
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
