@@ -132,16 +132,17 @@ static void commit_fetched_detached_transaction(intptr_t old)
        conditions.
     */
     int mysegnum = STM_SEGMENT->segment_num;
+    bool sp_running = (STM_PSEGMENT->safe_point == SP_RUNNING);
     int segnum = ((stm_thread_local_t *)old)->last_associated_segment_num;
     dprintf(("commit_fetched_detached_transaction from seg %d\n", segnum));
     assert(segnum > 0);
 
     if (segnum != mysegnum) {
-        s_mutex_lock();
-        assert(STM_PSEGMENT->safe_point == SP_RUNNING);
-        STM_PSEGMENT->safe_point = SP_COMMIT_OTHER_DETACHED;
-        s_mutex_unlock();
-
+        if (sp_running) {
+            s_mutex_lock();
+            STM_PSEGMENT->safe_point = SP_COMMIT_OTHER_DETACHED;
+            s_mutex_unlock();
+        }
         set_gs_register(get_segment_base(segnum));
     }
     commit_external_inevitable_transaction();
@@ -149,10 +150,12 @@ static void commit_fetched_detached_transaction(intptr_t old)
     if (segnum != mysegnum) {
         set_gs_register(get_segment_base(mysegnum));
 
-        s_mutex_lock();
-        assert(STM_PSEGMENT->safe_point == SP_COMMIT_OTHER_DETACHED);
-        STM_PSEGMENT->safe_point = SP_RUNNING;
-        s_mutex_unlock();
+        if (sp_running) {
+            s_mutex_lock();
+            assert(STM_PSEGMENT->safe_point == SP_COMMIT_OTHER_DETACHED);
+            STM_PSEGMENT->safe_point = SP_RUNNING;
+            s_mutex_unlock();
+        }
     }
 }
 
