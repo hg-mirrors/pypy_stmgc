@@ -85,7 +85,7 @@ long _check_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
-bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
+//bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 bool _check_stop_all_other_threads(void);
 void stm_resume_all_other_threads(void);
 int stm_is_inevitable(void);
@@ -304,10 +304,6 @@ bool _check_abort_transaction(void) {
 
 bool _check_become_inevitable(stm_thread_local_t *tl) {
     CHECKED(stm_become_inevitable(tl, "TEST"));
-}
-
-bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
-    CHECKED(stm_become_globally_unique_transaction(tl, "TESTGUT"));
 }
 
 bool _check_stop_all_other_threads(void) {
@@ -884,6 +880,7 @@ class BaseTest(object):
             raise Conflict()
 
     def become_globally_unique_transaction(self):
+        import py; py.test.skip("this function was removed")
         tl = self.tls[self.current_thread]
         if lib._check_become_globally_unique_transaction(tl):
             raise Conflict()
