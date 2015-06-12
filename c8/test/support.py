@@ -28,7 +28,6 @@ typedef struct {
     object_t *thread_local_obj;
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
-    long last_abort__bytes_in_nursery;
     int last_associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
@@ -37,6 +36,7 @@ typedef struct {
 
 char *stm_object_pages;
 char *stm_file_pages;
+uintptr_t stm_fill_mark_nursery_bytes;
 
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
@@ -103,6 +103,8 @@ object_t* _get_weakref(object_t *obj);
 /* void stm_collect(long level); */
 long _check_stm_collect(long level);
 uint64_t _stm_total_allocated(void);
+
+long bytes_before_transaction_break(void);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
 void _stm_largemalloc_init_arena(char *data_start, size_t data_size);
@@ -402,6 +404,11 @@ object_t * _get_ptr(object_t *obj, int n)
     field_addr += n * sizeof(void*); /* field */
     object_t * TLPREFIX * field = (object_t * TLPREFIX *)field_addr;
     return *field;
+}
+
+long bytes_before_transaction_break(void)
+{
+    return STM_SEGMENT->nursery_mark - STM_SEGMENT->nursery_current;
 }
 
 
