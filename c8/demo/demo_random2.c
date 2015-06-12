@@ -8,6 +8,8 @@
 #include <sys/wait.h>
 
 #include "stmgc.h"
+#include "stm/fprintcolor.h"
+#include "stm/fprintcolor.c"
 
 #define NUMTHREADS 3
 #define STEPS_PER_THREAD 50000
@@ -52,8 +54,10 @@ struct thread_data {
     int active_roots_num;
     long roots_on_ss;
     long roots_on_ss_at_tr_start;
+    long globally_unique;
 };
 __thread struct thread_data td;
+static long progress = 1;
 
 struct thread_data *_get_td(void)
 {
@@ -61,9 +65,16 @@ struct thread_data *_get_td(void)
 }
 
 
+long check_size(long size)
+{
+    assert(size >= sizeof(struct node_s));
+    assert(size <= sizeof(struct node_s) + 4096*70);
+    return size;
+}
+
 ssize_t stmcb_size_rounded_up(struct object_s *ob)
 {
-    return ((struct node_s*)ob)->my_size;
+    return check_size(((struct node_s*)ob)->my_size);
 }
 
 void stmcb_trace(struct object_s *obj, void visit(object_t **))
@@ -73,7 +84,8 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 
     /* and the same value at the end: */
     /* note, ->next may be the same as last_next */
-    nodeptr_t *last_next = (nodeptr_t*)((char*)n + n->my_size - sizeof(void*));
+    nodeptr_t *last_next = (nodeptr_t*)((char*)n + check_size(n->my_size)
+                                        - sizeof(void*));
 
     assert(n->next == *last_next);
 
@@ -193,7 +205,8 @@ void set_next(objptr_t p, objptr_t v)
         nodeptr_t n = (nodeptr_t)p;
 
         /* and the same value at the end: */
-        nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n + n->my_size - sizeof(void*));
+        nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n +
+                                       check_size(n->my_size) - sizeof(void*));
         assert(n->next == *last_next);
         n->next = (nodeptr_t)v;
         *last_next = (nodeptr_t)v;
@@ -205,7 +218,8 @@ nodeptr_t get_next(objptr_t p)
     nodeptr_t n = (nodeptr_t)p;
 
     /* and the same value at the end: */
-    nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n + n->my_size - sizeof(void*));
+    nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n +
+                                       check_size(n->my_size) - sizeof(void*));
     OPT_ASSERT(n->next == *last_next);
 
     return n->next;
@@ -239,6 +253,7 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
             sizeof(struct node_s)+32, sizeof(struct node_s)+48,
             sizeof(struct node_s) + (get_rand(100000) & ~15)};
         size_t size = sizes[get_rand(sizeof(sizes) / sizeof(size_t))];
+        size = check_size(size);
         p = stm_allocate(size);
         nodeptr_t n = (nodeptr_t)p;
         n->sig = SIGNATURE;
@@ -296,6 +311,16 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
     return p;
 }
 
+static void end_gut(void)
+{
+    if (td.globally_unique != 0) {
+        fprintf(stderr, "[GUT END]");
+        assert(progress == td.globally_unique);
+        td.globally_unique = 0;
+        stm_resume_all_other_threads();
+    }
+}
+
 void frame_loop();
 objptr_t do_step(objptr_t p)
 {
@@ -309,13 +334,22 @@ objptr_t do_step(objptr_t p)
         p = simple_events(p, _r);
     } else if (get_rand(20) == 1) {
         long pushed = push_roots();
-        stm_commit_transaction();
-        td.roots_on_ss_at_tr_start = td.roots_on_ss;
-
-        if (get_rand(100) < 98) {
-            stm_start_transaction(&stm_thread_local);
-        } else {
-            stm_start_inevitable_transaction(&stm_thread_local);
+        end_gut();
+        if (get_rand(100) < 95) {
+            stm_leave_transactional_zone(&stm_thread_local);
+            /* Nothing here; it's unlikely that a different thread
+               manages to steal the detached inev transaction.
+               Give them a little chance with a usleep(). */
+            dprintf(("sleep...\n"));
+            usleep(1);
+            dprintf(("sleep done\n"));
+            td.roots_on_ss_at_tr_start = td.roots_on_ss;
+            stm_enter_transactional_zone(&stm_thread_local);
+        }
+        else {
+            _stm_commit_transaction();
+            td.roots_on_ss_at_tr_start = td.roots_on_ss;
+            _stm_start_transaction(&stm_thread_local);
         }
         td.roots_on_ss = td.roots_on_ss_at_tr_start;
         td.active_roots_num = 0;
@@ -336,10 +370,16 @@ objptr_t do_step(objptr_t p)
         p= NULL;
     } else if (get_rand(20) == 1) {
         p = (objptr_t)-1; // possibly fork
-    } else if (get_rand(20) == 1) {
+    } else if (get_rand(100) == 1) {
         long pushed = push_roots();
-        stm_become_globally_unique_transaction(&stm_thread_local, "really");
-        fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
+        if (td.globally_unique == 0) {
+            stm_stop_all_other_threads();
+            td.globally_unique = progress;
+            fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
+        }
+        else {
+            end_gut();
+        }
         pop_roots(pushed);
         p = NULL;
     }
@@ -364,6 +404,8 @@ void frame_loop()
 
         p = do_step(p);
 
+        if (!td.globally_unique)
+            ++progress;   /* racy, but good enough */
 
         if (p == (objptr_t)-1) {
             p = NULL;
@@ -371,6 +413,7 @@ void frame_loop()
             long call_fork = (thread_may_fork != NULL && *(long *)thread_may_fork);
             if (call_fork) {   /* common case */
                 long pushed = push_roots();
+                end_gut();
                 /* run a fork() inside the transaction */
                 printf("==========   FORK  =========\n");
                 *(long*)thread_may_fork = 0;
@@ -426,7 +469,7 @@ void *demo_random(void *arg)
     setup_thread();
 
     td.roots_on_ss_at_tr_start = 0;
-    stm_start_transaction(&stm_thread_local);
+    stm_enter_transactional_zone(&stm_thread_local);
     td.roots_on_ss = td.roots_on_ss_at_tr_start;
     td.active_roots_num = 0;
 
@@ -435,7 +478,8 @@ void *demo_random(void *arg)
         frame_loop();
     }
 
-    stm_commit_transaction();
+    end_gut();
+    stm_leave_transactional_zone(&stm_thread_local);
 
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     stm_unregister_thread_local(&stm_thread_local);
