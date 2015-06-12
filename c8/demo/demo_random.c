@@ -9,6 +9,7 @@
 
 #include "stmgc.h"
 #include "stm/fprintcolor.h"
+#include "stm/fprintcolor.c"
 
 #define NUMTHREADS 2
 #define STEPS_PER_THREAD 500
