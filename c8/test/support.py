@@ -88,7 +88,7 @@ bool _check_become_inevitable(stm_thread_local_t *tl);
 //bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 bool _check_stop_all_other_threads(void);
 void stm_resume_all_other_threads(void);
-int stm_is_inevitable(void);
+int stm_is_inevitable(stm_thread_local_t *);
 long current_segment_num(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
@@ -770,14 +770,14 @@ class BaseTest(object):
         lib.stmcb_expand_marker = ffi.NULL
         lib.stmcb_debug_print = ffi.NULL
         tl = self.tls[self.current_thread]
-        if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
+        if lib._stm_in_transaction(tl) and self.is_inevitable():
             self.commit_transaction()      # must succeed!
         #
         for n, tl in enumerate(self.tls):
             if lib._stm_in_transaction(tl):
                 if self.current_thread != n:
                     self.switch(n)
-                if lib.stm_is_inevitable():
+                if self.is_inevitable():
                     self.commit_transaction()   # must succeed!
                 else:
                     self.abort_transaction()
@@ -785,6 +785,11 @@ class BaseTest(object):
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
         lib.stm_teardown()
+
+    def is_inevitable(self):
+        tl = self.tls[self.current_thread]
+        assert lib._stm_in_transaction(tl)
+        return lib.stm_is_inevitable(tl)
 
     def get_stm_thread_local(self):
         return self.tls[self.current_thread]

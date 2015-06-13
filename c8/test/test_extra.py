@@ -189,7 +189,7 @@ class TestExtra(BaseTest):
         self.switch(1)
         self.start_transaction()
         self.become_globally_unique_transaction()
-        assert lib.stm_is_inevitable()
+        assert self.is_inevitable()
         #
         py.test.raises(Conflict, self.switch, 0)
 
@@ -199,7 +199,7 @@ class TestExtra(BaseTest):
         self.switch(1)
         self.start_transaction()
         self.stop_all_other_threads()
-        assert lib.stm_is_inevitable()
+        assert self.is_inevitable()
         #
         py.test.raises(Conflict, self.switch, 0)
         #
@@ -213,6 +213,6 @@ class TestExtra(BaseTest):
         self.start_transaction()
         self.stop_all_other_threads()
         self.resume_all_other_threads()
-        assert lib.stm_is_inevitable()
+        assert self.is_inevitable()
         #
         self.switch(0)   # no conflict
