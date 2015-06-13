@@ -71,7 +71,7 @@ typedef struct stm_thread_local_s {
     /* the next fields are handled internally by the library */
     int last_associated_segment_num;   /* always a valid seg num */
     int thread_local_counter;
-    struct stm_thread_local_s *prev, *next;
+    struct stm_thread_local_s *self, *prev, *next;
     void *creating_pthread[2];
 } stm_thread_local_t;
 
@@ -87,10 +87,10 @@ extern volatile intptr_t _stm_detached_inevitable_from_thread;
 long _stm_start_transaction(stm_thread_local_t *tl);
 void _stm_commit_transaction(void);
 void _stm_leave_noninevitable_transactional_zone(void);
-#define _stm_detach_inevitable_transaction(tl)  do {            \
-    write_fence();                                              \
-    assert(_stm_detached_inevitable_from_thread == 0);          \
-    _stm_detached_inevitable_from_thread = (intptr_t)(tl);      \
+#define _stm_detach_inevitable_transaction(tl)  do {                    \
+    write_fence();                                                      \
+    assert(_stm_detached_inevitable_from_thread == 0);                  \
+    _stm_detached_inevitable_from_thread = (intptr_t)(tl->self);        \
 } while (0)
 void _stm_reattach_transaction(stm_thread_local_t *tl);
 void _stm_become_inevitable(const char*);
