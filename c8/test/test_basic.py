@@ -640,7 +640,7 @@ class TestBasic(BaseTest):
 
     def test_inevitable_transaction_has_priority(self):
         self.start_transaction()
-        assert lib.stm_is_inevitable() == 0
+        assert self.is_inevitable() == 0
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'a')
         self.push_root(lp1)
@@ -654,9 +654,9 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_write(lp1)
         stm_set_char(lp1, 'b')
-        assert lib.stm_is_inevitable() == 0
+        assert self.is_inevitable() == 0
         self.become_inevitable()
-        assert lib.stm_is_inevitable() == 1
+        assert self.is_inevitable() == 1
         self.commit_transaction()
         #
         py.test.raises(Conflict, self.switch, 0)

@@ -365,7 +365,7 @@ objptr_t do_step(objptr_t p)
     } else if (get_rand(20) == 1) {
         long pushed = push_roots();
         stm_become_inevitable(&stm_thread_local, "please");
-        assert(stm_is_inevitable());
+        assert(stm_is_inevitable(&stm_thread_local));
         pop_roots(pushed);
         p= NULL;
     } else if (get_rand(20) == 1) {
