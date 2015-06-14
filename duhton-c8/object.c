@@ -38,6 +38,8 @@ void stmcb_get_card_base_itemsize(struct object_s *obj,
                                   uintptr_t offset_itemsize[2])
 {
     DuType *tp = Du_Types[((struct DuObject_s *)obj)->type_id];
+    if (tp->dt_cards_itemsize == 0)
+        Du_FatalError("object of type '%s' has no cards", tp->dt_name);
     offset_itemsize[0] = tp->dt_cards_offset;
     offset_itemsize[1] = tp->dt_cards_itemsize;
 }
