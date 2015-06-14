@@ -8,6 +8,8 @@
 #include <sys/wait.h>
 
 #include "stmgc.h"
+#include "stm/fprintcolor.h"
+#include "stm/fprintcolor.c"
 
 #define NUMTHREADS 2
 #define STEPS_PER_THREAD 500
@@ -48,8 +50,10 @@ struct thread_data {
     int num_roots;
     int num_roots_at_transaction_start;
     int steps_left;
+    long globally_unique;
 };
 __thread struct thread_data td;
+static long progress = 1;
 
 struct thread_data *_get_td(void)
 {
@@ -57,9 +61,16 @@ struct thread_data *_get_td(void)
 }
 
 
+long check_size(long size)
+{
+    assert(size >= sizeof(struct node_s));
+    assert(size <= sizeof(struct node_s) + 4096*70);
+    return size;
+}
+
 ssize_t stmcb_size_rounded_up(struct object_s *ob)
 {
-    return ((struct node_s*)ob)->my_size;
+    return check_size(((struct node_s*)ob)->my_size);
 }
 
 void stmcb_trace(struct object_s *obj, void visit(object_t **))
@@ -69,7 +80,8 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
 
     /* and the same value at the end: */
     /* note, ->next may be the same as last_next */
-    nodeptr_t *last_next = (nodeptr_t*)((char*)n + n->my_size - sizeof(void*));
+    nodeptr_t *last_next = (nodeptr_t*)((char*)n + check_size(n->my_size)
+                                        - sizeof(void*));
 
     assert(n->next == *last_next);
 
@@ -113,36 +125,36 @@ objptr_t get_random_root()
     }
 }
 
-void reload_roots()
-{
-    int i;
-    assert(td.num_roots == td.num_roots_at_transaction_start);
-    for (i = td.num_roots_at_transaction_start - 1; i >= 0; i--) {
-        if (td.roots[i])
-            STM_POP_ROOT(stm_thread_local, td.roots[i]);
-    }
-
-    for (i = 0; i < td.num_roots_at_transaction_start; i++) {
-        if (td.roots[i])
-            STM_PUSH_ROOT(stm_thread_local, td.roots[i]);
-    }
-}
-
 void push_roots()
 {
     int i;
+    assert(td.num_roots_at_transaction_start <= td.num_roots);
     for (i = td.num_roots_at_transaction_start; i < td.num_roots; i++) {
         if (td.roots[i])
             STM_PUSH_ROOT(stm_thread_local, td.roots[i]);
     }
+    STM_SEGMENT->no_safe_point_here = 0;
 }
 
 void pop_roots()
 {
     int i;
-    for (i = td.num_roots - 1; i >= td.num_roots_at_transaction_start; i--) {
-        if (td.roots[i])
+    STM_SEGMENT->no_safe_point_here = 1;
+
+    assert(td.num_roots_at_transaction_start <= td.num_roots);
+    for (i = td.num_roots - 1; i >= 0; i--) {
+        if (td.roots[i]) {
             STM_POP_ROOT(stm_thread_local, td.roots[i]);
+            assert(td.roots[i]);
+        }
+    }
+
+    dprintf(("stm_is_inevitable() = %d\n", (int)stm_is_inevitable()));
+    for (i = 0; i < td.num_roots_at_transaction_start; i++) {
+        if (td.roots[i]) {
+            dprintf(("root %d: %p\n", i, td.roots[i]));
+            STM_PUSH_ROOT(stm_thread_local, td.roots[i]);
+        }
     }
 }
 
@@ -150,6 +162,7 @@ void del_root(int idx)
 {
     int i;
     assert(idx >= td.num_roots_at_transaction_start);
+    assert(idx < td.num_roots);
 
     for (i = idx; i < td.num_roots - 1; i++)
         td.roots[i] = td.roots[i + 1];
@@ -158,6 +171,7 @@ void del_root(int idx)
 
 void add_root(objptr_t r)
 {
+    assert(td.num_roots_at_transaction_start <= td.num_roots);
     if (r && td.num_roots < MAXROOTS) {
         td.roots[td.num_roots++] = r;
     }
@@ -184,7 +198,8 @@ void set_next(objptr_t p, objptr_t v)
         nodeptr_t n = (nodeptr_t)p;
 
         /* and the same value at the end: */
-        nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n + n->my_size - sizeof(void*));
+        nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n +
+                                       check_size(n->my_size) - sizeof(void*));
         assert(n->next == *last_next);
         n->next = (nodeptr_t)v;
         *last_next = (nodeptr_t)v;
@@ -196,7 +211,8 @@ nodeptr_t get_next(objptr_t p)
     nodeptr_t n = (nodeptr_t)p;
 
     /* and the same value at the end: */
-    nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n + n->my_size - sizeof(void*));
+    nodeptr_t TLPREFIX *last_next = (nodeptr_t TLPREFIX *)((stm_char*)n +
+                                       check_size(n->my_size) - sizeof(void*));
     OPT_ASSERT(n->next == *last_next);
 
     return n->next;
@@ -229,7 +245,7 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
                            sizeof(struct node_s) + (get_rand(100000) & ~15),
                            sizeof(struct node_s) + 4096,
                            sizeof(struct node_s) + 4096*70};
-        size_t size = sizes[get_rand(4)];
+        size_t size = check_size(sizes[get_rand(4)]);
         p = stm_allocate(size);
         nodeptr_t n = (nodeptr_t)p;
         n->sig = SIGNATURE;
@@ -240,7 +256,6 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
         n->next = NULL;
         *last_next = NULL;
         pop_roots();
-        /* reload_roots not necessary, all are old after start_transaction */
         break;
     case 4:  // read and validate 'p'
         read_barrier(p);
@@ -288,6 +303,15 @@ objptr_t simple_events(objptr_t p, objptr_t _r)
     return p;
 }
 
+static void end_gut(void)
+{
+    if (td.globally_unique != 0) {
+        fprintf(stderr, "[GUT END]");
+        assert(progress == td.globally_unique);
+        td.globally_unique = 0;
+        stm_resume_all_other_threads();
+    }
+}
 
 objptr_t do_step(objptr_t p)
 {
@@ -308,8 +332,14 @@ objptr_t do_step(objptr_t p)
         return NULL;
     } else if (get_rand(240) == 1) {
         push_roots();
-        stm_become_globally_unique_transaction(&stm_thread_local, "really");
-        fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
+        if (td.globally_unique == 0) {
+            stm_stop_all_other_threads();
+            td.globally_unique = progress;
+            fprintf(stderr, "[GUT/%d]", (int)STM_SEGMENT->segment_num);
+        }
+        else {
+            end_gut();
+        }
         pop_roots();
         return NULL;
     }
@@ -347,37 +377,53 @@ void *demo_random(void *arg)
 
     objptr_t p;
 
-    stm_start_transaction(&stm_thread_local);
+    stm_enter_transactional_zone(&stm_thread_local);
     assert(td.num_roots >= td.num_roots_at_transaction_start);
     td.num_roots = td.num_roots_at_transaction_start;
     p = NULL;
     pop_roots();                /* does nothing.. */
-    reload_roots();
 
     while (td.steps_left-->0) {
         if (td.steps_left % 8 == 0)
             fprintf(stdout, "#");
 
-        assert(p == NULL || ((nodeptr_t)p)->sig == SIGNATURE);
+        int local_seg = STM_SEGMENT->segment_num;
+        int p_sig = p == NULL ? 0 : ((nodeptr_t)p)->sig;
+
+        assert(p == NULL || p_sig == SIGNATURE);
+        (void)local_seg;
+        (void)p_sig;
+
+        if (!td.globally_unique)
+            ++progress;   /* racy, but good enough */
 
         p = do_step(p);
 
         if (p == (objptr_t)-1) {
             push_roots();
+            end_gut();
 
             long call_fork = (arg != NULL && *(long *)arg);
             if (call_fork == 0) {   /* common case */
-                stm_commit_transaction();
-                td.num_roots_at_transaction_start = td.num_roots;
-                if (get_rand(100) < 98) {
-                    stm_start_transaction(&stm_thread_local);
-                } else {
-                    stm_start_inevitable_transaction(&stm_thread_local);
+                if (get_rand(100) < 50) {
+                    stm_leave_transactional_zone(&stm_thread_local);
+                    /* Nothing here; it's unlikely that a different thread
+                       manages to steal the detached inev transaction.
+                       Give them a little chance with a usleep(). */
+                    dprintf(("sleep...\n"));
+                    usleep(1);
+                    dprintf(("sleep done\n"));
+                    td.num_roots_at_transaction_start = td.num_roots;
+                    stm_enter_transactional_zone(&stm_thread_local);
+                }
+                else {
+                    _stm_commit_transaction();
+                    td.num_roots_at_transaction_start = td.num_roots;
+                    _stm_start_transaction(&stm_thread_local);
                 }
                 td.num_roots = td.num_roots_at_transaction_start;
                 p = NULL;
                 pop_roots();
-                reload_roots();
             }
             else {
                 /* run a fork() inside the transaction */
@@ -401,16 +447,17 @@ void *demo_random(void *arg)
         }
     }
     push_roots();
-    stm_commit_transaction();
+    end_gut();
+    stm_force_transaction_break(&stm_thread_local);
 
     /* even out the shadow stack before leaveframe: */
-    stm_start_inevitable_transaction(&stm_thread_local);
+    stm_become_inevitable(&stm_thread_local, "before leaveframe");
     while (td.num_roots > 0) {
         td.num_roots--;
         objptr_t t;
         STM_POP_ROOT(stm_thread_local, t);
     }
-    stm_commit_transaction();
+    stm_leave_transactional_zone(&stm_thread_local);
 
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     stm_unregister_thread_local(&stm_thread_local);

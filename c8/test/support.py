@@ -28,7 +28,6 @@ typedef struct {
     object_t *thread_local_obj;
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
-    long last_abort__bytes_in_nursery;
     int last_associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
@@ -37,6 +36,7 @@ typedef struct {
 
 char *stm_object_pages;
 char *stm_file_pages;
+uintptr_t stm_fill_mark_nursery_bytes;
 
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
@@ -85,10 +85,10 @@ long _check_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
-bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
+//bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 bool _check_stop_all_other_threads(void);
 void stm_resume_all_other_threads(void);
-int stm_is_inevitable(void);
+int stm_is_inevitable(stm_thread_local_t *);
 long current_segment_num(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
@@ -103,6 +103,8 @@ object_t* _get_weakref(object_t *obj);
 /* void stm_collect(long level); */
 long _check_stm_collect(long level);
 uint64_t _stm_total_allocated(void);
+
+long bytes_before_transaction_break(void);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
 void _stm_largemalloc_init_arena(char *data_start, size_t data_size);
@@ -275,7 +277,7 @@ bool _checked_stm_write_card(object_t *object, uintptr_t index) {
 }
 
 bool _check_commit_transaction(void) {
-    CHECKED(stm_commit_transaction());
+    CHECKED(_stm_commit_transaction());
 }
 
 bool _check_stm_collect(long level) {
@@ -285,7 +287,7 @@ bool _check_stm_collect(long level) {
 long _check_start_transaction(stm_thread_local_t *tl) {
    void **jmpbuf = tl->rjthread.jmpbuf;                         \
     if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
-        stm_start_transaction(tl);                              \
+        stm_enter_transactional_zone(tl);                       \
         clear_jmpbuf(tl);                                       \
         return 0;                                               \
     }                                                           \
@@ -304,10 +306,6 @@ bool _check_abort_transaction(void) {
 
 bool _check_become_inevitable(stm_thread_local_t *tl) {
     CHECKED(stm_become_inevitable(tl, "TEST"));
-}
-
-bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
-    CHECKED(stm_become_globally_unique_transaction(tl, "TESTGUT"));
 }
 
 bool _check_stop_all_other_threads(void) {
@@ -406,6 +404,11 @@ object_t * _get_ptr(object_t *obj, int n)
     field_addr += n * sizeof(void*); /* field */
     object_t * TLPREFIX * field = (object_t * TLPREFIX *)field_addr;
     return *field;
+}
+
+long bytes_before_transaction_break(void)
+{
+    return STM_SEGMENT->nursery_mark - STM_SEGMENT->nursery_current;
 }
 
 
@@ -767,14 +770,14 @@ class BaseTest(object):
         lib.stmcb_expand_marker = ffi.NULL
         lib.stmcb_debug_print = ffi.NULL
         tl = self.tls[self.current_thread]
-        if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
+        if lib._stm_in_transaction(tl) and self.is_inevitable():
             self.commit_transaction()      # must succeed!
         #
         for n, tl in enumerate(self.tls):
             if lib._stm_in_transaction(tl):
                 if self.current_thread != n:
                     self.switch(n)
-                if lib.stm_is_inevitable():
+                if self.is_inevitable():
                     self.commit_transaction()   # must succeed!
                 else:
                     self.abort_transaction()
@@ -782,6 +785,11 @@ class BaseTest(object):
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
         lib.stm_teardown()
+
+    def is_inevitable(self):
+        tl = self.tls[self.current_thread]
+        assert lib._stm_in_transaction(tl)
+        return lib.stm_is_inevitable(tl)
 
     def get_stm_thread_local(self):
         return self.tls[self.current_thread]
@@ -884,6 +892,7 @@ class BaseTest(object):
             raise Conflict()
 
     def become_globally_unique_transaction(self):
+        import py; py.test.skip("this function was removed")
         tl = self.tls[self.current_thread]
         if lib._check_become_globally_unique_transaction(tl):
             raise Conflict()

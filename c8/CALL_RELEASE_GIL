@@ -1,0 +1,120 @@
+
+c8-gil-like
+===========
+
+A branch to have "GIL-like" behavior for inevitable transactions: one
+not-too-short inevitable transaction that is passed around multiple
+threads.
+
+The goal is to have good fast-case behavior with the PyPy JIT around
+CALL_RELEASE_GIL.  This is how it works in default (with shadowstack):
+
+
+- "rpy_fastgil" is a global variable.  The value 0 means the GIL is
+  definitely unlocked; the value 1 means it is probably locked (it is
+  actually locked only if some mutex object is acquired too).
+
+- before CALL_RELEASE_GIL, we know that we have the GIL and we need to
+  release it.  So we know that "rpy_fastgil" is 1, and we just write 0
+  there.
+
+- then we do the external call.
+
+- after CALL_RELEASE_GIL, two cases:
+
+  - if "rpy_fastgil" has been changed to 1 by some other thread *or*
+    if the (non-thread-local) shadowstack pointer changed, then we
+    call reacqgil_addr();
+
+  - otherwise, we swap rpy_fastgil back to 1 and we're done.
+
+- if the external call is long enough, a different thread will notice
+  that rpy_fastgil == 0 by regular polling, and grab the GIL for
+  itself by swapping it back to 1.  (The changes from 0 to 1 are done
+  with atomic instructions.)
+
+- a different mechanism is used when we voluntarily release the GIL,
+  based on the mutex mentioned above.  The mutex is also used by the
+  the reacqgil_addr() function if it actually needs to wait.
+
+
+Plan for porting this idea to stmgc:
+
+- we add a few macros to stmgc.h which can be used by C code, around
+  external calls; and we also inline these macros manually around
+  CALL_RELEASE_GIL in PyPy's JIT.
+
+- we add the "detached" mode to inevitable transactions: it means that
+  no thread is actively running this inevitable transaction for now,
+  but it was not committed yet.  It is meant to be reattached, by the
+  same or a different thread.
+
+- we add a global variable, "stm_detached_inevitable_from_thread".  It
+  is equal to the stm_thread_local pointer of the thread that detached
+  inevitable transaction (like rpy_fastgil == 0), or NULL if there is
+  no detached inevitable transaction (like rpy_fastgil == 1).
+
+- the macro stm_detach_inevitable_transaction() simply writes the
+  current thread's stm_thread_local pointer into the global variable
+  stm_detached_inevitable_from_thread.  It can only be used if the
+  current transaction is inevitable (and in particular the inevitable
+  transaction was not detached already, because we're running it).
+  After the macro is called, the current thread is assumed not to be
+  running in a transaction any more (no more object or shadowstack
+  access).
+
+- the macro stm_reattach_transaction() does an atomic swap on
+  stm_detached_inevitable_from_thread to change it to NULL.  If the
+  old value was equal to our own stm_thread_local pointer, we are done.  If
+  not, we call a helper, _stm_reattach_transaction().
+
+- we also add the macro stm_detach_transation().  If the current
+  thread is inevitable it calls stm_detach_inevitable_transaction().
+  Otherwise it calls a helper, _stm_detach_noninevitable_transaction().
+
+- _stm_reattach_transaction(old): called with the old value from
+  stm_detached_inevitable_from_thread (which was swapped to be NULL just
+  now).  If old != NULL, this swap had the effect that we took over
+  the inevitable transaction originally detached from a different
+  thread; we need to fix a few things like the stm_thread_local and %gs but
+  then we can continue running this reattached inevitable transaction.
+  If old == NULL, we need to fall back to the current
+  stm_start_transaction().  (A priori, there is no need to wait at
+  this point.  The waiting point is later, in the optional
+  stm_become_inevitable()).
+
+- _stm_detach_noninevitable_transaction(): we try to make the
+  transaction inevitable.  If it works we can then use
+  stm_detach_inevitable_transaction().  On the other hand, if we can't
+  make it inevitable without waiting, then instead we just commit it
+  and continue.  In the latter case,
+  stm_detached_inevitable_from_thread is still NULL.
+
+- other place to fix: major collections.  Maybe simply look inside
+  stm_detached_inevitable_from_thread, and if not NULL, grab the
+  inevitable transaction and commit it now.  Or maybe not.  The point
+  is that we need to prevent a thread from asynchronously grabbing it
+  by an atomic swap of stm_detached_inevitable_from_thread; instead,
+  the parallel threads that finish their external calls should all
+  find NULL in this variable and call _stm_reattach_transaction()
+  which will wait for the major GC to end.
+
+- stm_become_inevitable(): if it finds a detached inevitable
+  transaction, it should attach and commit it as a way to get rid of
+  it.  This is why it might be better to call directly
+  stm_start_inevitable_transaction() when possible: that one is
+  allowed to attach to a detached inevitable transaction and simply
+  return, unlike stm_become_inevitable() which must continue running
+  the existing transaction.
+
+- commit logic of a non-inevitable transaction: we wait if there is
+  an inevitable transaction.  Here too, if the inevitable transaction
+  is found to be detached, we could just commit it now.  Or, a better
+  approach: if we find a detached inevitable transaction we grab it
+  temporarily, and commit only the *non-inevitable* transaction if it
+  doesn't conflict.  The inevitable transaction is then detached
+  again.  (Note that the conflict detection is: we don't commit any
+  write to any of the objects in the inevitable transaction's
+  read-set.  This relies on inevitable threads maintaining their
+  read-set correctly, which should be the case in PyPy, but needs to
+  be checked.)
