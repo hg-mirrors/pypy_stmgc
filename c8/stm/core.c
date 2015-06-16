@@ -496,21 +496,18 @@ static void wait_for_other_inevitable(struct stm_commit_log_entry_s *old)
     intptr_t detached = fetch_detached_transaction();
     if (detached != 0) {
         commit_fetched_detached_transaction(detached);
-        return;
+        return;   /* can't continue here, 'old' might be freed */
     }
 
     timing_event(STM_SEGMENT->running_thread, STM_WAIT_OTHER_INEVITABLE);
 
-    while (old->next == INEV_RUNNING && !safe_point_requested()) {
-        spin_loop();
-        usleep(10);    /* XXXXXX */
+    s_mutex_lock();
 
-        detached = fetch_detached_transaction();
-        if (detached != 0) {
-            commit_fetched_detached_transaction(detached);
-            break;
-        }
+    if (old->next == INEV_RUNNING && !safe_point_requested()) {
+        cond_wait(C_COMMIT_PROGRESS);
     }
+    s_mutex_unlock();
+
     timing_event(STM_SEGMENT->running_thread, STM_WAIT_DONE);
 }
 
@@ -1362,6 +1359,13 @@ static void _core_commit_transaction(bool external)
 
     /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
+
+    if (was_inev) {
+        /* This signal wakes up the other threads that were waiting for
+           the inevitable thread to commit. */
+        cond_broadcast(C_COMMIT_PROGRESS);
+    }
+
     commit_finalizers();
 
     /* update 'overflow_number' if needed */

@@ -5,6 +5,7 @@ enum cond_type_e {
     C_AT_SAFE_POINT,
     C_REQUEST_REMOVED,
     C_SEGMENT_FREE,
+    C_COMMIT_PROGRESS,
     _C_TOTAL
 };
 

@@ -434,6 +434,7 @@ static void synchronize_all_threads(enum sync_type_e sync_type)
             s_mutex_lock();
             goto restart;
         }
+        cond_broadcast(C_COMMIT_PROGRESS);
 
         STM_PSEGMENT->safe_point = SP_WAIT_FOR_C_AT_SAFE_POINT;
         cond_wait_timeout(C_AT_SAFE_POINT, 0.00001);
