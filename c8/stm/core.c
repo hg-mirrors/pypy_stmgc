@@ -1562,10 +1562,16 @@ void _stm_become_inevitable(const char *msg)
             if (!any_soon_finished_or_inevitable_thread_segment())
                 break;
             s_mutex_lock();
-            if (safe_point_requested())
+            if (safe_point_requested()) {
                 enter_safe_point_if_requested();
-            else if (any_soon_finished_or_inevitable_thread_segment())
+            }
+            else if (any_soon_finished_or_inevitable_thread_segment()) {
+#if STM_TESTS
+                abort_with_mutex();   /* tests: another transaction is
+                                         already inevitable, abort */
+#endif
                 cond_wait(C_SEGMENT_FREE_OR_SAFE_POINT);
+            }
             s_mutex_unlock();
         }
         if (!_validate_and_turn_inevitable())
