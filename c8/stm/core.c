@@ -1575,21 +1575,6 @@ void _stm_become_inevitable(const char *msg)
     _stm_collectable_safe_point();
 
     if (msg != MSG_INEV_DONT_SLEEP) {
-
-        /* The following usleep() is important right now.  In a
-           situation where you have one thread (this one) doing a lot
-           of short external calls, and other threads not, then the
-           other threads will try to grab and commit this thread when
-           it detaches.  But the problem is that this thread will then
-           immediately start the next transaction and reach this
-           point.  This doesn't actually give the other threads a
-           chance to commit.  So we wait a little bit here, while we
-           are still not inevitable.  My guess (and a few measures):
-           this should be enough to cause the other threads to
-           synchronize over the rythm of this one.
-        */
-        usleep(1);
-
         dprintf(("become_inevitable: %s\n", msg));
         timing_become_inevitable();
         _validate_and_turn_inevitable(/*can_sleep=*/true);
