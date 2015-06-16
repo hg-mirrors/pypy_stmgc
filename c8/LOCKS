@@ -81,13 +81,3 @@ example because we want to start a major collection.
 
 The mutex also needs to be acquired for rewind_longjmp's setjmp() and
 longjmp() equivalent.
-
-
-
-usleep loop
-===========
-
-core.c: wait_for_other_inevitable()
-sync.c: stm_wait_for_current_inevitable_transaction()
-
-Must be fixed!
