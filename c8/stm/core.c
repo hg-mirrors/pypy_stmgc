@@ -1549,30 +1549,29 @@ void stm_abort_transaction(void)
 
 void _stm_become_inevitable(const char *msg)
 {
+    int num_waits = 0;
+
  retry_from_start:
     assert(STM_PSEGMENT->transaction_state == TS_REGULAR);
     _stm_collectable_safe_point();
 
     if (msg != MSG_INEV_DONT_SLEEP) {
         dprintf(("become_inevitable: %s\n", msg));
-        timing_become_inevitable();
 
-        int repeat;
-        for (repeat = 0; repeat < 4; repeat++) {
-            if (!any_soon_finished_or_inevitable_thread_segment())
-                break;
-            s_mutex_lock();
-            if (safe_point_requested()) {
-                enter_safe_point_if_requested();
-            }
-            else if (any_soon_finished_or_inevitable_thread_segment()) {
+        if (any_soon_finished_or_inevitable_thread_segment() &&
+                num_waits <= NB_SEGMENTS) {
 #if STM_TESTS
-                abort_with_mutex();   /* tests: another transaction is
-                                         already inevitable, abort */
+            timing_become_inevitable(); /* for tests: another transaction */
+            stm_abort_transaction();    /* is already inevitable, abort   */
 #endif
+            s_mutex_lock();
+            if (any_soon_finished_or_inevitable_thread_segment() &&
+                    !safe_point_requested()) {
                 cond_wait(C_SEGMENT_FREE_OR_SAFE_POINT);
             }
             s_mutex_unlock();
+            num_waits++;
+            goto retry_from_start;
         }
         if (!_validate_and_turn_inevitable())
             goto retry_from_start;
@@ -1580,8 +1579,8 @@ void _stm_become_inevitable(const char *msg)
     else {
         if (!_validate_and_turn_inevitable())
             return;
-        timing_become_inevitable();
     }
+    timing_become_inevitable();
     soon_finished_or_inevitable_thread_segment();
     STM_PSEGMENT->transaction_state = TS_INEVITABLE;
 
