@@ -123,3 +123,71 @@ static bool modification_lock_check_wrlock(int segnum)
     return segnum == 0 || _modlocks[segnum - 1].write_locked;
 }
 #endif
+
+
+
+
+
+
+/* The 'inevitable_perf_lock' idea is a read-write lock that should be
+   acquired in these situations:
+
+   - for writing when there is an inevitable transaction running.
+     More precisely, just around the time the head of the commit log
+     is set to INEV_RUNNING;
+
+   - for reading, shortly, when we're trying to commit a
+     non-inevitable transaction.
+
+   This has the following effects:
+
+   - when we want to commit a non-inevitable transaction, if there is
+     an inevitable transaction running, then we block;
+
+   - when we want to become inevitable, we first wait for the other
+     threads that are about to commit.
+
+   We cannot use a pthread_rwlock, because:
+
+   - in detach.c, we might commit a different thread's inevitable
+     transaction.  The pthread_rwlock does not give a way to release
+     the write lock acquired by a different thread;
+
+   - we expect a precise priority, subtly different from Linux's.
+     Writers should always have less priority than readers, because
+     in stm_become_inevitable(), it is always a good idea to let
+     other transactions that want to commit go ahead, before we
+     turn inevitable.
+*/
+
+
+/* The 'inevitable_perf_lock' idea is a read-write lock that should be
+   acquired in these situations:
+
+   - for writing when there is an inevitable transaction running.
+     More precisely, just around the time the head of the commit log
+     is set to INEV_RUNNING;
+
+   - for reading, shortly, when we're trying to commit a
+     non-inevitable transaction.
+
+   This has the following effects:
+
+   - when we want to commit a non-inevitable transaction, if there is
+     an inevitable transaction running, then we block;
+
+   - when we want to become inevitable, we first wait for the other
+     threads that are about to commit.
+
+   We cannot use a pthread_rwlock, because:
+
+   - in detach.c, we might commit a different thread's inevitable
+     transaction.  The pthread_rwlock does not give a way to release
+     the write lock acquired by a different thread;
+
+   - we expect a precise priority, subtly different from Linux's.
+     Writers should always have less priority than readers, because
+     in stm_become_inevitable(), it is always a good idea to let
+     other transactions that want to commit go ahead, before we
+     turn inevitable.
+*/
