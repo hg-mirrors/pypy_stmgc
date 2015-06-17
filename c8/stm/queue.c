@@ -47,7 +47,7 @@ void stm_queue_free(stm_queue_t *queue)
 {
     long i;
     for (i = 0; i < STM_NB_SEGMENTS; i++) {
-        stm_priv_segment_info_t *pseg = get_priv_segment(i);
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
         spinlock_acquire(pseg->active_queues_lock);
 
         if (queue->segs[i].active) {

@@ -219,6 +219,8 @@ stm_hashtable_t *_get_hashtable(object_t *obj);
 uintptr_t _get_entry_index(stm_hashtable_entry_t *entry);
 object_t *_get_entry_object(stm_hashtable_entry_t *entry);
 
+typedef struct stm_queue_s stm_queue_t;
+typedef ... stm_queue_entry_t;
 stm_queue_t *stm_queue_create(void);
 void stm_queue_free(stm_queue_t *);
 void stm_queue_put(stm_queue_t *queue, object_t *newitem);
@@ -676,7 +678,7 @@ def stm_allocate_queue():
     tid = 421417
     lib._set_type_id(o, tid)
     q = lib.stm_queue_create()
-    lib._set_queue(o, h)
+    lib._set_queue(o, q)
     return o
 
 def get_queue(o):
