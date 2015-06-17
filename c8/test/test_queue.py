@@ -266,3 +266,36 @@ class TestQueue(BaseTestQueue):
         assert stm_get_char(obj1) == 'G'
         #
         stm_major_collect()       # to get rid of the queue object
+
+    def test_add_with_minor_collection(self):
+        self.start_transaction()
+        qobj = self.allocate_queue()
+        for i in range(10):
+            print '.'
+            obj1 = stm_allocate(16)
+            stm_set_char(obj1, chr(i))
+            print '+'
+            self.put(qobj, obj1)
+            self.push_root(qobj)
+            stm_minor_collect()
+            qobj = self.pop_root()
+        #
+        for i in reversed(range(10)):    # reverse order, in this case, for now
+            obj1 = self.get(qobj)
+            assert stm_get_char(obj1) == chr(i)
+            stm_minor_collect()
+
+    def test_add_complexity(self):
+        py.test.skip("performance test")
+        # on my laptop, runs in 43.8 sec using 'added_young_limit' and
+        # in 56.2 sec without using 'added_young_limit' (most likely,
+        # with quadratic complexity)
+        self.start_transaction()
+        qobj = self.allocate_queue()
+        for i in range(40000):
+            print '.'
+            obj1 = stm_allocate(16)
+            self.put(qobj, obj1)
+            self.push_root(qobj)
+            stm_minor_collect()
+            qobj = self.pop_root()
