@@ -50,7 +50,7 @@ class BaseTestQueue(BaseTest):
 
     def put(self, obj, newitem):
         q = lib._get_queue(obj)
-        lib.stm_queue_put(q, newitem)
+        lib.stm_queue_put(obj, q, newitem)
 
 
 class TestQueue(BaseTestQueue):
@@ -139,6 +139,28 @@ class TestQueue(BaseTestQueue):
         self.start_transaction()
         stm_major_collect()       # to get rid of the queue object
 
+    def test_reenable_minor_collections(self):
+        self.start_transaction()
+        qobj = self.allocate_queue()
+        #
+        self.push_root(qobj)
+        obj1 = stm_allocate(32)
+        stm_set_char(obj1, 'G')
+        self.put(qobj, obj1)
+        stm_minor_collect()
+        qobj = self.pop_root()
+        obj1 = self.get(qobj)
+        assert stm_get_char(obj1) == 'G'
+        #
+        obj2 = stm_allocate(32)
+        stm_set_char(obj2, 'H')
+        self.put(qobj, obj2)
+        stm_minor_collect()
+        obj2 = self.get(qobj)
+        assert stm_get_char(obj2) == 'H'
+        #
+        stm_major_collect()       # to get rid of the queue object
+
     def test_parallel_transactions(self):
         self.start_transaction()
         qobj = self.allocate_queue()
@@ -163,3 +185,5 @@ class TestQueue(BaseTestQueue):
         self.switch(1)
         obj1 = self.get(qobj)
         assert stm_get_char(obj1) == 'U'
+        #
+        stm_major_collect()       # to get rid of the queue object
