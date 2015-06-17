@@ -60,24 +60,35 @@ void stm_queue_free(stm_queue_t *queue)
     free(queue);
 }
 
+static inline void queue_lock_acquire(void)
+{
+    int num = STM_SEGMENT->segment_num;
+    spinlock_acquire(get_priv_segment(num)->active_queues_lock);
+}
+static inline void queue_lock_release(void)
+{
+    int num = STM_SEGMENT->segment_num;
+    spinlock_release(get_priv_segment(num)->active_queues_lock);
+}
+
 static void queue_activate(stm_queue_t *queue)
 {
     stm_queue_segment_t *seg = &queue->segs[STM_SEGMENT->segment_num - 1];
 
     if (!seg->active) {
-        spinlock_acquire(STM_PSEGMENT->active_queues_lock);
+        queue_lock_acquire();
         if (STM_PSEGMENT->active_queues == NULL)
             STM_PSEGMENT->active_queues = tree_create();
         tree_insert(STM_PSEGMENT->active_queues, (uintptr_t)queue, 0);
         assert(!seg->active);
         seg->active = true;
-        spinlock_release(STM_PSEGMENT->active_queues_lock);
+        queue_lock_release();
     }
 }
 
 static void queues_deactivate_all(bool at_commit)
 {
-    spinlock_acquire(STM_PSEGMENT->active_queues_lock);
+    queue_lock_acquire();
 
     bool added_any_old_entries = false;
     wlog_t *item;
@@ -110,11 +121,12 @@ static void queues_deactivate_all(bool at_commit)
         seg->old_objects_popped = NULL;
 
         /* deactivate this queue */
+        assert(seg->active);
         seg->active = false;
 
     } TREE_LOOP_END;
 
-    spinlock_release(STM_PSEGMENT->active_queues_lock);
+    queue_lock_release();
 
     if (added_any_old_entries)
         cond_broadcast(C_QUEUE_OLD_ENTRIES);
@@ -187,8 +199,8 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue,
 
 static void queue_trace_segment(stm_queue_segment_t *seg,
                                 void trace(object_t **)) {
-    trace(&seg->added_in_this_transaction);
-    trace(&seg->old_objects_popped);
+    trace((object_t **)&seg->added_in_this_transaction);
+    trace((object_t **)&seg->old_objects_popped);
 }
 
 void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **))
