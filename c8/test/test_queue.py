@@ -99,7 +99,6 @@ class TestQueue(BaseTestQueue):
         #
         self.start_transaction()
         qobj = self.pop_root()
-        self.push_root(qobj)
         got = {}
         for i in range(3):
             o = self.get(qobj)
@@ -107,6 +106,10 @@ class TestQueue(BaseTestQueue):
             got[c] = got.get(c, 0) + 1
         print got
         assert got == {'D': 2, 'F': 1}
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        stm_major_collect()       # to get rid of the queue object
 
     def test_get_along_several_transactions(self):
         self.start_transaction()
@@ -120,12 +123,11 @@ class TestQueue(BaseTestQueue):
         self.put(qobj, obj1)
         self.put(qobj, obj2)
         self.commit_transaction()
+        qobj = self.pop_root()
         #
         got = {}
         for i in range(3):
             self.start_transaction()
-            qobj = self.pop_root()
-            self.push_root(qobj)
             o = self.get(qobj)
             c = stm_get_char(o)
             got[c] = got.get(c, 0) + 1
@@ -133,3 +135,6 @@ class TestQueue(BaseTestQueue):
         #
         print got
         assert got == {'D': 2, 'F': 1}
+        #
+        self.start_transaction()
+        stm_major_collect()       # to get rid of the queue object
