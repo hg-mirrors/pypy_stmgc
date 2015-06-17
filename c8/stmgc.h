@@ -736,27 +736,18 @@ struct stm_hashtable_entry_s {
    embed the queue inside an 'object_t' you probably need a light
    finalizer to do the freeing. */
 typedef struct stm_queue_s stm_queue_t;
-typedef TLPREFIX struct stm_queue_entry_s stm_queue_entry_t;
 
 stm_queue_t *stm_queue_create(void);
 void stm_queue_free(stm_queue_t *);
 /* put() does not cause delays or transaction breaks (but push roots!) */
-void stm_queue_put(stm_queue_t *queue, object_t *newitem);
+void stm_queue_put(object_t *qobj, stm_queue_t *queue, object_t *newitem);
 /* get() can commit and wait outside a transaction (so push roots).
    Unsuitable if the current transaction is atomic!  With timeout < 0.0,
    waits forever; with timeout >= 0.0, returns NULL in an *inevitable*
    transaction (this is needed to ensure correctness). */
 object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
                         stm_thread_local_t *tl);
-extern uint32_t stm_queue_entry_userdata;
 void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **));
-
-struct stm_queue_entry_s {
-    struct object_s header;
-    uint32_t userdata;
-    object_t *object;          /* car */
-    stm_queue_entry_t *next;   /* cdr */
-};
 
 
 /* ==================== END ==================== */
