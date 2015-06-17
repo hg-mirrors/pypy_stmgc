@@ -118,6 +118,7 @@ static void queues_deactivate_all(bool at_commit)
             stm_queue_entry_t* tail = head;
             while (tail->next != NULL)
                 tail = tail->next;
+            dprintf(("items move to old_entries in queue %p\n", queue));
          retry:
             old = queue->old_entries;
             tail->next = old;
@@ -177,6 +178,7 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
     if (seg->added_in_this_transaction) {
         entry = seg->added_in_this_transaction;
         seg->added_in_this_transaction = entry->next;
+        assert(entry->object != NULL);
         return entry->object; /* 'entry' is left behind for the GC to collect */
     }
 
@@ -192,6 +194,7 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
         seg->old_objects_popped = entry;
 
         queue_activate(queue);
+        assert(entry->object != NULL);
         return entry->object;
     }
     else {
