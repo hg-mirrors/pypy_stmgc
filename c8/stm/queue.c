@@ -10,8 +10,10 @@ typedef union stm_queue_segment_u {
            added to this queue during the current transaction.  If the
            transaction commits, these are moved to 'old_entries'. */
         queue_entry_t *added_in_this_transaction;
-        /* XXX we could split this list in two: the young entries and
-           the outside-the-nursery-but-still-current-transaction */
+
+        /* a point inside the chained list above such that all items from
+           this point are known to contain non-young objects, for GC */
+        queue_entry_t *added_young_limit;
 
         /* a chained list of old entries that the current transaction
            popped.  only used if the transaction is not inevitable:
@@ -69,6 +71,7 @@ void stm_queue_free(stm_queue_t *queue)
            that's it */
         if (!seg->active) {
             assert(!seg->added_in_this_transaction);
+            assert(!seg->added_young_limit);
             assert(!seg->old_objects_popped);
             continue;
         }
@@ -138,6 +141,7 @@ static void queues_deactivate_all(bool at_commit)
 
         /* forget the two lists of entries */
         seg->added_in_this_transaction = NULL;
+        seg->added_young_limit = NULL;
         seg->old_objects_popped = NULL;
 
         /* free the list of entries that must disappear */
@@ -212,6 +216,8 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
     if (seg->added_in_this_transaction) {
         entry = seg->added_in_this_transaction;
         seg->added_in_this_transaction = entry->next;
+        if (entry == seg->added_young_limit)
+            seg->added_young_limit = entry->next;
         result = entry->object;
         assert(result != NULL);
         free(entry);
@@ -275,9 +281,10 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
     }
 }
 
-static void queue_trace_list(queue_entry_t *entry, void trace(object_t **))
+static void queue_trace_list(queue_entry_t *entry, void trace(object_t **),
+                             queue_entry_t *stop_at)
 {
-    while (entry != NULL) {
+    while (entry != stop_at) {
         trace(&entry->object);
         entry = entry->next;
     }
@@ -289,10 +296,11 @@ void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **))
         long i;
         for (i = 0; i < STM_NB_SEGMENTS; i++) {
             stm_queue_segment_t *seg = &queue->segs[i];
-            queue_trace_list(seg->added_in_this_transaction, trace);
-            queue_trace_list(seg->old_objects_popped, trace);
+            seg->added_young_limit = seg->added_in_this_transaction;
+            queue_trace_list(seg->added_in_this_transaction, trace, NULL);
+            queue_trace_list(seg->old_objects_popped, trace, NULL);
         }
-        queue_trace_list(queue->old_entries, trace);
+        queue_trace_list(queue->old_entries, trace, NULL);
     }
     else {
         /* for minor collections: it is enough to trace the objects
@@ -300,6 +308,8 @@ void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **))
            old (or, worse, belong to a parallel thread and must not
            be traced). */
         stm_queue_segment_t *seg = &queue->segs[STM_SEGMENT->segment_num - 1];
-        queue_trace_list(seg->added_in_this_transaction, trace);
+        queue_trace_list(seg->added_in_this_transaction, trace,
+                         seg->added_young_limit);
+        seg->added_young_limit = seg->added_in_this_transaction;
     }
 }
