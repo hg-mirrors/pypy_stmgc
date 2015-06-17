@@ -187,3 +187,82 @@ class TestQueue(BaseTestQueue):
         assert stm_get_char(obj1) == 'U'
         #
         stm_major_collect()       # to get rid of the queue object
+
+    def test_abort_restores_items(self):
+        self.start_transaction()
+        qobj = self.allocate_queue()
+        #
+        self.push_root(qobj)
+        obj1 = stm_allocate(32)
+        stm_set_char(obj1, 'G')
+        self.put(qobj, obj1)
+        self.commit_transaction()
+        qobj = self.pop_root()
+        #
+        self.start_transaction()
+        self.get(qobj)
+        self.abort_transaction()
+        #
+        self.start_transaction()
+        obj1 = self.get(qobj)
+        assert stm_get_char(obj1) == 'G'
+        #
+        stm_major_collect()       # to get rid of the queue object
+
+    def test_major_collection_added_in_this_transaction(self):
+        self.start_transaction()
+        qobj = self.allocate_queue()
+        #
+        self.push_root(qobj)
+        obj1 = stm_allocate(32)
+        stm_set_char(obj1, 'G')
+        self.put(qobj, obj1)
+        stm_major_collect()
+        qobj = self.pop_root()
+        obj1 = self.get(qobj)
+        assert stm_get_char(obj1) == 'G'
+        #
+        stm_major_collect()       # to get rid of the queue object
+
+    def test_major_collection_old_objects_popped(self):
+        self.start_transaction()
+        qobj = self.allocate_queue()
+        #
+        self.push_root(qobj)
+        obj1 = stm_allocate(32)
+        stm_set_char(obj1, 'G')
+        self.put(qobj, obj1)
+        self.commit_transaction()
+        qobj = self.pop_root()
+        #
+        self.start_transaction()
+        self.get(qobj)
+        self.push_root(qobj)
+        stm_major_collect()
+        self.abort_transaction()
+        #
+        self.start_transaction()
+        obj1 = self.get(qobj)
+        assert stm_get_char(obj1) == 'G'
+        #
+        stm_major_collect()       # to get rid of the queue object
+
+    def test_major_collection_old_entries(self):
+        self.start_transaction()
+        qobj = self.allocate_queue()
+        #
+        self.push_root(qobj)
+        obj1 = stm_allocate(32)
+        stm_set_char(obj1, 'G')
+        self.put(qobj, obj1)
+        self.commit_transaction()
+        qobj = self.pop_root()
+        #
+        self.start_transaction()
+        self.push_root(qobj)
+        stm_major_collect()
+        self.pop_root()
+        obj1 = self.get(qobj)
+        assert stm_get_char(obj1) == 'G'
+        #
+        stm_major_collect()       # to get rid of the queue object
