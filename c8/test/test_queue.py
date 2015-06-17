@@ -18,6 +18,8 @@ class BaseTestQueue(BaseTest):
             try:
                 assert lib._get_type_id(obj) == 421417
                 self.seen_queues -= 1
+                q = lib._get_queue(obj)
+                lib.stm_queue_free(q)
             except:
                 self.errors.append(sys.exc_info()[2])
                 raise
@@ -41,8 +43,8 @@ class BaseTestQueue(BaseTest):
 
     def get(self, obj):
         q = lib._get_queue(obj)
-        res = lib.stm_queue_get(obj, q, self.tls[self.current_thread])
-        if res == ffi.cast("object_t *", 42):
+        res = lib.stm_queue_get(obj, q, 0.0, self.tls[self.current_thread])
+        if res == ffi.NULL:
             raise Empty
         return res
 
@@ -73,3 +75,61 @@ class TestQueue(BaseTestQueue):
             o = self.get(qobj)
             got[o] = got.get(o, 0) + 1
         assert got == {obj1: 2, obj2: 1}
+        #
+        assert not self.is_inevitable()
+        py.test.raises(Empty, self.get, qobj)
+        assert self.is_inevitable()
+        py.test.raises(Empty, self.get, qobj)
+        assert self.is_inevitable()
+
+    def test_put_get_next_transaction(self):
+        self.start_transaction()
+        obj1 = stm_allocate(32)
+        obj2 = stm_allocate(32)
+        stm_set_char(obj1, 'D')
+        stm_set_char(obj2, 'F')
+        qobj = self.allocate_queue()
+        self.push_root(qobj)
+        print "put"
+        self.put(qobj, obj1)
+        self.put(qobj, obj1)
+        self.put(qobj, obj2)
+        print "done"
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        qobj = self.pop_root()
+        self.push_root(qobj)
+        got = {}
+        for i in range(3):
+            o = self.get(qobj)
+            c = stm_get_char(o)
+            got[c] = got.get(c, 0) + 1
+        print got
+        assert got == {'D': 2, 'F': 1}
+
+    def test_get_along_several_transactions(self):
+        self.start_transaction()
+        obj1 = stm_allocate(32)
+        obj2 = stm_allocate(32)
+        stm_set_char(obj1, 'D')
+        stm_set_char(obj2, 'F')
+        qobj = self.allocate_queue()
+        self.push_root(qobj)
+        self.put(qobj, obj1)
+        self.put(qobj, obj1)
+        self.put(qobj, obj2)
+        self.commit_transaction()
+        #
+        got = {}
+        for i in range(3):
+            self.start_transaction()
+            qobj = self.pop_root()
+            self.push_root(qobj)
+            o = self.get(qobj)
+            c = stm_get_char(o)
+            got[c] = got.get(c, 0) + 1
+            self.commit_transaction()
+        #
+        print got
+        assert got == {'D': 2, 'F': 1}

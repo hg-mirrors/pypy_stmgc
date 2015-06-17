@@ -47,10 +47,18 @@ void stm_queue_free(stm_queue_t *queue)
 {
     long i;
     for (i = 0; i < STM_NB_SEGMENTS; i++) {
+        /* it is possible that queues_deactivate_all() runs in parallel,
+           but it should not be possible at this point for another thread
+           to change 'active' from false to true.  if it is false, then
+           that's it */
+        if (!queue->segs[i].active)
+            continue;
+
         struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
         spinlock_acquire(pseg->active_queues_lock);
 
         if (queue->segs[i].active) {
+            assert(pseg->active_queues != NULL);
             bool ok = tree_delete_item(pseg->active_queues, (uintptr_t)queue);
             assert(ok);
         }
@@ -126,6 +134,9 @@ static void queues_deactivate_all(bool at_commit)
 
     } TREE_LOOP_END;
 
+    tree_free(STM_PSEGMENT->active_queues);
+    STM_PSEGMENT->active_queues = NULL;
+
     queue_lock_release();
 
     if (added_any_old_entries)
@@ -148,13 +159,15 @@ void stm_queue_put(stm_queue_t *queue, object_t *newitem)
     queue_activate(queue);
 }
 
-object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue,
+object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
                         stm_thread_local_t *tl)
 {
     /* if the queue is empty, this commits and waits outside a transaction.
        must not be called if the transaction is atomic!  never causes
        conflicts.  you need to push roots!
     */
+    struct timespec t;
+    bool t_ready = false;
     stm_queue_entry_t *entry;
     stm_queue_segment_t *seg = &queue->segs[STM_SEGMENT->segment_num - 1];
 
@@ -181,14 +194,36 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue,
     else {
         /* no pending entry, wait */
 #if STM_TESTS
-        return (object_t *)42;  /* can't wait, return 42 but ONLY FOR TESTS! */
+        assert(timeout == 0.0);   /* can't wait in the basic tests */
 #endif
+        if (timeout == 0.0) {
+            if (!stm_is_inevitable(tl)) {
+                stm_become_inevitable(tl, "stm_queue_get");
+                goto retry;
+            }
+            else
+                return NULL;
+        }
+
         STM_PUSH_ROOT(*tl, qobj);
         _stm_commit_transaction();
 
         s_mutex_lock();
-        while (queue->old_entries == NULL)
-            cond_wait(C_QUEUE_OLD_ENTRIES);
+        while (queue->old_entries == NULL) {
+            if (timeout < 0.0) {      /* no timeout */
+                cond_wait(C_QUEUE_OLD_ENTRIES);
+            }
+            else {
+                if (!t_ready) {
+                    timespec_delay(&t, timeout);
+                    t_ready = true;
+                }
+                if (!cond_wait_timespec(C_QUEUE_OLD_ENTRIES, &t)) {
+                    timeout = 0.0;   /* timed out! */
+                    break;
+                }
+            }
+        }
         s_mutex_unlock();
 
         _stm_start_transaction(tl);
