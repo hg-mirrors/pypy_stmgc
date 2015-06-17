@@ -57,3 +57,19 @@ class TestQueue(BaseTestQueue):
         self.start_transaction()
         qobj = self.allocate_queue()
         py.test.raises(Empty, self.get, qobj)
+
+    def test_put_get_same_transaction(self):
+        self.start_transaction()
+        obj1 = stm_allocate(32)
+        obj2 = stm_allocate(32)
+        qobj = self.allocate_queue()
+        print "put"
+        self.put(qobj, obj1)
+        self.put(qobj, obj1)
+        self.put(qobj, obj2)
+        print "done"
+        got = {}
+        for i in range(3):
+            o = self.get(qobj)
+            got[o] = got.get(o, 0) + 1
+        assert got == {obj1: 2, obj2: 1}
