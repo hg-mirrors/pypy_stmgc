@@ -42,4 +42,5 @@
 #include "stm/rewind_setjmp.c"
 #include "stm/finalizer.c"
 #include "stm/hashtable.c"
+#include "stm/queue.c"
 #include "stm/detach.c"

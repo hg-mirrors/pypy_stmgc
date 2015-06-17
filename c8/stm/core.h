@@ -117,6 +117,8 @@ struct stm_priv_segment_info_s {
     bool minor_collect_will_commit_now;
 
     struct tree_s *callbacks_on_commit_and_abort[2];
+    struct tree_s *active_queues;
+    int active_queues_lock;
 
     /* This is the number stored in the overflowed objects (a multiple of
        GCFLAG_OVERFLOW_NUMBER_bit0).  It is incremented when the
