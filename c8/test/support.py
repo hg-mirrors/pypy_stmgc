@@ -224,7 +224,7 @@ typedef ... stm_queue_entry_t;
 stm_queue_t *stm_queue_create(void);
 void stm_queue_free(stm_queue_t *);
 void stm_queue_put(stm_queue_t *queue, object_t *newitem);
-object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue,
+object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
                         stm_thread_local_t *tl);
 uint32_t stm_queue_entry_userdata;
 void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **));
@@ -495,6 +495,8 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
     if (myobj->type_id == 421416) {
         /* queue entry */
         object_t **ref = &((struct stm_queue_entry_s *)myobj)->object;
+        visit(ref);
+        ref = (object_t **)&((struct stm_queue_entry_s *)myobj)->next;
         visit(ref);
     }
     if (myobj->type_id < 421420) {

@@ -743,8 +743,10 @@ void stm_queue_free(stm_queue_t *);
 /* put() does not cause delays or transaction breaks (but push roots!) */
 void stm_queue_put(stm_queue_t *queue, object_t *newitem);
 /* get() can commit and wait outside a transaction (so push roots).
-   unsuitable if the current transaction is atomic! */
-object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue,
+   Unsuitable if the current transaction is atomic!  With timeout < 0.0,
+   waits forever; with timeout >= 0.0, returns NULL in an *inevitable*
+   transaction (this is needed to ensure correctness). */
+object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
                         stm_thread_local_t *tl);
 extern uint32_t stm_queue_entry_userdata;
 void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **));
