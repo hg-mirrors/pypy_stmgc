@@ -138,3 +138,28 @@ class TestQueue(BaseTestQueue):
         #
         self.start_transaction()
         stm_major_collect()       # to get rid of the queue object
+
+    def test_parallel_transactions(self):
+        self.start_transaction()
+        qobj = self.allocate_queue()
+        self.push_root(qobj)
+        self.commit_transaction()
+        qobj = self.pop_root()
+        #
+        self.start_transaction()
+        obj1 = stm_allocate(32)
+        stm_set_char(obj1, 'U')
+        self.put(qobj, obj1)
+        #
+        self.switch(1)
+        self.start_transaction()
+        py.test.raises(Empty, self.get, qobj)
+        self.commit_transaction()
+        self.start_transaction()
+        #
+        self.switch(0)
+        self.commit_transaction()
+        #
+        self.switch(1)
+        obj1 = self.get(qobj)
+        assert stm_get_char(obj1) == 'U'
