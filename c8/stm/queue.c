@@ -45,6 +45,7 @@ stm_queue_t *stm_queue_create(void)
     void *mem;
     int result = posix_memalign(&mem, 64, sizeof(stm_queue_t));
     assert(result == 0);
+    (void)result;
     memset(mem, 0, sizeof(stm_queue_t));
     return (stm_queue_t *)mem;
 }
@@ -83,6 +84,7 @@ void stm_queue_free(stm_queue_t *queue)
             assert(pseg->active_queues != NULL);
             bool ok = tree_delete_item(pseg->active_queues, (uintptr_t)queue);
             assert(ok);
+            (void)ok;
         }
         queue_free_entries(seg->added_in_this_transaction);
         queue_free_entries(seg->old_objects_popped);
@@ -174,8 +176,10 @@ static void queues_deactivate_all(bool at_commit)
 
     queue_lock_release();
 
-    if (added_any_old_entries)
+    if (added_any_old_entries) {
+        assert(_has_mutex());
         cond_broadcast(C_QUEUE_OLD_ENTRIES);
+    }
 }
 
 void stm_queue_put(object_t *qobj, stm_queue_t *queue, object_t *newitem)
