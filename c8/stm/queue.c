@@ -46,6 +46,7 @@ stm_queue_t *stm_queue_create(void)
 void stm_queue_free(stm_queue_t *queue)
 {
     long i;
+    dprintf(("free queue %p\n", queue));
     for (i = 0; i < STM_NB_SEGMENTS; i++) {
         /* it is possible that queues_deactivate_all() runs in parallel,
            but it should not be possible at this point for another thread
@@ -54,7 +55,7 @@ void stm_queue_free(stm_queue_t *queue)
         if (!queue->segs[i].active)
             continue;
 
-        struct stm_priv_segment_info_s *pseg = get_priv_segment(i);
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(i + 1);
         spinlock_acquire(pseg->active_queues_lock);
 
         if (queue->segs[i].active) {
@@ -90,6 +91,7 @@ static void queue_activate(stm_queue_t *queue)
         tree_insert(STM_PSEGMENT->active_queues, (uintptr_t)queue, 0);
         assert(!seg->active);
         seg->active = true;
+        dprintf(("activated queue %p\n", queue));
         queue_lock_release();
     }
 }
@@ -131,6 +133,7 @@ static void queues_deactivate_all(bool at_commit)
         /* deactivate this queue */
         assert(seg->active);
         seg->active = false;
+        dprintf(("deactivated queue %p\n", queue));
 
     } TREE_LOOP_END;
 
