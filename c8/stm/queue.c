@@ -10,6 +10,8 @@ typedef union stm_queue_segment_u {
            added to this queue during the current transaction.  If the
            transaction commits, these are moved to 'old_entries'. */
         queue_entry_t *added_in_this_transaction;
+        /* XXX we could split this list in two: the young entries and
+           the outside-the-nursery-but-still-current-transaction */
 
         /* a chained list of old entries that the current transaction
            popped.  only used if the transaction is not inevitable:
