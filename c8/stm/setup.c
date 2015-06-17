@@ -181,7 +181,6 @@ void stm_teardown(void)
     teardown_smallmalloc();
     teardown_pages();
     teardown_modification_locks();
-    teardown_queue();
 }
 
 static void _shadowstack_trap_page(char *start, int prot)
