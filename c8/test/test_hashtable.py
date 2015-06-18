@@ -46,6 +46,8 @@ class BaseTestHashtable(BaseTest):
             try:
                 assert lib._get_type_id(obj) == 421419
                 self.seen_hashtables -= 1
+                h = get_hashtable(obj)
+                lib.stm_hashtable_free(h)
             except:
                 self.errors.append(sys.exc_info()[2])
                 raise
