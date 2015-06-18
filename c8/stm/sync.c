@@ -119,11 +119,13 @@ static inline void timespec_delay(struct timespec *t, double incr)
     long integral_part = (long)incr;
     t->tv_sec += integral_part;
     incr -= integral_part;
+    assert(incr >= 0.0 && incr <= 1.0);
 
     long nsec = t->tv_nsec + (long)(incr * 1000000000.0);
-    while (nsec >= 1000000000) {
+    if (nsec >= 1000000000) {
         t->tv_sec += 1;
         nsec -= 1000000000;
+        assert(nsec < 1000000000);
     }
     t->tv_nsec = nsec;
 }
