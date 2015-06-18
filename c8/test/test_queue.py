@@ -168,6 +168,7 @@ class TestQueue(BaseTestQueue):
         #
         obj2 = stm_allocate(32)
         stm_set_char(obj2, 'H')
+        print 'put2'
         self.put(qobj, obj2)
         stm_minor_collect()
         obj2 = self.get(qobj)
