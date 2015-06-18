@@ -529,7 +529,7 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
             enter_safe_point_if_requested();
         }
         else if (STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
-            cond_wait(C_SEGMENT_FREE_OR_SAFE_POINT);
+            cond_wait(C_SEGMENT_FREE_OR_SAFE_POINT_REQ);
         }
         s_mutex_unlock();
         goto retry_from_start;   /* redo _stm_validate() now */
@@ -1119,7 +1119,7 @@ static void _do_start_transaction(stm_thread_local_t *tl)
 {
     assert(!_stm_in_transaction(tl));
 
-    while (!acquire_thread_segment(tl)) {}
+    acquire_thread_segment(tl);
     /* GS invalid before this point! */
 
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
@@ -1567,7 +1567,7 @@ void _stm_become_inevitable(const char *msg)
             s_mutex_lock();
             if (any_soon_finished_or_inevitable_thread_segment() &&
                     !safe_point_requested()) {
-                cond_wait(C_SEGMENT_FREE_OR_SAFE_POINT);
+                cond_wait(C_SEGMENT_FREE_OR_SAFE_POINT_REQ);
             }
             s_mutex_unlock();
             num_waits++;
