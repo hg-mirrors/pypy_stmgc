@@ -495,6 +495,33 @@ static void reset_wb_executed_flags(void);
 static void readd_wb_executed_flags(void);
 static void check_all_write_barrier_flags(char *segbase, struct list_s *list);
 
+static void wait_for_inevitable(void)
+{
+    intptr_t detached = 0;
+
+    s_mutex_lock();
+    if (safe_point_requested()) {
+        /* XXXXXX if the safe point below aborts, in
+           _validate_and_attach(), 'new' leaks */
+        enter_safe_point_if_requested();
+    }
+    else if (STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
+        /* loop until C_SEGMENT_FREE_OR_SAFE_POINT_REQ is signalled, but
+           try to detach an inevitable transaction regularly */
+        while (1) {
+            detached = fetch_detached_transaction();
+            if (detached != 0)
+                break;
+            if (cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ, 0.00001))
+                break;
+        }
+    }
+    s_mutex_unlock();
+
+    if (detached != 0)
+        commit_fetched_detached_transaction(detached);
+}
+
 /* This is called to do stm_validate() and then attach 'new' at the
    head of the 'commit_log_root' chained list.  This function sleeps
    and retries until it succeeds or aborts.
@@ -523,22 +550,8 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 #endif
 
     if (STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
-        s_mutex_lock();
-        if (safe_point_requested()) {
-            /* XXXXXX if the safe point below aborts, 'new' leaks */
-            enter_safe_point_if_requested();
-        }
-        else if (STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
-            cond_wait(C_SEGMENT_FREE_OR_SAFE_POINT_REQ);
-        }
-        s_mutex_unlock();
+        wait_for_inevitable();
         goto retry_from_start;   /* redo _stm_validate() now */
-    }
-
-    intptr_t detached = fetch_detached_transaction();
-    if (detached != 0) {
-        commit_fetched_detached_transaction(detached);
-        goto retry_from_start;
     }
 
     /* we must not remove the WB_EXECUTED flags before validation as
@@ -1564,12 +1577,31 @@ void _stm_become_inevitable(const char *msg)
             timing_become_inevitable(); /* for tests: another transaction */
             stm_abort_transaction();    /* is already inevitable, abort   */
 #endif
+
+            intptr_t detached = 0;
+
             s_mutex_lock();
             if (any_soon_finished_or_inevitable_thread_segment() &&
                     !safe_point_requested()) {
-                cond_wait(C_SEGMENT_FREE_OR_SAFE_POINT_REQ);
+
+                /* wait until C_SEGMENT_FREE_OR_SAFE_POINT_REQ is signalled */
+                while (!cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ,
+                                          0.000054321)) {
+                    /* try to detach another inevitable transaction, but
+                       only after waiting a bit.  This is necessary to avoid
+                       deadlocks in some situations, which are hopefully
+                       not too common.  We don't want two threads constantly
+                       detaching each other. */
+                    detached = fetch_detached_transaction();
+                    if (detached != 0)
+                        break;
+                }
             }
             s_mutex_unlock();
+
+            if (detached != 0)
+                commit_fetched_detached_transaction(detached);
+
             num_waits++;
             goto retry_from_start;
         }
