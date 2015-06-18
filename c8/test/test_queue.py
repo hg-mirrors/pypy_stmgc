@@ -59,12 +59,12 @@ class BaseTestQueue(BaseTest):
     def join(self, obj):
         q = get_queue(obj)
         res = lib.stm_queue_join(obj, q, self.tls[self.current_thread]);
-        if res == 1:
+        if res == 0:
             return
-        elif res == 42:
+        elif res > 0:
             raise Conflict("join() cannot wait in tests")
         else:
-            raise AssertionError("stm_queue_join error")
+            raise AssertionError("too much task_done()!")
 
 
 class TestQueue(BaseTestQueue):

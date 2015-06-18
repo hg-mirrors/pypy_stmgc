@@ -751,7 +751,7 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
 void stm_queue_task_done(stm_queue_t *queue);
 /* join() commits and waits outside a transaction (so push roots).
    Unsuitable if the current transaction is atomic! */
-int stm_queue_join(object_t *qobj, stm_queue_t *queue, stm_thread_local_t *tl);
+long stm_queue_join(object_t *qobj, stm_queue_t *queue, stm_thread_local_t *tl);
 void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **));
 
 
