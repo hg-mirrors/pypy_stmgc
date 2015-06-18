@@ -250,6 +250,11 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
     }
 
  retry:
+    /* careful, STM_SEGMENT->segment_num may change here because
+       we're starting new transactions below! */
+    seg = &queue->segs[STM_SEGMENT->segment_num - 1];
+    assert(!seg->added_in_this_transaction);
+
     /* can't easily use compare_and_swap here.  The issue is that
        if we do "compare_and_swap(&old_entry, entry, entry->next)",
        then we need to read entry->next, but a parallel thread
