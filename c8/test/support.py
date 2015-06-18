@@ -225,6 +225,8 @@ void stm_queue_free(stm_queue_t *);
 void stm_queue_put(object_t *qobj, stm_queue_t *queue, object_t *newitem);
 object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
                         stm_thread_local_t *tl);
+void stm_queue_task_done(stm_queue_t *queue);
+int stm_queue_join(object_t *qobj, stm_queue_t *queue, stm_thread_local_t *tl);
 void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **));
 
 void _set_queue(object_t *obj, stm_queue_t *q);
@@ -658,7 +660,9 @@ def stm_allocate_hashtable():
 
 def get_hashtable(o):
     assert lib._get_type_id(o) == 421419
-    return lib._get_hashtable(o)
+    h = lib._get_hashtable(o)
+    assert h
+    return h
 
 def stm_allocate_queue():
     o = lib.stm_allocate(16)
@@ -670,7 +674,9 @@ def stm_allocate_queue():
 
 def get_queue(o):
     assert lib._get_type_id(o) == 421417
-    return lib._get_queue(o)
+    q = lib._get_queue(o)
+    assert q
+    return q
 
 def stm_get_weakref(o):
     return lib._get_weakref(o)
