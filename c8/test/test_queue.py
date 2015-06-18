@@ -18,7 +18,7 @@ class BaseTestQueue(BaseTest):
             try:
                 assert lib._get_type_id(obj) == 421417
                 self.seen_queues -= 1
-                q = lib._get_queue(obj)
+                q = get_queue(obj)
                 lib.stm_queue_free(q)
             except:
                 self.errors.append(sys.exc_info()[2])
@@ -42,15 +42,29 @@ class BaseTestQueue(BaseTest):
         return q
 
     def get(self, obj):
-        q = lib._get_queue(obj)
+        q = get_queue(obj)
         res = lib.stm_queue_get(obj, q, 0.0, self.tls[self.current_thread])
         if res == ffi.NULL:
             raise Empty
         return res
 
     def put(self, obj, newitem):
-        q = lib._get_queue(obj)
+        q = get_queue(obj)
         lib.stm_queue_put(obj, q, newitem)
+
+    def task_done(self, obj):
+        q = get_queue(obj)
+        lib.stm_queue_task_done(q)
+
+    def join(self, obj):
+        q = get_queue(obj)
+        res = lib.stm_queue_join(obj, q, self.tls[self.current_thread]);
+        if res == 1:
+            return
+        elif res == 42:
+            raise Conflict("join() cannot wait in tests")
+        else:
+            raise AssertionError("stm_queue_join error")
 
 
 class TestQueue(BaseTestQueue):
@@ -299,3 +313,51 @@ class TestQueue(BaseTestQueue):
             self.push_root(qobj)
             stm_minor_collect()
             qobj = self.pop_root()
+
+    def test_task_done_1(self):
+        self.start_transaction()
+        qobj = self.allocate_queue()
+        self.push_root(qobj)
+        stm_minor_collect()
+        qobj = self.pop_root()
+        self.join(qobj)
+        obj1 = stm_allocate(32)
+        self.put(qobj, obj1)
+        py.test.raises(Conflict, self.join, qobj)
+        self.get(qobj)
+        py.test.raises(Conflict, self.join, qobj)
+        self.task_done(qobj)
+        self.join(qobj)
+
+    def test_task_done_2(self):
+        self.start_transaction()
+        qobj = self.allocate_queue()
+        self.push_root(qobj)
+        self.put(qobj, stm_allocate(32))
+        self.put(qobj, stm_allocate(32))
+        self.get(qobj)
+        self.get(qobj)
+        self.commit_transaction()
+        qobj = self.pop_root()
+        #
+        self.start_transaction()
+        py.test.raises(Conflict, self.join, qobj)
+        #
+        self.switch(1)
+        self.start_transaction()
+        py.test.raises(Conflict, self.join, qobj)
+        self.task_done(qobj)
+        py.test.raises(Conflict, self.join, qobj)
+        self.task_done(qobj)
+        self.join(qobj)
+        #
+        self.switch(0)
+        py.test.raises(Conflict, self.join, qobj)
+        #
+        self.switch(1)
+        self.commit_transaction()
+        #
+        self.switch(0)
+        self.join(qobj)
+        #
+        stm_major_collect()       # to get rid of the queue object
