@@ -84,8 +84,6 @@ void stm_queue_free(stm_queue_t *queue)
             bool ok = tree_delete_item(pseg->active_queues, (uintptr_t)queue);
             assert(ok);
             (void)ok;
-            queue_free_entries(seg->added_in_this_transaction);
-            queue_free_entries(seg->old_objects_popped);
         }
         else {
             assert(!seg->added_in_this_transaction);
@@ -94,6 +92,9 @@ void stm_queue_free(stm_queue_t *queue)
         }
 
         spinlock_release(pseg->active_queues_lock);
+
+        queue_free_entries(seg->added_in_this_transaction);
+        queue_free_entries(seg->old_objects_popped);
     }
     free(queue);
 }
@@ -164,8 +165,11 @@ static void queues_deactivate_all(bool at_commit)
         if (head != NULL) {
             queue_entry_t *old;
             queue_entry_t *tail = head;
-            while (tail->next != NULL)
+            assert(!_is_in_nursery(head->object));
+            while (tail->next != NULL) {
                 tail = tail->next;
+                assert(!_is_in_nursery(tail->object));
+            }
             dprintf(("items move to old_entries in queue %p\n", queue));
 
             spinlock_acquire(queue->old_entries_lock);
@@ -271,6 +275,8 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
         queue_activate(queue, seg);
 
         queue_check_entry(entry);
+        assert(!_is_in_nursery(entry->object));
+
         entry->next = seg->old_objects_popped;
         seg->old_objects_popped = entry;
         return entry->object;
