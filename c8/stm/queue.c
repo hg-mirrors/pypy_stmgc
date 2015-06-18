@@ -210,13 +210,6 @@ void stm_queue_put(object_t *qobj, stm_queue_t *queue, object_t *newitem)
     entry->next = seg->added_in_this_transaction;
     seg->added_in_this_transaction = entry;
     seg->unfinished_tasks_in_this_transaction++;
-
-    /* add qobj to 'objects_pointing_to_nursery' if it has the
-       WRITE_BARRIER flag */
-    if (qobj->stm_flags & GCFLAG_WRITE_BARRIER) {
-        qobj->stm_flags &= ~GCFLAG_WRITE_BARRIER;
-        LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, qobj);
-    }
 }
 
 static void queue_check_entry(queue_entry_t *entry)
@@ -381,14 +374,30 @@ void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **))
         }
         queue_trace_list(queue->old_entries, trace, NULL);
     }
-    else {
-        /* for minor collections: it is enough to trace the objects
-           added in the current transaction.  All other objects are
-           old (or, worse, belong to a parallel thread and must not
-           be traced). */
+    /* for minor collections, done differently.
+       see collect_active_queues() below */
+}
+
+static void collect_active_queues(void)
+{
+    wlog_t *item;
+    TREE_LOOP_FORWARD(STM_PSEGMENT->active_queues, item) {
+        /* it is enough to trace the objects added in the current
+           transaction.  All other objects reachable from the queue
+           are old (or, worse, belong to a parallel thread and must
+           not be traced).  Performance note: this is linear in the
+           total number of active queues, but at least each queue that
+           has not been touched for a while in a long transaction is
+           handled very cheaply.
+        */
+        stm_queue_t *queue = (stm_queue_t *)item->addr;
         stm_queue_segment_t *seg = &queue->segs[STM_SEGMENT->segment_num - 1];
-        queue_trace_list(seg->added_in_this_transaction, trace,
-                         seg->added_young_limit);
-        seg->added_young_limit = seg->added_in_this_transaction;
-    }
+        if (seg->added_young_limit != seg->added_in_this_transaction) {
+            dprintf(("minor collection trace queue %p\n", queue));
+            queue_trace_list(seg->added_in_this_transaction,
+                             &minor_trace_if_young,
+                             seg->added_young_limit);
+            seg->added_young_limit = seg->added_in_this_transaction;
+        }
+    } TREE_LOOP_END;
 }
