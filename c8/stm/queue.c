@@ -39,8 +39,10 @@ struct stm_queue_s {
        and the 'segs' is an array of items 64 bytes each */
     stm_queue_segment_t segs[STM_NB_SEGMENTS];
 
-    /* a chained list of old entries in the queue */
-    queue_entry_t *volatile old_entries;
+    /* a chained list of old entries in the queue; modified only
+       with the lock */
+    queue_entry_t *old_entries;
+    uint8_t old_entries_lock;
 
     /* total of 'unfinished_tasks_in_this_transaction' for all
        committed transactions */
@@ -74,17 +76,6 @@ void stm_queue_free(stm_queue_t *queue)
     for (i = 0; i < STM_NB_SEGMENTS; i++) {
         stm_queue_segment_t *seg = &queue->segs[i];
 
-        /* it is possible that queues_deactivate_all() runs in parallel,
-           but it should not be possible at this point for another thread
-           to change 'active' from false to true.  if it is false, then
-           that's it */
-        if (!seg->active) {
-            assert(!seg->added_in_this_transaction);
-            assert(!seg->added_young_limit);
-            assert(!seg->old_objects_popped);
-            continue;
-        }
-
         struct stm_priv_segment_info_s *pseg = get_priv_segment(i + 1);
         spinlock_acquire(pseg->active_queues_lock);
 
@@ -93,9 +84,14 @@ void stm_queue_free(stm_queue_t *queue)
             bool ok = tree_delete_item(pseg->active_queues, (uintptr_t)queue);
             assert(ok);
             (void)ok;
+            queue_free_entries(seg->added_in_this_transaction);
+            queue_free_entries(seg->old_objects_popped);
         }
-        queue_free_entries(seg->added_in_this_transaction);
-        queue_free_entries(seg->old_objects_popped);
+        else {
+            assert(!seg->added_in_this_transaction);
+            assert(!seg->added_young_limit);
+            assert(!seg->old_objects_popped);
+        }
 
         spinlock_release(pseg->active_queues_lock);
     }
@@ -171,11 +167,13 @@ static void queues_deactivate_all(bool at_commit)
             while (tail->next != NULL)
                 tail = tail->next;
             dprintf(("items move to old_entries in queue %p\n", queue));
-         retry:
+
+            spinlock_acquire(queue->old_entries_lock);
             old = queue->old_entries;
             tail->next = old;
-            if (!__sync_bool_compare_and_swap(&queue->old_entries, old, head))
-                goto retry;
+            queue->old_entries = head;
+            spinlock_release(queue->old_entries_lock);
+
             added_any_old_entries = true;
         }
 
@@ -221,6 +219,12 @@ void stm_queue_put(object_t *qobj, stm_queue_t *queue, object_t *newitem)
     }
 }
 
+static void queue_check_entry(queue_entry_t *entry)
+{
+    assert(entry->object != NULL);
+    assert(((TLPREFIX int *)entry->object)[1] != 0);   /* userdata != 0 */
+}
+
 object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
                         stm_thread_local_t *tl)
 {
@@ -239,26 +243,38 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
         seg->added_in_this_transaction = entry->next;
         if (entry == seg->added_young_limit)
             seg->added_young_limit = entry->next;
+        queue_check_entry(entry);
         result = entry->object;
-        assert(result != NULL);
         free(entry);
         return result;
     }
 
  retry:
+    /* can't easily use compare_and_swap here.  The issue is that
+       if we do "compare_and_swap(&old_entry, entry, entry->next)",
+       then we need to read entry->next, but a parallel thread
+       could have grabbed the same entry and already freed it.
+       More subtly, there is also an ABA problem: even if we
+       read the correct entry->next, maybe a parallel thread
+       can free and reuse this entry.  Then the compare_and_swap
+       succeeds, but the value written is outdated nonsense.
+    */
+    spinlock_acquire(queue->old_entries_lock);
     entry = queue->old_entries;
-    if (entry != NULL) {
-        if (!__sync_bool_compare_and_swap(&queue->old_entries,
-                                          entry, entry->next))
-            goto retry;
+    if (entry != NULL)
+        queue->old_entries = entry->next;
+    spinlock_release(queue->old_entries_lock);
 
+    if (entry != NULL) {
         /* successfully popped the old 'entry'.  It remains in the
-           'old_objects_popped' list for now. */
+           'old_objects_popped' list for now.  From now on, this entry
+           "belongs" to this segment and should never be read by
+           another segment. */
+        queue_check_entry(entry);
         entry->next = seg->old_objects_popped;
         seg->old_objects_popped = entry;
 
         queue_activate(queue);
-        assert(entry->object != NULL);
         return entry->object;
     }
     else {
