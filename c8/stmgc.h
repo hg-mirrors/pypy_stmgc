@@ -739,7 +739,7 @@ typedef struct stm_queue_s stm_queue_t;
 
 stm_queue_t *stm_queue_create(void);
 void stm_queue_free(stm_queue_t *);
-/* put() does not cause delays or transaction breaks (but push roots!) */
+/* put() does not cause delays or transaction breaks */
 void stm_queue_put(object_t *qobj, stm_queue_t *queue, object_t *newitem);
 /* get() can commit and wait outside a transaction (so push roots).
    Unsuitable if the current transaction is atomic!  With timeout < 0.0,
