@@ -284,7 +284,9 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
 #endif
         if (timeout == 0.0) {
             if (!stm_is_inevitable(tl)) {
+                STM_PUSH_ROOT(*tl, qobj);
                 stm_become_inevitable(tl, "stm_queue_get");
+                STM_POP_ROOT(*tl, qobj);
                 goto retry;
             }
             else
