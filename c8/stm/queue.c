@@ -309,7 +309,7 @@ void stm_queue_task_done(stm_queue_t *queue)
     seg->unfinished_tasks_in_this_transaction--;
 }
 
-int stm_queue_join(object_t *qobj, stm_queue_t *queue, stm_thread_local_t *tl)
+long stm_queue_join(object_t *qobj, stm_queue_t *queue, stm_thread_local_t *tl)
 {
     int64_t result;
 
@@ -317,8 +317,7 @@ int stm_queue_join(object_t *qobj, stm_queue_t *queue, stm_thread_local_t *tl)
     result = queue->unfinished_tasks;   /* can't wait in tests */
     result += (queue->segs[STM_SEGMENT->segment_num - 1]
                .unfinished_tasks_in_this_transaction);
-    if (result > 0)
-        return 42;
+    return result;
 #else
     STM_PUSH_ROOT(*tl, qobj);
     _stm_commit_transaction();
@@ -333,8 +332,9 @@ int stm_queue_join(object_t *qobj, stm_queue_t *queue, stm_thread_local_t *tl)
     STM_POP_ROOT(*tl, qobj);   /* 'queue' should stay alive until here */
 #endif
 
-    /* returns 1 for 'ok', or 0 for error: negative 'unfinished_tasks' */
-    return (result == 0);
+    /* returns 0 for 'ok', or negative if there was more task_done()
+       than put() so far */
+    return result;
 }
 
 static void queue_trace_list(queue_entry_t *entry, void trace(object_t **),
