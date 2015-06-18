@@ -109,9 +109,9 @@ static inline void queue_lock_release(void)
     spinlock_release(get_priv_segment(num)->active_queues_lock);
 }
 
-static void queue_activate(stm_queue_t *queue)
+static void queue_activate(stm_queue_t *queue, stm_queue_segment_t *seg)
 {
-    stm_queue_segment_t *seg = &queue->segs[STM_SEGMENT->segment_num - 1];
+    assert(seg == &queue->segs[STM_SEGMENT->segment_num - 1]);
 
     if (!seg->active) {
         queue_lock_acquire();
@@ -202,13 +202,13 @@ void stm_queue_put(object_t *qobj, stm_queue_t *queue, object_t *newitem)
        delays or transaction breaks.  you need to push roots!
     */
     stm_queue_segment_t *seg = &queue->segs[STM_SEGMENT->segment_num - 1];
+    queue_activate(queue, seg);
+
     queue_entry_t *entry = malloc(sizeof(queue_entry_t));
     assert(entry);
     entry->object = newitem;
     entry->next = seg->added_in_this_transaction;
     seg->added_in_this_transaction = entry;
-
-    queue_activate(queue);
     seg->unfinished_tasks_in_this_transaction++;
 
     /* add qobj to 'objects_pointing_to_nursery' if it has the
@@ -270,11 +270,11 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
            'old_objects_popped' list for now.  From now on, this entry
            "belongs" to this segment and should never be read by
            another segment. */
+        queue_activate(queue, seg);
+
         queue_check_entry(entry);
         entry->next = seg->old_objects_popped;
         seg->old_objects_popped = entry;
-
-        queue_activate(queue);
         return entry->object;
     }
     else {
@@ -322,8 +322,8 @@ object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
 
 void stm_queue_task_done(stm_queue_t *queue)
 {
-    queue_activate(queue);
     stm_queue_segment_t *seg = &queue->segs[STM_SEGMENT->segment_num - 1];
+    queue_activate(queue, seg);
     seg->unfinished_tasks_in_this_transaction--;
 }
 
