@@ -370,7 +370,7 @@ static void queue_trace_list(queue_entry_t *entry, void trace(object_t **),
 
 void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **))
 {
-    if (trace == TRACE_FOR_MAJOR_COLLECTION) {
+    if (trace != TRACE_FOR_MINOR_COLLECTION) {
         long i;
         for (i = 0; i < STM_NB_SEGMENTS; i++) {
             stm_queue_segment_t *seg = &queue->segs[i];
