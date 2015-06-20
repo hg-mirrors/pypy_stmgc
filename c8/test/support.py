@@ -218,6 +218,19 @@ void _set_hashtable(object_t *obj, stm_hashtable_t *h);
 stm_hashtable_t *_get_hashtable(object_t *obj);
 uintptr_t _get_entry_index(stm_hashtable_entry_t *entry);
 object_t *_get_entry_object(stm_hashtable_entry_t *entry);
+
+typedef struct stm_queue_s stm_queue_t;
+stm_queue_t *stm_queue_create(void);
+void stm_queue_free(stm_queue_t *);
+void stm_queue_put(object_t *qobj, stm_queue_t *queue, object_t *newitem);
+object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
+                        stm_thread_local_t *tl);
+void stm_queue_task_done(stm_queue_t *queue);
+int stm_queue_join(object_t *qobj, stm_queue_t *queue, stm_thread_local_t *tl);
+void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **));
+
+void _set_queue(object_t *obj, stm_queue_t *q);
+stm_queue_t *_get_queue(object_t *obj);
 """)
 
 
@@ -382,6 +395,20 @@ object_t *_get_entry_object(stm_hashtable_entry_t *entry)
     return entry->object;
 }
 
+void _set_queue(object_t *obj, stm_queue_t *q)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    *(stm_queue_t *TLPREFIX *)field_addr = q;
+}
+
+stm_queue_t *_get_queue(object_t *obj)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    return *(stm_queue_t *TLPREFIX *)field_addr;
+}
+
 void _set_ptr(object_t *obj, int n, object_t *v)
 {
     long nrefs = (long)((myobj_t*)obj)->type_id - 421420;
@@ -423,6 +450,9 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj)
         if (myobj->type_id == 421418) {    /* hashtable entry */
             return sizeof(struct stm_hashtable_entry_s);
         }
+        if (myobj->type_id == 421417) {    /* queue */
+            return sizeof(struct myobj_s) + 1 * sizeof(void*);
+        }
         /* basic case: tid equals 42 plus the size of the object */
         assert(myobj->type_id >= 42 + sizeof(struct myobj_s));
         assert((myobj->type_id - 42) >= 16);
@@ -453,6 +483,12 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
         object_t **ref = &((struct stm_hashtable_entry_s *)myobj)->object;
         visit(ref);
     }
+    if (myobj->type_id == 421417) {
+        /* queue */
+        stm_queue_t *q = *((stm_queue_t **)(myobj + 1));
+        stm_queue_tracefn(q, visit);
+        return;
+    }
     if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
@@ -476,6 +512,7 @@ void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
     assert(myobj->type_id != 0);
     assert(myobj->type_id != 421419);
     assert(myobj->type_id != 421418);
+    assert(myobj->type_id != 421417);
     if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
@@ -494,6 +531,7 @@ void stmcb_get_card_base_itemsize(struct object_s *obj,
     assert(myobj->type_id != 0);
     assert(myobj->type_id != 421419);
     assert(myobj->type_id != 421418);
+    assert(myobj->type_id != 421417);
     if (myobj->type_id < 421420) {
         offset_itemsize[0] = SIZEOF_MYOBJ;
         offset_itemsize[1] = 1;
@@ -622,7 +660,23 @@ def stm_allocate_hashtable():
 
 def get_hashtable(o):
     assert lib._get_type_id(o) == 421419
-    return lib._get_hashtable(o)
+    h = lib._get_hashtable(o)
+    assert h
+    return h
+
+def stm_allocate_queue():
+    o = lib.stm_allocate(16)
+    tid = 421417
+    lib._set_type_id(o, tid)
+    q = lib.stm_queue_create()
+    lib._set_queue(o, q)
+    return o
+
+def get_queue(o):
+    assert lib._get_type_id(o) == 421417
+    q = lib._get_queue(o)
+    assert q
+    return q
 
 def stm_get_weakref(o):
     return lib._get_weakref(o)
