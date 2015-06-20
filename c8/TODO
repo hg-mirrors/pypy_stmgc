@@ -1,13 +1,10 @@
 
+- fix markers (e.g. become_inevitable doesn't seem to show up)
+
 - improve sync of small objs on commit (see FLAG_SYNC_LARGE in nursery.c)
 
 - reshare pages:
   make seg0 MAP_SHARED in order to re-share private pages during major GC
-
-- avoid usleep(10) when waiting for an inevitable transaction:
-  we do this sleep when we try to commit and another inev transaction is
-  currently running. idea: signal the inev transaction to do the commit
-  for us
 
 - maybe re-implement the "please commit soon" signal
 
