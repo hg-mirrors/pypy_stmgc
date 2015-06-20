@@ -1563,6 +1563,8 @@ void _stm_become_inevitable(const char *msg)
 {
     int num_waits = 0;
 
+    timing_become_inevitable();
+
  retry_from_start:
     assert(STM_PSEGMENT->transaction_state == TS_REGULAR);
     _stm_collectable_safe_point();
@@ -1612,7 +1614,6 @@ void _stm_become_inevitable(const char *msg)
         if (!_validate_and_turn_inevitable())
             return;
     }
-    timing_become_inevitable();
     soon_finished_or_inevitable_thread_segment();
     STM_PSEGMENT->transaction_state = TS_INEVITABLE;
 
