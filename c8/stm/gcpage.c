@@ -48,7 +48,7 @@ static void setup_N_pages(char *pages_addr, long num)
 }
 
 
-static int lock_growth_large = 0;
+static uint8_t lock_growth_large = 0;
 
 static stm_char *allocate_outside_nursery_large(uint64_t size)
 {
@@ -794,6 +794,7 @@ static void major_collection_now_at_safe_point(void)
     mark_visit_from_modified_objects();
     mark_visit_from_markers();
     mark_visit_from_roots();
+    mark_visit_from_active_queues();
     mark_visit_from_finalizer_pending();
 
     /* finalizer support: will mark as visited all objects with a
