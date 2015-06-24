@@ -132,10 +132,6 @@ enum stm_event_e {
     STM_TRANSACTION_COMMIT,
     STM_TRANSACTION_ABORT,
 
-    /* write-read contention: a "marker" is included in the PYPYSTM file
-       saying where the write was done.  Followed by STM_TRANSACTION_ABORT. */
-    STM_CONTENTION_WRITE_READ,
-
     /* inevitable contention: all threads that try to become inevitable
        have a STM_BECOME_INEVITABLE event with a position marker.  Then,
        if it waits it gets a STM_WAIT_OTHER_INEVITABLE.  It is possible
@@ -143,8 +139,14 @@ enum stm_event_e {
        STM_TRANSACTION_ABORT if it fails to become inevitable. */
     STM_BECOME_INEVITABLE,
 
-    /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE */
+    /* write-read contention: a "marker" is included in the PYPYSTM file
+       saying where the write was done.  Followed by STM_TRANSACTION_ABORT. */
+    STM_CONTENTION_WRITE_READ,
+
+    /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE or
+       possibly STM_TRANSACTION_ABORT */
     STM_WAIT_FREE_SEGMENT,
+    STM_WAIT_SYNCING,
     STM_WAIT_SYNC_PAUSE,
     STM_WAIT_OTHER_INEVITABLE,
     STM_WAIT_DONE,
