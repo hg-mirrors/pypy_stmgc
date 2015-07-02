@@ -478,8 +478,7 @@ long current_segment_num(void)
                     ],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0', '-Werror',  #, '-ferror-limit=1',  for clang
-                         '-Wfatal-errors'],   # for gcc
+     extra_compile_args=['-g', '-O0', '-Werror', '-ferror-limit=1'],
      extra_link_args=['-g', '-lrt'],
      force_generic_engine=True)
 

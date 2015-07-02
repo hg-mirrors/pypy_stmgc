@@ -127,14 +127,19 @@ void stm_setup(void)
        private range of addresses.
     */
 
+    setup_modification_locks();
     setup_sync();
     setup_nursery();
     setup_gcpage();
     setup_pages();
     setup_forksupport();
     setup_finalizer();
+    setup_detach();
 
     set_gs_register(get_segment_base(0));
+
+    dprintf(("nursery: %p -> %p\n", (void *)NURSERY_START,
+                                    (void *)NURSERY_END));
 }
 
 void stm_teardown(void)
@@ -162,6 +167,7 @@ void stm_teardown(void)
         tree_free(pr->callbacks_on_commit_and_abort[1]);
         list_free(pr->young_objects_with_light_finalizers);
         list_free(pr->old_objects_with_light_finalizers);
+        if (pr->active_queues) tree_free(pr->active_queues);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);
@@ -174,6 +180,7 @@ void stm_teardown(void)
     teardown_gcpage();
     teardown_smallmalloc();
     teardown_pages();
+    teardown_modification_locks();
 }
 
 static void _shadowstack_trap_page(char *start, int prot)
@@ -227,6 +234,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
 {
     int num;
     s_mutex_lock();
+    tl->self_or_0_if_atomic = (intptr_t)tl;    /* 'not atomic' */
     if (stm_all_thread_locals == NULL) {
         stm_all_thread_locals = tl->next = tl->prev = tl;
         num = 0;
@@ -242,7 +250,6 @@ void stm_register_thread_local(stm_thread_local_t *tl)
     /* assign numbers consecutively, but that's for tests; we could also
        assign the same number to all of them and they would get their own
        numbers automatically. */
-    tl->associated_segment_num = -1;
     tl->last_associated_segment_num = num + 1;
     tl->thread_local_counter = ++thread_local_counters;
     *_get_cpth(tl) = pthread_self();
@@ -262,6 +269,8 @@ void stm_register_thread_local(stm_thread_local_t *tl)
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)
 {
+    commit_detached_transaction_if_from(tl);
+
     s_mutex_lock();
     assert(tl->prev != NULL);
     assert(tl->next != NULL);

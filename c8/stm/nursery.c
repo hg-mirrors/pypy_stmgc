@@ -11,7 +11,12 @@
 static uintptr_t _stm_nursery_start;
 
 
+#define DEFAULT_FILL_MARK_NURSERY_BYTES   (NURSERY_SIZE / 4)
+
+uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+
 /************************************************************/
+
 
 static void setup_nursery(void)
 {
@@ -252,6 +257,9 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
 }
 
 
+#define TRACE_FOR_MINOR_COLLECTION  (&minor_trace_if_young)
+
+
 static void _trace_card_object(object_t *obj)
 {
     assert(!_is_in_nursery(obj));
@@ -288,7 +296,7 @@ static void _trace_card_object(object_t *obj)
 
             dprintf(("trace_cards on %p with start:%lu stop:%lu\n",
                      obj, start, stop));
-            stmcb_trace_cards(realobj, &minor_trace_if_young,
+            stmcb_trace_cards(realobj, TRACE_FOR_MINOR_COLLECTION,
                               start, stop);
         }
 
@@ -309,6 +317,7 @@ static void collect_roots_in_nursery(void)
     else
         assert(finalbase <= ssbase && ssbase <= current);
 
+    dprintf(("collect_roots_in_nursery:\n"));
     while (current > ssbase) {
         --current;
         uintptr_t x = (uintptr_t)current->ss;
@@ -320,6 +329,7 @@ static void collect_roots_in_nursery(void)
         else {
             /* it is an odd-valued marker, ignore */
         }
+        dprintf(("    %p: %p -> %p\n", current, (void *)x, current->ss));
     }
 
     minor_trace_if_young(&tl->thread_local_obj);
@@ -338,7 +348,7 @@ static inline void _collect_now(object_t *obj)
            outside the nursery, possibly forcing nursery objects out and
            adding them to 'objects_pointing_to_nursery' as well. */
         char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-        stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+        stmcb_trace((struct object_s *)realobj, TRACE_FOR_MINOR_COLLECTION);
 
         obj->stm_flags |= GCFLAG_WRITE_BARRIER;
     }
@@ -447,7 +457,7 @@ static void collect_objs_still_young_but_with_finalizers(void)
 }
 
 
-static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
+static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 {
 #pragma push_macro("STM_PSEGMENT")
 #pragma push_macro("STM_SEGMENT")
@@ -464,7 +474,6 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     }
     OPT_ASSERT((nursery_used & 7) == 0);
 
-#ifndef NDEBUG
     /* reset the nursery by zeroing it */
     char *realnursery;
     realnursery = REAL_ADDRESS(pseg->pub.segment_base, _stm_nursery_start);
@@ -476,11 +485,14 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
                        (NURSERY_END - _stm_nursery_start) - nursery_used);
 
 #else
+# ifndef NDEBUG
     memset(realnursery, 0xa0, nursery_used);
-#endif
+# endif
 #endif
 
+    pseg->total_throw_away_nursery += nursery_used;
     pseg->pub.nursery_current = (stm_char *)_stm_nursery_start;
+    pseg->pub.nursery_mark -= nursery_used;
 
     /* free any object left from 'young_outside_nursery' */
     if (!tree_is_cleared(pseg->young_outside_nursery)) {
@@ -505,8 +517,6 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     }
 
     tree_clear(pseg->nursery_objects_shadows);
-
-    return nursery_used;
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
@@ -519,6 +529,7 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 static void _do_minor_collection(bool commit)
 {
     dprintf(("minor_collection commit=%d\n", (int)commit));
+    assert(!STM_SEGMENT->no_safe_point_here);
 
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
 
@@ -545,6 +556,9 @@ static void _do_minor_collection(bool commit)
     if (STM_PSEGMENT->finalizers != NULL)
         collect_objs_still_young_but_with_finalizers();
 
+    if (STM_PSEGMENT->active_queues != NULL)
+        collect_active_queues();
+
     collect_oldrefs_to_nursery();
     assert(list_is_empty(STM_PSEGMENT->old_objects_with_cards_set));
 
@@ -561,11 +575,12 @@ static void _do_minor_collection(bool commit)
     assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
 }
 
-static void minor_collection(bool commit)
+static void minor_collection(bool commit, bool external)
 {
     assert(!_has_mutex());
 
-    stm_safe_point();
+    if (!external)
+        stm_safe_point();
 
     timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_START);
 
@@ -579,7 +594,7 @@ void stm_collect(long level)
     if (level > 0)
         force_major_collection_request();
 
-    minor_collection(/*commit=*/ false);
+    minor_collection(/*commit=*/ false, /*external=*/ false);
 
 #ifdef STM_TESTS
     /* tests don't want aborts in stm_allocate, thus

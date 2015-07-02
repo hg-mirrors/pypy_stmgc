@@ -28,8 +28,6 @@ typedef struct {
     object_t *thread_local_obj;
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
-    long last_abort__bytes_in_nursery;
-    int associated_segment_num;
     int last_associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
@@ -38,6 +36,7 @@ typedef struct {
 
 char *stm_object_pages;
 char *stm_file_pages;
+uintptr_t stm_fill_mark_nursery_bytes;
 
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
@@ -86,10 +85,10 @@ long _check_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
-bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
+//bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 bool _check_stop_all_other_threads(void);
 void stm_resume_all_other_threads(void);
-int stm_is_inevitable(void);
+int stm_is_inevitable(stm_thread_local_t *);
 long current_segment_num(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
@@ -104,6 +103,8 @@ object_t* _get_weakref(object_t *obj);
 /* void stm_collect(long level); */
 long _check_stm_collect(long level);
 uint64_t _stm_total_allocated(void);
+
+long bytes_before_transaction_break(void);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
 void _stm_largemalloc_init_arena(char *data_start, size_t data_size);
@@ -131,10 +132,6 @@ enum stm_event_e {
     STM_TRANSACTION_COMMIT,
     STM_TRANSACTION_ABORT,
 
-    /* write-read contention: a "marker" is included in the PYPYSTM file
-       saying where the write was done.  Followed by STM_TRANSACTION_ABORT. */
-    STM_CONTENTION_WRITE_READ,
-
     /* inevitable contention: all threads that try to become inevitable
        have a STM_BECOME_INEVITABLE event with a position marker.  Then,
        if it waits it gets a STM_WAIT_OTHER_INEVITABLE.  It is possible
@@ -142,8 +139,14 @@ enum stm_event_e {
        STM_TRANSACTION_ABORT if it fails to become inevitable. */
     STM_BECOME_INEVITABLE,
 
-    /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE */
+    /* write-read contention: a "marker" is included in the PYPYSTM file
+       saying where the write was done.  Followed by STM_TRANSACTION_ABORT. */
+    STM_CONTENTION_WRITE_READ,
+
+    /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE or
+       possibly STM_TRANSACTION_ABORT */
     STM_WAIT_FREE_SEGMENT,
+    STM_WAIT_SYNCING,
     STM_WAIT_SYNC_PAUSE,
     STM_WAIT_OTHER_INEVITABLE,
     STM_WAIT_DONE,
@@ -217,6 +220,19 @@ void _set_hashtable(object_t *obj, stm_hashtable_t *h);
 stm_hashtable_t *_get_hashtable(object_t *obj);
 uintptr_t _get_entry_index(stm_hashtable_entry_t *entry);
 object_t *_get_entry_object(stm_hashtable_entry_t *entry);
+
+typedef struct stm_queue_s stm_queue_t;
+stm_queue_t *stm_queue_create(void);
+void stm_queue_free(stm_queue_t *);
+void stm_queue_put(object_t *qobj, stm_queue_t *queue, object_t *newitem);
+object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
+                        stm_thread_local_t *tl);
+void stm_queue_task_done(stm_queue_t *queue);
+int stm_queue_join(object_t *qobj, stm_queue_t *queue, stm_thread_local_t *tl);
+void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **));
+
+void _set_queue(object_t *obj, stm_queue_t *q);
+stm_queue_t *_get_queue(object_t *obj);
 """)
 
 
@@ -276,7 +292,7 @@ bool _checked_stm_write_card(object_t *object, uintptr_t index) {
 }
 
 bool _check_commit_transaction(void) {
-    CHECKED(stm_commit_transaction());
+    CHECKED(_stm_commit_transaction());
 }
 
 bool _check_stm_collect(long level) {
@@ -286,7 +302,7 @@ bool _check_stm_collect(long level) {
 long _check_start_transaction(stm_thread_local_t *tl) {
    void **jmpbuf = tl->rjthread.jmpbuf;                         \
     if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
-        stm_start_transaction(tl);                              \
+        stm_enter_transactional_zone(tl);                       \
         clear_jmpbuf(tl);                                       \
         return 0;                                               \
     }                                                           \
@@ -305,10 +321,6 @@ bool _check_abort_transaction(void) {
 
 bool _check_become_inevitable(stm_thread_local_t *tl) {
     CHECKED(stm_become_inevitable(tl, "TEST"));
-}
-
-bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
-    CHECKED(stm_become_globally_unique_transaction(tl, "TESTGUT"));
 }
 
 bool _check_stop_all_other_threads(void) {
@@ -385,6 +397,20 @@ object_t *_get_entry_object(stm_hashtable_entry_t *entry)
     return entry->object;
 }
 
+void _set_queue(object_t *obj, stm_queue_t *q)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    *(stm_queue_t *TLPREFIX *)field_addr = q;
+}
+
+stm_queue_t *_get_queue(object_t *obj)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    return *(stm_queue_t *TLPREFIX *)field_addr;
+}
+
 void _set_ptr(object_t *obj, int n, object_t *v)
 {
     long nrefs = (long)((myobj_t*)obj)->type_id - 421420;
@@ -409,6 +435,11 @@ object_t * _get_ptr(object_t *obj, int n)
     return *field;
 }
 
+long bytes_before_transaction_break(void)
+{
+    return STM_SEGMENT->nursery_mark - STM_SEGMENT->nursery_current;
+}
+
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj)
 {
@@ -420,6 +451,9 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj)
         }
         if (myobj->type_id == 421418) {    /* hashtable entry */
             return sizeof(struct stm_hashtable_entry_s);
+        }
+        if (myobj->type_id == 421417) {    /* queue */
+            return sizeof(struct myobj_s) + 1 * sizeof(void*);
         }
         /* basic case: tid equals 42 plus the size of the object */
         assert(myobj->type_id >= 42 + sizeof(struct myobj_s));
@@ -451,6 +485,12 @@ void stmcb_trace(struct object_s *obj, void visit(object_t **))
         object_t **ref = &((struct stm_hashtable_entry_s *)myobj)->object;
         visit(ref);
     }
+    if (myobj->type_id == 421417) {
+        /* queue */
+        stm_queue_t *q = *((stm_queue_t **)(myobj + 1));
+        stm_queue_tracefn(q, visit);
+        return;
+    }
     if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
@@ -474,6 +514,7 @@ void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
     assert(myobj->type_id != 0);
     assert(myobj->type_id != 421419);
     assert(myobj->type_id != 421418);
+    assert(myobj->type_id != 421417);
     if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
@@ -492,6 +533,7 @@ void stmcb_get_card_base_itemsize(struct object_s *obj,
     assert(myobj->type_id != 0);
     assert(myobj->type_id != 421419);
     assert(myobj->type_id != 421418);
+    assert(myobj->type_id != 421417);
     if (myobj->type_id < 421420) {
         offset_itemsize[0] = SIZEOF_MYOBJ;
         offset_itemsize[1] = 1;
@@ -620,7 +662,23 @@ def stm_allocate_hashtable():
 
 def get_hashtable(o):
     assert lib._get_type_id(o) == 421419
-    return lib._get_hashtable(o)
+    h = lib._get_hashtable(o)
+    assert h
+    return h
+
+def stm_allocate_queue():
+    o = lib.stm_allocate(16)
+    tid = 421417
+    lib._set_type_id(o, tid)
+    q = lib.stm_queue_create()
+    lib._set_queue(o, q)
+    return o
+
+def get_queue(o):
+    assert lib._get_type_id(o) == 421417
+    q = lib._get_queue(o)
+    assert q
+    return q
 
 def stm_get_weakref(o):
     return lib._get_weakref(o)
@@ -768,14 +826,14 @@ class BaseTest(object):
         lib.stmcb_expand_marker = ffi.NULL
         lib.stmcb_debug_print = ffi.NULL
         tl = self.tls[self.current_thread]
-        if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
+        if lib._stm_in_transaction(tl) and self.is_inevitable():
             self.commit_transaction()      # must succeed!
         #
         for n, tl in enumerate(self.tls):
             if lib._stm_in_transaction(tl):
                 if self.current_thread != n:
                     self.switch(n)
-                if lib.stm_is_inevitable():
+                if self.is_inevitable():
                     self.commit_transaction()   # must succeed!
                 else:
                     self.abort_transaction()
@@ -783,6 +841,11 @@ class BaseTest(object):
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
         lib.stm_teardown()
+
+    def is_inevitable(self):
+        tl = self.tls[self.current_thread]
+        assert lib._stm_in_transaction(tl)
+        return lib.stm_is_inevitable(tl)
 
     def get_stm_thread_local(self):
         return self.tls[self.current_thread]
@@ -798,8 +861,8 @@ class BaseTest(object):
         seen = set()
         for tl1 in self.tls:
             if lib._stm_in_transaction(tl1):
-                assert tl1.associated_segment_num not in seen
-                seen.add(tl1.associated_segment_num)
+                assert tl1.last_associated_segment_num not in seen
+                seen.add(tl1.last_associated_segment_num)
 
     def commit_transaction(self):
         tl = self.tls[self.current_thread]
@@ -885,6 +948,7 @@ class BaseTest(object):
             raise Conflict()
 
     def become_globally_unique_transaction(self):
+        import py; py.test.skip("this function was removed")
         tl = self.tls[self.current_thread]
         if lib._check_become_globally_unique_transaction(tl):
             raise Conflict()

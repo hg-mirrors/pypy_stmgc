@@ -24,24 +24,37 @@
 
 #if defined(__i386__) || defined(__amd64__)
 
-# define HAVE_FULL_EXCHANGE_INSN
   static inline void spin_loop(void) { asm("pause" : : : "memory"); }
   static inline void write_fence(void) { asm("" : : : "memory"); }
+/*# define atomic_exchange(ptr, old, new)  do {         \
+          (old) = __sync_lock_test_and_set(ptr, new);   \
+      } while (0)*/
 
 #else
 
   static inline void spin_loop(void) { asm("" : : : "memory"); }
   static inline void write_fence(void) { __sync_synchronize(); }
 
+/*# define atomic_exchange(ptr, old, new)  do {           \
+          (old) = *(ptr);                                 \
+      } while (UNLIKELY(!__sync_bool_compare_and_swap(ptr, old, new))); */
+
 #endif
 
 
-#define spinlock_acquire(lock)                                          \
-    do { if (LIKELY(__sync_lock_test_and_set(&(lock), 1) == 0)) break;  \
-         spin_loop(); } while (1)
-#define spinlock_release(lock)                                          \
-    do { assert((lock) == 1);                                           \
-         __sync_lock_release(&(lock)); } while (0)
+static inline void _spinlock_acquire(uint8_t *plock) {
+ retry:
+    if (__builtin_expect(__sync_lock_test_and_set(plock, 1) != 0, 0)) {
+        spin_loop();
+        goto retry;
+    }
+}
+static inline void _spinlock_release(uint8_t *plock) {
+    assert(*plock == 1);
+    __sync_lock_release(plock);
+}
+#define spinlock_acquire(lock) _spinlock_acquire(&(lock))
+#define spinlock_release(lock) _spinlock_release(&(lock))
 
 
 #endif  /* _STM_ATOMIC_H */

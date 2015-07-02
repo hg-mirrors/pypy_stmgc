@@ -17,6 +17,9 @@
 #include "stm/marker.h"
 #include "stm/rewind_setjmp.h"
 #include "stm/finalizer.h"
+#include "stm/locks.h"
+#include "stm/detach.h"
+#include "stm/queue.h"
 
 #include "stm/misc.c"
 #include "stm/list.c"
@@ -40,3 +43,5 @@
 #include "stm/rewind_setjmp.c"
 #include "stm/finalizer.c"
 #include "stm/hashtable.c"
+#include "stm/queue.c"
+#include "stm/detach.c"
