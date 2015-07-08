@@ -32,3 +32,6 @@ call it 'gcc-seg-gs', and put it in the $PATH:
     #!/bin/bash
     BUILD=/..../build      # <- insert full path
     exec $BUILD/gcc/xgcc -B $BUILD/gcc "$@"
+
+GCC has a bug, likely in the "ivopts" optimization, that can be worked
+around by specifying "-fno-ivopts".
