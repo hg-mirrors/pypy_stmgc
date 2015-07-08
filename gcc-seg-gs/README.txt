@@ -31,7 +31,8 @@ call it 'gcc-seg-gs', and put it in the $PATH:
 
     #!/bin/bash
     BUILD=/..../build      # <- insert full path
-    exec $BUILD/gcc/xgcc -B $BUILD/gcc "$@"
+    exec $BUILD/gcc/xgcc -B $BUILD/gcc -fno-ivopts "$@"
 
-GCC has a bug, likely in the "ivopts" optimization, that can be worked
-around by specifying "-fno-ivopts".
+So far, GCC has a bug in the presence of multiple address spaces, likely
+in the "ivopts" optimization.  It can be worked around by specifying
+"-fno-ivopts" like above.  https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66768
