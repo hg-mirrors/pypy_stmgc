@@ -120,14 +120,37 @@ Index: gcc/config/i386/i386.c
        x = XEXP (x, 0);
        /* Avoid (%rip) for call operands.  */
        if (CONSTANT_ADDRESS_P (x) && code == 'P'
-@@ -51816,6 +51830,130 @@
+@@ -26015,6 +26029,7 @@
+   for (i = recog_data.n_operands - 1; i >= 0; --i)
+     if (MEM_P (recog_data.operand[i]))
+       {
++	int addr_space;
+         constrain_operands_cached (insn, reload_completed);
+         if (which_alternative != -1)
+ 	  {
+@@ -26030,7 +26045,13 @@
+ 	    if (*constraints == 'X')
+ 	      continue;
+ 	  }
+-	return memory_address_length (XEXP (recog_data.operand[i], 0), false);
++
++	/**** <AR> ****/
++	addr_space = MEM_ADDR_SPACE(recog_data.operand[i]);
++	/* account for one byte segment prefix for SEG_FS/SEG_GS addr spaces */
++	return (addr_space == ADDR_SPACE_GENERIC ? 0 : 1)
++	/**** </AR> ****/
++	  + memory_address_length (XEXP (recog_data.operand[i], 0), false);
+       }
+   return 0;
+ }
+@@ -51816,6 +51837,130 @@
  }
  #endif
  
 +
 +/***** <AR> *****/
 +
-+/*** GS segment register addressing mode ***/
++/*** FS/GS segment register addressing mode ***/
 +
 +static machine_mode
 +ix86_addr_space_pointer_mode (addr_space_t as)
@@ -182,7 +205,7 @@ Index: gcc/config/i386/i386.c
 +
 +/* The default, SEG_FS and SEG_GS address spaces are all "subsets" of
 +   each other. */
-+bool static 
++bool static
 +ix86_addr_space_subset_p (addr_space_t subset, addr_space_t superset)
 +{
 +  gcc_assert (subset == ADDR_SPACE_GENERIC ||
