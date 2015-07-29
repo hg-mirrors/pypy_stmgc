@@ -1345,6 +1345,9 @@ static void _core_commit_transaction(bool external)
         write_fence();
         assert(_stm_detached_inevitable_from_thread == -1);
         _stm_detached_inevitable_from_thread = 0;
+    } else {
+        /* we certainly are not detached right now */
+        assert(_stm_detached_inevitable_from_thread != (intptr_t)STM_SEGMENT->running_thread);
     }
 
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
