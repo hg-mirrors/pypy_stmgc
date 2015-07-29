@@ -77,34 +77,25 @@ def get_psegment(segment_id, field=''):
         '((struct stm_priv_segment_info_s *)(stm_object_pages+%d))%s'
         % (get_segment_size() * segment_id + get_psegment_ofs(), field))
 
-def thread_to_segment_id(thread_id):
-    base = int_(gdb.parse_and_eval('stm_object_pages'))
+def current_segment():
+    mytl = int_(gdb.parse_and_eval('&stm_thread_local'))
     for j in range(1, get_nb_segments() + 1):
-        #ti = get_psegment(j, '->pub.running_thread->creating_pthread[0]')
-        ti = get_psegment(j, '->running_pthread')
-        if int_(ti) == thread_id:
+        tl = get_psegment(j, '->pub.running_thread')
+        if int_(tl) == mytl:
             ts = get_psegment(j, '->transaction_state')
             if int_(ts) == 0:
                 print >> sys.stderr, "note: transaction_state == 0"
             return j
-    raise Exception("thread not found: %r" % (thread_id,))
+    raise Exception("no segment seems to be running this thread")
 
 def interactive_segment_base(thread=None):
     if thread is None:
-        s = gdb.execute('info threads', False, True)
-        i = s.find('\n* ')
-        assert i >= 0
-        fields = s[i+2:].split()
-        assert fields[1] == 'Thread'
-        assert fields[2].startswith('0x')
-        thread_id = int(fields[2], 16)
-        segment_id = thread_to_segment_id(thread_id)
+        segment_id = current_segment()
     elif thread.type.code == gdb.TYPE_CODE_INT:
         if 0 <= int_(thread) < 256:
             segment_id = int_(thread)
         else:
-            thread_id = int_(thread)
-            segment_id = thread_to_segment_id(thread_id)
+            raise TypeError("segment num not in range")
     else:
         raise TypeError("'thread' argument must be an int or not given")
     return get_segment_base(segment_id)
