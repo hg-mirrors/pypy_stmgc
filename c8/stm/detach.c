@@ -124,6 +124,7 @@ void _stm_reattach_transaction(intptr_t self)
 
         assert(tl != old_tl);
 
+        // XXX: not sure if the next line is a good idea
         tl->last_associated_segment_num = remote_seg_num;
         ensure_gs_register(remote_seg_num);
         commit_external_inevitable_transaction();
