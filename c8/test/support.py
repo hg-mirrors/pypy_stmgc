@@ -35,7 +35,6 @@ typedef struct {
 } stm_thread_local_t;
 
 char *stm_object_pages;
-char *stm_file_pages;
 uintptr_t stm_fill_mark_nursery_bytes;
 
 void stm_read(object_t *obj);
