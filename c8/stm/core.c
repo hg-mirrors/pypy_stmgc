@@ -64,7 +64,9 @@ static void import_objects(
         uintptr_t current_page_num = ((uintptr_t)oslice) / 4096;
 
         if (pagenum == -1) {
-            if (get_page_status_in(my_segnum, current_page_num) == PAGE_NO_ACCESS)
+            /* XXX: what about PAGE_READONLY? check that the below line handles
+               this case correctly */
+            if (get_page_status_in(my_segnum, current_page_num) != PAGE_ACCESSIBLE)
                 continue;
         } else if (pagenum != current_page_num) {
             continue;
@@ -87,7 +89,7 @@ static void import_objects(
 
         /* XXX: if the next assert is always true, we should never get a segfault
            in this function at all. So the DEBUG_EXPECT_SEGFAULT is correct. */
-        assert((get_page_status_in(my_segnum, current_page_num) != PAGE_NO_ACCESS));
+        assert((get_page_status_in(my_segnum, current_page_num) == PAGE_ACCESSIBLE));
 
         /* dprintf(("import slice seg=%d obj=%p off=%lu sz=%d pg=%lu\n", */
         /*          from_segnum, obj, SLICE_OFFSET(undo->slice), */
