@@ -117,6 +117,7 @@ bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 bool _stm_was_written_card(object_t *obj);
 uint8_t _stm_get_page_status(uintptr_t pagenum);
+bool _stm_get_hint_modified_recently(uintptr_t pagenum);
 
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);

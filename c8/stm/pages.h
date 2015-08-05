@@ -33,6 +33,9 @@
 
 #define PAGE_FLAG_START   END_NURSERY_PAGE
 #define PAGE_FLAG_END     NB_PAGES
+#if PAGE_FLAG_END - PAGE_FLAG_START != NB_SHARED_PAGES
+#   error "ensure this"
+#endif
 
 struct page_shared_s {
 #if NB_SEGMENTS <= 4
@@ -57,7 +60,14 @@ enum {
     PAGE_ACCESSIBLE = 2
 };
 
-static struct page_shared_s pages_status[PAGE_FLAG_END - PAGE_FLAG_START];
+static struct page_shared_s pages_status[NB_SHARED_PAGES];
+
+/* a way to track recently modified pages so that we do
+   not attempt to reshare them in major GCs */
+static uint8_t page_modified_recently[NB_SHARED_PAGES / 8];
+#if NB_SHARED_PAGES % 8 != 0
+#   error "ensure this"
+#endif
 
 static void page_mark_accessible(long segnum, uintptr_t pagenum);
 static void page_mark_inaccessible(long segnum, uintptr_t pagenum);
@@ -67,6 +77,22 @@ static bool is_major_collection_requested(void);
 static void force_major_collection_request(void);
 static void reset_major_collection_requested(void);
 
+static inline void set_hint_modified_recently(uintptr_t pagenum)
+{
+    pagenum = pagenum - PAGE_FLAG_START;
+    page_modified_recently[pagenum / 8] |= (1 << (pagenum % 8));
+}
+
+static inline bool get_hint_modified_recently(uintptr_t pagenum)
+{
+    pagenum = pagenum - PAGE_FLAG_START;
+    return !!(page_modified_recently[pagenum / 8] & (1 << (pagenum % 8)));
+}
+
+static void clear_hint_privatized(void)
+{
+    memset(page_modified_recently, 0, NB_SHARED_PAGES / 8);
+}
 
 static inline char *get_virtual_page(long segnum, uintptr_t pagenum)
 {

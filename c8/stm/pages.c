@@ -74,6 +74,7 @@ static void page_mark_accessible(long segnum, uintptr_t pagenum)
 
     /* set this flag *after* we un-protected it, because XXX later */
     set_page_status_in(segnum, pagenum, PAGE_ACCESSIBLE);
+    set_hint_modified_recently(pagenum);
 }
 
 __attribute__((unused))

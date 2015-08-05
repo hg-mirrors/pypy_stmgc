@@ -67,6 +67,11 @@ uint8_t _stm_get_page_status(uintptr_t pagenum)
     return res;
 }
 
+bool _stm_get_hint_modified_recently(uintptr_t pagenum)
+{
+    return get_hint_modified_recently(pagenum);
+}
+
 long _stm_count_modified_old_objects(void)
 {
     assert(STM_PSEGMENT->modified_old_objects);

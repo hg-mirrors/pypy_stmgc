@@ -811,6 +811,9 @@ static void major_collection_now_at_safe_point(void)
     /* cleanup */
     clean_up_segment_lists();
 
+    /* clear privatized hints (XXX: only do ever 2nd major GC?) */
+    clear_hint_privatized();
+
     /* sweeping */
     sweep_large_objects();
     sweep_small_objects();
