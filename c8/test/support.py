@@ -77,7 +77,7 @@ long stm_can_move(object_t *obj);
 char *_stm_real_address(object_t *o);
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
-bool _stm_is_accessible_page(uintptr_t pagenum);
+uint8_t _stm_get_page_status(uintptr_t pagenum);
 
 void clear_jmpbuf(stm_thread_local_t *tl);
 long _check_start_transaction(stm_thread_local_t *tl);
@@ -590,6 +590,10 @@ CARD_MARKED = lib._STM_CARD_MARKED
 CARD_MARKED_OLD = lib._stm_get_transaction_read_version
 lib.stm_hashtable_entry_userdata = 421418
 
+PAGE_NO_ACCESS = 0
+PAGE_READONLY = 1
+PAGE_ACCESSIBLE = 2
+
 
 class Conflict(Exception):
     pass
@@ -751,8 +755,11 @@ def stm_major_collect():
         raise Conflict()
     return res
 
+def stm_get_page_status(pagenum):
+    return lib._stm_get_page_status(pagenum)
+
 def stm_is_accessible_page(pagenum):
-    return lib._stm_is_accessible_page(pagenum)
+    return stm_get_page_status() == PAGE_ACCESSIBLE
 
 def stm_get_obj_size(o):
     return lib.stmcb_size_rounded_up(stm_get_real_address(o))
