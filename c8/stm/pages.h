@@ -22,6 +22,13 @@
    - write: SIGSEGV -> privatize
    - validate: check if readonly page affected
                -> mprotect and mark NO_ACCESS
+  OR: since validate should not change page mappings, make all
+      other segments NO_ACCESS if we commit to a page that is
+      readonly somewhere else. Or actually, on write (SIGSEGV)
+      to a readonly page, do this. However, I'm not sure if we
+      are really allowed to mprotect pages in other segments
+      and thereby may trigger SIGSEGV in those segments concurrently
+      (is mprotect atomic?).
 */
 
 #define PAGE_FLAG_START   END_NURSERY_PAGE
