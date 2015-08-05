@@ -80,10 +80,10 @@ static void reset_major_collection_requested(void);
 static inline void set_hint_modified_recently(uintptr_t pagenum)
 {
     pagenum = pagenum - PAGE_FLAG_START;
-    // page_modified_recently[pagenum / 8] |= (1 << (pagenum % 8));
-    /* we depend on the information to be accurate in major GCs, so
-       make sure we do it atomically (XXX): */
-    __sync_fetch_and_or(&page_modified_recently[pagenum / 8], 1 << (pagenum % 8));
+    page_modified_recently[pagenum / 8] |= (1 << (pagenum % 8));
+    /* /\* we depend on the information to be accurate in major GCs, so */
+    /*    make sure we do it atomically (XXX): *\/ */
+    /* __sync_fetch_and_or(&page_modified_recently[pagenum / 8], 1 << (pagenum % 8)); */
 }
 
 static inline bool get_hint_modified_recently(uintptr_t pagenum)

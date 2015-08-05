@@ -1784,7 +1784,7 @@ static void synchronize_objects_flush(void)
             if (i == myself)
                 continue;
 
-            if (get_page_status_in(i, page) != PAGE_NO_ACCESS) {
+            if (get_page_status_in(i, page) == PAGE_ACCESSIBLE) {
                 /* shared or private, but never segfault */
                 char *dst = REAL_ADDRESS(get_segment_base(i), frag);
                 dprintf(("-> flush %p to seg %lu, sz=%lu\n", frag, i, frag_size));

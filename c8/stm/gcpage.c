@@ -218,7 +218,7 @@ static void major_collection_if_requested(void)
 
 static void page_check_and_reshare(uintptr_t pagenum)
 {
-    if (!get_hint_modified_recently(pagenum))
+    if (get_hint_modified_recently(pagenum))
         return;
 
     /* check if page is accessible *only* in segment 0 */
@@ -235,6 +235,38 @@ static void page_check_and_reshare(uintptr_t pagenum)
 
 static void major_reshare_pages(void)
 {
+    long i;
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        /* ignore pages with overflow objs */
+        struct list_s *lst = get_priv_segment(i)->large_overflow_objects;
+        if (lst != NULL) {
+            LIST_FOREACH_R(lst, object_t*,
+                 {
+                     object_t *obj = item;
+                     uintptr_t pagenum = (uintptr_t)obj / 4096UL;
+                     if (is_small_uniform(obj)) {
+                         set_hint_modified_recently(pagenum);
+                         continue;
+                     }
+                     struct object_s *realobj = (struct object_s *)get_virtual_address(i, obj);
+                     ssize_t obj_size = stmcb_size_rounded_up(realobj);
+                     assert(obj_size >= 16);
+                     uintptr_t start = (uintptr_t)obj;
+                     uintptr_t first_page = start / 4096UL;
+                     uintptr_t end = start + obj_size;
+                     uintptr_t last_page = (end - 1) / 4096UL;
+
+                     for (; first_page <= last_page; first_page++) {
+                         set_hint_modified_recently(first_page);
+                     }
+                 });
+        }
+    }
+
+
+    /* msync(stm_object_pages + END_NURSERY_PAGE*4096, */
+    /*       NB_SHARED_PAGES*4096, */
+    /*       MS_INVALIDATE|MS_SYNC); */
     /* Now loop over all pages and re-share them if possible. */
     uintptr_t pagenum, endpagenum;
     pagenum = END_NURSERY_PAGE;   /* starts after the nursery */
@@ -459,6 +491,9 @@ static void mark_visit_from_modified_objects(void)
                 continue;
             object_t *obj = modified->object;
             struct object_s *dst = (struct object_s*)REAL_ADDRESS(base, obj);
+
+            /* make sure we don't reshare its page */
+            set_hint_modified_recently((uintptr_t)obj / 4096);
 
             if (!(dst->stm_flags & GCFLAG_VISITED)) {
                 LIST_APPEND(uniques, obj);
@@ -832,8 +867,6 @@ static void major_collection_now_at_safe_point(void)
 
     DEBUG_EXPECT_SEGFAULT(false);
 
-    major_reshare_pages();
-
     /* marking */
     LIST_CREATE(marked_objects_to_trace);
     mark_visit_from_modified_objects();
@@ -862,6 +895,9 @@ static void major_collection_now_at_safe_point(void)
     /* sweeping */
     sweep_large_objects();
     sweep_small_objects();
+
+    /* *after* marking modified objects, we may try to reshare pages */
+    major_reshare_pages();
 
     dprintf((" | used after collection:  %ld\n",
              (long)pages_ctl.total_allocated));
