@@ -116,7 +116,7 @@ uint8_t _stm_get_card_value(object_t *obj, long idx);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 bool _stm_was_written_card(object_t *obj);
-bool _stm_is_accessible_page(uintptr_t pagenum);
+uint8_t _stm_get_page_status(uintptr_t pagenum);
 
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
