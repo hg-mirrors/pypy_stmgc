@@ -96,3 +96,6 @@ class TestBasic(BaseTest):
         self.start_transaction()
         assert stm_get_page_status(p1) == PAGE_READONLY
         assert stm_get_page_status(p2) == PAGE_READONLY
+
+        stm_set_char(lp1, 'a')
+        stm_set_char(lp2, 'b')

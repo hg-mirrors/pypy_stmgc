@@ -63,12 +63,28 @@ static void reset_major_collection_requested(void)
 
 static void page_mark_accessible(long segnum, uintptr_t pagenum)
 {
-    assert(segnum==0 || get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS);
+    uint8_t page_status = get_page_status_in(segnum, pagenum);
+
+    assert(segnum==0
+           || page_status == PAGE_NO_ACCESS
+           || page_status == PAGE_READONLY);
+
     dprintf(("page_mark_accessible(%lu) in seg:%ld\n", pagenum, segnum));
 
-    if (mprotect(get_virtual_page(segnum, pagenum), 4096, PROT_READ | PROT_WRITE)) {
-        perror("mprotect");
-        stm_fatalerror("mprotect failed! Consider running 'sysctl vm.max_map_count=16777216'");
+    if (page_status == PAGE_NO_ACCESS) {
+        if (mprotect(get_virtual_page(segnum, pagenum), 4096, PROT_READ | PROT_WRITE)) {
+            perror("mprotect");
+            stm_fatalerror("mprotect failed! Consider running 'sysctl vm.max_map_count=16777216'");
+        }
+    } else {
+        /* PAGE_READONLY requires renewing the mmap to MAP_PRIVATE */
+        char *addr = get_virtual_page(segnum, pagenum);
+        char *res = mmap(addr, 4096UL,
+                         PROT_READ|PROT_WRITE,
+                         MAP_PRIVATE|MAP_NORESERVE|MAP_ANONYMOUS|MAP_FIXED,
+                         -1, 0);
+        if (res == MAP_FAILED)
+            stm_fatalerror("%s failed (mmap): %m", "page_mark_accessible");
     }
 
     /* set this flag *after* we un-protected it, because XXX later */

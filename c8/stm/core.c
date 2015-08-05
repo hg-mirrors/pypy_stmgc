@@ -167,7 +167,21 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     long i;
     int my_segnum = STM_SEGMENT->segment_num;
 
-    assert(get_page_status_in(my_segnum, pagenum) == PAGE_NO_ACCESS);
+    uint8_t page_status = get_page_status_in(my_segnum, pagenum);
+    assert(page_status == PAGE_NO_ACCESS
+           || page_status == PAGE_READONLY);
+
+    /* make our page write-ready */
+    page_mark_accessible(my_segnum, pagenum);
+
+    if (page_status == PAGE_READONLY) {
+        /* copy from seg0 (XXX: can we depend on copy-on-write
+           of the kernel somehow?) */
+        pagecopy(get_virtual_page(my_segnum, pagenum),
+                 get_virtual_page(0, pagenum));
+        release_all_privatization_locks();
+        return;
+    }
 
     /* find who has the most recent revision of our page */
     int copy_from_segnum = -1;
@@ -185,9 +199,6 @@ static void handle_segfault_in_page(uintptr_t pagenum)
         }
     }
     OPT_ASSERT(copy_from_segnum != my_segnum);
-
-    /* make our page write-ready */
-    page_mark_accessible(my_segnum, pagenum);
 
     /* account for this page now: XXX */
     /* increment_total_allocated(4096); */
@@ -972,8 +983,6 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
                            false);      /* do_missing_cards */
         }
 
-        DEBUG_EXPECT_SEGFAULT(false);
-
         /* don't remove WRITE_BARRIER, but add CARDS_SET */
         obj->stm_flags |= (GCFLAG_CARDS_SET | GCFLAG_WB_EXECUTED);
         LIST_APPEND(STM_PSEGMENT->old_objects_with_cards_set, obj);
@@ -1004,13 +1013,10 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
                            false);      /* do_missing_cards */
         }
 
-        DEBUG_EXPECT_SEGFAULT(false);
         /* remove the WRITE_BARRIER flag and add WB_EXECUTED */
         obj->stm_flags &= ~(GCFLAG_WRITE_BARRIER | GCFLAG_CARDS_SET);
         obj->stm_flags |= GCFLAG_WB_EXECUTED;
     }
-
-    DEBUG_EXPECT_SEGFAULT(true);
 }
 
 
