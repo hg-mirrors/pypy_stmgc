@@ -28,22 +28,26 @@
 #define PAGE_FLAG_END     NB_PAGES
 
 struct page_shared_s {
-#if NB_SEGMENTS <= 8
+#if NB_SEGMENTS <= 4
     uint8_t by_segment;
-#elif NB_SEGMENTS <= 16
+#elif NB_SEGMENTS <= 8
     uint16_t by_segment;
-#elif NB_SEGMENTS <= 32
+#elif NB_SEGMENTS <= 16
     uint32_t by_segment;
-#elif NB_SEGMENTS <= 64
+#elif NB_SEGMENTS <= 32
     uint64_t by_segment;
 #else
-#   error "NB_SEGMENTS > 64 not supported right now"
+#   error "NB_SEGMENTS > 32 not supported right now"
 #endif
 };
 
 enum {
+    /* page is inaccessible in segment, SIGSEGV on access */
     PAGE_NO_ACCESS = 0,
-    PAGE_ACCESSIBLE = 1
+    /* page is shared with seg0, SIGSEGV on write */
+    PAGE_READONLY = 1,
+    /* page is private and fully accessible */
+    PAGE_ACCESSIBLE = 2
 };
 
 static struct page_shared_s pages_status[PAGE_FLAG_END - PAGE_FLAG_START];
@@ -68,7 +72,7 @@ static inline char *get_virtual_address(long segnum, object_t *obj)
     return REAL_ADDRESS(get_segment_base(segnum), obj);
 }
 
-static inline bool get_page_status_in(long segnum, uintptr_t pagenum)
+static inline uint8_t get_page_status_in(long segnum, uintptr_t pagenum)
 {
     /* reading page status requires "read"-lock, which is defined as
        "any segment has the privatization_lock".  This is enough to
@@ -81,19 +85,24 @@ static inline bool get_page_status_in(long segnum, uintptr_t pagenum)
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_status[pagenum - PAGE_FLAG_START];
 
-    return (ps->by_segment >> segnum) & 1;
+    return (ps->by_segment >> (segnum * 2)) & 2;
 }
 
 static inline void set_page_status_in(long segnum, uintptr_t pagenum,
-                                      bool status)
+                                      uint8_t status)
 {
+    OPT_ASSERT(status <= PAGE_ACCESSIBLE);
+
     /* writing page status requires "write"-lock: */
     assert(all_privatization_locks_acquired());
 
-    OPT_ASSERT(segnum < 8 * sizeof(struct page_shared_s));
+    int seg_shift = segnum * 2;
+    OPT_ASSERT(segnum < 4 * sizeof(struct page_shared_s));
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_status[pagenum - PAGE_FLAG_START];
 
     assert(status != get_page_status_in(segnum, pagenum));
-    __sync_fetch_and_xor(&ps->by_segment, 1UL << segnum); /* invert the flag */
+    /* protected by "write"-lock: */
+    ps->by_segment &= ~(3UL << seg_shift); /* clear */
+    ps->by_segment |= status << seg_shift; /* set */
 }
