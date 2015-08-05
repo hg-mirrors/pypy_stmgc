@@ -573,7 +573,7 @@ long current_segment_num(void)
                     ],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0', '-Wall'], #, '-ferror-limit=5'],
+                 extra_compile_args=['-g', '-O0', '-Werror', '-Wall'], #, '-ferror-limit=5'],
      extra_link_args=['-g', '-lrt'],
      force_generic_engine=True)
 
