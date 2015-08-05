@@ -78,6 +78,7 @@ char *_stm_real_address(object_t *o);
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
 uint8_t _stm_get_page_status(uintptr_t pagenum);
+bool _stm_get_hint_modified_recently(uintptr_t pagenum);
 
 void clear_jmpbuf(stm_thread_local_t *tl);
 long _check_start_transaction(stm_thread_local_t *tl);
@@ -761,6 +762,9 @@ def stm_get_page_status(pagenum):
 def stm_is_accessible_page(pagenum):
     return stm_get_page_status() == PAGE_ACCESSIBLE
 
+def stm_get_hint_modified_recently(pagenum):
+    return lib._stm_get_hint_modified_recently(pagenum)
+
 def stm_get_obj_size(o):
     return lib.stmcb_size_rounded_up(stm_get_real_address(o))
 
@@ -902,6 +906,17 @@ class BaseTest(object):
 
     def switch_to_segment(self, seg_num):
         lib._stm_test_switch_segment(seg_num)
+
+    def push_roots(self, os):
+        for o in os:
+            self.push_root(o)
+        self._last_push_all = os
+
+    def pop_roots(self):
+        os = self._last_push_all
+        self._last_push_all = None
+        return [self.pop_root() for _ in reversed(os)]
+
 
     def push_root(self, o):
         assert ffi.typeof(o) == ffi.typeof("object_t *")

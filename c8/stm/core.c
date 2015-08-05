@@ -713,6 +713,7 @@ static void make_bk_slices_for_range(
             NEW_SLICE(slice_off, slice_sz));
         dprintf(("> append slice %p, off=%lu, sz=%lu\n", bk_slice, slice_off, slice_sz));
         release_modification_lock_wr(STM_SEGMENT->segment_num);
+        set_hint_modified_recently((uintptr_t)obj / 4096UL);
 
         slice_off += slice_sz;
     }
