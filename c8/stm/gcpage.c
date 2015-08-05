@@ -216,6 +216,49 @@ static void major_collection_if_requested(void)
 }
 
 
+static void page_check_and_reshare(uintptr_t pagenum)
+{
+    if (!get_hint_modified_recently(pagenum))
+        return;
+
+    /* check if page is accessible *only* in segment 0 */
+    if (get_page_status(pagenum)->by_segment == PAGE_ACCESSIBLE)
+        return;                 /* only accessible in seg0 */
+
+    long i;
+    for (i = 1; i < NB_SEGMENTS; i++){
+        if (get_page_status_in(i, pagenum) == PAGE_ACCESSIBLE) {
+            page_mark_readonly(i, pagenum);
+        }
+    }
+}
+
+static void major_reshare_pages(void)
+{
+    /* Now loop over all pages and re-share them if possible. */
+    uintptr_t pagenum, endpagenum;
+    pagenum = END_NURSERY_PAGE;   /* starts after the nursery */
+    endpagenum = (uninitialized_page_start - stm_object_pages) / 4096UL;
+
+    while (1) {
+        if (UNLIKELY(pagenum == endpagenum)) {
+            /* we reach this point usually twice, because there are
+               more pages after 'uninitialized_page_stop' */
+            if (endpagenum == NB_PAGES)
+                break;   /* done */
+            pagenum = (uninitialized_page_stop - stm_object_pages) / 4096UL;
+            endpagenum = NB_PAGES;
+            continue;
+        }
+
+        page_check_and_reshare(pagenum);
+
+        pagenum++;
+    }
+}
+
+
+
 /************************************************************/
 
 /* objects to trace are traced in the sharing seg0 or in a
@@ -788,6 +831,8 @@ static void major_collection_now_at_safe_point(void)
     acquire_all_privatization_locks();
 
     DEBUG_EXPECT_SEGFAULT(false);
+
+    major_reshare_pages();
 
     /* marking */
     LIST_CREATE(marked_objects_to_trace);

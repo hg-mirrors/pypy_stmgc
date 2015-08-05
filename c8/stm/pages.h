@@ -80,7 +80,10 @@ static void reset_major_collection_requested(void);
 static inline void set_hint_modified_recently(uintptr_t pagenum)
 {
     pagenum = pagenum - PAGE_FLAG_START;
-    page_modified_recently[pagenum / 8] |= (1 << (pagenum % 8));
+    // page_modified_recently[pagenum / 8] |= (1 << (pagenum % 8));
+    /* we depend on the information to be accurate in major GCs, so
+       make sure we do it atomically (XXX): */
+    __sync_fetch_and_or(&page_modified_recently[pagenum / 8], 1 << (pagenum % 8));
 }
 
 static inline bool get_hint_modified_recently(uintptr_t pagenum)
@@ -105,6 +108,11 @@ static inline char *get_virtual_address(long segnum, object_t *obj)
     return REAL_ADDRESS(get_segment_base(segnum), obj);
 }
 
+static inline struct page_shared_s* get_page_status(uintptr_t pagenum)
+{
+    return &pages_status[pagenum - PAGE_FLAG_START];
+}
+
 static inline uint8_t get_page_status_in(long segnum, uintptr_t pagenum)
 {
     /* reading page status requires "read"-lock, which is defined as
@@ -118,7 +126,7 @@ static inline uint8_t get_page_status_in(long segnum, uintptr_t pagenum)
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_status[pagenum - PAGE_FLAG_START];
 
-    return (ps->by_segment >> (segnum * 2)) & 2;
+    return (ps->by_segment >> (segnum * 2)) & 3;
 }
 
 static inline void set_page_status_in(long segnum, uintptr_t pagenum,
@@ -136,6 +144,6 @@ static inline void set_page_status_in(long segnum, uintptr_t pagenum,
 
     assert(status != get_page_status_in(segnum, pagenum));
     /* protected by "write"-lock: */
-    ps->by_segment &= ~(3UL << seg_shift); /* clear */
+    ps->by_segment &= ~(0b11UL << seg_shift); /* clear */
     ps->by_segment |= status << seg_shift; /* set */
 }
