@@ -239,6 +239,7 @@ static void free_cle(struct stm_commit_log_entry_s *e);
 
 
 extern char *stm_object_pages;
+extern int stm_object_pages_fd;
 extern long _stm_segment_nb_pages;
 extern int _stm_nb_segments;
 extern int _stm_psegment_ofs;

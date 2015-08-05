@@ -133,7 +133,7 @@ void _stm_largemalloc_sweep(void);
 
 
 char *stm_object_pages;
-char *stm_file_pages;
+int stm_object_pages_fd;
 object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
 bool (*_stm_smallmalloc_keep)(char *data);
 void _stm_smallmalloc_sweep_test(void);

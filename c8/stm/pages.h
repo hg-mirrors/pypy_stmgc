@@ -14,6 +14,14 @@
   a major GC first validates all segments (incl. the extra seg.),
   then re-maps all PRIVATE, unmodified pages to the SHARED (unmodified)
   page. Thus, we get "free" copy-on-write supported by the kernel.
+
+  This probably requires the introduction of a read-only state for
+  pages in segments. They are safe to read from, but as soon as we
+  modify them, or we pull a change from the CL into that page, we
+  need to privatize the page or make it NO_ACCESS:
+   - write: SIGSEGV -> privatize
+   - validate: check if readonly page affected
+               -> mprotect and mark NO_ACCESS
 */
 
 #define PAGE_FLAG_START   END_NURSERY_PAGE
