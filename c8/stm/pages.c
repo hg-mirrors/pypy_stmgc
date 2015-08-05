@@ -66,7 +66,6 @@ static void page_mark_accessible(long segnum, uintptr_t pagenum)
     assert(segnum==0 || get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS);
     dprintf(("page_mark_accessible(%lu) in seg:%ld\n", pagenum, segnum));
 
-    dprintf(("RW(seg%ld, page%lu)\n", segnum, pagenum));
     if (mprotect(get_virtual_page(segnum, pagenum), 4096, PROT_READ | PROT_WRITE)) {
         perror("mprotect");
         stm_fatalerror("mprotect failed! Consider running 'sysctl vm.max_map_count=16777216'");
@@ -75,9 +74,9 @@ static void page_mark_accessible(long segnum, uintptr_t pagenum)
     /* set this flag *after* we un-protected it, because XXX later */
     set_page_status_in(segnum, pagenum, PAGE_ACCESSIBLE);
     set_hint_modified_recently(pagenum);
+    dprintf(("RW(seg%ld, page%lu)\n", segnum, pagenum));
 }
 
-__attribute__((unused))
 static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
 {
     assert(segnum==0 || get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE);
@@ -92,4 +91,28 @@ static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
         perror("mprotect");
         stm_fatalerror("mprotect failed! Consider running 'sysctl vm.max_map_count=16777216'");
     }
+}
+
+
+static void page_mark_readonly(long segnum, uintptr_t pagenum)
+{
+    /* mark readonly and share with seg0 */
+    assert(_has_mutex());
+    assert(segnum > 0 && get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE);
+    dprintf(("page_mark_readonly(%lu) in seg:%ld\n", pagenum, segnum));
+
+    char *virt_addr = get_virtual_page(segnum, pagenum);
+    madvise(virt_addr, 4096UL, MADV_DONTNEED);
+    /* XXX: does it matter if SHARED or PRIVATE? */
+    char *res = mmap(virt_addr, 4096UL,
+                     PROT_READ,
+                     MAP_SHARED|MAP_FIXED|MAP_NORESERVE,
+                     stm_object_pages_fd,
+                     (pagenum - END_NURSERY_PAGE) * 4096UL);
+    if (res == MAP_FAILED)
+        stm_fatalerror("%s failed (mmap): %m", "page_mark_readonly");
+
+    set_page_status_in(segnum, pagenum, PAGE_READONLY);
+
+    dprintf(("RO(seg%ld, page%lu)\n", segnum, pagenum));
 }

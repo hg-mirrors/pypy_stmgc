@@ -66,3 +66,33 @@ class TestBasic(BaseTest):
         stm_set_char(lp2, 'a')
         assert stm_get_hint_modified_recently(p1)
         assert stm_get_hint_modified_recently(p2)
+
+    def test_resharing(self):
+        self.start_transaction()
+        lp1 = stm_allocate(16)
+        big = GC_LAST_SMALL_SIZE+64
+        lp2 = stm_allocate(big)
+        self.push_roots([lp1, lp2])
+        stm_minor_collect()
+        lp1, lp2 = self.pop_roots()
+        self.push_roots([lp1, lp2])
+        self.commit_transaction()
+        p1 = stm_get_obj_pages(lp1)[0]
+        p2 = stm_get_obj_pages(lp2)[0]
+        self.switch(1)
+
+        self.start_transaction()
+        # NO_ACCESS stays NO_ACCESS
+        assert stm_get_page_status(p1) == PAGE_NO_ACCESS
+        assert stm_get_page_status(p2) == PAGE_NO_ACCESS
+        stm_major_collect()
+        stm_major_collect()
+        stm_major_collect()
+        assert stm_get_page_status(p1) == PAGE_NO_ACCESS
+        assert stm_get_page_status(p2) == PAGE_NO_ACCESS
+
+        self.switch(0)
+        # ACCESSIBLE becomes READONLY after 2 major gcs
+        self.start_transaction()
+        assert stm_get_page_status(p1) == PAGE_READONLY
+        assert stm_get_page_status(p2) == PAGE_READONLY
