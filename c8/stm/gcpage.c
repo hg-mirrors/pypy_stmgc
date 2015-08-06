@@ -471,6 +471,19 @@ static void assert_obj_accessible_in(long segnum, object_t *obj)
 #endif
 }
 
+static void hint_whole_obj_modified_recently(long segnum, object_t *obj)
+{
+    uintptr_t page = (uintptr_t)obj / 4096UL;
+
+    struct object_s *realobj =
+        (struct object_s *)REAL_ADDRESS(get_segment_base(segnum), obj);
+    size_t obj_size = stmcb_size_rounded_up(realobj);
+    uintptr_t count = obj_size / 4096UL + 1;
+    while (count--> 0) {
+        set_hint_modified_recently(page);
+        page++;
+    }
+}
 
 
 static void mark_visit_from_modified_objects(void)
@@ -500,10 +513,6 @@ static void mark_visit_from_modified_objects(void)
             object_t *obj = modified->object;
             struct object_s *dst = (struct object_s*)REAL_ADDRESS(base, obj);
 
-            /* make sure we don't reshare the slice's page */
-            set_hint_modified_recently(
-                ((uintptr_t)obj + SLICE_OFFSET(modified->slice)) / 4096);
-
             if (!(dst->stm_flags & GCFLAG_VISITED)) {
                 LIST_APPEND(uniques, obj);
                 dst->stm_flags |= GCFLAG_VISITED;
@@ -520,9 +529,9 @@ static void mark_visit_from_modified_objects(void)
                   This is because we create a backup of the whole obj
                   and thus make all pages accessible. */
                assert_obj_accessible_in(i, item);
-
-               /* make sure we also don't reshare the obj-header-page */
-               set_hint_modified_recently((uintptr_t)item / 4096);
+               /* the whole obj may be traced, not only parts actually in
+                  modified_old_objects */
+               hint_whole_obj_modified_recently(i, item);
 
                assert(!is_overflow_obj_safe(get_priv_segment(i), item)); /* should never be in that list */
 
