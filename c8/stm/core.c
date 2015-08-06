@@ -158,7 +158,6 @@ static void handle_segfault_in_page(uintptr_t pagenum)
 {
     /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
        and validates to newest revision */
-
     dprintf(("handle_segfault_in_page(%lu), seg %d\n", pagenum, STM_SEGMENT->segment_num));
 
     /* XXX: bad, but no deadlocks: */
@@ -179,6 +178,16 @@ static void handle_segfault_in_page(uintptr_t pagenum)
            of the kernel somehow?) */
         pagecopy(get_virtual_page(my_segnum, pagenum),
                  get_virtual_page(0, pagenum));
+
+        /* make READONLY pages in other segments NO_ACCESS */
+        for (i = 1; i < NB_SEGMENTS; i++) {
+            if (i == my_segnum)
+                continue;
+
+            if (get_page_status_in(i, pagenum) == PAGE_READONLY)
+                page_mark_inaccessible(i, pagenum);
+        }
+
         release_all_privatization_locks();
         return;
     }
@@ -724,7 +733,6 @@ static void make_bk_slices_for_range(
             NEW_SLICE(slice_off, slice_sz));
         dprintf(("> append slice %p, off=%lu, sz=%lu\n", bk_slice, slice_off, slice_sz));
         release_modification_lock_wr(STM_SEGMENT->segment_num);
-        set_hint_modified_recently((uintptr_t)obj / 4096UL);
 
         slice_off += slice_sz;
     }
@@ -931,17 +939,33 @@ static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
         end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
     }
 
+    dprintf(("touch_all_pages_of_obj(%p, %lu): %ld-%ld\n",
+             obj, obj_size, first_page, end_page));
+
     acquire_privatization_lock(STM_SEGMENT->segment_num);
     uintptr_t page;
     for (page = first_page; page <= end_page; page++) {
-        if (get_page_status_in(my_segnum, page) == PAGE_NO_ACCESS) {
+        set_hint_modified_recently(page);
+
+        if (get_page_status_in(my_segnum, page) != PAGE_ACCESSIBLE) {
             release_privatization_lock(STM_SEGMENT->segment_num);
             volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
-            *dummy;            /* force segfault */
+            *dummy = *dummy;            /* force segfault (incl. writing) */
+
             acquire_privatization_lock(STM_SEGMENT->segment_num);
         }
     }
     release_privatization_lock(STM_SEGMENT->segment_num);
+
+#ifndef NDEBUG
+    acquire_privatization_lock(STM_SEGMENT->segment_num);
+    for (page = first_page; page <= end_page; page++) {
+        if (get_page_status_in(my_segnum, page) != PAGE_ACCESSIBLE)
+            abort();
+    }
+    release_privatization_lock(STM_SEGMENT->segment_num);
+
+#endif
 }
 
 static void write_slowpath_common(object_t *obj, bool mark_card)
@@ -983,6 +1007,8 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
                            false);      /* do_missing_cards */
         }
 
+        DEBUG_EXPECT_SEGFAULT(false);
+
         /* don't remove WRITE_BARRIER, but add CARDS_SET */
         obj->stm_flags |= (GCFLAG_CARDS_SET | GCFLAG_WB_EXECUTED);
         LIST_APPEND(STM_PSEGMENT->old_objects_with_cards_set, obj);
@@ -1013,10 +1039,13 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
                            false);      /* do_missing_cards */
         }
 
+        DEBUG_EXPECT_SEGFAULT(false);
         /* remove the WRITE_BARRIER flag and add WB_EXECUTED */
         obj->stm_flags &= ~(GCFLAG_WRITE_BARRIER | GCFLAG_CARDS_SET);
         obj->stm_flags |= GCFLAG_WB_EXECUTED;
     }
+
+    DEBUG_EXPECT_SEGFAULT(true);
 }
 
 

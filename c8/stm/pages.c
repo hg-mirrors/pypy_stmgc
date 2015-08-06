@@ -95,7 +95,9 @@ static void page_mark_accessible(long segnum, uintptr_t pagenum)
 
 static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
 {
-    assert(segnum==0 || get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE);
+    assert(segnum==0
+           || get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE
+           || get_page_status_in(segnum, pagenum) == PAGE_READONLY);
     dprintf(("page_mark_inaccessible(%lu) in seg:%ld\n", pagenum, segnum));
 
     set_page_status_in(segnum, pagenum, PAGE_NO_ACCESS);
@@ -122,7 +124,7 @@ static void page_mark_readonly(long segnum, uintptr_t pagenum)
     /* XXX: does it matter if SHARED or PRIVATE? */
     char *res = mmap(virt_addr, 4096UL,
                      PROT_READ,
-                     MAP_SHARED|MAP_FIXED|MAP_NORESERVE,
+                     MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE,
                      stm_object_pages_fd,
                      (pagenum - END_NURSERY_PAGE) * 4096UL);
     if (res == MAP_FAILED)

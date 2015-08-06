@@ -77,19 +77,20 @@ static bool is_major_collection_requested(void);
 static void force_major_collection_request(void);
 static void reset_major_collection_requested(void);
 
-static inline void set_hint_modified_recently(uintptr_t pagenum)
-{
-    pagenum = pagenum - PAGE_FLAG_START;
-    page_modified_recently[pagenum / 8] |= (1 << (pagenum % 8));
-    /* /\* we depend on the information to be accurate in major GCs, so */
-    /*    make sure we do it atomically (XXX): *\/ */
-    /* __sync_fetch_and_or(&page_modified_recently[pagenum / 8], 1 << (pagenum % 8)); */
-}
 
 static inline bool get_hint_modified_recently(uintptr_t pagenum)
 {
     pagenum = pagenum - PAGE_FLAG_START;
-    return !!(page_modified_recently[pagenum / 8] & (1 << (pagenum % 8)));
+    return !!(page_modified_recently[pagenum / 8] & (1UL << (pagenum % 8)));
+}
+
+static inline void set_hint_modified_recently(uintptr_t pagenum)
+{
+    pagenum = pagenum - PAGE_FLAG_START;
+    page_modified_recently[pagenum / 8] |= 1UL << (pagenum % 8);
+    /* /\* we depend on the information to be accurate in major GCs, so */
+    /*    make sure we do it atomically (XXX): *\/ */
+    /* __sync_fetch_and_or(&page_modified_recently[pagenum / 8], 1L << (pagenum % 8)); */
 }
 
 static void clear_hint_privatized(void)
