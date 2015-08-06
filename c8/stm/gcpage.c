@@ -473,21 +473,21 @@ static void assert_obj_accessible_in(long segnum, object_t *obj)
 
 static void hint_whole_obj_modified_recently(long segnum, object_t *obj)
 {
-    uintptr_t page = (uintptr_t)obj / 4096UL;
+    uintptr_t end_page, first_page = ((uintptr_t)obj) / 4096UL;
 
-    if (is_small_uniform(obj)) {
-        set_hint_modified_recently(page);
-        return;
+    if (LIKELY(is_small_uniform(obj))) {
+        end_page = first_page;
+    } else {
+        struct object_s *realobj =
+            (struct object_s *)REAL_ADDRESS(get_segment_base(segnum), obj);
+        size_t obj_size = stmcb_size_rounded_up(realobj);
+
+        end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
     }
 
-    struct object_s *realobj =
-        (struct object_s *)REAL_ADDRESS(get_segment_base(segnum), obj);
-    size_t obj_size = stmcb_size_rounded_up(realobj);
-    uintptr_t count = obj_size / 4096UL + 1;
-    while (count--> 0) {
+    uintptr_t page;
+    for (page = first_page; page <= end_page; page++)
         set_hint_modified_recently(page);
-        page++;
-    }
 }
 
 
