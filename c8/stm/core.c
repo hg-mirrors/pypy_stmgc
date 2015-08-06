@@ -1326,15 +1326,8 @@ static void push_large_overflow_objects_to_other_segments(void)
     synchronize_objects_flush();
     release_privatization_lock(STM_SEGMENT->segment_num);
 
-    /* we can as well clear the list here, since the
-       objects are only useful if the commit succeeds. And
-       we never do a major collection in-between.
-       They should also survive any page privatization happening
-       before the actual commit, since we always do a pagecopy
-       in handle_segfault_in_page() that also copies
-       unknown-to-the-segment/uncommitted things.
-    */
-    list_clear(STM_PSEGMENT->large_overflow_objects);
+    /* don't clear the list yet, as major GC page resharing
+       depends on the list until the real commit */
 }
 
 
@@ -1375,7 +1368,6 @@ static void _core_commit_transaction(bool external)
 
     push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
-
 
     /* before releasing _stm_detached_inevitable_from_thread, perform
        the commit. Otherwise, the same thread whose (inev) transaction we try

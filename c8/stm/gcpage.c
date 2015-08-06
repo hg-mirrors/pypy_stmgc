@@ -475,6 +475,11 @@ static void hint_whole_obj_modified_recently(long segnum, object_t *obj)
 {
     uintptr_t page = (uintptr_t)obj / 4096UL;
 
+    if (is_small_uniform(obj)) {
+        set_hint_modified_recently(page);
+        return;
+    }
+
     struct object_s *realobj =
         (struct object_s *)REAL_ADDRESS(get_segment_base(segnum), obj);
     size_t obj_size = stmcb_size_rounded_up(realobj);
