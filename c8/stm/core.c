@@ -951,7 +951,6 @@ static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
             release_privatization_lock(STM_SEGMENT->segment_num);
             volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
             *dummy = *dummy;            /* force segfault (incl. writing) */
-
             acquire_privatization_lock(STM_SEGMENT->segment_num);
         }
     }
@@ -1444,6 +1443,7 @@ static void reset_modified_from_backup_copies(int segment_num)
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
     assert(modification_lock_check_wrlock(segment_num));
+    DEBUG_EXPECT_SEGFAULT(false);
 
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
     struct list_s *list = pseg->modified_old_objects;
@@ -1471,6 +1471,7 @@ static void reset_modified_from_backup_copies(int segment_num)
     check_all_write_barrier_flags(pseg->pub.segment_base, list);
 
     list_clear(list);
+    DEBUG_EXPECT_SEGFAULT(true);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
