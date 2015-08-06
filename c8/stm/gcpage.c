@@ -218,16 +218,19 @@ static void major_collection_if_requested(void)
 
 static void page_check_and_reshare(uintptr_t pagenum)
 {
+    /* if page was recently modified, do nothing */
     if (get_hint_modified_recently(pagenum))
         return;
 
-    /* check if page is accessible *only* in segment 0 */
-    if (get_page_status(pagenum)->by_segment == PAGE_ACCESSIBLE)
+    /* check if page is accessible *only* in segment 0,
+       then we don't need to do anything (fastpath) */
+    if (get_page_status(pagenum)->by_segment == (PAGE_ACCESSIBLE << 0))
         return;                 /* only accessible in seg0 */
 
     long i;
     for (i = 1; i < NB_SEGMENTS; i++){
         if (get_page_status_in(i, pagenum) == PAGE_ACCESSIBLE) {
+            /* XXX: also do for PAGE_NO_ACCESS */
             page_mark_readonly(i, pagenum);
         }
     }
@@ -263,10 +266,10 @@ static void major_reshare_pages(void)
         }
     }
 
-
-    /* msync(stm_object_pages + END_NURSERY_PAGE*4096, */
-    /*       NB_SHARED_PAGES*4096, */
-    /*       MS_INVALIDATE|MS_SYNC); */
+    /* XXXXXXXXXXXXXXX: necessary? */
+    msync(stm_object_pages + END_NURSERY_PAGE*4096,
+          NB_SHARED_PAGES*4096,
+          MS_SYNC);             /* MS_INVALIDATE| */
     /* Now loop over all pages and re-share them if possible. */
     uintptr_t pagenum, endpagenum;
     pagenum = END_NURSERY_PAGE;   /* starts after the nursery */
@@ -449,6 +452,8 @@ static void assert_obj_accessible_in(long segnum, object_t *obj)
 {
 #ifndef NDEBUG
     uintptr_t page = (uintptr_t)obj / 4096UL;
+
+    /* header must even be writable! */
     assert(get_page_status_in(segnum, page) == PAGE_ACCESSIBLE);
 
     struct object_s *realobj =
@@ -457,7 +462,7 @@ static void assert_obj_accessible_in(long segnum, object_t *obj)
     size_t obj_size = stmcb_size_rounded_up(realobj);
     uintptr_t count = obj_size / 4096UL + 1;
     while (count--> 0) {
-        assert(get_page_status_in(segnum, page) == PAGE_ACCESSIBLE);
+        assert(get_page_status_in(segnum, page) != PAGE_NO_ACCESS);
         page++;
     }
 #endif
@@ -492,8 +497,9 @@ static void mark_visit_from_modified_objects(void)
             object_t *obj = modified->object;
             struct object_s *dst = (struct object_s*)REAL_ADDRESS(base, obj);
 
-            /* make sure we don't reshare its page */
-            set_hint_modified_recently((uintptr_t)obj / 4096);
+            /* make sure we don't reshare the slice's page */
+            set_hint_modified_recently(
+                ((uintptr_t)obj + SLICE_OFFSET(modified->slice)) / 4096);
 
             if (!(dst->stm_flags & GCFLAG_VISITED)) {
                 LIST_APPEND(uniques, obj);
@@ -511,6 +517,9 @@ static void mark_visit_from_modified_objects(void)
                   This is because we create a backup of the whole obj
                   and thus make all pages accessible. */
                assert_obj_accessible_in(i, item);
+
+               /* make sure we also don't reshare the obj-header-page */
+               set_hint_modified_recently((uintptr_t)item / 4096);
 
                assert(!is_overflow_obj_safe(get_priv_segment(i), item)); /* should never be in that list */
 
