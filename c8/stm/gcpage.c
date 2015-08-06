@@ -290,6 +290,9 @@ static void major_reshare_pages(void)
 
         pagenum++;
     }
+
+    /* clear privatized hints (XXX: only do ever 2nd major GC?) */
+    clear_hint_privatized();
 }
 
 
@@ -898,15 +901,13 @@ static void major_collection_now_at_safe_point(void)
     /* cleanup */
     clean_up_segment_lists();
 
-    /* clear privatized hints (XXX: only do ever 2nd major GC?) */
-    clear_hint_privatized();
-
     /* sweeping */
     sweep_large_objects();
     sweep_small_objects();
 
     /* *after* marking modified objects, we may try to reshare pages */
     major_reshare_pages();
+
 
     dprintf((" | used after collection:  %ld\n",
              (long)pages_ctl.total_allocated));
