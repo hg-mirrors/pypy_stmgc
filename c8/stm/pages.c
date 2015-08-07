@@ -63,11 +63,12 @@ static void reset_major_collection_requested(void)
 
 static void page_mark_accessible(long segnum, uintptr_t pagenum)
 {
+#ifndef NDEBUG
     uint8_t page_status = get_page_status_in(segnum, pagenum);
-
     assert(segnum==0
            || page_status == PAGE_NO_ACCESS
            || page_status == PAGE_READONLY);
+#endif
 
     dprintf(("page_mark_accessible(%lu) in seg:%ld\n", pagenum, segnum));
 
