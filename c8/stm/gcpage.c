@@ -252,11 +252,14 @@ static long page_check_and_reshare(uintptr_t pagenum)
 }
 
 
+__attribute__((unused))
 static long _do_reshare = 0;
 static void major_reshare_pages(void)
 {
+#ifndef STM_TESTS
     if ((_do_reshare++) % 2 == 0)
         return;
+#endif
 
     long i;
     for (i = 1; i < NB_SEGMENTS; i++) {

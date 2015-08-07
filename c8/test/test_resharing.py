@@ -187,3 +187,32 @@ class TestBasic(BaseTest):
         stm_set_char(lp2, 'b')
         assert stm_get_page_status(p1) == PAGE_ACCESSIBLE
         assert stm_get_page_status(p2) == PAGE_ACCESSIBLE
+
+
+    def test_weakref(self):
+        self.start_transaction()
+        big = GC_LAST_SMALL_SIZE+64
+        refd = stm_allocate(big)
+        wref = stm_allocate_weakref(refd)    # no collection here
+        self.push_roots([refd, wref])
+        stm_minor_collect()
+        refd, wref = self.pop_roots()
+        self.push_roots([refd, wref])
+        self.commit_transaction()
+
+        self.start_transaction()
+        self.become_inevitable()
+        stm_major_collect()
+        stm_major_collect()
+        stm_major_collect()
+        page = stm_get_obj_pages(wref)[0]
+        assert stm_get_page_status(page) == PAGE_READONLY
+        refd, wref = self.pop_roots()
+        assert stm_get_weakref(wref) == refd
+        self.push_root(wref)
+        # refd dies
+        stm_major_collect()
+        # now wref is in NO_ACCESS page
+        assert stm_get_page_status(page) == PAGE_NO_ACCESS
+        assert stm_get_weakref(wref) == ffi.NULL
+        assert stm_get_page_status(page) == PAGE_ACCESSIBLE
