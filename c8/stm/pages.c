@@ -71,26 +71,15 @@ static void page_mark_accessible(long segnum, uintptr_t pagenum)
 
     dprintf(("page_mark_accessible(%lu) in seg:%ld\n", pagenum, segnum));
 
-    if (page_status == PAGE_NO_ACCESS) {
-        if (mprotect(get_virtual_page(segnum, pagenum), 4096, PROT_READ | PROT_WRITE)) {
-            perror("mprotect");
-            stm_fatalerror("mprotect failed! Consider running 'sysctl vm.max_map_count=16777216'");
-        }
-    } else {
-        /* PAGE_READONLY requires renewing the mmap to MAP_PRIVATE */
-        char *addr = get_virtual_page(segnum, pagenum);
-        char *res = mmap(addr, 4096UL,
-                         PROT_READ|PROT_WRITE,
-                         MAP_PRIVATE|MAP_NORESERVE|MAP_ANONYMOUS|MAP_FIXED,
-                         -1, 0);
-        if (res == MAP_FAILED)
-            stm_fatalerror("%s failed (mmap): %m", "page_mark_accessible");
+    if (mprotect(get_virtual_page(segnum, pagenum), 4096, PROT_READ | PROT_WRITE)) {
+        perror("mprotect");
+        stm_fatalerror("mprotect failed! Consider running 'sysctl vm.max_map_count=16777216'");
     }
 
     /* set this flag *after* we un-protected it, because XXX later */
     set_page_status_in(segnum, pagenum, PAGE_ACCESSIBLE);
     set_hint_modified_recently(pagenum);
-    dprintf(("RW(seg%ld, page%lu)\n", segnum, pagenum));
+    dprintf(("RW(seg%ld, page %lu)\n", segnum, pagenum));
 }
 
 static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
@@ -102,7 +91,7 @@ static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
 
     set_page_status_in(segnum, pagenum, PAGE_NO_ACCESS);
 
-    dprintf(("NONE(seg%ld, page%lu)\n", segnum, pagenum));
+    dprintf(("NONE(seg%ld, page %lu)\n", segnum, pagenum));
     char *addr = get_virtual_page(segnum, pagenum);
     madvise(addr, 4096, MADV_DONTNEED);
     if (mprotect(addr, 4096, PROT_NONE)) {
@@ -115,13 +104,16 @@ static void page_mark_inaccessible(long segnum, uintptr_t pagenum)
 static void page_mark_readonly(long segnum, uintptr_t pagenum)
 {
     /* mark readonly and share with seg0 */
-    assert(_has_mutex());
-    assert(segnum > 0 && get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE);
+    assert(segnum > 0 &&
+           (get_page_status_in(segnum, pagenum) == PAGE_ACCESSIBLE
+            || get_page_status_in(segnum, pagenum) == PAGE_NO_ACCESS));
     dprintf(("page_mark_readonly(%lu) in seg:%ld\n", pagenum, segnum));
 
     char *virt_addr = get_virtual_page(segnum, pagenum);
     madvise(virt_addr, 4096UL, MADV_DONTNEED);
-    /* XXX: does it matter if SHARED or PRIVATE? */
+    /* XXX: does it matter if SHARED or PRIVATE?
+       IF MAP_SHARED, make sure page_mark_accessible doesn't simply mprotect() but also
+       mmap() as MAP_PRIVATE */
     char *res = mmap(virt_addr, 4096UL,
                      PROT_READ,
                      MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE,
@@ -132,5 +124,5 @@ static void page_mark_readonly(long segnum, uintptr_t pagenum)
 
     set_page_status_in(segnum, pagenum, PAGE_READONLY);
 
-    dprintf(("RO(seg%ld, page%lu)\n", segnum, pagenum));
+    dprintf(("RO(seg%ld, page %lu)\n", segnum, pagenum));
 }

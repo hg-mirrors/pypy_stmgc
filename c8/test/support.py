@@ -760,7 +760,7 @@ def stm_get_page_status(pagenum):
     return lib._stm_get_page_status(pagenum)
 
 def stm_is_accessible_page(pagenum):
-    return stm_get_page_status() == PAGE_ACCESSIBLE
+    return stm_get_page_status(pagenum) == PAGE_ACCESSIBLE
 
 def stm_get_hint_modified_recently(pagenum):
     return lib._stm_get_hint_modified_recently(pagenum)
