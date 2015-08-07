@@ -227,10 +227,12 @@ static void page_check_and_reshare(uintptr_t pagenum)
     if (get_page_status(pagenum)->by_segment == (PAGE_ACCESSIBLE << 0))
         return;                 /* only accessible in seg0 */
 
+    /* XXX: fast-path for all pages=READONLY */
+
     long i;
     for (i = 1; i < NB_SEGMENTS; i++){
         if (get_page_status_in(i, pagenum) == PAGE_ACCESSIBLE) {
-            /* XXX: also do for PAGE_NO_ACCESS */
+            /* XXX: also do for PAGE_NO_ACCESS? */
             page_mark_readonly(i, pagenum);
         }
     }
@@ -266,10 +268,8 @@ static void major_reshare_pages(void)
         }
     }
 
-    /* XXXXXXXXXXXXXXX: necessary? */
-    msync(stm_object_pages + END_NURSERY_PAGE*4096,
-          NB_SHARED_PAGES*4096,
-          MS_SYNC);             /* MS_INVALIDATE| */
+    /* msync() done when validating seg0 */
+
     /* Now loop over all pages and re-share them if possible. */
     uintptr_t pagenum, endpagenum;
     pagenum = END_NURSERY_PAGE;   /* starts after the nursery */

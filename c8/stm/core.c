@@ -63,9 +63,10 @@ static void import_objects(
         stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
         uintptr_t current_page_num = ((uintptr_t)oslice) / 4096;
 
+        /* never import anything into READONLY pages */
+        assert(get_page_status_in(my_segnum, current_page_num) != PAGE_READONLY);
+
         if (pagenum == -1) {
-            /* XXX: what about PAGE_READONLY? check that the below line handles
-               this case correctly */
             if (get_page_status_in(my_segnum, current_page_num) != PAGE_ACCESSIBLE)
                 continue;
         } else if (pagenum != current_page_num) {
@@ -170,15 +171,13 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     assert(page_status == PAGE_NO_ACCESS
            || page_status == PAGE_READONLY);
 
-    /* make our page write-ready */
-    page_mark_accessible(my_segnum, pagenum);
-
     if (page_status == PAGE_READONLY) {
-        /* copy from seg0 (XXX: can we depend on copy-on-write
-           of the kernel somehow?) */
-        pagecopy(get_virtual_page(my_segnum, pagenum),
-                 get_virtual_page(0, pagenum));
+        /* make our page write-ready */
+        page_mark_accessible(my_segnum, pagenum);
 
+        dprintf((" > found READONLY, make others NO_ACCESS\n"));
+        /* our READONLY copy *has* to have the current data, no
+           copy necessary */
         /* make READONLY pages in other segments NO_ACCESS */
         for (i = 1; i < NB_SEGMENTS; i++) {
             if (i == my_segnum)
@@ -193,11 +192,18 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     }
 
     /* find who has the most recent revision of our page */
+    /* XXX: uh, *more* recent would be enough, right? */
     int copy_from_segnum = -1;
     uint64_t most_recent_rev = 0;
+    bool was_readonly = false;
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
+
+        if (!was_readonly && get_page_status_in(i, pagenum) == PAGE_READONLY) {
+            was_readonly = true;
+            break;
+        }
 
         struct stm_commit_log_entry_s *log_entry;
         log_entry = get_priv_segment(i)->last_commit_log_entry;
@@ -209,10 +215,29 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     }
     OPT_ASSERT(copy_from_segnum != my_segnum);
 
+    if (was_readonly) {
+        assert(page_status == PAGE_NO_ACCESS);
+        /* this case could be avoided by making all NO_ACCESS to READONLY
+           when resharing pages (XXX: better?).
+           We may go from NO_ACCESS->READONLY->ACCESSIBLE on write with
+           2 SIGSEGV in a row.*/
+        dprintf((" > make a previously NO_ACCESS page READONLY\n"));
+        page_mark_readonly(my_segnum, pagenum);
+
+        release_all_privatization_locks();
+        return;
+    }
+
+    /* make our page write-ready */
+    page_mark_accessible(my_segnum, pagenum);
+
     /* account for this page now: XXX */
     /* increment_total_allocated(4096); */
 
+
     if (copy_from_segnum == -1) {
+        dprintf((" > found newly allocated page: copy from seg0\n"));
+
         /* this page is only accessible in the sharing segment seg0 so far (new
            allocation). We can thus simply mark it accessible here. */
         pagecopy(get_virtual_page(my_segnum, pagenum),
@@ -220,6 +245,8 @@ static void handle_segfault_in_page(uintptr_t pagenum)
         release_all_privatization_locks();
         return;
     }
+
+    dprintf((" > import data from seg %d\n", copy_from_segnum));
 
     /* before copying anything, acquire modification locks from our and
        the other segment */
