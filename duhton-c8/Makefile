@@ -3,7 +3,7 @@ C8SOURCES = ../c8/stmgc.c ../c8/stm/*.c
 
 C8HEADERS = ../c8/stmgc.h ../c8/stm/*.h
 
-COMMON = -pthread -lrt -g -Wall #-D_STM_NURSERY_ZEROED=1
+COMMON = -pthread -lrt -g -Wall -D_STM_NURSERY_ZEROED=1
 
 
 all: duhton_debug duhton duhton_release
