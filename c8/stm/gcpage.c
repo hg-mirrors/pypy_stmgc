@@ -226,30 +226,38 @@ static void major_collection_if_requested(void)
 }
 
 
-static void page_check_and_reshare(uintptr_t pagenum)
+static long page_check_and_reshare(uintptr_t pagenum)
 {
     /* if page was recently modified, do nothing */
     if (get_hint_modified_recently(pagenum))
-        return;
+        return 0;
 
     /* check if page is accessible *only* in segment 0,
        then we don't need to do anything (fastpath) */
     if (get_page_status(pagenum)->by_segment == (PAGE_ACCESSIBLE << 0))
-        return;                 /* only accessible in seg0 */
+        return 0;               /* only accessible in seg0 */
 
     /* XXX: fast-path for all pages=READONLY */
 
-    long i;
+    long i, count = 0;
     for (i = 1; i < NB_SEGMENTS; i++){
         if (get_page_status_in(i, pagenum) == PAGE_ACCESSIBLE) {
             /* XXX: also do for PAGE_NO_ACCESS? */
             page_mark_readonly(i, pagenum);
+            count++;
         }
     }
+
+    return count;
 }
 
+
+static long _do_reshare = 0;
 static void major_reshare_pages(void)
 {
+    if ((_do_reshare++) % 2 == 0)
+        return;
+
     long i;
     for (i = 1; i < NB_SEGMENTS; i++) {
         /* ignore pages with overflow objs */
@@ -285,6 +293,7 @@ static void major_reshare_pages(void)
     pagenum = END_NURSERY_PAGE;   /* starts after the nursery */
     endpagenum = (uninitialized_page_start - stm_object_pages) / 4096UL;
 
+    long count = 0;
     while (1) {
         if (UNLIKELY(pagenum == endpagenum)) {
             /* we reach this point usually twice, because there are
@@ -296,10 +305,12 @@ static void major_reshare_pages(void)
             continue;
         }
 
-        page_check_and_reshare(pagenum);
+        count += page_check_and_reshare(pagenum);
 
         pagenum++;
     }
+
+    fprintf(stderr,"reshared %ld pages = %ld KiB\n", count, count * 4);
 
     /* clear privatized hints (XXX: only do ever 2nd major GC?) */
     clear_hint_privatized();
@@ -931,7 +942,6 @@ static void major_collection_now_at_safe_point(void)
 
     /* *after* marking modified objects, we may try to reshare pages */
     major_reshare_pages();
-
 
     dprintf((" | used after collection:  %ld\n",
              (long)pages_ctl.total_allocated));

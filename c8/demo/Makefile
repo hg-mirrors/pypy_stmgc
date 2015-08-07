@@ -28,7 +28,7 @@ debug-%: %.c ${H_FILES} ${C_FILES}
         $< -o debug-$* ../stmgc.c
 
 build-%: %.c ${H_FILES} ${C_FILES}
-	$(CC) $(COMMON) -DSTM_GC_NURSERY=128 -O1 $< -o build-$* ../stmgc.c
+	$(CC) $(COMMON) -DSTM_GC_NURSERY=128 -O0 -g $< -o build-$* ../stmgc.c
 
 release-%: %.c ${H_FILES} ${C_FILES}
 	$(CC) $(COMMON) -DNDEBUG -O2 $< -o release-$* ../stmgc.c
