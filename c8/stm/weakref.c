@@ -38,10 +38,17 @@ static void _set_weakref_in_all_segments(object_t *weakref, object_t *value)
 
     long i;
     for (i = 0; i < NB_SEGMENTS; i++) {
-        if (get_page_status_in(i, pagenum) == PAGE_ACCESSIBLE) {
+        uint8_t status = get_page_status_in(i, pagenum);
+
+        if (status == PAGE_ACCESSIBLE) {
             char *base = get_segment_base(i);
             object_t ** ref_loc = (object_t **)REAL_ADDRESS(base, point_to_loc);
             *ref_loc = value;
+        } else if (status == PAGE_READONLY) {
+            /* we can't write to this page as we must not trigger a SIGSEGV */
+            page_mark_inaccessible(i, pagenum);
+        } else {
+            assert(status == PAGE_NO_ACCESS);
         }
     }
 }

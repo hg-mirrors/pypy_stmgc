@@ -915,7 +915,7 @@ class BaseTest(object):
     def pop_roots(self):
         os = self._last_push_all
         self._last_push_all = None
-        return [self.pop_root() for _ in reversed(os)]
+        return list(reversed([self.pop_root() for _ in os]))
 
 
     def push_root(self, o):
