@@ -771,11 +771,14 @@ static void major_do_validation_and_minor_collections(void)
 
     /* XXXXXXX: necessary?? AFAIK it is undefined if changes
        to the MAP_SHARED in seg0 propagate to the READONLY
-       MAP_SHARED/MAP_PRIVATE in other segments
-       TODO: only used pages */
-    msync(stm_object_pages + END_NURSERY_PAGE*4096,
-          NB_SHARED_PAGES*4096UL,
-          MS_INVALIDATE|MS_SYNC);
+       MAP_SHARED/MAP_PRIVATE in other segments */
+    char *range_start = stm_object_pages + END_NURSERY_PAGE*4096;
+    msync(range_start, uninitialized_page_start - range_start,
+          MS_INVALIDATE | MS_SYNC);
+    char *range_end = stm_object_pages + NB_PAGES * 4096UL;
+    msync(uninitialized_page_stop, range_end - uninitialized_page_stop,
+          MS_INVALIDATE | MS_SYNC);
+
 
     ensure_gs_register(original_num);
 }
