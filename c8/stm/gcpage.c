@@ -134,8 +134,16 @@ static void _fill_preexisting_slice(long segnum, char *dest,
                                     const char *src, uintptr_t size)
 {
     uintptr_t np = dest - get_segment_base(segnum);
-    if (get_page_status_in(segnum, np / 4096) != PAGE_NO_ACCESS)
+    uintptr_t page = np / 4096UL;
+    uint8_t status = get_page_status_in(segnum, page);
+    if (status == PAGE_ACCESSIBLE) {
         memcpy(dest, src, size);
+    } else if (status == PAGE_READONLY) {
+        /* we can't write to this page as we must not trigger a SIGSEGV */
+        page_mark_inaccessible(segnum, page);
+    } else {
+        assert(status == PAGE_NO_ACCESS);
+    }
 }
 
 object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
@@ -149,7 +157,9 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
     memcpy(nobj_seg0, initial_data, size_rounded_up);
     ((struct object_s *)nobj_seg0)->stm_flags = GCFLAG_WRITE_BARRIER;
 
-    acquire_privatization_lock(STM_SEGMENT->segment_num);
+    /* XXX: not sure if we need to do better: acquire all privatization
+       locks in order to make READONLY pages NO_ACCESS in _fill_preexisting_slice */
+    acquire_all_privatization_locks();
     DEBUG_EXPECT_SEGFAULT(false);
 
     long j;
@@ -176,7 +186,7 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
     }
 
     DEBUG_EXPECT_SEGFAULT(true);
-    release_privatization_lock(STM_SEGMENT->segment_num);
+    release_all_privatization_locks();
 
     write_fence();     /* make sure 'nobj' is fully initialized from
                           all threads here */
