@@ -1833,6 +1833,7 @@ static void synchronize_objects_flush(void)
             if (i == myself)
                 continue;
 
+            assert(get_page_status_in(i, page) != PAGE_READONLY);
             if (get_page_status_in(i, page) == PAGE_ACCESSIBLE) {
                 /* shared or private, but never segfault */
                 char *dst = REAL_ADDRESS(get_segment_base(i), frag);

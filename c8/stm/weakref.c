@@ -45,6 +45,7 @@ static void _set_weakref_in_all_segments(object_t *weakref, object_t *value)
             object_t ** ref_loc = (object_t **)REAL_ADDRESS(base, point_to_loc);
             *ref_loc = value;
         } else if (status == PAGE_READONLY) {
+            assert(i != 0);
             /* we can't write to this page as we must not trigger a SIGSEGV */
             page_mark_inaccessible(i, pagenum);
         } else {
@@ -143,7 +144,16 @@ static void stm_visit_old_weakrefs(void)
 
             ssize_t size = 16;
             stm_char *wr = (stm_char *)WEAKREF_PTR(weakref, size);
-            char *real_wr = REAL_ADDRESS(pseg->pub.segment_base, wr);
+            char *real_wr;
+            if (get_page_status_in(i, (uintptr_t)wr / 4096UL) == PAGE_NO_ACCESS) {
+                /* this can happen if another wref was in the same READONLY page as
+                   this, and on handling it in _set_weakref_in_all_segments(NULL),
+                   it made this page NO_ACCESS.
+                   In this case, seg0 is OK to look for. */
+                real_wr = REAL_ADDRESS(stm_object_pages, wr);
+            } else {
+                real_wr = REAL_ADDRESS(pseg->pub.segment_base, wr);
+            }
             object_t *pointing_to = *(object_t **)real_wr;
             assert((uintptr_t)pointing_to >= NURSERY_END);
             if (!mark_visited_test(pointing_to)) {
