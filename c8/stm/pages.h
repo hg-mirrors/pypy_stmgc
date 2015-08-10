@@ -93,11 +93,19 @@ static inline void set_hint_modified_recently(uintptr_t pagenum)
     /* __sync_fetch_and_or(&page_modified_recently[pagenum / 8], 1L << (pagenum % 8)); */
 }
 
+__attribute__((unused))
 static void clear_hint_modified_recently(uintptr_t pagenum)
 {
     pagenum = pagenum - PAGE_FLAG_START;
     page_modified_recently[pagenum / 8] &= ~(1UL << (pagenum % 8));
 }
+
+__attribute__((unused))
+static void clear_hint_modified_recently_all(void)
+{
+    memset(page_modified_recently, 0, NB_SHARED_PAGES / 8);
+}
+
 
 static inline char *get_virtual_page(long segnum, uintptr_t pagenum)
 {
