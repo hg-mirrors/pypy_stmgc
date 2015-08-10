@@ -154,7 +154,7 @@ static void go_to_the_past(uintptr_t pagenum,
 }
 
 
-
+long ro_to_acc = 0;
 static void handle_segfault_in_page(uintptr_t pagenum)
 {
     /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
@@ -186,6 +186,8 @@ static void handle_segfault_in_page(uintptr_t pagenum)
             if (get_page_status_in(i, pagenum) == PAGE_READONLY)
                 page_mark_inaccessible(i, pagenum);
         }
+
+        ro_to_acc++;
 
         release_all_privatization_locks();
         return;
@@ -990,7 +992,6 @@ static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
             abort();
     }
     release_privatization_lock(STM_SEGMENT->segment_num);
-
 #endif
 }
 

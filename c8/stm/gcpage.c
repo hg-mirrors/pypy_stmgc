@@ -225,12 +225,10 @@ static void major_collection_if_requested(void)
     exec_local_finalizers();
 }
 
-
 static long page_check_and_reshare(uintptr_t pagenum)
 {
     /* if page was recently modified, do nothing */
     if (get_hint_modified_recently(pagenum)) {
-        /* clear for the next pass */
         clear_hint_modified_recently(pagenum);
         return 0;
     }
@@ -254,15 +252,41 @@ static long page_check_and_reshare(uintptr_t pagenum)
     return count;
 }
 
+extern long ro_to_acc;
 
 /* num of pages to reshare at most per major GC: */
 #define STM_MAX_RESHARE_PAGES 2048UL                  /* 8MiB */
+/* major GCs between clearing the hints and doing a reshare-pass over all pages */
+#define _RESHARE_CLEAR_GAP 8
+__attribute__((unused))
+uintptr_t _clear_hints_pass = 0;
 uintptr_t _last_reshare_pass_page = END_NURSERY_PAGE; /* starts after the nursery */
 static void major_reshare_pages(void)
 {
+#ifndef STM_TESTS
+    if (_last_reshare_pass_page == END_NURSERY_PAGE) {
+        /* we finished a pass */
+        _clear_hints_pass++;
+        if (_clear_hints_pass % _RESHARE_CLEAR_GAP == (_RESHARE_CLEAR_GAP - 1)) {
+            /* we do a reshare pass */
+            fprintf(stderr, "ro -> acc since last reshare pass: %ld\n", ro_to_acc);
+            ro_to_acc = 0;
+            fprintf(stderr, "START_RESHARE_PASS\n");
+        } else {
+            /* we don't reshare, so just collecting modification hints */
+            fprintf(stderr, "COLLECT_HINTS_ONLY\n");
+
+            /* XXX: since major GC also makes sure that currently modified objs are
+               "modified recently", maybe don't need to do it in touch_all_pages_of_obj() */
+            return;
+        }
+    }
+#endif
+
+    /* to never reshare pages with overflow objects, make sure they are
+       marked as recently modified: */
     long i;
     for (i = 1; i < NB_SEGMENTS; i++) {
-        /* ignore pages with overflow objs */
         struct list_s *lst = get_priv_segment(i)->large_overflow_objects;
         if (lst != NULL) {
             LIST_FOREACH_R(lst, object_t*,
@@ -328,10 +352,12 @@ static void major_reshare_pages(void)
 
     if (finished_pass) {
         _last_reshare_pass_page = END_NURSERY_PAGE;
-        fprintf(stderr,"reshared %ld pages = %ld KiB (finished pass)\n", count, count * 4);
+        fprintf(stderr,"reshared %ld pages = %ld KiB (finished pass)\n",
+                count, count * 4);
     } else {
         _last_reshare_pass_page = pagenum;
-        fprintf(stderr,"reshared %ld pages = %ld KiB\n", count, count * 4);
+        fprintf(stderr,"reshared %ld pages = %ld KiB\n",
+                count, count * 4);
     }
 }
 
