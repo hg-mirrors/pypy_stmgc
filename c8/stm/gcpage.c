@@ -229,8 +229,11 @@ static void major_collection_if_requested(void)
 static long page_check_and_reshare(uintptr_t pagenum)
 {
     /* if page was recently modified, do nothing */
-    if (get_hint_modified_recently(pagenum))
+    if (get_hint_modified_recently(pagenum)) {
+        /* clear for the next pass */
+        clear_hint_modified_recently(pagenum);
         return 0;
+    }
 
     /* check if page is accessible *only* in segment 0,
        then we don't need to do anything (fastpath) */
@@ -252,15 +255,11 @@ static long page_check_and_reshare(uintptr_t pagenum)
 }
 
 
-__attribute__((unused))
-static long _do_reshare = 0;
+/* num of pages to reshare at most per major GC: */
+#define STM_MAX_RESHARE_PAGES 2048UL                  /* 8MiB */
+uintptr_t _last_reshare_pass_page = END_NURSERY_PAGE; /* starts after the nursery */
 static void major_reshare_pages(void)
 {
-#ifndef STM_TESTS
-    if ((_do_reshare++) % 2 == 0)
-        return;
-#endif
-
     long i;
     for (i = 1; i < NB_SEGMENTS; i++) {
         /* ignore pages with overflow objs */
@@ -293,30 +292,47 @@ static void major_reshare_pages(void)
 
     /* Now loop over all pages and re-share them if possible. */
     uintptr_t pagenum, endpagenum;
-    pagenum = END_NURSERY_PAGE;   /* starts after the nursery */
-    endpagenum = (uninitialized_page_start - stm_object_pages) / 4096UL;
+    pagenum = _last_reshare_pass_page;
+    uintptr_t endpage_of_large_objs = (uninitialized_page_start - stm_object_pages) / 4096UL;
+    uintptr_t startpage_of_small_objs = (uninitialized_page_stop - stm_object_pages) / 4096UL;
+    if (pagenum > endpage_of_large_objs) {
+        if (pagenum < startpage_of_small_objs)
+            pagenum = startpage_of_small_objs; /* pages may have been freed already */
+        endpagenum = NB_PAGES;  /* end of smallobj pages */
+    } else {
+        endpagenum = endpage_of_large_objs;
+    }
 
     long count = 0;
+    bool finished_pass = true;
     while (1) {
         if (UNLIKELY(pagenum == endpagenum)) {
             /* we reach this point usually twice, because there are
                more pages after 'uninitialized_page_stop' */
             if (endpagenum == NB_PAGES)
                 break;   /* done */
-            pagenum = (uninitialized_page_stop - stm_object_pages) / 4096UL;
+            pagenum = startpage_of_small_objs;
             endpagenum = NB_PAGES;
             continue;
         }
 
         count += page_check_and_reshare(pagenum);
-
         pagenum++;
+
+        if (count >= STM_MAX_RESHARE_PAGES) {
+            /* continue in the next major GC */
+            finished_pass = false;
+            break;
+        }
     }
 
-    fprintf(stderr,"reshared %ld pages = %ld KiB\n", count, count * 4);
-
-    /* clear privatized hints (XXX: only do ever 2nd major GC?) */
-    clear_hint_privatized();
+    if (finished_pass) {
+        _last_reshare_pass_page = END_NURSERY_PAGE;
+        fprintf(stderr,"reshared %ld pages = %ld KiB (finished pass)\n", count, count * 4);
+    } else {
+        _last_reshare_pass_page = pagenum;
+        fprintf(stderr,"reshared %ld pages = %ld KiB\n", count, count * 4);
+    }
 }
 
 

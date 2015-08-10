@@ -115,6 +115,9 @@ static void page_mark_readonly(long segnum, uintptr_t pagenum)
     /* XXX: does it matter if SHARED or PRIVATE?
        IF MAP_SHARED, make sure page_mark_accessible doesn't simply mprotect() but also
        mmap() as MAP_PRIVATE */
+    /* XXX: MAP_PRIVATE should work because AFAIK when we map PRIVATE to a
+       SHARED file page, we should really share it in memory until we write
+       to it, in which case we do all necessary things in the segfault handler. */
     char *res = mmap(virt_addr, 4096UL,
                      PROT_READ,
                      MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE,
