@@ -1835,6 +1835,5 @@ static void small_overflow_obj_ranges_add(object_t *obj)
 
     /* no merge was found */
     STM_PSEGMENT->small_overflow_obj_ranges =
-        list_append2(STM_PSEGMENT->small_overflow_obj_ranges,
-                     (uintptr_t)obj, (uintptr_t)obj_size);
+        list_append2(lst, (uintptr_t)obj, (uintptr_t)obj_size);
 }

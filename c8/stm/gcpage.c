@@ -597,8 +597,44 @@ static void clean_up_segment_lists(void)
             }
         }
 
-        /* XXX: fix small_overflow_obj_ranges */
-        abort();
+        /* fix ranges in small_overflow_obj_ranges that may have
+           holes from dying objs */
+        lst = pseg->small_overflow_obj_ranges;
+        if (!list_is_empty(lst)) {
+            long j;
+            struct list_s *new_lst = list_create();
+            for (j = lst->count - 2; j >= 0; j -= 2) {
+                stm_char *start = (stm_char*)lst->items[j];
+                ssize_t size = (ssize_t)lst->items[j+1];
+
+                struct object_s *realobj = (struct object_s *)
+                    REAL_ADDRESS(pseg->pub.segment_base, start);
+                size_t obj_size = stmcb_size_rounded_up(realobj);
+                assert(size % obj_size == 0);
+
+                stm_char *obj = start, *range_end = start + size;
+                for (; obj < range_end; obj += obj_size) {
+                    /* note: all these obj-slots *are* in use by overflow objs */
+                    if (!mark_visited_test((object_t*)obj)) {
+                        if (obj != start) {
+                            new_lst = list_append2(new_lst,
+                                                   (uintptr_t)start,
+                                                   (uintptr_t)(obj - start));
+                        }
+                        start = obj + obj_size; // next start
+                    }
+                }
+                if (obj != start) {
+                    new_lst = list_append2(new_lst,
+                                           (uintptr_t)start,
+                                           (uintptr_t)(obj - start));
+                }
+            }
+
+            list_free(lst);
+            pseg->small_overflow_obj_ranges = new_lst;
+        }
+
 
         /* Remove from 'modified_old_objects' all old hashtables that die */
         {
