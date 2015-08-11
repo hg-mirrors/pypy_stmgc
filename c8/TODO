@@ -1,7 +1,7 @@
 
 - fix markers (e.g. become_inevitable doesn't seem to show up)
 
-- improve sync of small objs on commit (see FLAG_SYNC_LARGE in nursery.c)
+IN_PROGRESS: improve sync of small objs on commit (see FLAG_SYNC_LARGE in nursery.c)
 
 - reshare pages:
   make seg0 MAP_SHARED in order to re-share private pages during major GC
