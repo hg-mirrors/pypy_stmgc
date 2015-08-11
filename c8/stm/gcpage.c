@@ -597,6 +597,9 @@ static void clean_up_segment_lists(void)
             }
         }
 
+        /* XXX: fix small_overflow_obj_ranges */
+        abort();
+
         /* Remove from 'modified_old_objects' all old hashtables that die */
         {
             lst = pseg->modified_old_objects;

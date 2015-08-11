@@ -104,9 +104,16 @@ struct stm_priv_segment_info_s {
     /* list of objects created in the current transaction and
        that survived at least one minor collection. They need
        to be synchronized to other segments on commit, but they
-       do not need to be in the commit log entry.
-       XXX: for now it also contains small overflow objs */
+       do not need to be in the commit log entry. */
     struct list_s *large_overflow_objects;
+
+    /* lists the memory ranges of uncommitted/overflow objs that
+       need to be flushed to other segments on commit (like
+       large_overflow_objects). (unsorted, a range never overlaps
+       pages) */
+    /* XXX: not much different from before. Maybe try a ranges list
+       per size class. */
+    struct list_s *small_overflow_obj_ranges;
 
     uint8_t privatization_lock;  // XXX KILL
 
@@ -303,8 +310,10 @@ static void abort_data_structures_from_segment_num(int segment_num);
 
 static void touch_all_pages_of_obj(object_t *obj, size_t obj_size);
 
+static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size);
 static void synchronize_object_enqueue(object_t *obj);
 static void synchronize_objects_flush(void);
+static void small_overflow_obj_ranges_add(object_t *obj);
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
 static bool _stm_validate(void);
