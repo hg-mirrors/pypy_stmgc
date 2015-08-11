@@ -1813,10 +1813,11 @@ static void small_overflow_obj_ranges_add(object_t *obj)
 
     struct list_s *lst = STM_PSEGMENT->small_overflow_obj_ranges;
     if (!list_is_empty(lst)) {
-        /* try to merge with other ranges (XXX: quadratic, problem?) */
+        /* seems to not help to look for merges in this way: */
         stm_char *obj_start = (stm_char*)obj;
         long i;
-        for (i = lst->count - 2; i >= 0; i -= 2) {
+        long min = lst->count - 4 * 2; /* go back 4 elems */
+        for (i = lst->count - 2; i >= min; i -= 2) {
             stm_char *start = (stm_char*)lst->items[i];
             ssize_t size = (ssize_t)lst->items[i+1];
 
