@@ -1821,12 +1821,10 @@ static void small_overflow_obj_ranges_add(object_t *obj)
             ssize_t size = (ssize_t)lst->items[i+1];
 
             if (start + size == obj_start) {
-                /* merge!
-                   Note: we cannot overlap pages by adding to a range
-                   in this way, since the first slot in a smallmalloc
-                   page is always unused. Thus, we never merge the
-                   last obj in a page with the first obj in a successor
-                   page. */
+                /* merge! */
+                if ((size + obj_size) + ((uintptr_t)start & 4095) > 4096)
+                    break;      /* doesn't fit inside the same page */
+
                 lst->items[i+1] = size + obj_size;
                 return;
             }
