@@ -49,22 +49,6 @@ static uintptr_t first_small_uniform_loc = (uintptr_t) -1;
 */
 struct small_malloc_data_s {
     struct small_free_loc_s *loc_free[GC_N_SMALL_REQUESTS];
-
-    /* with "uncommitted_ranges", we do the following during major GCs:
-
-       for seg in segments:
-           for r in seg.uncommitted_ranges:
-               size = obj_size_in_seg(seg, (object_t*)r)
-               assert(r.size % size == 0)
-               for(obj = r; obj < r + r.size; r += size):
-                   if obj_dies(obj):
-                       adjust_range(r) // split/shrink
-
-       Optionally, we can also merge ranges, sort the list, etc.
-       But generally, I hope we don't have too many uncommitted
-       ranges; and I don't know, if there is another way to get
-       the size(-class) of the page/objs.
-     */
 };
 
 
