@@ -574,7 +574,7 @@ long current_segment_num(void)
                     ],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0', '-Wall'], #, '-ferror-limit=5'],
+                 extra_compile_args=['-g', '-O0', '-Werror', '-Wall'], #, '-ferror-limit=5'],
      extra_link_args=['-g', '-lrt'],
      force_generic_engine=True)
 
@@ -896,6 +896,17 @@ class BaseTest(object):
 
     def switch_to_segment(self, seg_num):
         lib._stm_test_switch_segment(seg_num)
+
+    def push_roots(self, os):
+        for o in os:
+            self.push_root(o)
+        self._last_push_all = os
+
+    def pop_roots(self):
+        os = self._last_push_all
+        self._last_push_all = None
+        return list(reversed([self.pop_root() for _ in os]))
+
 
     def push_root(self, o):
         assert ffi.typeof(o) == ffi.typeof("object_t *")
