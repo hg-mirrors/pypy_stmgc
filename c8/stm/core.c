@@ -1155,7 +1155,10 @@ static void _do_start_transaction(stm_thread_local_t *tl)
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->large_overflow_objects));
-    assert(list_is_empty(STM_PSEGMENT->small_overflow_obj_ranges));
+#ifndef NDEBUG
+    for (long i = 2; i < GC_N_SMALL_REQUESTS; i++)
+        assert(list_is_empty(STM_PSEGMENT->small_overflow_obj_ranges[i]));
+#endif
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
@@ -1244,7 +1247,9 @@ static void _finish_transaction(enum stm_event_e event)
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
     list_clear(STM_PSEGMENT->old_objects_with_cards_set);
     list_clear(STM_PSEGMENT->large_overflow_objects);
-    list_clear(STM_PSEGMENT->small_overflow_obj_ranges);
+    for (long i = 2; i < GC_N_SMALL_REQUESTS; i++)
+        list_clear(STM_PSEGMENT->small_overflow_obj_ranges[i]);
+
     if (tl != NULL)
         timing_event(tl, event);
 
@@ -1288,18 +1293,20 @@ static void push_overflow_objects_to_other_segments(void)
         release_privatization_lock(STM_SEGMENT->segment_num);
     }
 
-    if (!list_is_empty(STM_PSEGMENT->small_overflow_obj_ranges)) {
-        acquire_privatization_lock(STM_SEGMENT->segment_num);
+    for (long i = 2; i < GC_N_SMALL_REQUESTS; i++) {
+        if (!list_is_empty(STM_PSEGMENT->small_overflow_obj_ranges[i])) {
+            acquire_privatization_lock(STM_SEGMENT->segment_num);
 
-        struct list_s *lst = STM_PSEGMENT->small_overflow_obj_ranges;
-        while (!list_is_empty(lst)) {
-            ssize_t len = (ssize_t)list_pop_item(lst);
-            stm_char *start = (stm_char*)list_pop_item(lst);
-            _synchronize_fragment(start, len);
+            struct list_s *lst = STM_PSEGMENT->small_overflow_obj_ranges[i];
+            while (!list_is_empty(lst)) {
+                ssize_t len = (ssize_t)list_pop_item(lst);
+                stm_char *start = (stm_char*)list_pop_item(lst);
+                _synchronize_fragment(start, len);
+            }
+
+            synchronize_objects_flush();
+            release_privatization_lock(STM_SEGMENT->segment_num);
         }
-
-        synchronize_objects_flush();
-        release_privatization_lock(STM_SEGMENT->segment_num);
     }
 
     /* we can as well clear the list here, since the
@@ -1311,7 +1318,10 @@ static void push_overflow_objects_to_other_segments(void)
        unknown-to-the-segment/uncommitted things.
     */
     list_clear(STM_PSEGMENT->large_overflow_objects);
-    list_clear(STM_PSEGMENT->small_overflow_obj_ranges);
+#ifndef NDEBUG
+    for (long i = 2; i < GC_N_SMALL_REQUESTS; i++)
+        assert(list_is_empty(STM_PSEGMENT->small_overflow_obj_ranges[i]));
+#endif
 }
 
 
@@ -1532,7 +1542,8 @@ static void abort_data_structures_from_segment_num(int segment_num)
     list_clear(pseg->objects_pointing_to_nursery);
     list_clear(pseg->old_objects_with_cards_set);
     list_clear(pseg->large_overflow_objects);
-    list_clear(pseg->small_overflow_obj_ranges);
+    for (long i = 2; i < GC_N_SMALL_REQUESTS; i++)
+        list_clear(pseg->small_overflow_obj_ranges[i]);
     list_clear(pseg->young_weakrefs);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
@@ -1811,12 +1822,12 @@ static void small_overflow_obj_ranges_add(object_t *obj)
         (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
     OPT_ASSERT(obj_size >= 16);
 
-    struct list_s *lst = STM_PSEGMENT->small_overflow_obj_ranges;
+    struct list_s *lst = STM_PSEGMENT->small_overflow_obj_ranges[obj_size / 8];
     if (!list_is_empty(lst)) {
         /* seems to not help to look for merges in this way: */
         stm_char *obj_start = (stm_char*)obj;
         long i;
-        long min = lst->count - 4 * 2; /* go back 4 elems */
+        long min = lst->count - 2 * 2; /* go back 4 elems */
         for (i = lst->count - 2; i >= min; i -= 2) {
             stm_char *start = (stm_char*)lst->items[i];
             ssize_t size = (ssize_t)lst->items[i+1];
@@ -1833,6 +1844,6 @@ static void small_overflow_obj_ranges_add(object_t *obj)
     }
 
     /* no merge was found */
-    STM_PSEGMENT->small_overflow_obj_ranges =
+    STM_PSEGMENT->small_overflow_obj_ranges[obj_size / 8] =
         list_append2(lst, (uintptr_t)obj, (uintptr_t)obj_size);
 }

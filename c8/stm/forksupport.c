@@ -98,7 +98,8 @@ static void fork_abort_thread(long i)
         STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
         list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
         list_clear(STM_PSEGMENT->large_overflow_objects);
-        list_clear(STM_PSEGMENT->small_overflow_obj_ranges);
+        for (long k = 2; k < GC_N_SMALL_REQUESTS; k++)
+            list_clear(STM_PSEGMENT->small_overflow_obj_ranges[k]);
 
         s_mutex_unlock();
         return;
