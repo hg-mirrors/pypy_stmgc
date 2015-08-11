@@ -57,7 +57,7 @@ long stm_can_move(object_t *obj)
 static object_t *find_existing_shadow(object_t *obj);
 #define GCWORD_MOVED  ((object_t *) -1)
 #define FLAG_SYNC_LARGE       0x01
-
+#define FLAG_SYNC_SMALL       0x02
 
 static void minor_trace_if_young(object_t **pobj)
 {
@@ -96,6 +96,8 @@ static void minor_trace_if_young(object_t **pobj)
 
             dprintf(("has_shadow(%p): %p, sz:%lu\n",
                      obj, nobj, size));
+            /* XXX: shadows are always large-mallocd */
+            nobj_sync_now = FLAG_SYNC_LARGE;
             goto copy_large_object;
         }
 
@@ -106,10 +108,12 @@ static void minor_trace_if_young(object_t **pobj)
             /* case 1: object is not small enough.
                Ask gcpage.c for an allocation via largemalloc. */
             nobj = (object_t *)allocate_outside_nursery_large(size);
+            nobj_sync_now = FLAG_SYNC_LARGE;
         }
         else {
             /* case "small enough" */
             nobj = (object_t *)allocate_outside_nursery_small(size);
+            nobj_sync_now = FLAG_SYNC_SMALL;
         }
         //dprintf(("move %p -> %p\n", obj, nobj));
 
@@ -118,7 +122,7 @@ static void minor_trace_if_young(object_t **pobj)
         char *realnobj = REAL_ADDRESS(STM_SEGMENT->segment_base, nobj);
         memcpy(realnobj, realobj, size);
 
-        nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
+        nobj_sync_now |= (uintptr_t)nobj; /* SYNC_LARGE set above */
 
         pforwarded_array[0] = GCWORD_MOVED;
         pforwarded_array[1] = nobj;
@@ -133,6 +137,7 @@ static void minor_trace_if_young(object_t **pobj)
         /* a young object outside the nursery */
         nobj = obj;
         tree_delete_item(STM_PSEGMENT->young_outside_nursery, (uintptr_t)nobj);
+        assert(!is_small_uniform(nobj));
         nobj_sync_now = ((uintptr_t)nobj) | FLAG_SYNC_LARGE;
     }
 
@@ -363,31 +368,42 @@ static void collect_oldrefs_to_nursery(void)
 
     while (!list_is_empty(lst)) {
         uintptr_t obj_sync_now = list_pop_item(lst);
-        object_t *obj = (object_t *)(obj_sync_now & ~FLAG_SYNC_LARGE);
+        object_t *obj = (object_t *)(obj_sync_now & ~(FLAG_SYNC_LARGE|FLAG_SYNC_SMALL));
 
         assert(!_is_in_nursery(obj));
 
         _collect_now(obj);
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
 
-        if (obj_sync_now & FLAG_SYNC_LARGE) {
-            /* XXX: SYNC_LARGE even set for small objs right now */
-            /* this is a newly allocated obj in this transaction. We must
-               either synchronize the object to other segments now, or
-               add the object to large_overflow_objects list */
-            struct stm_priv_segment_info_s *pseg = get_priv_segment(STM_SEGMENT->segment_num);
-            if (pseg->minor_collect_will_commit_now) {
-                acquire_privatization_lock(pseg->pub.segment_num);
-                synchronize_object_enqueue(obj);
-                release_privatization_lock(pseg->pub.segment_num);
-            } else {
-                LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
-            }
-            _cards_cleared_in_object(pseg, obj, false);
-        }
-
         /* the list could have moved while appending */
         lst = STM_PSEGMENT->objects_pointing_to_nursery;
+
+        if (!(obj_sync_now & (FLAG_SYNC_LARGE|FLAG_SYNC_SMALL)))
+            continue;
+
+        /* obj is a newly allocated obj in this transaction. We must
+           either synchronize the object to other segments now, or
+           add the object to large_overflow_objects list */
+        struct stm_priv_segment_info_s *pseg = get_priv_segment(STM_SEGMENT->segment_num);
+        if (pseg->minor_collect_will_commit_now) {
+            /* small or large obj are directly synced now */
+            acquire_privatization_lock(pseg->pub.segment_num);
+            synchronize_object_enqueue(obj);
+            release_privatization_lock(pseg->pub.segment_num);
+
+            if (obj_sync_now & FLAG_SYNC_LARGE) {
+                _cards_cleared_in_object(pseg, obj, false);
+            }
+        } else {
+            /* remember them in lists to sync on commit */
+            if (obj_sync_now & FLAG_SYNC_LARGE) {
+                LIST_APPEND(STM_PSEGMENT->large_overflow_objects, obj);
+                _cards_cleared_in_object(pseg, obj, false);
+            } else { // SYNC_SMALL
+                small_overflow_obj_ranges_add(obj);
+            }
+        }
+
     }
 
     /* flush all overflow objects to other segments now */

@@ -23,6 +23,8 @@ IN_PROGRESS: improve sync of small objs on commit (see FLAG_SYNC_LARGE in nurser
 - avoid __builtin_frame_address(0) in precisely the performance-critical
   functions like the interpreter main loop
 
+- some lists in PSEGMENT can only grow and never shrink again
+  check if it matters
 
 ---------------------------
 DONE:

@@ -1155,6 +1155,7 @@ static void _do_start_transaction(stm_thread_local_t *tl)
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->large_overflow_objects));
+    assert(list_is_empty(STM_PSEGMENT->small_overflow_obj_ranges));
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
@@ -1243,6 +1244,7 @@ static void _finish_transaction(enum stm_event_e event)
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
     list_clear(STM_PSEGMENT->old_objects_with_cards_set);
     list_clear(STM_PSEGMENT->large_overflow_objects);
+    list_clear(STM_PSEGMENT->small_overflow_obj_ranges);
     if (tl != NULL)
         timing_event(tl, event);
 
@@ -1273,20 +1275,32 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
 #endif
 }
 
-static void push_large_overflow_objects_to_other_segments(void)
+static void push_overflow_objects_to_other_segments(void)
 {
-    if (list_is_empty(STM_PSEGMENT->large_overflow_objects))
-        return;
+    if (!list_is_empty(STM_PSEGMENT->large_overflow_objects)) {
+        acquire_privatization_lock(STM_SEGMENT->segment_num);
+        LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
+               ({
+                   assert(!(item->stm_flags & GCFLAG_WB_EXECUTED));
+                   synchronize_object_enqueue(item);
+               }));
+        synchronize_objects_flush();
+        release_privatization_lock(STM_SEGMENT->segment_num);
+    }
 
-    /* XXX: also pushes small ones right now */
-    acquire_privatization_lock(STM_SEGMENT->segment_num);
-    LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
-        ({
-            assert(!(item->stm_flags & GCFLAG_WB_EXECUTED));
-            synchronize_object_enqueue(item);
-        }));
-    synchronize_objects_flush();
-    release_privatization_lock(STM_SEGMENT->segment_num);
+    if (!list_is_empty(STM_PSEGMENT->small_overflow_obj_ranges)) {
+        acquire_privatization_lock(STM_SEGMENT->segment_num);
+
+        struct list_s *lst = STM_PSEGMENT->small_overflow_obj_ranges;
+        while (!list_is_empty(lst)) {
+            ssize_t len = (ssize_t)list_pop_item(lst);
+            stm_char *start = (stm_char*)list_pop_item(lst);
+            _synchronize_fragment(start, len);
+        }
+
+        synchronize_objects_flush();
+        release_privatization_lock(STM_SEGMENT->segment_num);
+    }
 
     /* we can as well clear the list here, since the
        objects are only useful if the commit succeeds. And
@@ -1297,6 +1311,7 @@ static void push_large_overflow_objects_to_other_segments(void)
        unknown-to-the-segment/uncommitted things.
     */
     list_clear(STM_PSEGMENT->large_overflow_objects);
+    list_clear(STM_PSEGMENT->small_overflow_obj_ranges);
 }
 
 
@@ -1335,7 +1350,7 @@ static void _core_commit_transaction(bool external)
         s_mutex_unlock();
     }
 
-    push_large_overflow_objects_to_other_segments();
+    push_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
 
 
@@ -1517,6 +1532,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
     list_clear(pseg->objects_pointing_to_nursery);
     list_clear(pseg->old_objects_with_cards_set);
     list_clear(pseg->large_overflow_objects);
+    list_clear(pseg->small_overflow_obj_ranges);
     list_clear(pseg->young_weakrefs);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
@@ -1709,7 +1725,6 @@ static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
 }
 
 
-
 static void synchronize_object_enqueue(object_t *obj)
 {
     assert(!_is_young(obj));
@@ -1784,4 +1799,42 @@ static void synchronize_objects_flush(void)
     } while (j > 0);
 
     DEBUG_EXPECT_SEGFAULT(true);
+}
+
+
+
+static void small_overflow_obj_ranges_add(object_t *obj)
+{
+    assert(is_small_uniform(obj));
+
+    ssize_t obj_size = stmcb_size_rounded_up(
+        (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
+    OPT_ASSERT(obj_size >= 16);
+
+    struct list_s *lst = STM_PSEGMENT->small_overflow_obj_ranges;
+    if (!list_is_empty(lst)) {
+        /* try to merge with other ranges (XXX: quadratic, problem?) */
+        stm_char *obj_start = (stm_char*)obj;
+        long i;
+        for (i = lst->count - 2; i >= 0; i -= 2) {
+            stm_char *start = (stm_char*)lst->items[i];
+            ssize_t size = (ssize_t)lst->items[i+1];
+
+            if (start + size == obj_start) {
+                /* merge!
+                   Note: we cannot overlap pages by adding to a range
+                   in this way, since the first slot in a smallmalloc
+                   page is always unused. Thus, we never merge the
+                   last obj in a page with the first obj in a successor
+                   page. */
+                lst->items[i+1] = size + obj_size;
+                return;
+            }
+        }
+    }
+
+    /* no merge was found */
+    STM_PSEGMENT->small_overflow_obj_ranges =
+        list_append2(STM_PSEGMENT->small_overflow_obj_ranges,
+                     (uintptr_t)obj, (uintptr_t)obj_size);
 }

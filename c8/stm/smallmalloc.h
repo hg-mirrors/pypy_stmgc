@@ -50,12 +50,6 @@ static uintptr_t first_small_uniform_loc = (uintptr_t) -1;
 struct small_malloc_data_s {
     struct small_free_loc_s *loc_free[GC_N_SMALL_REQUESTS];
 
-    /* lists the memory ranges of uncommitted/overflow objs that
-       need to be flushed to other segments on commit (like
-       large_overflow_objects). (unsorted, a range never overlaps
-       pages) */
-    struct list_s *uncommitted_ranges;
-
     /* with "uncommitted_ranges", we do the following during major GCs:
 
        for seg in segments:
