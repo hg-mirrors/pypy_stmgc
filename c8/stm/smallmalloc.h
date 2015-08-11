@@ -49,6 +49,18 @@ static uintptr_t first_small_uniform_loc = (uintptr_t) -1;
 */
 struct small_malloc_data_s {
     struct small_free_loc_s *loc_free[GC_N_SMALL_REQUESTS];
+
+    /* lists the memory ranges of uncommitted/overflow objs that
+       need to be flushed to other segments on commit (like
+       large_overflow_objects) */
+    struct list_s *uncommitted_ranges;
+
+    /* List of smallobjs that were unreachable in a major GC. We
+       really free them only on commit/abort because we would
+       otherwise need to deal with holes generated in the
+       uncommitted_ranges during major GCs (and I can't think of
+       a non-quadratic algorithm to deal with this). */
+    struct list_s *delayed_free_objs;
 };
 
 
