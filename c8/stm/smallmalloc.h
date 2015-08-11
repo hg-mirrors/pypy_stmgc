@@ -52,15 +52,25 @@ struct small_malloc_data_s {
 
     /* lists the memory ranges of uncommitted/overflow objs that
        need to be flushed to other segments on commit (like
-       large_overflow_objects) */
+       large_overflow_objects). (unsorted, a range never overlaps
+       pages) */
     struct list_s *uncommitted_ranges;
 
-    /* List of smallobjs that were unreachable in a major GC. We
-       really free them only on commit/abort because we would
-       otherwise need to deal with holes generated in the
-       uncommitted_ranges during major GCs (and I can't think of
-       a non-quadratic algorithm to deal with this). */
-    struct list_s *delayed_free_objs;
+    /* with "uncommitted_ranges", we do the following during major GCs:
+
+       for seg in segments:
+           for r in seg.uncommitted_ranges:
+               size = obj_size_in_seg(seg, (object_t*)r)
+               assert(r.size % size == 0)
+               for(obj = r; obj < r + r.size; r += size):
+                   if obj_dies(obj):
+                       adjust_range(r) // split/shrink
+
+       Optionally, we can also merge ranges, sort the list, etc.
+       But generally, I hope we don't have too many uncommitted
+       ranges; and I don't know, if there is another way to get
+       the size(-class) of the page/objs.
+     */
 };
 
 
