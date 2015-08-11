@@ -111,11 +111,9 @@ struct stm_priv_segment_info_s {
        need to be flushed to other segments on commit (like
        large_overflow_objects). (unsorted, a range never overlaps
        pages) */
-    /* XXX: not much different from before. Maybe try a ranges list
-       per size class. */
     /* XXX: also, we could sweep these ranges on abort and thereby
        free these overflow objs early */
-    struct list_s *small_overflow_obj_ranges;
+    struct list_s *small_overflow_obj_ranges[GC_N_SMALL_REQUESTS];
 
     uint8_t privatization_lock;  // XXX KILL
 
