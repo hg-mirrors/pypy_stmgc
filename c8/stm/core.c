@@ -1727,11 +1727,30 @@ static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
        of the fragment need syncing to other segments? (keep privatization
        lock until the "flush") */
 
-    /* Enqueue this object (or fragemnt of object) */
-    if (STM_PSEGMENT->sq_len == SYNC_QUEUE_SIZE)
+    int sq_len = STM_PSEGMENT->sq_len;
+    /* try to merge with previous fragment: */
+    int min = sq_len-4 <= 0 ? 0 : sq_len-4; /* go back 4 elems */
+    for (int i = sq_len-1; i >= min; i--) {
+        stm_char *start = STM_PSEGMENT->sq_fragments[i];
+        ssize_t size = STM_PSEGMENT->sq_fragsizes[i];
+
+        if (start + size == frag) {
+            /* merge! */
+            if ((size + frag_size) + ((uintptr_t)start & 4095) > 4096)
+                break;      /* doesn't fit inside the same page */
+
+            STM_PSEGMENT->sq_fragsizes[i] = size + frag_size;
+            return;
+        }
+    }
+
+    /* Enqueue this object (or fragment of object) */
+    if (sq_len == SYNC_QUEUE_SIZE) {
         synchronize_objects_flush();
-    STM_PSEGMENT->sq_fragments[STM_PSEGMENT->sq_len] = frag;
-    STM_PSEGMENT->sq_fragsizes[STM_PSEGMENT->sq_len] = frag_size;
+        sq_len = STM_PSEGMENT->sq_len;
+    }
+    STM_PSEGMENT->sq_fragments[sq_len] = frag;
+    STM_PSEGMENT->sq_fragsizes[sq_len] = frag_size;
     ++STM_PSEGMENT->sq_len;
 }
 
@@ -1748,6 +1767,7 @@ static void synchronize_object_enqueue(object_t *obj)
     OPT_ASSERT(obj_size >= 16);
 
     if (LIKELY(is_small_uniform(obj))) {
+        /* XXX: could also use the knowledge of full_pages_object_size ^^^ */
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
         OPT_ASSERT(obj_size <= GC_LAST_SMALL_SIZE);
         _synchronize_fragment((stm_char *)obj, obj_size);
@@ -1828,7 +1848,8 @@ static void small_overflow_obj_ranges_add(object_t *obj)
         stm_char *obj_start = (stm_char*)obj;
         long i;
         long min = lst->count - 4 * 2; /* go back 4 elems */
-        for (i = lst->count - 2; i >= min && i >= 0; i -= 2) {
+        min = min >= 0 ? min : 0;
+        for (i = lst->count - 2; i >= min; i -= 2) {
             stm_char *start = (stm_char*)lst->items[i];
             ssize_t size = (ssize_t)lst->items[i+1];
 
@@ -1837,11 +1858,13 @@ static void small_overflow_obj_ranges_add(object_t *obj)
                 if ((size + obj_size) + ((uintptr_t)start & 4095) > 4096)
                     break;      /* doesn't fit inside the same page */
 
+                //fprintf(stderr, "merged\n");
                 lst->items[i+1] = size + obj_size;
                 return;
             }
         }
     }
+    //fprintf(stderr, "nomerge\n");
 
     /* no merge was found */
     STM_PSEGMENT->small_overflow_obj_ranges[obj_size / 8] =
