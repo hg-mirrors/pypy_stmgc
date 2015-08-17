@@ -126,11 +126,14 @@ static char *_allocate_small_slowpath(uint64_t size)
        Maybe we can pick one from free_uniform_pages.
      */
     smallpage = free_uniform_pages;
-    if (smallpage != NULL) {
+    if (LIKELY(smallpage != NULL)) {
         if (UNLIKELY(!__sync_bool_compare_and_swap(&free_uniform_pages,
                                                    smallpage,
                                                    smallpage->nextpage)))
             goto retry;
+
+        /* got a new page: */
+        increment_total_allocated(4096);
 
         /* Succeeded: we have a page in 'smallpage', which is not
            initialized so far, apart from the 'nextpage' field read
@@ -173,8 +176,6 @@ static inline stm_char *allocate_outside_nursery_small(uint64_t size)
         &STM_PSEGMENT->small_malloc_data.loc_free[size / 8];
 
     struct small_free_loc_s *result = *fl;
-
-    increment_total_allocated(size);
 
     if (UNLIKELY(result == NULL)) {
         char *addr = _allocate_small_slowpath(size);
@@ -270,7 +271,6 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
         }
         else if (!_smallmalloc_sweep_keep(p)) {
             /* the location should be freed now */
-            increment_total_allocated(-szword*8);
 #ifdef STM_TESTS
             /* fill location with 0xdd in all segs except seg0 */
             int j;
@@ -311,6 +311,9 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
 
         ((struct small_free_loc_s *)baseptr)->nextpage = free_uniform_pages;
         free_uniform_pages = (struct small_free_loc_s *)baseptr;
+
+        /* gave the page back */
+        increment_total_allocated(-4096);
     }
     else if (!any_object_dying) {
         get_fpsz(baseptr)->sz = szword;
