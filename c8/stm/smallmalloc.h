@@ -38,6 +38,11 @@ static struct small_free_loc_s *small_page_lists[GC_N_SMALL_REQUESTS];
 
 #define free_uniform_pages   (small_page_lists[0])
 
+/* here are pages that should be in small_page_lists, but since they
+   are "pretty full", let's use them again only after they are less
+   full (XXX: or if we run out of pages). */
+static struct small_free_loc_s *pretty_full_pages[GC_N_SMALL_REQUESTS];
+
 
 /* For is_small_uniform(). */
 static uintptr_t first_small_uniform_loc = (uintptr_t) -1;

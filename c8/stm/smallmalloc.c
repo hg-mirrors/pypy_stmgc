@@ -36,6 +36,7 @@ bool (*_stm_smallmalloc_keep)(char *data);   /* a hook for tests */
 static void teardown_smallmalloc(void)
 {
     memset(small_page_lists, 0, sizeof(small_page_lists));
+    memset(pretty_full_pages, 0, sizeof(pretty_full_pages));
     assert(free_uniform_pages == NULL);   /* done by the previous line */
     first_small_uniform_loc = (uintptr_t) -1;
 #ifdef STM_TESTS
@@ -261,6 +262,7 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
        to have it ignored in the end because we put the page into
        'free_uniform_pages' */
 
+    long free_slots_balance = 0;
     for (i = 0; i <= 4096 - size; i += size) {
         char *p = baseptr + i;
         if (p == (char *)fl) {
@@ -268,9 +270,11 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
             flprev = fl;
             fl = fl->next;
             any_object_dying = true;
+            free_slots_balance++;
         }
         else if (!_smallmalloc_sweep_keep(p)) {
             /* the location should be freed now */
+            free_slots_balance++;
 #ifdef STM_TESTS
             /* fill location with 0xdd in all segs except seg0 */
             int j;
@@ -297,6 +301,7 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
         }
         else {
             //dprintf(("keep small %p : %lu\n", (char*)(p - stm_object_pages), szword*8));
+            free_slots_balance--;
             any_object_remaining = true;
         }
     }
@@ -322,9 +327,15 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
         get_full_page_size(baseptr)->sz = szword;
     }
     else {
-        check_order_inside_small_page(page_free);
-        page_free->nextpage = small_page_lists[szword];
-        small_page_lists[szword] = page_free;
+        if (free_slots_balance < 0) {
+            /* "pretty full" */
+            page_free->nextpage = pretty_full_pages[szword];
+            pretty_full_pages[szword] = page_free;
+        } else {
+            check_order_inside_small_page(page_free);
+            page_free->nextpage = small_page_lists[szword];
+            small_page_lists[szword] = page_free;
+        }
     }
 }
 
@@ -333,8 +344,10 @@ void _stm_smallmalloc_sweep(void)
     long i, szword;
     for (szword = 2; szword < GC_N_SMALL_REQUESTS; szword++) {
         struct small_free_loc_s *page = small_page_lists[szword];
+        struct small_free_loc_s *pfpage = pretty_full_pages[szword];
         struct small_free_loc_s *nextpage;
         small_page_lists[szword] = NULL;
+        pretty_full_pages[szword] = NULL;
 
         /* process the pages that the various segments are busy filling */
         /* including sharing seg0 for old-malloced things */
@@ -361,6 +374,14 @@ void _stm_smallmalloc_sweep(void)
             nextpage = page->nextpage;
             sweep_small_page(getbaseptr(page), page, szword);
             page = nextpage;
+        }
+
+        /* process all the pretty full pages */
+        while (pfpage != NULL) {
+            assert(get_full_page_size((char *)pfpage)->sz == 0);
+            nextpage = pfpage->nextpage;
+            sweep_small_page(getbaseptr(pfpage), pfpage, szword);
+            pfpage = nextpage;
         }
     }
 
