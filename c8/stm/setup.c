@@ -101,6 +101,8 @@ void stm_setup(void)
         pr->pub.segment_base = segment_base;
         pr->modified_old_objects = list_create();
         pr->large_overflow_objects = list_create();
+        for (long k = 2; k < GC_N_SMALL_REQUESTS; k++)
+            pr->small_overflow_obj_ranges[k] = list_create();
         pr->young_weakrefs = list_create();
         pr->old_weakrefs = list_create();
         pr->objects_pointing_to_nursery = list_create();
@@ -158,7 +160,13 @@ void stm_teardown(void)
         list_free(pr->old_objects_with_cards_set);
         list_free(pr->modified_old_objects);
         assert(list_is_empty(pr->large_overflow_objects));
+#ifndef NDEBUG
+        for (long k = 2; k < GC_N_SMALL_REQUESTS; k++)
+            assert(list_is_empty(pr->small_overflow_obj_ranges[k]));
+#endif
         list_free(pr->large_overflow_objects);
+        for (long k = 2; k < GC_N_SMALL_REQUESTS; k++)
+            list_free(pr->small_overflow_obj_ranges[k]);
         list_free(pr->young_weakrefs);
         list_free(pr->old_weakrefs);
         tree_free(pr->young_outside_nursery);
