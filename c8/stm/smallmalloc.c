@@ -328,7 +328,8 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
     }
     else {
         if (free_slots_balance < 0) {
-            /* "pretty full" */
+            /* "pretty full" (>= 50% used), so don't use the page
+               for new allocations until it is at least half-empty again  */
             page_free->nextpage = pretty_full_pages[szword];
             pretty_full_pages[szword] = page_free;
         } else {
