@@ -23,15 +23,17 @@ def ht_length_upper_bound(o):
 def htitems(o):
     h = get_hashtable(o)
     upper_bound = lib.stm_hashtable_length_upper_bound(h)
-    entries = ffi.new("stm_hashtable_entry_t *[]", upper_bound)
-    count = lib.stm_hashtable_list(o, h, entries)
+    entries = stm_allocate_refs(upper_bound)
+    count = lib._stm_hashtable_list(o, h, entries)
     assert count <= upper_bound
-    return [(lib._get_entry_index(entries[i]),
-             lib._get_entry_object(entries[i])) for i in range(count)]
+
+    return [(lib._get_entry_index(ffi.cast("stm_hashtable_entry_t *", stm_get_ref(entries, i))),
+             lib._get_entry_object(ffi.cast("stm_hashtable_entry_t *", stm_get_ref(entries, i))))
+            for i in range(count)]
 
 def htlen(o):
     h = get_hashtable(o)
-    count = lib.stm_hashtable_list(o, h, ffi.NULL)
+    count = lib._stm_hashtable_list(o, h, ffi.NULL)
     return count
 
 

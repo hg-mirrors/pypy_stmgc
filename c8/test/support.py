@@ -210,11 +210,11 @@ object_t *hashtable_read_result;
 bool _check_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
                             object_t *nvalue, stm_thread_local_t *tl);
 long stm_hashtable_length_upper_bound(stm_hashtable_t *);
-long stm_hashtable_list(object_t *, stm_hashtable_t *,
-                        stm_hashtable_entry_t **results);
 uint32_t stm_hashtable_entry_userdata;
 void stm_hashtable_tracefn(struct object_s *, stm_hashtable_t *,
                            void trace(object_t **));
+long _stm_hashtable_list(object_t *o, stm_hashtable_t *h,
+                         object_t *entries);
 
 void _set_hashtable(object_t *obj, stm_hashtable_t *h);
 stm_hashtable_t *_get_hashtable(object_t *obj);
@@ -396,6 +396,16 @@ object_t *_get_entry_object(stm_hashtable_entry_t *entry)
     stm_read((object_t *)entry);
     return entry->object;
 }
+
+long _stm_hashtable_list(object_t *o, stm_hashtable_t *h,
+                         object_t *entries)
+{
+    if (entries != NULL)
+        return stm_hashtable_list(o, h,
+            (stm_hashtable_entry_t * TLPREFIX*)((stm_char*)entries+SIZEOF_MYOBJ));
+    return stm_hashtable_list(o, h, NULL);
+}
+
 
 void _set_queue(object_t *obj, stm_queue_t *q)
 {
