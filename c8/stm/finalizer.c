@@ -486,6 +486,10 @@ static void _execute_finalizers(struct finalizers_s *f)
    XXX: what happens in _execute_finalizer if the transaction
         conflicts (or fails to become inevitable) in a finalizer?
         (the run_finalizers list is half-way cleared?)
+   XXX: according to translator.backendopt.finalizer, getfield_gc
+        for primitive types is a safe op in light finalizers.
+        I don't think that's correct in general (maybe if
+        getfield on *dying obj*).
 */
 
 static void _invoke_general_finalizers(stm_thread_local_t *tl)
