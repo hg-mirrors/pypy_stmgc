@@ -139,6 +139,7 @@ class TestLightFinalizer(BaseTest):
         self.expect_finalized([lp1], from_tlnum=0)
 
 
+
 class TestRegularFinalizer(BaseTest):
     expect_content_character = None
     run_major_collect_in_finalizer = False
@@ -272,3 +273,59 @@ class TestRegularFinalizer(BaseTest):
         self.expect_finalized([])
         stm_major_collect()
         self.expect_finalized([lp1])
+
+
+class TestMoreRegularFinalizers(BaseTest):
+
+    def test_inevitable_in_finalizer(self):
+        lpo = stm_allocate_old(16)
+
+        self._first_time = True
+        @ffi.callback("void(object_t *)")
+        def finalizer(obj):
+            print "finalizing!", obj
+            stm_set_char(lpo, 'a')
+
+            if self._first_time:
+                self._first_time = False
+                # we will switch to the other TX and
+                # make it inevitable, so that our TX
+                # will abort on commit (or validate)
+                self.switch(0, validate=False)
+                self.become_inevitable()
+                self.switch(1, validate=False)
+
+        lib.stmcb_finalizer = finalizer
+        self._finalizer_keepalive = finalizer
+
+        # start a transaction with a finalizing obj
+        self.switch(1)
+        self.start_transaction()
+        lpf = stm_allocate_with_finalizer(16)
+
+        self.push_root(lpf)
+        stm_minor_collect()
+
+
+        self.switch(0)
+        self.start_transaction()
+        stm_set_char(lpo, 'x')
+        self.switch(1)
+        lpf = self.pop_root()
+        # commit this TX, start a new one, let lpf
+        # die with a major-gc:
+        self.commit_transaction()
+        self.start_transaction()
+        stm_major_collect()
+        # commit and run finalizer in separate TX
+        # that will abort because of a conflict
+        self.commit_transaction()
+
+        self.switch(0, validate=False)
+        assert stm_get_char(lpo) == 'x'
+        # commit the now-inevitable TX and run
+        # the aborted finalizer again
+        self.commit_transaction()
+        self.start_transaction()
+        # should now see the value set by finalizer
+        assert stm_get_char(lpo) == 'a'

@@ -481,6 +481,13 @@ static void _execute_finalizers(struct finalizers_s *f)
     LIST_FREE(f->run_finalizers);
 }
 
+/* XXX: can there be a race between _invoke_general_finalizers
+        and _commit_finalizer on g_finalizers (+other places?)?
+   XXX: what happens in _execute_finalizer if the transaction
+        conflicts (or fails to become inevitable) in a finalizer?
+        (the run_finalizers list is half-way cleared?)
+*/
+
 static void _invoke_general_finalizers(stm_thread_local_t *tl)
 {
     /* called between transactions */
@@ -496,6 +503,7 @@ static void _invoke_general_finalizers(stm_thread_local_t *tl)
     stm_rewind_jmp_enterframe(tl, &rjbuf);
     _stm_start_transaction(tl);
 
+    fprintf(stderr, "run_finalizers: %lu\n", list_count(g_finalizers.run_finalizers));
     _execute_finalizers(&g_finalizers);
 
     _stm_commit_transaction();
