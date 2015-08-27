@@ -518,8 +518,9 @@ static void _invoke_general_finalizers(stm_thread_local_t *tl)
     /* others may add to g_finalizers again: */
     __sync_lock_release(&g_finalizers.lock);
 
-    fprintf(stderr, "run_finalizers: %lu\n", list_count(copy.run_finalizers));
-    _execute_finalizers(&copy);
+    if (copy.run_finalizers != NULL) {
+        _execute_finalizers(&copy);
+    }
 
     _stm_commit_transaction();
     stm_rewind_jmp_leaveframe(tl, &rjbuf);
