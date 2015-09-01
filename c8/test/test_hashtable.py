@@ -354,6 +354,50 @@ class TestHashtable(BaseTestHashtable):
         stm_major_collect()       # to get rid of the hashtable object
 
 
+    def test_new_entry_if_nursery_full(self):
+        self.start_transaction()
+        tl0 = self.tls[self.current_thread]
+        # make sure we fill the nursery *exactly* so that
+        # the last entry allocation triggers a minor GC
+        # and needs to allocate preexisting outside the nursery:
+        SMALL = 24 + lib.SIZEOF_MYOBJ
+        assert (NURSERY_SIZE - SIZEOF_HASHTABLE_OBJ) % SMALL < SIZEOF_HASHTABLE_ENTRY
+        to_alloc = (NURSERY_SIZE - SIZEOF_HASHTABLE_OBJ) // SMALL
+        for i in range(to_alloc):
+            stm_allocate(SMALL)
+        h = self.allocate_hashtable()
+        assert is_in_nursery(h)
+        self.push_root(h)
+        # would trigger minor GC when allocating 'entry' in nursery:
+        entry = hashtable_lookup(h, get_hashtable(h), 123)
+        h = self.pop_root()
+        self.push_root(h)
+        assert is_in_nursery(h) # didn't trigger minor-gc, since entry allocated outside
+        assert not is_in_nursery(entry)
+        assert htget(h, 123) == ffi.NULL
+        htset(h, 123, h, tl0)
+
+        # stm_write(h) - the whole thing may be fixed also by ensuring
+        # the hashtable gets retraced in minor-GC if stm_hashtable_write_entry
+        # detects the 'entry' to be young (and hobj being old)
+
+        stm_minor_collect()
+        h = self.pop_root()
+        assert htget(h, 123) == h
+        entry2 = hashtable_lookup(h, get_hashtable(h), 123)
+        assert entry == entry2
+        assert not is_in_nursery(h)
+        assert not is_in_nursery(entry2)
+
+        # get rid of ht:
+        self.commit_transaction()
+        self.start_transaction()
+        stm_major_collect()
+        self.commit_transaction()
+
+
+
+
 class TestRandomHashtable(BaseTestHashtable):
 
     def setup_method(self, meth):
