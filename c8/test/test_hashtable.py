@@ -423,6 +423,38 @@ class TestHashtable(BaseTestHashtable):
         stm_major_collect()
         self.commit_transaction()
 
+    def test_empty_entry_not_kept_alive(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        self.push_root(h)
+        stm_minor_collect()
+        h = self.pop_root()
+        self.push_root(h)
+
+        # produce some entries so we get compaction in major GC
+        K = 300
+        for i in range(K):
+            hashtable_lookup(h, get_hashtable(h), i)
+
+        entry = hashtable_lookup(h, get_hashtable(h), K)
+        self.push_root(entry)
+
+        self.commit_transaction()
+        self.start_transaction()
+
+        stm_major_collect() # compaction and rehashing
+
+        entry = self.pop_root()
+        entry2 = hashtable_lookup(h, get_hashtable(h), K)
+        assert entry != entry2
+
+        # get rid of ht:
+        self.pop_root()
+        self.commit_transaction()
+        self.start_transaction()
+        stm_major_collect()
+        self.commit_transaction()
+
 
 
 
