@@ -227,8 +227,10 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
     i = index & mask;
     entry = VOLATILE_TABLE(table)->items[i];
     if (entry != NULL) {
-        if (entry->index == index)
+        if (entry->index == index) {
+            stm_read((object_t*)entry);
             return entry;           /* found at the first try */
+        }
 
         uintptr_t perturb = index;
         while (1) {
@@ -236,8 +238,10 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             i &= mask;
             entry = VOLATILE_TABLE(table)->items[i];
             if (entry != NULL) {
-                if (entry->index == index)
+                if (entry->index == index) {
+                    stm_read((object_t*)entry);
                     return entry;    /* found */
+                }
             }
             else
                 break;
@@ -335,6 +339,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
         table->items[i] = entry;
         write_fence();     /* make sure 'table->items' is written here */
         VOLATILE_TABLE(table)->resize_counter = rc - 6;    /* unlock */
+        stm_read((object_t*)entry);
         return entry;
     }
     else {
