@@ -225,6 +225,7 @@ void _set_hashtable(object_t *obj, stm_hashtable_t *h);
 stm_hashtable_t *_get_hashtable(object_t *obj);
 uintptr_t _get_entry_index(stm_hashtable_entry_t *entry);
 object_t *_get_entry_object(stm_hashtable_entry_t *entry);
+void *_get_hashtable_table(stm_hashtable_t *h);
 
 typedef struct stm_queue_s stm_queue_t;
 stm_queue_t *stm_queue_create(void);
@@ -401,6 +402,11 @@ object_t *_get_entry_object(stm_hashtable_entry_t *entry)
 {
     stm_read((object_t *)entry);
     return entry->object;
+}
+
+
+void *_get_hashtable_table(stm_hashtable_t *h) {
+    return *((void**)h);
 }
 
 long _stm_hashtable_list(object_t *o, stm_hashtable_t *h,

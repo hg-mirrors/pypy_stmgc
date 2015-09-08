@@ -150,8 +150,9 @@ static void _insert_clean(stm_hashtable_table_t *table,
 
 static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
                                   uintptr_t biggercount,
-                                  char *segment_base)
+                                  long segnum) /* segnum=-1 if no major GC */
 {
+    char *segment_base = segnum == -1 ? NULL : get_segment_base(segnum);
     dprintf(("rehash %p to size %ld, segment_base=%p\n",
              hashtable, biggercount, segment_base));
 
@@ -175,22 +176,26 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
         stm_hashtable_entry_t *entry = table->items[j];
         if (entry == NULL)
             continue;
-        if (segment_base != NULL) {
+
+        char *to_read_from = segment_base;
+        if (segnum != -1) {
             /* -> compaction during major GC */
+            to_read_from = get_page_status_in(segnum, (uintptr_t)entry / 4096UL) == PAGE_NO_ACCESS
+                ? stm_object_pages : to_read_from;
             if (((struct stm_hashtable_entry_s *)
-                       REAL_ADDRESS(segment_base, entry))->object == NULL &&
-                   !_stm_was_read_by_anybody((object_t *)entry)) {
-                dprintf(("  removing dead %p\n", entry));
+                 REAL_ADDRESS(to_read_from, entry))->object == NULL &&
+                !_stm_was_read_by_anybody((object_t *)entry)) {
+                dprintf(("  removing dead %p at %ld\n", entry, j));
                 continue;
             }
         }
 
         uintptr_t eindex;
-        if (segment_base == NULL)
+        if (segnum == -1)
             eindex = entry->index;   /* read from STM_SEGMENT */
         else
             eindex = ((struct stm_hashtable_entry_s *)
-                       REAL_ADDRESS(segment_base, entry))->index;
+                       REAL_ADDRESS(to_read_from, entry))->index;
 
         dprintf(("  insert_clean %p at index=%ld\n",
                  entry, eindex));
@@ -340,7 +345,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             biggercount *= 4;
         else
             biggercount *= 2;
-        _stm_rehash_hashtable(hashtable, biggercount, /*segment_base=*/NULL);
+        _stm_rehash_hashtable(hashtable, biggercount, /*segnum=*/-1);
         goto restart;
     }
 }
@@ -501,7 +506,7 @@ static void _stm_compact_hashtable(struct object_s *hobj,
         assert(count <= table->mask + 1);
 
         dprintf(("compact with %ld items:\n", num_entries_times_6 / 6));
-        _stm_rehash_hashtable(hashtable, count, get_segment_base(segnum));
+        _stm_rehash_hashtable(hashtable, count, segnum);
     }
 
     table = hashtable->table;

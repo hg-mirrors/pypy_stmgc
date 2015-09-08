@@ -395,6 +395,35 @@ class TestHashtable(BaseTestHashtable):
         stm_major_collect()
         self.commit_transaction()
 
+    def test_dont_lose_entry(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        self.push_root(h)
+        stm_minor_collect()
+        h = self.pop_root()
+        self.push_root(h)
+        # produce entries:
+        K = 300
+        for i in range(K):
+            hashtable_lookup(h, get_hashtable(h), i)
+
+        table = lib._get_hashtable_table(get_hashtable(h))
+        entry = hashtable_lookup(h, get_hashtable(h), K)
+        self.push_root(entry)
+        stm_major_collect()
+        entry2 = hashtable_lookup(h, get_hashtable(h), K)
+        entry = self.pop_root()
+        assert table != lib._get_hashtable_table(get_hashtable(h)) # compacted
+        assert entry == entry2
+
+        # get rid of ht:
+        self.pop_root()
+        self.commit_transaction()
+        self.start_transaction()
+        stm_major_collect()
+        self.commit_transaction()
+
+
 
 
 
