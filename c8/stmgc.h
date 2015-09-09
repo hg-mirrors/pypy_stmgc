@@ -725,6 +725,9 @@ typedef TLPREFIX struct stm_hashtable_entry_s stm_hashtable_entry_t;
 
 stm_hashtable_t *stm_hashtable_create(void);
 void stm_hashtable_free(stm_hashtable_t *);
+/* lookup returns a reference to an entry. This entry is only valid
+   in the current transaction and needs to be looked up again if there
+   may have been a break inbetween. */
 stm_hashtable_entry_t *stm_hashtable_lookup(object_t *, stm_hashtable_t *,
                                             uintptr_t key);
 object_t *stm_hashtable_read(object_t *, stm_hashtable_t *, uintptr_t key);
@@ -733,8 +736,13 @@ void stm_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
 void stm_hashtable_write_entry(object_t *hobj, stm_hashtable_entry_t *entry,
                                object_t *nvalue);
 long stm_hashtable_length_upper_bound(stm_hashtable_t *);
+
+/* WARNING: stm_hashtable_list does not do a stm_write() on the 'results'
+   argument. 'results' may point inside an object. So if 'results' may be
+   a part of an old obj (which may have survived a minor GC), then make
+   sure to call stm_write() on the obj before calling this function. */
 long stm_hashtable_list(object_t *, stm_hashtable_t *,
-                        stm_hashtable_entry_t **results);
+                        stm_hashtable_entry_t * TLPREFIX *results);
 extern uint32_t stm_hashtable_entry_userdata;
 void stm_hashtable_tracefn(struct object_s *, stm_hashtable_t *,
                            void (object_t **));

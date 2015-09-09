@@ -12,6 +12,8 @@ typedef ... object_t;
 #define _STM_FAST_ALLOC ...
 #define _STM_CARD_SIZE ...
 #define _STM_CARD_MARKED ...
+#define STM_GC_NURSERY ...
+#define SIZEOF_HASHTABLE_ENTRY ...
 
 typedef struct {
 ...;
@@ -209,17 +211,21 @@ bool _check_hashtable_read(object_t *, stm_hashtable_t *, uintptr_t key);
 object_t *hashtable_read_result;
 bool _check_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
                             object_t *nvalue, stm_thread_local_t *tl);
+stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
+                                            stm_hashtable_t *hashtable,
+                                            uintptr_t index);
 long stm_hashtable_length_upper_bound(stm_hashtable_t *);
-long stm_hashtable_list(object_t *, stm_hashtable_t *,
-                        stm_hashtable_entry_t **results);
 uint32_t stm_hashtable_entry_userdata;
 void stm_hashtable_tracefn(struct object_s *, stm_hashtable_t *,
                            void trace(object_t **));
+long _stm_hashtable_list(object_t *o, stm_hashtable_t *h,
+                         object_t *entries);
 
 void _set_hashtable(object_t *obj, stm_hashtable_t *h);
 stm_hashtable_t *_get_hashtable(object_t *obj);
 uintptr_t _get_entry_index(stm_hashtable_entry_t *entry);
 object_t *_get_entry_object(stm_hashtable_entry_t *entry);
+void *_get_hashtable_table(stm_hashtable_t *h);
 
 typedef struct stm_queue_s stm_queue_t;
 stm_queue_t *stm_queue_create(void);
@@ -256,6 +262,7 @@ struct myobj_s {
 typedef TLPREFIX struct myobj_s myobj_t;
 #define SIZEOF_MYOBJ sizeof(struct myobj_s)
 
+#define SIZEOF_HASHTABLE_ENTRY sizeof(struct stm_hashtable_entry_s)
 
 int _stm_get_flags(object_t *obj) {
     return obj->stm_flags;
@@ -396,6 +403,21 @@ object_t *_get_entry_object(stm_hashtable_entry_t *entry)
     stm_read((object_t *)entry);
     return entry->object;
 }
+
+
+void *_get_hashtable_table(stm_hashtable_t *h) {
+    return *((void**)h);
+}
+
+long _stm_hashtable_list(object_t *o, stm_hashtable_t *h,
+                         object_t *entries)
+{
+    if (entries != NULL)
+        return stm_hashtable_list(o, h,
+            (stm_hashtable_entry_t * TLPREFIX*)((stm_char*)entries+SIZEOF_MYOBJ));
+    return stm_hashtable_list(o, h, NULL);
+}
+
 
 void _set_queue(object_t *obj, stm_queue_t *q)
 {
@@ -570,6 +592,7 @@ long current_segment_num(void)
                     ('STM_NO_COND_WAIT', '1'),
                     ('STM_DEBUGPRINT', '1'),
                     ('_STM_NURSERY_ZEROED', '1'),
+                    ('STM_GC_NURSERY', '128'), # KB
                     ('GC_N_SMALL_REQUESTS', str(GC_N_SMALL_REQUESTS)), #check
                     ],
      undef_macros=['NDEBUG'],
@@ -590,7 +613,8 @@ CARD_CLEAR = 0
 CARD_MARKED = lib._STM_CARD_MARKED
 CARD_MARKED_OLD = lib._stm_get_transaction_read_version
 lib.stm_hashtable_entry_userdata = 421418
-
+NURSERY_SIZE = lib.STM_GC_NURSERY * 1024 # bytes
+SIZEOF_HASHTABLE_ENTRY = lib.SIZEOF_HASHTABLE_ENTRY
 
 class Conflict(Exception):
     pass
@@ -652,13 +676,19 @@ def stm_allocate_with_finalizer_refs(n):
     lib._set_type_id(o, tid)
     return o
 
+SIZEOF_HASHTABLE_OBJ = 16 + lib.SIZEOF_MYOBJ
 def stm_allocate_hashtable():
     o = lib.stm_allocate(16)
+    assert is_in_nursery(o)
     tid = 421419
     lib._set_type_id(o, tid)
     h = lib.stm_hashtable_create()
     lib._set_hashtable(o, h)
     return o
+
+def hashtable_lookup(hto, ht, idx):
+    return ffi.cast("object_t*",
+                    lib.stm_hashtable_lookup(hto, ht, idx))
 
 def get_hashtable(o):
     assert lib._get_type_id(o) == 421419
