@@ -1,7 +1,7 @@
 
 - fix markers (e.g. become_inevitable doesn't seem to show up)
 
-- improve sync of small objs on commit (see FLAG_SYNC_LARGE in nursery.c)
+IN_PROGRESS: improve sync of small objs on commit (see FLAG_SYNC_LARGE in nursery.c)
 
 - reshare pages:
   make seg0 MAP_SHARED in order to re-share private pages during major GC
@@ -23,6 +23,8 @@
 - avoid __builtin_frame_address(0) in precisely the performance-critical
   functions like the interpreter main loop
 
+- some lists in PSEGMENT can only grow and never shrink again
+  check if it matters
 
 ---------------------------
 DONE:
