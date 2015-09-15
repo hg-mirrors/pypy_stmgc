@@ -1,3 +1,10 @@
+- stm_identityhash spends a good time figuring out if an obj is prebuilt
+  (40% of its time). maybe after setup_prebuilt, we could defer the test
+  of GCFLAG_HAS_SHADOW in id_or_identityhash to after an address comparison.
+  I.e., after setup_prebuilt, all objs allocated there could be in some
+  area at the start of the heap, and can thus be classified by having
+  an address < some_barrier. (may include some non-prebuilt ones, but
+  that's ok) (also take care of small prebuilt objs)
 
 - fix markers (e.g. become_inevitable doesn't seem to show up)
 
