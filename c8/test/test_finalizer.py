@@ -139,6 +139,7 @@ class TestLightFinalizer(BaseTest):
         self.expect_finalized([lp1], from_tlnum=0)
 
 
+
 class TestRegularFinalizer(BaseTest):
     expect_content_character = None
     run_major_collect_in_finalizer = False
