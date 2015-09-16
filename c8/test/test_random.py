@@ -243,6 +243,7 @@ class GlobalState(object):
         self.root_numbering = 0
         self.ref_type_map = {}
         self.root_sizes = {}
+        self.noconfl_objs = set()
 
     def get_new_root_name(self, is_ref_type, size):
         self.root_numbering += 1
@@ -260,6 +261,12 @@ class GlobalState(object):
     def inc_and_get_global_time(self):
         self.global_time += 1
         return self.global_time
+
+    def add_noconfl_obj(self, o):
+        self.noconfl_objs.add(o)
+
+    def is_noconfl(self, o):
+        return o in self.noconfl_objs
 
     def push_state_to_other_threads(self, trs):
         assert not trs.check_must_abort()
@@ -382,6 +389,27 @@ def op_allocate(ex, global_state, thread_state):
     thread_state.reload_roots(ex)
     thread_state.register_root(r)
 
+def op_allocate_no_confl(ex, global_state, thread_state):
+    # copy&paste of op_allocate...
+    size = global_state.rnd.choice([
+        "16", "48", "288",
+        str(4096+16),
+        str(80*1024+16),
+        #"SOME_MEDIUM_SIZE+16",
+        #"SOME_LARGE_SIZE+16",
+    ])
+    r = global_state.get_new_root_name(False, size)
+    thread_state.push_roots(ex)
+
+    ex.do('%s = stm_allocate_noconflict(%s)' % (r, size))
+    ex.do('# 0x%x' % (int(ffi.cast("uintptr_t", ex.content[r]))))
+    thread_state.transaction_state.add_root(r, 0, True)
+
+    thread_state.pop_roots(ex)
+    thread_state.reload_roots(ex)
+    thread_state.register_root(r)
+    global_state.add_noconfl_obj(r)
+
 def op_allocate_ref(ex, global_state, thread_state):
     num = str(global_state.rnd.randrange(1, 1000))
     r = global_state.get_new_root_name(True, num)
@@ -429,6 +457,10 @@ def op_write(ex, global_state, thread_state):
     trs = thread_state.transaction_state
     is_ref = global_state.has_ref_type(r)
     try_cards = global_state.rnd.randrange(1, 100) > 5 # and False
+    # noconfl:
+    if global_state.is_noconfl(r):
+        ex.do('stm_write(%s) # noconfl' % r)
+        return
     #
     # decide on a value to write
     if is_ref:
@@ -449,6 +481,10 @@ def op_read(ex, global_state, thread_state):
     r = thread_state.get_random_root()
     trs = thread_state.transaction_state
     v = trs.read_root(r)
+    # noconfl:
+    if global_state.is_noconfl(r):
+        ex.do('stm_read(%s) # noconfl' % r)
+        return
     #
     offset = global_state.get_root_size(r) + " - 1"
     if global_state.has_ref_type(r):
@@ -576,6 +612,7 @@ class TestRandom(BaseTest):
             [op_write,]*70,
             [op_allocate,]*10,
             [op_allocate_ref]*10,
+            [op_allocate_no_confl]*2,
             [op_commit_transaction,]*6,
             [op_abort_transaction,],
             [op_forget_root]*10,

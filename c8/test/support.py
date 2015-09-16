@@ -45,6 +45,7 @@ void stm_read(object_t *obj);
 object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
+object_t *stm_allocate_noconflict(ssize_t size_rounded_up);
 
 /*void stm_write_card(); use _checked_stm_write_card() instead */
 
@@ -660,6 +661,18 @@ def stm_allocate_weakref(point_to_obj, size=None):
 
 def stm_allocate_refs(n):
     o = lib.stm_allocate(HDR + n * WORD)
+    tid = 421420 + n
+    lib._set_type_id(o, tid)
+    return o
+
+def stm_allocate_noconflict(size):
+    o = lib.stm_allocate_noconflict(size)
+    tid = 42 + size
+    lib._set_type_id(o, tid)
+    return o
+
+def stm_allocate_noconflict_refs(n):
+    o = lib.stm_allocate_noconflict(HDR + n * WORD)
     tid = 421420 + n
     lib._set_type_id(o, tid)
     return o
