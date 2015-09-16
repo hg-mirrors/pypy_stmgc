@@ -412,6 +412,7 @@ void *demo_random(void *arg)
     stm_unregister_thread_local(&stm_thread_local);
 
     status = sem_post(&done); assert(status == 0);
+    (void)status;
     return NULL;
 }
 

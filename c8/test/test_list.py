@@ -56,7 +56,7 @@ int test_tree_walk(struct tree_s *tree, uintptr_t addrs[])
 ''', define_macros=[('STM_TESTS', '1')],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0', '-Werror', '-ferror-limit=1'],
+     extra_compile_args=['-g', '-O0', '-Werror'],
      force_generic_engine=True)
 
 # ____________________________________________________________
