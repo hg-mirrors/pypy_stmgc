@@ -774,11 +774,12 @@ struct stm_hashtable_entry_s {
    RuntimeError).  When the GC traces, you must keep the table pointer
    alive with stm_hashtable_iter_tracefn().  The original hashtable
    object must also be kept alive. */
-struct stm_hashtable_table_s *stm_hashtable_iter(stm_hashtable_t *);
+typedef struct stm_hashtable_table_s stm_hashtable_table_t;
+stm_hashtable_table_t *stm_hashtable_iter(stm_hashtable_t *);
 stm_hashtable_entry_t **
-stm_hashtable_iter_next(object_t *hobj, struct stm_hashtable_table_s *table,
+stm_hashtable_iter_next(object_t *hobj, stm_hashtable_table_t *table,
                         stm_hashtable_entry_t **previous);
-void stm_hashtable_iter_tracefn(struct stm_hashtable_table_s *table,
+void stm_hashtable_iter_tracefn(stm_hashtable_table_t *table,
                                 void trace(object_t **));
 
 

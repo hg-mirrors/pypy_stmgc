@@ -542,7 +542,7 @@ class TestHashtable(BaseTestHashtable):
         maximum.add('DONE')
         for iterobj, i, seen in iterators:
             assert seen.issubset(maximum)
-            for j in range(i):
+            for j in range(i + 1):
                 assert j ^ 19 in seen
             # we may also have seen more items added later
 
