@@ -767,6 +767,18 @@ struct stm_hashtable_entry_s {
     object_t *object;
 };
 
+/* Hashtable iterators.  You get a raw 'table' pointer when you make an
+   iterator, which you pass to stm_hashtable_iter_next().  When the GC
+   traces, you must keep the table pointer alive with
+   stm_hashtable_iter_tracefn().  This may or may not return items added
+   after stm_hashtable_iter() was called. */
+struct stm_hashtable_table_s *stm_hashtable_iter(stm_hashtable_t *);
+stm_hashtable_entry_t **
+stm_hashtable_iter_next(object_t *hobj, struct stm_hashtable_table_s *table,
+                        stm_hashtable_entry_t **previous);
+void stm_hashtable_iter_tracefn(struct stm_hashtable_table_s *table,
+                                void trace(object_t **));
+
 
 /* Queues.  The items you put() and get() back are in random order.
    Like hashtables, the type 'stm_queue_t' is not an object type at
