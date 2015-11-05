@@ -767,11 +767,13 @@ struct stm_hashtable_entry_s {
     object_t *object;
 };
 
-/* Hashtable iterators.  You get a raw 'table' pointer when you make an
-   iterator, which you pass to stm_hashtable_iter_next().  When the GC
-   traces, you must keep the table pointer alive with
-   stm_hashtable_iter_tracefn().  This may or may not return items added
-   after stm_hashtable_iter() was called. */
+/* Hashtable iterators.  You get a raw 'table' pointer when you make
+   an iterator, which you pass to stm_hashtable_iter_next().  This may
+   or may not return items added after stm_hashtable_iter() was
+   called; there is no logic so far to detect changes (unlike Python's
+   RuntimeError).  When the GC traces, you must keep the table pointer
+   alive with stm_hashtable_iter_tracefn().  The original hashtable
+   object must also be kept alive. */
 struct stm_hashtable_table_s *stm_hashtable_iter(stm_hashtable_t *);
 stm_hashtable_entry_t **
 stm_hashtable_iter_next(object_t *hobj, struct stm_hashtable_table_s *table,
