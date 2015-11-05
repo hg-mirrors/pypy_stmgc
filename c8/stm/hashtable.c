@@ -53,7 +53,7 @@ uint32_t stm_hashtable_entry_userdata;
 #define TRACE_FLAG_ONCE             1
 #define TRACE_FLAG_KEEPALIVE        2
 
-typedef struct stm_hashtable_table_s {
+struct stm_hashtable_table_s {
     uintptr_t mask;      /* 'mask' is always immutable. */
 
     /* 'resize_counter' start at an odd value, and is decremented (by
@@ -70,7 +70,7 @@ typedef struct stm_hashtable_table_s {
     uint8_t trace_flag;
 
     stm_hashtable_entry_t *items[INITIAL_HASHTABLE_SIZE];
-} stm_hashtable_table_t;
+};
 
 #define IS_EVEN(p) (((p) & 1) == 0)
 
@@ -617,7 +617,7 @@ struct stm_hashtable_table_s *stm_hashtable_iter(stm_hashtable_t *hashtable)
 }
 
 stm_hashtable_entry_t **
-stm_hashtable_iter_next(object_t *hobj, struct stm_hashtable_table_s *table,
+stm_hashtable_iter_next(object_t *hobj, stm_hashtable_table_t *table,
                         stm_hashtable_entry_t **previous)
 {
     /* Set the read marker on hobj for every item, in case we have
@@ -654,7 +654,7 @@ stm_hashtable_iter_next(object_t *hobj, struct stm_hashtable_table_s *table,
     return NULL;
 }
 
-void stm_hashtable_iter_tracefn(struct stm_hashtable_table_s *table,
+void stm_hashtable_iter_tracefn(stm_hashtable_table_t *table,
                                 void trace(object_t **))
 {
     if (all_hashtables_seen == NULL) {   /* for minor collections */
