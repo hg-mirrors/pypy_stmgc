@@ -638,6 +638,21 @@ class TestBasic(BaseTest):
         self.start_transaction()
         assert stm_get_char(lp1) == 'a'
 
+    def test_overflow_freed_on_abort(self):
+        self.start_transaction()
+        big = stm_allocate(GC_LAST_SMALL_SIZE + FAST_ALLOC) # large, outside, young obj
+        self.push_root(big)
+        stm_minor_collect() # now 'big' is overflow
+        big = self.pop_root()
+        self.abort_transaction()
+
+        self.start_transaction()
+        big2 = stm_allocate(GC_LAST_SMALL_SIZE + FAST_ALLOC)
+        assert big == big2 # reused slot
+        self.abort_transaction()
+
+
+
     def test_inevitable_transaction_has_priority(self):
         self.start_transaction()
         assert self.is_inevitable() == 0
