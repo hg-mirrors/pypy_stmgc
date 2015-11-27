@@ -212,6 +212,9 @@ bool _check_hashtable_read(object_t *, stm_hashtable_t *, uintptr_t key);
 object_t *hashtable_read_result;
 bool _check_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
                             object_t *nvalue, stm_thread_local_t *tl);
+bool _check_hashtable_write_entry(object_t *, stm_hashtable_entry_t *,
+                                  object_t *nvalue);
+                            
 stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
                                             stm_hashtable_t *hashtable,
                                             uintptr_t index);
@@ -221,6 +224,7 @@ void stm_hashtable_tracefn(struct object_s *, stm_hashtable_t *,
                            void trace(object_t **));
 long _stm_hashtable_list(object_t *o, stm_hashtable_t *h,
                          object_t *entries);
+stm_hashtable_entry_t *stm_hashtable_pickitem(object_t *, stm_hashtable_t *);
 
 object_t *_hashtable_iter(stm_hashtable_t *);
 stm_hashtable_entry_t *_hashtable_iter_next(object_t *, object_t *);
@@ -359,6 +363,12 @@ bool _check_hashtable_write(object_t *hobj, stm_hashtable_t *h, uintptr_t key,
                             object_t *nvalue, stm_thread_local_t *tl)
 {
     CHECKED(stm_hashtable_write(hobj, h, key, nvalue, tl));
+}
+
+bool _check_hashtable_write_entry(object_t *hobj, stm_hashtable_entry_t *entry,
+                                  object_t *nvalue)
+{
+    CHECKED(stm_hashtable_write_entry(hobj, entry, nvalue));
 }
 
 #undef CHECKED
