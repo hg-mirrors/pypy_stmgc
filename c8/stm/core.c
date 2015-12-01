@@ -1175,6 +1175,10 @@ static void _do_start_transaction(stm_thread_local_t *tl)
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->large_overflow_objects));
+#ifndef NDEBUG
+    for (long i = 2; i < GC_N_SMALL_REQUESTS; i++)
+        assert(list_is_empty(STM_PSEGMENT->small_overflow_obj_ranges[i]));
+#endif
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
     assert(list_is_empty(STM_PSEGMENT->young_weakrefs));
     assert(tree_is_cleared(STM_PSEGMENT->young_outside_nursery));
@@ -1263,6 +1267,9 @@ static void _finish_transaction(enum stm_event_e event)
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
     list_clear(STM_PSEGMENT->old_objects_with_cards_set);
     list_clear(STM_PSEGMENT->large_overflow_objects);
+    for (long i = 2; i < GC_N_SMALL_REQUESTS; i++)
+        list_clear(STM_PSEGMENT->small_overflow_obj_ranges[i]);
+
     if (tl != NULL)
         timing_event(tl, event);
 
@@ -1293,20 +1300,34 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
 #endif
 }
 
-static void push_large_overflow_objects_to_other_segments(void)
+static void push_overflow_objects_to_other_segments(void)
 {
-    if (list_is_empty(STM_PSEGMENT->large_overflow_objects))
-        return;
+    if (!list_is_empty(STM_PSEGMENT->large_overflow_objects)) {
+        acquire_privatization_lock(STM_SEGMENT->segment_num);
+        LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
+               ({
+                   assert(!(item->stm_flags & GCFLAG_WB_EXECUTED));
+                   synchronize_object_enqueue(item);
+               }));
+        synchronize_objects_flush();
+        release_privatization_lock(STM_SEGMENT->segment_num);
+    }
 
-    /* XXX: also pushes small ones right now */
-    acquire_privatization_lock(STM_SEGMENT->segment_num);
-    LIST_FOREACH_R(STM_PSEGMENT->large_overflow_objects, object_t *,
-        ({
-            assert(!(item->stm_flags & GCFLAG_WB_EXECUTED));
-            synchronize_object_enqueue(item);
-        }));
-    synchronize_objects_flush();
-    release_privatization_lock(STM_SEGMENT->segment_num);
+    for (long i = 2; i < GC_N_SMALL_REQUESTS; i++) {
+        if (!list_is_empty(STM_PSEGMENT->small_overflow_obj_ranges[i])) {
+            acquire_privatization_lock(STM_SEGMENT->segment_num);
+
+            struct list_s *lst = STM_PSEGMENT->small_overflow_obj_ranges[i];
+            while (!list_is_empty(lst)) {
+                ssize_t len = (ssize_t)list_pop_item(lst);
+                stm_char *start = (stm_char*)list_pop_item(lst);
+                _synchronize_fragment(start, len);
+            }
+
+            synchronize_objects_flush();
+            release_privatization_lock(STM_SEGMENT->segment_num);
+        }
+    }
 
     /* we can as well clear the list here, since the
        objects are only useful if the commit succeeds. And
@@ -1317,6 +1338,10 @@ static void push_large_overflow_objects_to_other_segments(void)
        unknown-to-the-segment/uncommitted things.
     */
     list_clear(STM_PSEGMENT->large_overflow_objects);
+#ifndef NDEBUG
+    for (long i = 2; i < GC_N_SMALL_REQUESTS; i++)
+        assert(list_is_empty(STM_PSEGMENT->small_overflow_obj_ranges[i]));
+#endif
 }
 
 
@@ -1355,7 +1380,7 @@ static void _core_commit_transaction(bool external)
         s_mutex_unlock();
     }
 
-    push_large_overflow_objects_to_other_segments();
+    push_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
 
 
@@ -1569,6 +1594,8 @@ static void abort_data_structures_from_segment_num(int segment_num)
             }
         });
     list_clear(pseg->large_overflow_objects);
+    for (long i = 2; i < GC_N_SMALL_REQUESTS; i++)
+        list_clear(pseg->small_overflow_obj_ranges[i]);
     list_clear(pseg->young_weakrefs);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
@@ -1752,14 +1779,32 @@ static inline void _synchronize_fragment(stm_char *frag, ssize_t frag_size)
        of the fragment need syncing to other segments? (keep privatization
        lock until the "flush") */
 
-    /* Enqueue this object (or fragemnt of object) */
-    if (STM_PSEGMENT->sq_len == SYNC_QUEUE_SIZE)
+    int sq_len = STM_PSEGMENT->sq_len;
+    /* try to merge with previous fragment: */
+    int min = sq_len-4 <= 0 ? 0 : sq_len-4; /* go back 4 elems */
+    for (int i = sq_len-1; i >= min; i--) {
+        stm_char *start = STM_PSEGMENT->sq_fragments[i];
+        ssize_t size = STM_PSEGMENT->sq_fragsizes[i];
+
+        if (start + size == frag) {
+            /* merge! */
+            if ((size + frag_size) + ((uintptr_t)start & 4095) > 4096)
+                break;      /* doesn't fit inside the same page */
+
+            STM_PSEGMENT->sq_fragsizes[i] = size + frag_size;
+            return;
+        }
+    }
+
+    /* Enqueue this object (or fragment of object) */
+    if (sq_len == SYNC_QUEUE_SIZE) {
         synchronize_objects_flush();
-    STM_PSEGMENT->sq_fragments[STM_PSEGMENT->sq_len] = frag;
-    STM_PSEGMENT->sq_fragsizes[STM_PSEGMENT->sq_len] = frag_size;
+        sq_len = STM_PSEGMENT->sq_len;
+    }
+    STM_PSEGMENT->sq_fragments[sq_len] = frag;
+    STM_PSEGMENT->sq_fragsizes[sq_len] = frag_size;
     ++STM_PSEGMENT->sq_len;
 }
-
 
 
 static void synchronize_object_enqueue(object_t *obj)
@@ -1774,6 +1819,7 @@ static void synchronize_object_enqueue(object_t *obj)
     OPT_ASSERT(obj_size >= 16);
 
     if (LIKELY(is_small_uniform(obj))) {
+        /* XXX: could also use the knowledge of full_pages_object_size ^^^ */
         assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
         OPT_ASSERT(obj_size <= GC_LAST_SMALL_SIZE);
         _synchronize_fragment((stm_char *)obj, obj_size);
@@ -1836,4 +1882,43 @@ static void synchronize_objects_flush(void)
     } while (j > 0);
 
     DEBUG_EXPECT_SEGFAULT(true);
+}
+
+
+
+static void small_overflow_obj_ranges_add(object_t *obj)
+{
+    assert(is_small_uniform(obj));
+
+    ssize_t obj_size = stmcb_size_rounded_up(
+        (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
+    OPT_ASSERT(obj_size >= 16);
+
+    struct list_s *lst = STM_PSEGMENT->small_overflow_obj_ranges[obj_size / 8];
+    if (!list_is_empty(lst)) {
+        /* seems to not help to look for merges in this way: */
+        stm_char *obj_start = (stm_char*)obj;
+        long i;
+        long min = lst->count - 4 * 2; /* go back 4 elems */
+        min = min >= 0 ? min : 0;
+        for (i = lst->count - 2; i >= min; i -= 2) {
+            stm_char *start = (stm_char*)lst->items[i];
+            ssize_t size = (ssize_t)lst->items[i+1];
+
+            if (start + size == obj_start) {
+                /* merge! */
+                if ((size + obj_size) + ((uintptr_t)start & 4095) > 4096)
+                    break;      /* doesn't fit inside the same page */
+
+                //fprintf(stderr, "merged\n");
+                lst->items[i+1] = size + obj_size;
+                return;
+            }
+        }
+    }
+    //fprintf(stderr, "nomerge\n");
+
+    /* no merge was found */
+    STM_PSEGMENT->small_overflow_obj_ranges[obj_size / 8] =
+        list_append2(lst, (uintptr_t)obj, (uintptr_t)obj_size);
 }
