@@ -39,20 +39,6 @@ static void setup_protection_settings(void)
 }
 
 
-static void setup_signal_handler(void)
-{
-    struct sigaction act;
-    memset(&act, 0, sizeof(act));
-
-	act.sa_sigaction = &_signal_handler;
-	/* The SA_SIGINFO flag tells sigaction() to use the sa_sigaction field, not sa_handler. */
-	act.sa_flags = SA_SIGINFO | SA_NODEFER;
-
-	if (sigaction(SIGSEGV, &act, NULL) < 0) {
-		perror ("sigaction");
-		abort();
-	}
-}
 
 void stm_setup(void)
 {
