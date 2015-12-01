@@ -455,6 +455,74 @@ class TestHashtable(BaseTestHashtable):
         stm_major_collect()
         self.commit_transaction()
 
+    def test_pickitem(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        expected = []
+        for i in range(29):
+            lp = stm_allocate(32)
+            htset(h, 19 ^ i, lp, tl0)
+            expected.append((19 ^ i, lp))
+        # successive calls to pickitem() return different items, even
+        # though we don't delete the entries in this first step
+        seen = []
+        for i in range(29):
+            entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+            assert entry != ffi.NULL
+            seen.append((lib._get_entry_index(entry),
+                         lib._get_entry_object(entry)))
+        assert sorted(seen) == sorted(expected)
+        # now call pickitem() and delete each entry returned
+        seen = []
+        for i in range(29):
+            entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+            assert entry != ffi.NULL
+            seen.append((lib._get_entry_index(entry),
+                         lib._get_entry_object(entry)))
+            res = lib._check_hashtable_write_entry(h, entry, ffi.NULL)
+            assert not res   # no conflict in this test
+        assert sorted(seen) == sorted(expected)
+        # check that the next pickitem() returns NULL
+        entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+        assert entry == ffi.NULL
+        # verify that the dict is empty
+        assert htitems(h) == []
+
+    def test_pickitem_conflict(self):
+        for op in range(4):
+            self.start_transaction()
+            tl0 = self.tls[self.current_thread]
+            h = self.allocate_hashtable()
+            self.push_root(h)
+            self.commit_transaction()
+            #
+            self.start_transaction()
+            h = self.pop_root()
+            self.push_root(h)
+            if op & 1:
+                entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+                assert entry == ffi.NULL
+            #
+            self.switch(1)
+            self.start_transaction()
+            if op & 2:
+                lp1 = stm_allocate(16)
+                htset(h, 12345678901, lp1, tl0)
+            self.commit_transaction()
+            #
+            if op == 1 | 2:
+                py.test.raises(Conflict, self.switch, 0)   # conflict!
+                # transaction aborted here
+            else:
+                self.switch(0)   # no conflict
+                self.commit_transaction()
+            # get rid of h
+            self.pop_root()
+            self.start_transaction()
+            stm_major_collect()
+            self.commit_transaction()
+
     def test_iter_direct(self):
         self.start_transaction()
         h = self.allocate_hashtable()
