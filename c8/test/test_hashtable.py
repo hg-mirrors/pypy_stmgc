@@ -455,8 +455,164 @@ class TestHashtable(BaseTestHashtable):
         stm_major_collect()
         self.commit_transaction()
 
+    def test_pickitem(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        expected = []
+        for i in range(29):
+            lp = stm_allocate(32)
+            htset(h, 19 ^ i, lp, tl0)
+            expected.append((19 ^ i, lp))
+        # successive calls to pickitem() return different items, even
+        # though we don't delete the entries in this first step
+        seen = []
+        for i in range(29):
+            entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+            assert entry != ffi.NULL
+            seen.append((lib._get_entry_index(entry),
+                         lib._get_entry_object(entry)))
+        assert sorted(seen) == sorted(expected)
+        # now call pickitem() and delete each entry returned
+        seen = []
+        for i in range(29):
+            entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+            assert entry != ffi.NULL
+            seen.append((lib._get_entry_index(entry),
+                         lib._get_entry_object(entry)))
+            res = lib._check_hashtable_write_entry(h, entry, ffi.NULL)
+            assert not res   # no conflict in this test
+        assert sorted(seen) == sorted(expected)
+        # check that the next pickitem() returns NULL
+        entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+        assert entry == ffi.NULL
+        # verify that the dict is empty
+        assert htitems(h) == []
 
+    def test_pickitem_conflict(self):
+        for op in range(4):
+            self.start_transaction()
+            tl0 = self.tls[self.current_thread]
+            h = self.allocate_hashtable()
+            self.push_root(h)
+            self.commit_transaction()
+            #
+            self.start_transaction()
+            h = self.pop_root()
+            self.push_root(h)
+            if op & 1:
+                entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+                assert entry == ffi.NULL
+            #
+            self.switch(1)
+            self.start_transaction()
+            if op & 2:
+                lp1 = stm_allocate(16)
+                htset(h, 12345678901, lp1, tl0)
+            self.commit_transaction()
+            #
+            if op == 1 | 2:
+                py.test.raises(Conflict, self.switch, 0)   # conflict!
+                # transaction aborted here
+            else:
+                self.switch(0)   # no conflict
+                self.commit_transaction()
+            # get rid of h
+            self.pop_root()
+            self.start_transaction()
+            stm_major_collect()
+            self.commit_transaction()
 
+    def test_iter_direct(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        expected = []
+        for i in range(29):
+            lp = stm_allocate(32)
+            htset(h, 19 ^ i, lp, tl0)
+            expected.append((19 ^ i, lp))
+        table = lib.stm_hashtable_iter(get_hashtable(h))
+        previous = ffi.NULL
+        seen = []
+        while True:
+            next_pentry = lib.stm_hashtable_iter_next(h, table, previous)
+            if next_pentry == ffi.NULL:
+                break
+            previous = next_pentry
+            entry = next_pentry[0]
+            seen.append((lib._get_entry_index(entry),
+                         lib._get_entry_object(entry)))
+        assert len(seen) == 29
+        assert sorted(seen) == sorted(expected)
+
+    def test_iter_object(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        expected = []
+        for i in range(29):
+            lp = stm_allocate(32)
+            htset(h, 19 ^ i, lp, tl0)
+            expected.append((19 ^ i, lp))
+        iterobj = hashtable_iter(h)
+        seen = []
+        while True:
+            entry = hashtable_iter_next(h, iterobj)
+            if entry == ffi.NULL:
+                break
+            seen.append((lib._get_entry_index(entry),
+                         lib._get_entry_object(entry)))
+        assert len(seen) == 29
+        assert sorted(seen) == sorted(expected)
+
+    def test_iter_collections(self):
+        def advance(iterobj, seen):
+            entry = hashtable_iter_next(h, iterobj)
+            if entry == ffi.NULL:
+                seen.add('DONE')
+            else:
+                item = (lib._get_entry_index(entry),
+                        lib._get_entry_object(entry))
+                assert htget(h, item[0]) == item[1]
+                assert item[0] not in seen
+                seen.add(item[0])
+
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        iterators = []
+        for i in range(250):
+            lp = stm_allocate(32)
+            htset(h, 19 ^ i, lp, tl0)
+            iterators.append((hashtable_iter(h), i, set()))
+
+            iterobj, _, seen = random.choice(iterators)
+            if 'DONE' not in seen:
+                advance(iterobj, seen)
+
+            self.push_root(h)
+            for iterobj, _, _ in iterators:
+                self.push_root(iterobj)
+            if i % 49 == 48:
+                stm_major_collect()
+            elif i % 7 == 6:
+                stm_minor_collect()
+            for i, prev in reversed(list(enumerate(iterators))):
+                iterators[i] = (self.pop_root(),) + prev[1:]
+            h = self.pop_root()
+
+        for iterobj, _, seen in iterators:
+            while 'DONE' not in seen:
+                advance(iterobj, seen)
+
+        maximum = set([j ^ 19 for j in range(250)])
+        maximum.add('DONE')
+        for iterobj, i, seen in iterators:
+            assert seen.issubset(maximum)
+            for j in range(i + 1):
+                assert j ^ 19 in seen
+            # we may also have seen more items added later
 
 
 class TestRandomHashtable(BaseTestHashtable):
