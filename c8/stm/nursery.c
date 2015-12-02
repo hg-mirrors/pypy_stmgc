@@ -11,7 +11,12 @@
 static uintptr_t _stm_nursery_start;
 
 
+#define DEFAULT_FILL_MARK_NURSERY_BYTES   (NURSERY_SIZE / 4)
+
+uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+
 /************************************************************/
+
 
 static void setup_nursery(void)
 {
@@ -106,7 +111,6 @@ static void minor_trace_if_young(object_t **pobj)
             /* case "small enough" */
             nobj = (object_t *)allocate_outside_nursery_small(size);
         }
-
         //dprintf(("move %p -> %p\n", obj, nobj));
 
         /* copy the object */
@@ -143,6 +147,9 @@ static void minor_trace_if_young(object_t **pobj)
     /* Must trace the object later */
     LIST_APPEND(STM_PSEGMENT->objects_pointing_to_nursery, nobj_sync_now);
     _cards_cleared_in_object(get_priv_segment(STM_SEGMENT->segment_num), nobj, true);
+
+    assert(IMPLY(obj_should_use_cards(STM_SEGMENT->segment_base, nobj),
+                 (((uintptr_t)nobj) & 15) == 0));
 }
 
 static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, object_t *obj,
@@ -185,6 +192,8 @@ static void _verify_cards_cleared_in_all_lists(struct stm_priv_segment_info_s *p
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         _cards_cleared_in_object(pseg, undo->object, false);
     }
     LIST_FOREACH_R(
@@ -248,6 +257,9 @@ static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
 }
 
 
+#define TRACE_FOR_MINOR_COLLECTION  (&minor_trace_if_young)
+
+
 static void _trace_card_object(object_t *obj)
 {
     assert(!_is_in_nursery(obj));
@@ -284,7 +296,7 @@ static void _trace_card_object(object_t *obj)
 
             dprintf(("trace_cards on %p with start:%lu stop:%lu\n",
                      obj, start, stop));
-            stmcb_trace_cards(realobj, &minor_trace_if_young,
+            stmcb_trace_cards(realobj, TRACE_FOR_MINOR_COLLECTION,
                               start, stop);
         }
 
@@ -305,6 +317,7 @@ static void collect_roots_in_nursery(void)
     else
         assert(finalbase <= ssbase && ssbase <= current);
 
+    dprintf(("collect_roots_in_nursery:\n"));
     while (current > ssbase) {
         --current;
         uintptr_t x = (uintptr_t)current->ss;
@@ -316,6 +329,7 @@ static void collect_roots_in_nursery(void)
         else {
             /* it is an odd-valued marker, ignore */
         }
+        dprintf(("    %p: %p -> %p\n", current, (void *)x, current->ss));
     }
 
     minor_trace_if_young(&tl->thread_local_obj);
@@ -334,7 +348,7 @@ static inline void _collect_now(object_t *obj)
            outside the nursery, possibly forcing nursery objects out and
            adding them to 'objects_pointing_to_nursery' as well. */
         char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
-        stmcb_trace((struct object_s *)realobj, &minor_trace_if_young);
+        stmcb_trace((struct object_s *)realobj, TRACE_FOR_MINOR_COLLECTION);
 
         obj->stm_flags |= GCFLAG_WRITE_BARRIER;
     }
@@ -410,6 +424,21 @@ static void collect_cardrefs_to_nursery(void)
     }
 }
 
+static void collect_roots_from_markers(uintptr_t len_old)
+{
+    dprintf(("collect_roots_from_markers\n"));
+
+    /* visit the marker objects */
+    struct list_s *list = STM_PSEGMENT->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)(list->items + len_old);
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+
+    for (; undo < end; undo++) {
+        /* this logic also works if type2 == TYPE_MODIFIED_HASHTABLE */
+        if (undo->type == TYPE_POSITION_MARKER)
+            minor_trace_if_young(&undo->marker_object);
+    }
+}
 
 static void collect_objs_still_young_but_with_finalizers(void)
 {
@@ -428,18 +457,15 @@ static void collect_objs_still_young_but_with_finalizers(void)
 }
 
 
-static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
+static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 {
 #pragma push_macro("STM_PSEGMENT")
 #pragma push_macro("STM_SEGMENT")
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
     dprintf(("throw_away_nursery\n"));
-    /* reset the nursery by zeroing it */
-    size_t nursery_used;
-    char *realnursery;
 
-    realnursery = REAL_ADDRESS(pseg->pub.segment_base, _stm_nursery_start);
+    size_t nursery_used;
     nursery_used = pseg->pub.nursery_current - (stm_char *)_stm_nursery_start;
     if (nursery_used > NB_NURSERY_PAGES * 4096) {
         /* possible in rare cases when the program artificially advances
@@ -447,13 +473,27 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
         nursery_used = NB_NURSERY_PAGES * 4096;
     }
     OPT_ASSERT((nursery_used & 7) == 0);
+
+    /* reset the nursery by zeroing it */
+    char *realnursery;
+    realnursery = REAL_ADDRESS(pseg->pub.segment_base, _stm_nursery_start);
+    (void)realnursery;
+#if _STM_NURSERY_ZEROED
     memset(realnursery, 0, nursery_used);
 
     /* assert that the rest of the nursery still contains only zeroes */
     assert_memset_zero(realnursery + nursery_used,
                        (NURSERY_END - _stm_nursery_start) - nursery_used);
 
+#else
+# ifndef NDEBUG
+    memset(realnursery, 0xa0, nursery_used);
+# endif
+#endif
+
+    pseg->total_throw_away_nursery += nursery_used;
     pseg->pub.nursery_current = (stm_char *)_stm_nursery_start;
+    pseg->pub.nursery_mark -= nursery_used;
 
     /* free any object left from 'young_outside_nursery' */
     if (!tree_is_cleared(pseg->young_outside_nursery)) {
@@ -478,8 +518,6 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     }
 
     tree_clear(pseg->nursery_objects_shadows);
-
-    return nursery_used;
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
@@ -492,20 +530,35 @@ static size_t throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 static void _do_minor_collection(bool commit)
 {
     dprintf(("minor_collection commit=%d\n", (int)commit));
+    assert(!STM_SEGMENT->no_safe_point_here);
 
     STM_PSEGMENT->minor_collect_will_commit_now = commit;
+
+    uintptr_t len_old;
+    if (STM_PSEGMENT->overflow_number_has_been_used)
+        len_old = STM_PSEGMENT->position_markers_len_old;
+    else
+        len_old = 0;
+
     if (!commit) {
         /* 'STM_PSEGMENT->overflow_number' is used now by this collection,
            in the sense that it's copied to the overflow objects */
         STM_PSEGMENT->overflow_number_has_been_used = true;
+        STM_PSEGMENT->position_markers_len_old =
+            list_count(STM_PSEGMENT->modified_old_objects);
     }
 
     collect_cardrefs_to_nursery();
+
+    collect_roots_from_markers(len_old);
 
     collect_roots_in_nursery();
 
     if (STM_PSEGMENT->finalizers != NULL)
         collect_objs_still_young_but_with_finalizers();
+
+    if (STM_PSEGMENT->active_queues != NULL)
+        collect_active_queues();
 
     collect_oldrefs_to_nursery();
     assert(list_is_empty(STM_PSEGMENT->old_objects_with_cards_set));
@@ -523,13 +576,18 @@ static void _do_minor_collection(bool commit)
     assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
 }
 
-static void minor_collection(bool commit)
+static void minor_collection(bool commit, bool external)
 {
     assert(!_has_mutex());
 
-    stm_safe_point();
+    if (!external)
+        stm_safe_point();
+
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_START);
 
     _do_minor_collection(commit);
+
+    timing_event(STM_SEGMENT->running_thread, STM_GC_MINOR_DONE);
 }
 
 void stm_collect(long level)
@@ -537,7 +595,7 @@ void stm_collect(long level)
     if (level > 0)
         force_major_collection_request();
 
-    minor_collection(/*commit=*/ false);
+    minor_collection(/*commit=*/ false, /*external=*/ false);
 
 #ifdef STM_TESTS
     /* tests don't want aborts in stm_allocate, thus
@@ -570,6 +628,9 @@ object_t *_stm_allocate_slowpath(ssize_t size_rounded_up)
     stm_char *end = p + size_rounded_up;
     if ((uintptr_t)end <= NURSERY_END) {
         STM_SEGMENT->nursery_current = end;
+#if !_STM_NURSERY_ZEROED
+        ((object_t *)p)->stm_flags = 0;
+#endif
         return (object_t *)p;
     }
 
@@ -595,7 +656,19 @@ object_t *_stm_allocate_external(ssize_t size_rounded_up)
 
     tree_insert(STM_PSEGMENT->young_outside_nursery, (uintptr_t)o, 0);
 
+#if _STM_NURSERY_ZEROED
     memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0, size_rounded_up);
+#else
+
+#ifndef NDEBUG
+    memset(REAL_ADDRESS(STM_SEGMENT->segment_base, o), 0xb0, size_rounded_up);
+#endif
+
+    o->stm_flags = 0;
+    /* make all pages of 'o' accessible as synchronize_obj_flush() in minor
+       collections assumes all young objs are fully accessible. */
+    touch_all_pages_of_obj(o, size_rounded_up);
+#endif
     return o;
 }
 
@@ -615,6 +688,7 @@ void _stm_set_nursery_free_count(uint64_t free_count)
 }
 #endif
 
+__attribute__((unused))
 static void assert_memset_zero(void *s, size_t n)
 {
 #ifndef NDEBUG
@@ -631,9 +705,12 @@ static void assert_memset_zero(void *s, size_t n)
 static void check_nursery_at_transaction_start(void)
 {
     assert((uintptr_t)STM_SEGMENT->nursery_current == _stm_nursery_start);
+
+#if _STM_NURSERY_ZEROED
     assert_memset_zero(REAL_ADDRESS(STM_SEGMENT->segment_base,
                                     STM_SEGMENT->nursery_current),
                        NURSERY_END - _stm_nursery_start);
+#endif
 }
 
 
@@ -646,20 +723,19 @@ static void major_do_validation_and_minor_collections(void)
 
     /* including the sharing seg0 */
     for (i = 0; i < NB_SEGMENTS; i++) {
-        set_gs_register(get_segment_base(i));
+        ensure_gs_register(i);
 
         bool ok = _stm_validate();
         assert(get_priv_segment(i)->last_commit_log_entry->next == NULL
                || get_priv_segment(i)->last_commit_log_entry->next == INEV_RUNNING);
         if (!ok) {
-            assert(i != 0);     /* sharing seg0 should never need an abort */
-
             if (STM_PSEGMENT->transaction_state == TS_NONE) {
                 /* we found a segment that has stale read-marker data and thus
                    is in conflict with committed objs. Since it is not running
                    currently, it's fine to ignore it. */
                 continue;
             }
+            assert(i != 0);     /* sharing seg0 should never need an abort */
 
             /* tell it to abort when continuing */
             STM_PSEGMENT->pub.nursery_end = NSE_SIGABORT;
@@ -671,7 +747,7 @@ static void major_do_validation_and_minor_collections(void)
         }
 
 
-        if (MINOR_NOTHING_TO_DO(STM_PSEGMENT))  /*TS_NONE segments have NOTHING_TO_DO*/
+        if (MINOR_NOTHING_TO_DO(STM_PSEGMENT))
             continue;
 
         assert(STM_PSEGMENT->transaction_state != TS_NONE);
@@ -693,7 +769,7 @@ static void major_do_validation_and_minor_collections(void)
         }
     }
 
-    set_gs_register(get_segment_base(original_num));
+    ensure_gs_register(original_num);
 }
 
 
@@ -702,8 +778,16 @@ static object_t *allocate_shadow(object_t *obj)
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     size_t size = stmcb_size_rounded_up((struct object_s *)realobj);
 
-    /* always gets outside as a large object for now (XXX?) */
-    object_t *nobj = (object_t *)allocate_outside_nursery_large(size);
+    /* always gets outside */
+    object_t *nobj;
+    if (size > GC_LAST_SMALL_SIZE) {
+        /* case 1: object is not small enough.
+           Ask gcpage.c for an allocation via largemalloc. */
+        nobj = (object_t *)allocate_outside_nursery_large(size);
+    } else {
+        /* case "small enough" */
+        nobj = (object_t *)allocate_outside_nursery_small(size);
+    }
 
     /* Initialize the shadow enough to be considered a valid gc object.
        If the original object stays alive at the next minor collection,

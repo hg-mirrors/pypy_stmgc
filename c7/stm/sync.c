@@ -141,6 +141,27 @@ static void wait_for_end_of_inevitable_transaction(void)
     }
 }
 
+void stm_wait_for_current_inevitable_transaction(void)
+{
+    long i;
+    for (i = 1; i <= NB_SEGMENTS; i++) {
+        struct stm_priv_segment_info_s *other_pseg = get_priv_segment(i);
+        if (other_pseg->transaction_state == TS_INEVITABLE) {
+            /* Asynchronously found out that there is an inevitable
+               transaction running.  Wait until it signals "done",
+               then return (even if another inev transaction started
+               in the meantime).
+             */
+            s_mutex_lock();
+            if (other_pseg->transaction_state == TS_INEVITABLE)
+                cond_wait(C_INEVITABLE);
+            /*else: this inev transaction finished just now */
+            s_mutex_unlock();
+            break;
+        }
+    }
+}
+
 static bool acquire_thread_segment(stm_thread_local_t *tl)
 {
     /* This function acquires a segment for the currently running thread,

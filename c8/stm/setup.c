@@ -123,6 +123,7 @@ void stm_setup(void)
        private range of addresses.
     */
 
+    setup_modification_locks();
     setup_sync();
     setup_nursery();
     setup_gcpage();
@@ -130,8 +131,12 @@ void stm_setup(void)
     setup_forksupport();
     setup_finalizer();
     setup_commitlog();
+    setup_detach();
 
     set_gs_register(get_segment_base(0));
+
+    dprintf(("nursery: %p -> %p\n", (void *)NURSERY_START,
+                                    (void *)NURSERY_END));
 }
 
 void stm_teardown(void)
@@ -159,6 +164,7 @@ void stm_teardown(void)
         tree_free(pr->callbacks_on_commit_and_abort[1]);
         list_free(pr->young_objects_with_light_finalizers);
         list_free(pr->old_objects_with_light_finalizers);
+        if (pr->active_queues) tree_free(pr->active_queues);
     }
 
     munmap(stm_object_pages, TOTAL_MEMORY);
@@ -170,14 +176,15 @@ void stm_teardown(void)
     teardown_smallmalloc();
     teardown_pages();
     teardown_commitlog();
+    teardown_modification_locks();
 }
 
-static void _shadowstack_trap_page(char *start, int prot)
+static char *_shadowstack_trap_page(struct stm_shadowentry_s *base)
 {
     size_t bsize = STM_SHADOW_STACK_DEPTH * sizeof(struct stm_shadowentry_s);
-    char *end = start + bsize + 4095;
+    char *end = ((char *)base) + bsize + 4095;
     end -= (((uintptr_t)end) & 4095);
-    mprotect(end, 4096, prot);
+    return end;
 }
 
 static void _init_shadow_stack(stm_thread_local_t *tl)
@@ -189,9 +196,9 @@ static void _init_shadow_stack(stm_thread_local_t *tl)
 
     /* set up a trap page: if the shadowstack overflows, it will
        crash in a clean segfault */
-    _shadowstack_trap_page(start, PROT_NONE);
-
     struct stm_shadowentry_s *s = (struct stm_shadowentry_s *)start;
+    mprotect(_shadowstack_trap_page(s), 4096, PROT_NONE);
+
     tl->shadowstack = s;
     tl->shadowstack_base = s;
     STM_PUSH_ROOT(*tl, -1);
@@ -202,8 +209,8 @@ static void _done_shadow_stack(stm_thread_local_t *tl)
     assert(tl->shadowstack > tl->shadowstack_base);
     assert(tl->shadowstack_base->ss == (object_t *)-1);
 
-    char *start = (char *)tl->shadowstack_base;
-    _shadowstack_trap_page(start, PROT_READ | PROT_WRITE);
+    char *trap = _shadowstack_trap_page(tl->shadowstack_base);
+    mprotect(trap, 4096, PROT_READ | PROT_WRITE);
 
     free(tl->shadowstack_base);
     tl->shadowstack = NULL;
@@ -217,10 +224,13 @@ static pthread_t *_get_cpth(stm_thread_local_t *tl)
     return (pthread_t *)(tl->creating_pthread);
 }
 
+static int thread_local_counters = 0;
+
 void stm_register_thread_local(stm_thread_local_t *tl)
 {
     int num;
     s_mutex_lock();
+    tl->self_or_0_if_atomic = (intptr_t)tl;    /* 'not atomic' */
     if (stm_all_thread_locals == NULL) {
         stm_all_thread_locals = tl->next = tl->prev = tl;
         num = 0;
@@ -236,14 +246,12 @@ void stm_register_thread_local(stm_thread_local_t *tl)
     /* assign numbers consecutively, but that's for tests; we could also
        assign the same number to all of them and they would get their own
        numbers automatically. */
-    tl->associated_segment_num = -1;
     tl->last_associated_segment_num = num + 1;
+    tl->thread_local_counter = ++thread_local_counters;
     *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num + 1));
     s_mutex_unlock();
-
-    DEBUG_EXPECT_SEGFAULT(true);
 
     if (num == 0) {
         dprintf(("STM_GC_NURSERY: %d\n", STM_GC_NURSERY));
@@ -257,6 +265,8 @@ void stm_register_thread_local(stm_thread_local_t *tl)
 
 void stm_unregister_thread_local(stm_thread_local_t *tl)
 {
+    commit_detached_transaction_if_from(tl);
+
     s_mutex_lock();
     assert(tl->prev != NULL);
     assert(tl->next != NULL);
@@ -280,4 +290,20 @@ __attribute__((unused))
 static bool _is_tl_registered(stm_thread_local_t *tl)
 {
     return tl->next != NULL;
+}
+
+static void detect_shadowstack_overflow(char *addr)
+{
+    if (addr == NULL)
+        return;
+    stm_thread_local_t *tl = stm_all_thread_locals;
+    while (tl != NULL) {
+        char *trap = _shadowstack_trap_page(tl->shadowstack_base);
+        if (trap <= addr && addr <= trap + 4095) {
+            fprintf(stderr, "This is caused by a stack overflow.\n"
+                "Sorry, proper RuntimeError support is not implemented yet.\n");
+            return;
+        }
+        tl = tl->next;
+    }
 }

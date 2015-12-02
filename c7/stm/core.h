@@ -232,7 +232,10 @@ enum /* transaction_state */ {
     TS_INEVITABLE,
 };
 
-static char *stm_object_pages;
+extern char *stm_object_pages;
+extern long _stm_segment_nb_pages;
+extern int _stm_nb_segments;
+extern int _stm_psegment_ofs;
 static int stm_object_pages_fd;
 static stm_thread_local_t *stm_all_thread_locals = NULL;
 
@@ -295,6 +298,7 @@ static inline bool was_read_remote(char *base, object_t *obj)
     uint8_t other_transaction_read_version =
         ((struct stm_segment_info_s *)REAL_ADDRESS(base, STM_PSEGMENT))
             ->transaction_read_version;
+    read_fence();
     uint8_t rm = ((struct stm_read_marker_s *)
                   (base + (((uintptr_t)obj) >> 4)))->rm;
     assert(rm <= other_transaction_read_version);

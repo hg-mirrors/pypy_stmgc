@@ -638,9 +638,24 @@ class TestBasic(BaseTest):
         self.start_transaction()
         assert stm_get_char(lp1) == 'a'
 
+    def test_overflow_freed_on_abort(self):
+        self.start_transaction()
+        big = stm_allocate(GC_LAST_SMALL_SIZE + FAST_ALLOC) # large, outside, young obj
+        self.push_root(big)
+        stm_minor_collect() # now 'big' is overflow
+        big = self.pop_root()
+        self.abort_transaction()
+
+        self.start_transaction()
+        big2 = stm_allocate(GC_LAST_SMALL_SIZE + FAST_ALLOC)
+        assert big == big2 # reused slot
+        self.abort_transaction()
+
+
+
     def test_inevitable_transaction_has_priority(self):
         self.start_transaction()
-        assert lib.stm_is_inevitable() == 0
+        assert self.is_inevitable() == 0
         lp1 = stm_allocate(16)
         stm_set_char(lp1, 'a')
         self.push_root(lp1)
@@ -654,9 +669,9 @@ class TestBasic(BaseTest):
         self.start_transaction()
         stm_write(lp1)
         stm_set_char(lp1, 'b')
-        assert lib.stm_is_inevitable() == 0
+        assert self.is_inevitable() == 0
         self.become_inevitable()
-        assert lib.stm_is_inevitable() == 1
+        assert self.is_inevitable() == 1
         self.commit_transaction()
         #
         py.test.raises(Conflict, self.switch, 0)
@@ -720,19 +735,53 @@ class TestBasic(BaseTest):
         lp1 = self.pop_root()
         self.check_char_everywhere(lp1, 'X')
 
-    def test_last_abort__bytes_in_nursery(self):
+    def test_stm_should_break_transaction_1(self):
+        lib.stm_fill_mark_nursery_bytes = 100
+        #
         self.start_transaction()
-        stm_allocate(56)
-        self.abort_transaction()
-        assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 56
-        self.start_transaction()
-        assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 56
         self.commit_transaction()
-        assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 56
         self.start_transaction()
-        assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 56
+        assert lib.bytes_before_transaction_break() == 100
+        stm_allocate(64)
+        assert lib.bytes_before_transaction_break() == 36
+        stm_allocate(64)
+        assert lib.bytes_before_transaction_break() == -28
         self.abort_transaction()
-        assert self.get_stm_thread_local().last_abort__bytes_in_nursery == 0
+        self.start_transaction()
+        assert lib.bytes_before_transaction_break() == 90    # 100 * 0.9
+        stm_allocate(200)
+        self.abort_transaction()
+        self.start_transaction()
+        assert lib.bytes_before_transaction_break() == 81    # 90 * 0.9
+        self.commit_transaction()
+        #
+        self.start_transaction()
+        assert lib.bytes_before_transaction_break() == 100
+        stm_allocate(64)
+        assert lib.bytes_before_transaction_break() == 36
+        self.abort_transaction()
+        self.start_transaction()
+        assert lib.bytes_before_transaction_break() == 57    # int(64 * 0.9)
+        stm_allocate(32)
+        assert lib.bytes_before_transaction_break() == 25
+        self.abort_transaction()
+        self.start_transaction()
+        assert lib.bytes_before_transaction_break() == 28    # int(32 * 0.9)
+        stm_allocate(64)
+        assert lib.bytes_before_transaction_break() == -36
+        self.commit_transaction()
+
+    def test_stm_should_break_transaction_2(self):
+        lib.stm_fill_mark_nursery_bytes = 10000000
+        #
+        n = 10000000
+        self.start_transaction()
+        self.commit_transaction()
+        self.start_transaction()
+        for i in range(1000):
+            assert lib.bytes_before_transaction_break() == n
+            stm_allocate(10000)
+            n -= 10000
 
     def test_bug(self):
         lp_char_5 = stm_allocate_old(384)

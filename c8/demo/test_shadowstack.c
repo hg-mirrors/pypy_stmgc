@@ -43,18 +43,17 @@ int main(void)
     stm_register_thread_local(&stm_thread_local);
     stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
 
-    stm_start_transaction(&stm_thread_local);
+    stm_enter_transactional_zone(&stm_thread_local);
     node_t *node = (node_t *)stm_allocate(sizeof(struct node_s));
     node->value = 129821;
     STM_PUSH_ROOT(stm_thread_local, node);
     STM_PUSH_ROOT(stm_thread_local, 333);  /* odd value */
-    stm_commit_transaction();
 
     /* now in a new transaction, pop the node off the shadowstack, but
        then do a major collection.  It should still be found by the
        tracing logic. */
-    stm_start_transaction(&stm_thread_local);
-    STM_POP_ROOT_RET(stm_thread_local);
+    stm_force_transaction_break(&stm_thread_local);
+    STM_POP_ROOT_DROP(stm_thread_local);
     STM_POP_ROOT(stm_thread_local, node);
     assert(node->value == 129821);
     STM_PUSH_ROOT(stm_thread_local, NULL);

@@ -374,3 +374,28 @@ class TestBasic(BaseTest):
 
         self.start_transaction()
         assert stm_get_char(o, HDR) == '\0'
+
+    def test_some_sizes(self):
+        sizes = range(16, GC_LAST_SMALL_SIZE*2, 16) + [FAST_ALLOC, FAST_ALLOC+16]
+        old = stm_allocate_old_refs(1)
+        for size in sizes:
+            self.start_transaction()
+            p = stm_allocate(size)
+            stm_set_char(p, 'a', use_cards=True)
+            stm_set_ref(old, 0, p)
+            self.commit_transaction()
+
+            self.start_transaction()
+            p = stm_get_ref(old, 0)
+            assert stm_get_char(p) == 'a'
+            stm_set_char(p, 'b', use_cards=True)
+            self.commit_transaction()
+
+            self.switch(1)
+
+            self.start_transaction()
+            p = stm_get_ref(old, 0)
+            assert stm_get_char(p) == 'b'
+            self.commit_transaction()
+
+            self.switch(0)

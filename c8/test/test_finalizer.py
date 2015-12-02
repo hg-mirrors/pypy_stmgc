@@ -13,9 +13,10 @@ class TestLightFinalizer(BaseTest):
             segnum = lib.current_segment_num()
             tlnum = '?'
             for n, tl in enumerate(self.tls):
-                if tl.associated_segment_num == segnum:
-                    tlnum = n
-                    break
+                if lib._stm_in_transaction(tl):
+                    if tl.last_associated_segment_num == segnum:
+                        tlnum = n
+                        break
             self.light_finalizers_called.append((obj, tlnum))
         self.light_finalizers_called = []
         lib.stmcb_light_finalizer = light_finalizer
@@ -136,6 +137,7 @@ class TestLightFinalizer(BaseTest):
         self.expect_finalized([])
         self.abort_transaction()
         self.expect_finalized([lp1], from_tlnum=0)
+
 
 
 class TestRegularFinalizer(BaseTest):

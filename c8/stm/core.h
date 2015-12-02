@@ -43,6 +43,7 @@ enum /* stm_flags */ {
     GCFLAG_CARDS_SET = _STM_GCFLAG_CARDS_SET,
     GCFLAG_VISITED = 0x10,
     GCFLAG_FINALIZATION_ORDERING = 0x20,
+    GCFLAG_NO_CONFLICT = _STM_GCFLAG_NO_CONFLICT,
     /* All remaining bits of the 32-bit 'stm_flags' field are taken by
        the "overflow number".  This is a number that identifies the
        "overflow objects" from the current transaction among all old
@@ -50,7 +51,7 @@ enum /* stm_flags */ {
        current transaction that have been flushed out of the nursery,
        which occurs if the same transaction allocates too many objects.
     */
-    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x40   /* must be last */
+    GCFLAG_OVERFLOW_NUMBER_bit0 = 0x80   /* must be last */
 };
 
 #define SYNC_QUEUE_SIZE    31
@@ -74,19 +75,17 @@ typedef TLPREFIX struct stm_priv_segment_info_s stm_priv_segment_info_t;
 struct stm_priv_segment_info_s {
     struct stm_segment_info_s pub;
 
-    /* lock protecting from concurrent modification of
-       'modified_old_objects', page-revision-changes, ...
-       Always acquired in global order of segments to avoid deadlocks. */
-    uint8_t modification_lock;
-
     /* All the old objects (older than the current transaction) that
        the current transaction attempts to modify.  This is used to
        track the STM status: these are old objects that where written
        to and that will need to be recorded in the commit log.  The
        list contains three entries for every such object, in the same
-       format as 'struct stm_undo_s' below.
+       format as 'struct stm_undo_s' below.  It can also represent a
+       position marker, like 'struct stm_undo_s'.
     */
     struct list_s *modified_old_objects;
+    uintptr_t position_markers_last;     /* index of most recent pos marker */
+    uintptr_t position_markers_len_old;  /* length of list at last minor col */
 
     struct list_s *objects_pointing_to_nursery;
     struct list_s *old_objects_with_cards_set;
@@ -119,13 +118,15 @@ struct stm_priv_segment_info_s {
     bool minor_collect_will_commit_now;
 
     struct tree_s *callbacks_on_commit_and_abort[2];
+    struct tree_s *active_queues;
+    uint8_t active_queues_lock;
 
     /* This is the number stored in the overflowed objects (a multiple of
        GCFLAG_OVERFLOW_NUMBER_bit0).  It is incremented when the
        transaction is done, but only if we actually overflowed any
        object; otherwise, no object has got this number. */
-    uint32_t overflow_number;
     bool overflow_number_has_been_used;
+    uint32_t overflow_number;
 
 
     struct stm_commit_log_entry_s *last_commit_log_entry;
@@ -154,6 +155,12 @@ struct stm_priv_segment_info_s {
     stm_char *sq_fragments[SYNC_QUEUE_SIZE];
     int sq_fragsizes[SYNC_QUEUE_SIZE];
     int sq_len;
+
+    /* For nursery_mark */
+    uintptr_t total_throw_away_nursery;
+
+    /* For stm_enable_atomic() */
+    uintptr_t atomic_nesting_levels;
 };
 
 enum /* safe_point */ {
@@ -161,6 +168,7 @@ enum /* safe_point */ {
     SP_RUNNING,
     SP_WAIT_FOR_C_REQUEST_REMOVED,
     SP_WAIT_FOR_C_AT_SAFE_POINT,
+    SP_WAIT_FOR_INEV,
 #ifdef STM_TESTS
     SP_WAIT_FOR_OTHER_THREAD,
 #endif
@@ -172,15 +180,17 @@ enum /* transaction_state */ {
     TS_INEVITABLE,
 };
 
+#define MSG_INEV_DONT_SLEEP  ((const char *)1)
+
+#define in_transaction(tl)                                              \
+    (get_segment((tl)->last_associated_segment_num)->running_thread == (tl))
 
 
 
-
-#ifndef STM_TESTS
-static char *stm_object_pages;
-#else
-char *stm_object_pages;
-#endif
+extern char *stm_object_pages;
+extern long _stm_segment_nb_pages;
+extern int _stm_nb_segments;
+extern int _stm_psegment_ofs;
 static stm_thread_local_t *stm_all_thread_locals = NULL;
 
 
@@ -232,11 +242,25 @@ static void abort_with_mutex(void) __attribute__((noreturn));
 static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
+static void touch_all_pages_of_obj(object_t *obj, size_t obj_size);
+
 static void synchronize_object_enqueue(object_t *obj);
 static void synchronize_objects_flush(void);
 
 static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
-static bool _stm_validate();
+static bool _stm_validate(void);
+static void _core_commit_transaction(bool external);
+
+static inline bool was_read_remote(char *base, object_t *obj)
+{
+    uint8_t other_transaction_read_version =
+        ((struct stm_segment_info_s *)REAL_ADDRESS(base, STM_PSEGMENT))
+            ->transaction_read_version;
+    uint8_t rm = ((struct stm_read_marker_s *)
+                  (base + (((uintptr_t)obj) >> 4)))->rm;
+    assert(rm <= other_transaction_read_version);
+    return rm == other_transaction_read_version;
+}
 
 static inline void _duck(void) {
     /* put a call to _duck() between two instructions that set 0 into
@@ -257,7 +281,7 @@ static inline void release_privatization_lock(int segnum)
     spinlock_release(get_priv_segment(segnum)->privatization_lock);
 }
 
-static inline bool all_privatization_locks_acquired()
+static inline bool all_privatization_locks_acquired(void)
 {
 #ifndef NDEBUG
     long l;
@@ -271,7 +295,7 @@ static inline bool all_privatization_locks_acquired()
 #endif
 }
 
-static inline void acquire_all_privatization_locks()
+static inline void acquire_all_privatization_locks(void)
 {
     /* XXX: don't do for the sharing seg0 */
     long l;
@@ -280,60 +304,10 @@ static inline void acquire_all_privatization_locks()
     }
 }
 
-static inline void release_all_privatization_locks()
+static inline void release_all_privatization_locks(void)
 {
     long l;
     for (l = NB_SEGMENTS-1; l >= 0; l--) {
         release_privatization_lock(l);
-    }
-}
-
-
-
-/* Modification locks are used to prevent copying from a segment
-   where either the revision of some pages is inconsistent with the
-   rest, or the modified_old_objects list is being modified (bk_copys).
-
-   Lock ordering: acquire privatization lock around acquiring a set
-   of modification locks!
-*/
-
-static inline void acquire_modification_lock(int segnum)
-{
-    spinlock_acquire(get_priv_segment(segnum)->modification_lock);
-}
-
-static inline void release_modification_lock(int segnum)
-{
-    spinlock_release(get_priv_segment(segnum)->modification_lock);
-}
-
-static inline void acquire_modification_lock_set(uint64_t seg_set)
-{
-    assert(NB_SEGMENTS <= 64);
-    OPT_ASSERT(seg_set < (1 << NB_SEGMENTS));
-
-    /* acquire locks in global order */
-    int i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        if ((seg_set & (1 << i)) == 0)
-            continue;
-
-        spinlock_acquire(get_priv_segment(i)->modification_lock);
-    }
-}
-
-static inline void release_modification_lock_set(uint64_t seg_set)
-{
-    assert(NB_SEGMENTS <= 64);
-    OPT_ASSERT(seg_set < (1 << NB_SEGMENTS));
-
-    int i;
-    for (i = 0; i < NB_SEGMENTS; i++) {
-        if ((seg_set & (1 << i)) == 0)
-            continue;
-
-        assert(get_priv_segment(i)->modification_lock);
-        spinlock_release(get_priv_segment(i)->modification_lock);
     }
 }

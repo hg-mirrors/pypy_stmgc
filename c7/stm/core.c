@@ -2,6 +2,11 @@
 # error "must be compiled via stmgc.c"
 #endif
 
+char *stm_object_pages;
+long _stm_segment_nb_pages = NB_PAGES;
+int _stm_nb_segments = NB_SEGMENTS;
+int _stm_psegment_ofs = (int)(uintptr_t)STM_PSEGMENT;
+
 
 static void teardown_core(void)
 {
@@ -40,7 +45,6 @@ static void check_flag_write_barrier(object_t *obj)
 #endif
 }
 
-__attribute__((always_inline))
 static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
 {
     /* An overflow object is an object from the same transaction, but
@@ -74,7 +78,6 @@ static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
     }
 }
 
-__attribute__((always_inline))
 static void write_slowpath_common(object_t *obj, bool mark_card)
 {
     assert(_seems_to_be_running_transaction());
@@ -218,6 +221,7 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
     check_flag_write_barrier(obj);
 }
 
+__attribute__((flatten))
 void _stm_write_slowpath(object_t *obj)
 {
     write_slowpath_common(obj, /*mark_card=*/false);
@@ -236,6 +240,7 @@ static bool obj_should_use_cards(object_t *obj)
     return (size >= _STM_MIN_CARD_OBJ_SIZE);
 }
 
+__attribute__((flatten))
 char _stm_write_slowpath_card_extra(object_t *obj)
 {
     /* the PyPy JIT calls this function directly if it finds that an
@@ -323,6 +328,7 @@ static void reset_transaction_read_version(void)
         /* failed */
         stm_fatalerror("reset_transaction_read_version: %m");
     }
+    write_fence();
     STM_SEGMENT->transaction_read_version = 1;
 }
 
@@ -350,20 +356,24 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
     STM_PSEGMENT->threadlocal_at_start_of_transaction = tl->thread_local_obj;
 
+    uint8_t rv = STM_SEGMENT->transaction_read_version;
+    if (rv < 0xff)   /* else, rare (maybe impossible?) case: we did already */
+        rv++;        /* incr it but enter_safe_point_if_requested() aborted */
+    STM_SEGMENT->transaction_read_version = rv;
+
     enter_safe_point_if_requested();
     dprintf(("start_transaction\n"));
 
     s_mutex_unlock();
 
-    /* Now running the SP_RUNNING start.  We can set our
-       'transaction_read_version' after releasing the mutex,
-       because it is only read by a concurrent thread in
-       stm_commit_transaction(), which waits until SP_RUNNING
-       threads are paused.
+    /* Now running the SP_RUNNING start.  We can reset the
+       transaction read version here, but we need to increment it
+       before, otherwise we can end up in enter_safe_point_if_requested(),
+       and another thread runs stm_commit_transaction(), and it may find
+       that we have read some object (even though we didn't do any read
+       so far).
     */
-    uint8_t old_rv = STM_SEGMENT->transaction_read_version;
-    STM_SEGMENT->transaction_read_version = old_rv + 1;
-    if (UNLIKELY(old_rv == 0xff)) {
+    if (UNLIKELY(rv == 0xff)) {
         reset_transaction_read_version();
     }
 
@@ -889,7 +899,8 @@ void stm_commit_transaction(void)
     /* send what is hopefully the correct signals */
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         /* wake up one thread in wait_for_end_of_inevitable_transaction() */
-        cond_signal(C_INEVITABLE);
+        STM_PSEGMENT->transaction_state = TS_NONE;
+        cond_broadcast(C_INEVITABLE);
         if (globally_unique_transaction)
             committed_globally_unique_transaction();
     }

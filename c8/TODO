@@ -1,0 +1,37 @@
+- stm_identityhash spends a good time figuring out if an obj is prebuilt
+  (40% of its time). maybe after setup_prebuilt, we could defer the test
+  of GCFLAG_HAS_SHADOW in id_or_identityhash to after an address comparison.
+  I.e., after setup_prebuilt, all objs allocated there could be in some
+  area at the start of the heap, and can thus be classified by having
+  an address < some_barrier. (may include some non-prebuilt ones, but
+  that's ok) (also take care of small prebuilt objs)
+
+- fix markers (e.g. become_inevitable doesn't seem to show up)
+
+- improve sync of small objs on commit (see FLAG_SYNC_LARGE in nursery.c)
+
+- reshare pages:
+  make seg0 MAP_SHARED in order to re-share private pages during major GC
+
+- maybe re-implement the "please commit soon" signal
+
+- the highest_overflow_number can overflow after 2**30 non-collect-time
+  minor collections
+
+- privatize (multiple) pages at once in the write barrier instead of
+  triggering segfaults
+
+- possibly messy too, but think about not using N+1 segments but only N
+
+- kill "atomic" and use regular lock elision?
+
+- increase the memory limit
+
+- avoid __builtin_frame_address(0) in precisely the performance-critical
+  functions like the interpreter main loop
+
+
+---------------------------
+DONE:
+- non-zeroed nursery:
+  read-the-docs benchmark shows 8% time spent in memset of throw_away_nursery

@@ -4,6 +4,7 @@
 
 int main(int argc, char **argv)
 {
+    rewind_jmp_buf rjbuf;
     char *filename = NULL;
     int interactive = 1;
 	int i;
@@ -35,13 +36,15 @@ int main(int argc, char **argv)
 	}
 
     Du_Initialize(num_threads);
+    stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
 
     while (1) {
         if (interactive) {
             printf("))) ");
             fflush(stdout);
         }
-        stm_start_inevitable_transaction(&stm_thread_local);
+        stm_enter_transactional_zone(&stm_thread_local);
+        //stm_become_inevitable(&stm_thread_local, "starting point");
         DuObject *code = Du_Compile(filename, interactive);
 
         if (code == NULL) {
@@ -58,13 +61,14 @@ int main(int argc, char **argv)
         //stm_collect(0);   /* hack... */
         //_du_restore1(stm_thread_local_obj);
 
-        stm_commit_transaction();
+        stm_leave_transactional_zone(&stm_thread_local);
 
         Du_TransactionRun();
         if (!interactive)
             break;
     }
 
+    stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     Du_Finalize();
     return 0;
 }

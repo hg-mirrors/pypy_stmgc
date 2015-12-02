@@ -10,16 +10,31 @@
 
 /* Commit Log things */
 struct stm_undo_s {
-    object_t *object;   /* the object that is modified */
-    char *backup;       /* some backup data (a slice of the original obj) */
-    uint64_t slice;     /* location and size of this slice (cannot cross
-                           pages).  The size is in the lower 2 bytes, and
-                           the offset in the remaining 6 bytes. */
+  union {
+    struct {
+        object_t *object;   /* the object that is modified */
+        char *backup;       /* some backup data (a slice of the original obj) */
+        uint64_t slice;     /* location and size of this slice (cannot cross
+                               pages).  The size is in the lower 2 bytes, and
+                               the offset in the remaining 6 bytes. */
+    };
+    struct {
+        intptr_t type;               /* TYPE_POSITION_MARKER */
+        uintptr_t marker_odd_number; /* the odd number part of the marker */
+        object_t *marker_object;     /* the object part of the marker */
+    };
+    struct {
+        intptr_t type1;             /* TYPE_POSITION_MARKER (again) */
+        intptr_t type2;             /* TYPE_MODIFIED_HASHTABLE */
+        object_t *modif_hashtable;  /* modified entry is previous stm_undo_s */
+    };
+  };
 };
+#define TYPE_POSITION_MARKER    (-1)
+#define TYPE_MODIFIED_HASHTABLE (-2)
 #define SLICE_OFFSET(slice)  ((slice) >> 16)
 #define SLICE_SIZE(slice)    ((int)((slice) & 0xFFFF))
 #define NEW_SLICE(offset, size) (((uint64_t)(offset)) << 16 | (size))
-
 
 
 /* The model is: we have a global chained list, from 'commit_log_root',
@@ -41,6 +56,7 @@ struct stm_commit_log_entry_s {
 static struct stm_commit_log_entry_s commit_log_root;
 
 
+
 static bool is_cle_collection_requested(void);
 
 static char *malloc_bk(size_t bk_size);
@@ -48,7 +64,7 @@ static void free_bk(struct stm_undo_s *undo);
 static struct stm_commit_log_entry_s *malloc_cle(long entries);
 static void free_cle(struct stm_commit_log_entry_s *e);
 
-void _dbg_print_commit_log();
+void _dbg_print_commit_log(void);
 
 #ifdef STM_TESTS
 uint64_t _stm_cle_allocated(void);
