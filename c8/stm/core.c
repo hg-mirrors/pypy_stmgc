@@ -1266,6 +1266,11 @@ void _stm_commit_transaction(void)
 static void _core_commit_transaction(bool external)
 {
     exec_local_finalizers();
+    if (!external && STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+        /* invoke finalizers now since they need to run in an inev
+           transaction (XXX) and we have one right here. */
+        invoke_general_finalizers(STM_SEGMENT->running_thread, false);
+    }
 
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
@@ -1355,7 +1360,7 @@ static void _core_commit_transaction(bool external)
     /* between transactions, call finalizers. this will execute
        a transaction itself */
     if (tl != NULL) {
-        invoke_general_finalizers(tl);
+        invoke_general_finalizers(tl, true);
 
         /* check for cle collection here after we released the segment */
         maybe_collect_commit_log();
