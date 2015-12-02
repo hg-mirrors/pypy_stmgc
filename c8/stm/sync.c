@@ -274,10 +274,6 @@ static void release_thread_segment(stm_thread_local_t *tl)
 
     assert(sync_ctl.in_use1[segnum] >= 1);
     sync_ctl.in_use1[segnum] = 0;
-
-    /* check for cle collection here after we released the segment
-       while we still hold the mutex */
-    maybe_collect_commit_log();
 }
 
 static void soon_finished_or_inevitable_thread_segment(void)
