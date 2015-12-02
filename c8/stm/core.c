@@ -140,9 +140,10 @@ static void handle_segfault_in_page(uintptr_t pagenum)
 
     assert(get_page_status_in(my_segnum, pagenum) == PAGE_NO_ACCESS);
 
-    /* find who has the most recent revision of our page */
+    /* find who has a more recent revision of our page */
     int copy_from_segnum = -1;
     uint64_t most_recent_rev = 0;
+    uint64_t our_rev = STM_PSEGMENT->last_commit_log_entry->rev_num;
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
@@ -153,6 +154,8 @@ static void handle_segfault_in_page(uintptr_t pagenum)
             && (copy_from_segnum == -1 || log_entry->rev_num > most_recent_rev)) {
             copy_from_segnum = i;
             most_recent_rev = log_entry->rev_num;
+            if (most_recent_rev >= our_rev)
+                break;
         }
     }
     OPT_ASSERT(copy_from_segnum != my_segnum);
@@ -1351,8 +1354,12 @@ static void _core_commit_transaction(bool external)
 
     /* between transactions, call finalizers. this will execute
        a transaction itself */
-    if (tl != NULL)
+    if (tl != NULL) {
         invoke_general_finalizers(tl);
+
+        /* check for cle collection here after we released the segment */
+        maybe_collect_commit_log();
+    }
 }
 
 static void reset_modified_from_backup_copies(int segment_num, object_t *only_obj)

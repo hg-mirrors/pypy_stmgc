@@ -2,6 +2,8 @@
 # error "must be compiled via stmgc.c"
 #endif
 
+#include <stdlib.h>
+
 uint64_t cle_allocated;
 
 static void setup_commitlog(void)
@@ -143,15 +145,21 @@ void free_commit_log_entries_up_to(struct stm_commit_log_entry_s *end)
     commit_log_root.rev_num = rev_num;
 }
 
+
+bool _collector_running = false;
+
 void maybe_collect_commit_log(void)
 {
+    assert(!_has_mutex());
+
+    if (!is_cle_collection_requested()
+        || __sync_lock_test_and_set(&_collector_running, 1) != 0)
+        return;
+
     /* XXX: maybe use other lock, but right now we must make sure
        that we do not run a major GC in parallel, since we do a
        validate in some segments. */
-    assert(_has_mutex());
-
-    if (!is_cle_collection_requested())
-        return;
+    s_mutex_lock();
 
     /* do validation in segments with no threads running, as some
        of them may rarely run a thread and thus rarely advance in
@@ -172,7 +180,7 @@ void maybe_collect_commit_log(void)
         }
     }
     set_gs_register(get_segment_base(original_num));
-
+    s_mutex_unlock();
 
     /* look for the last common commit log entry. However,
        don't free the last common one, as it may still be
@@ -200,8 +208,8 @@ void maybe_collect_commit_log(void)
         }
     } while ((next = cl->next) && next != INEV_RUNNING);
 
-
     if (cl == &commit_log_root) {
+        __sync_lock_release(&_collector_running, 0);
         dprintf(("WARN: triggered CLE collection w/o anything to do\n"));
         return;                 /* none found that is newer */
     }
@@ -210,4 +218,5 @@ void maybe_collect_commit_log(void)
     assert(cl->next != NULL && cl->next != INEV_RUNNING);
 
     free_commit_log_entries_up_to(cl);
+    __sync_lock_release(&_collector_running, 0);
 }
