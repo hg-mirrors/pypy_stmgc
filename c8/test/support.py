@@ -12,6 +12,8 @@ typedef ... object_t;
 #define _STM_FAST_ALLOC ...
 #define _STM_CARD_SIZE ...
 #define _STM_CARD_MARKED ...
+#define STM_GC_NURSERY ...
+#define SIZEOF_HASHTABLE_ENTRY ...
 
 typedef struct {
 ...;
@@ -28,8 +30,6 @@ typedef struct {
     object_t *thread_local_obj;
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
-    long last_abort__bytes_in_nursery;
-    int associated_segment_num;
     int last_associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
@@ -38,12 +38,14 @@ typedef struct {
 
 char *stm_object_pages;
 char *stm_file_pages;
+uintptr_t stm_fill_mark_nursery_bytes;
 
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
 object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
+object_t *stm_allocate_noconflict(ssize_t size_rounded_up);
 
 /*void stm_write_card(); use _checked_stm_write_card() instead */
 
@@ -86,10 +88,10 @@ long _check_start_transaction(stm_thread_local_t *tl);
 bool _check_commit_transaction(void);
 bool _check_abort_transaction(void);
 bool _check_become_inevitable(stm_thread_local_t *tl);
-bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
+//bool _check_become_globally_unique_transaction(stm_thread_local_t *tl);
 bool _check_stop_all_other_threads(void);
 void stm_resume_all_other_threads(void);
-int stm_is_inevitable(void);
+int stm_is_inevitable(stm_thread_local_t *);
 long current_segment_num(void);
 
 void _set_type_id(object_t *obj, uint32_t h);
@@ -105,6 +107,8 @@ object_t* _get_weakref(object_t *obj);
 long _check_stm_collect(long level);
 uint64_t _stm_total_allocated(void);
 uint64_t _stm_cle_allocated(void);
+
+long bytes_before_transaction_break(void);
 
 void _stm_set_nursery_free_count(uint64_t free_count);
 void _stm_largemalloc_init_arena(char *data_start, size_t data_size);
@@ -125,6 +129,58 @@ void stm_set_prebuilt_identityhash(object_t *obj, uint64_t hash);
 long stm_call_on_abort(stm_thread_local_t *, void *key, void callback(void *));
 long stm_call_on_commit(stm_thread_local_t *, void *key, void callback(void *));
 
+/* Profiling events.  In the comments: content of the markers, if any */
+enum stm_event_e {
+    /* always STM_TRANSACTION_START followed later by one of COMMIT or ABORT */
+    STM_TRANSACTION_START,
+    STM_TRANSACTION_COMMIT,
+    STM_TRANSACTION_ABORT,
+
+    /* inevitable contention: all threads that try to become inevitable
+       have a STM_BECOME_INEVITABLE event with a position marker.  Then,
+       if it waits it gets a STM_WAIT_OTHER_INEVITABLE.  It is possible
+       that a thread gets STM_BECOME_INEVITABLE followed by
+       STM_TRANSACTION_ABORT if it fails to become inevitable. */
+    STM_BECOME_INEVITABLE,
+
+    /* write-read contention: a "marker" is included in the PYPYSTM file
+       saying where the write was done.  Followed by STM_TRANSACTION_ABORT. */
+    STM_CONTENTION_WRITE_READ,
+
+    /* always one STM_WAIT_xxx followed later by STM_WAIT_DONE or
+       possibly STM_TRANSACTION_ABORT */
+    STM_WAIT_FREE_SEGMENT,
+    STM_WAIT_SYNCING,
+    STM_WAIT_SYNC_PAUSE,
+    STM_WAIT_OTHER_INEVITABLE,
+    STM_WAIT_DONE,
+
+    /* start and end of GC cycles */
+    STM_GC_MINOR_START,
+    STM_GC_MINOR_DONE,
+    STM_GC_MAJOR_START,
+    STM_GC_MAJOR_DONE,
+    ...
+};
+
+typedef struct {
+    uintptr_t odd_number;
+    object_t *object;
+} stm_loc_marker_t;
+
+typedef void (*stmcb_timing_event_fn)(stm_thread_local_t *tl,
+                                      enum stm_event_e event,
+                                      stm_loc_marker_t *markers);
+stmcb_timing_event_fn stmcb_timing_event;
+
+typedef int (*stm_expand_marker_fn)(char *seg_base, stm_loc_marker_t *marker,
+                                    char *output, int output_size);
+int stm_set_timing_log(const char *profiling_file_name, int fork_mode,
+                       stm_expand_marker_fn expand_marker);
+
+void stm_push_marker(stm_thread_local_t *, uintptr_t, object_t *);
+void stm_update_marker_num(stm_thread_local_t *, uintptr_t);
+void stm_pop_marker(stm_thread_local_t *);
 
 long _stm_count_modified_old_objects(void);
 long _stm_count_objects_pointing_to_nursery(void);
@@ -149,6 +205,55 @@ void stm_enable_light_finalizer(object_t *);
 
 void (*stmcb_finalizer)(object_t *);
 
+typedef struct stm_hashtable_s stm_hashtable_t;
+typedef ... stm_hashtable_entry_t;
+stm_hashtable_t *stm_hashtable_create(void);
+void stm_hashtable_free(stm_hashtable_t *);
+bool _check_hashtable_read(object_t *, stm_hashtable_t *, uintptr_t key);
+object_t *hashtable_read_result;
+bool _check_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
+                            object_t *nvalue, stm_thread_local_t *tl);
+bool _check_hashtable_write_entry(object_t *, stm_hashtable_entry_t *,
+                                  object_t *nvalue);
+                            
+stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
+                                            stm_hashtable_t *hashtable,
+                                            uintptr_t index);
+long stm_hashtable_length_upper_bound(stm_hashtable_t *);
+uint32_t stm_hashtable_entry_userdata;
+void stm_hashtable_tracefn(struct object_s *, stm_hashtable_t *,
+                           void trace(object_t **));
+long _stm_hashtable_list(object_t *o, stm_hashtable_t *h,
+                         object_t *entries);
+stm_hashtable_entry_t *stm_hashtable_pickitem(object_t *, stm_hashtable_t *);
+
+object_t *_hashtable_iter(stm_hashtable_t *);
+stm_hashtable_entry_t *_hashtable_iter_next(object_t *, object_t *);
+struct stm_hashtable_table_s *stm_hashtable_iter(stm_hashtable_t *);
+stm_hashtable_entry_t **
+stm_hashtable_iter_next(object_t *hobj, struct stm_hashtable_table_s *table,
+                        stm_hashtable_entry_t **previous);
+void stm_hashtable_iter_tracefn(struct stm_hashtable_table_s *table,
+                                void trace(object_t **));
+
+void _set_hashtable(object_t *obj, stm_hashtable_t *h);
+stm_hashtable_t *_get_hashtable(object_t *obj);
+uintptr_t _get_entry_index(stm_hashtable_entry_t *entry);
+object_t *_get_entry_object(stm_hashtable_entry_t *entry);
+void *_get_hashtable_table(stm_hashtable_t *h);
+
+typedef struct stm_queue_s stm_queue_t;
+stm_queue_t *stm_queue_create(void);
+void stm_queue_free(stm_queue_t *);
+void stm_queue_put(object_t *qobj, stm_queue_t *queue, object_t *newitem);
+object_t *stm_queue_get(object_t *qobj, stm_queue_t *queue, double timeout,
+                        stm_thread_local_t *tl);
+void stm_queue_task_done(stm_queue_t *queue);
+int stm_queue_join(object_t *qobj, stm_queue_t *queue, stm_thread_local_t *tl);
+void stm_queue_tracefn(stm_queue_t *queue, void trace(object_t **));
+
+void _set_queue(object_t *obj, stm_queue_t *q);
+stm_queue_t *_get_queue(object_t *obj);
 """)
 
 
@@ -172,6 +277,7 @@ struct myobj_s {
 typedef TLPREFIX struct myobj_s myobj_t;
 #define SIZEOF_MYOBJ sizeof(struct myobj_s)
 
+#define SIZEOF_HASHTABLE_ENTRY sizeof(struct stm_hashtable_entry_s)
 
 int _stm_get_flags(object_t *obj) {
     return obj->stm_flags;
@@ -208,7 +314,7 @@ bool _checked_stm_write_card(object_t *object, uintptr_t index) {
 }
 
 bool _check_commit_transaction(void) {
-    CHECKED(stm_commit_transaction());
+    CHECKED(_stm_commit_transaction());
 }
 
 bool _check_stm_collect(long level) {
@@ -218,7 +324,7 @@ bool _check_stm_collect(long level) {
 long _check_start_transaction(stm_thread_local_t *tl) {
    void **jmpbuf = tl->rjthread.jmpbuf;                         \
     if (__builtin_setjmp(jmpbuf) == 0) { /* returned directly */\
-        stm_start_transaction(tl);                              \
+        stm_enter_transactional_zone(tl);                       \
         clear_jmpbuf(tl);                                       \
         return 0;                                               \
     }                                                           \
@@ -239,16 +345,31 @@ bool _check_become_inevitable(stm_thread_local_t *tl) {
     CHECKED(stm_become_inevitable(tl, "TEST"));
 }
 
-bool _check_become_globally_unique_transaction(stm_thread_local_t *tl) {
-    CHECKED(stm_become_globally_unique_transaction(tl, "TESTGUT"));
-}
-
 bool _check_stop_all_other_threads(void) {
     CHECKED(stm_stop_all_other_threads());
 }
 
 bool _check_stm_validate(void) {
     CHECKED(stm_validate());
+}
+
+object_t *hashtable_read_result;
+
+bool _check_hashtable_read(object_t *hobj, stm_hashtable_t *h, uintptr_t key)
+{
+    CHECKED(hashtable_read_result = stm_hashtable_read(hobj, h, key));
+}
+
+bool _check_hashtable_write(object_t *hobj, stm_hashtable_t *h, uintptr_t key,
+                            object_t *nvalue, stm_thread_local_t *tl)
+{
+    CHECKED(stm_hashtable_write(hobj, h, key, nvalue, tl));
+}
+
+bool _check_hashtable_write_entry(object_t *hobj, stm_hashtable_entry_t *entry,
+                                  object_t *nvalue)
+{
+    CHECKED(stm_hashtable_write_entry(hobj, entry, nvalue));
 }
 
 #undef CHECKED
@@ -278,6 +399,92 @@ object_t * _get_weakref(object_t *obj)
     return *WEAKREF_PTR(obj, size);
 }
 
+void _set_hashtable(object_t *obj, stm_hashtable_t *h)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    *(stm_hashtable_t *TLPREFIX *)field_addr = h;
+}
+
+stm_hashtable_t *_get_hashtable(object_t *obj)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    return *(stm_hashtable_t *TLPREFIX *)field_addr;
+}
+
+uintptr_t _get_entry_index(stm_hashtable_entry_t *entry)
+{
+    stm_read((object_t *)entry);
+    return entry->index;
+}
+
+object_t *_get_entry_object(stm_hashtable_entry_t *entry)
+{
+    stm_read((object_t *)entry);
+    return entry->object;
+}
+
+
+void *_get_hashtable_table(stm_hashtable_t *h) {
+    return *((void**)h);
+}
+
+long _stm_hashtable_list(object_t *o, stm_hashtable_t *h,
+                         object_t *entries)
+{
+    if (entries != NULL)
+        return stm_hashtable_list(o, h,
+            (stm_hashtable_entry_t * TLPREFIX*)((stm_char*)entries+SIZEOF_MYOBJ));
+    return stm_hashtable_list(o, h, NULL);
+}
+
+struct myiter_s {
+    struct myobj_s common;
+    struct stm_hashtable_table_s *table;
+    stm_hashtable_entry_t **previous;
+};
+typedef TLPREFIX struct myiter_s myiter_t;
+
+object_t *_hashtable_iter(stm_hashtable_t *h)
+{
+    myiter_t *iter = (myiter_t *)stm_allocate(sizeof(myiter_t));
+    _set_type_id(&iter->common.hdr, 421416);
+    iter->table = stm_hashtable_iter(h);
+    iter->previous = NULL;
+    return (object_t *)iter;
+}
+
+stm_hashtable_entry_t *_hashtable_iter_next(object_t *hobj, object_t *iterobj)
+{
+    stm_write(iterobj);
+    myiter_t *iter = (myiter_t *)iterobj;
+    assert(iter->common.type_id == 421416);
+    stm_hashtable_entry_t **pentry;
+    pentry = stm_hashtable_iter_next(hobj, iter->table, iter->previous);
+    if (pentry == NULL)
+        return NULL;
+    iter->previous = pentry;
+    //fprintf(stderr, "\tcontaining %p: index=%ld, object=%p\n",
+    //        *pentry, (*pentry)->index, (*pentry)->object);
+    return *pentry;
+}
+
+
+void _set_queue(object_t *obj, stm_queue_t *q)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    *(stm_queue_t *TLPREFIX *)field_addr = q;
+}
+
+stm_queue_t *_get_queue(object_t *obj)
+{
+    stm_char *field_addr = ((stm_char*)obj);
+    field_addr += SIZEOF_MYOBJ; /* header */
+    return *(stm_queue_t *TLPREFIX *)field_addr;
+}
+
 void _set_ptr(object_t *obj, int n, object_t *v)
 {
     long nrefs = (long)((myobj_t*)obj)->type_id - 421420;
@@ -302,12 +509,29 @@ object_t * _get_ptr(object_t *obj, int n)
     return *field;
 }
 
+long bytes_before_transaction_break(void)
+{
+    return STM_SEGMENT->nursery_mark - STM_SEGMENT->nursery_current;
+}
 
 
 ssize_t stmcb_size_rounded_up(struct object_s *obj)
 {
     struct myobj_s *myobj = (struct myobj_s*)obj;
+    assert(myobj->type_id != 0);
     if (myobj->type_id < 421420) {
+        if (myobj->type_id == 421419) {    /* hashtable */
+            return sizeof(struct myobj_s) + 1 * sizeof(void*);
+        }
+        if (myobj->type_id == 421418) {    /* hashtable entry */
+            return sizeof(struct stm_hashtable_entry_s);
+        }
+        if (myobj->type_id == 421417) {    /* queue */
+            return sizeof(struct myobj_s) + 1 * sizeof(void*);
+        }
+        if (myobj->type_id == 421416) {    /* hashtable iterator */
+            return sizeof(struct myobj_s) + 2 * sizeof(void*);
+        }
         /* basic case: tid equals 42 plus the size of the object */
         assert(myobj->type_id >= 42 + sizeof(struct myobj_s));
         assert((myobj->type_id - 42) >= 16);
@@ -323,11 +547,34 @@ ssize_t stmcb_size_rounded_up(struct object_s *obj)
     }
 }
 
-
 void stmcb_trace(struct object_s *obj, void visit(object_t **))
 {
     int i;
     struct myobj_s *myobj = (struct myobj_s*)obj;
+    if (myobj->type_id == 421419) {
+        /* hashtable */
+        stm_hashtable_t *h = *((stm_hashtable_t **)(myobj + 1));
+        stm_hashtable_tracefn(obj, h, visit);
+        return;
+    }
+    if (myobj->type_id == 421418) {
+        /* hashtable entry */
+        object_t **ref = &((struct stm_hashtable_entry_s *)myobj)->object;
+        visit(ref);
+    }
+    if (myobj->type_id == 421417) {
+        /* queue */
+        stm_queue_t *q = *((stm_queue_t **)(myobj + 1));
+        stm_queue_tracefn(q, visit);
+        return;
+    }
+    if (myobj->type_id == 421416) {
+        /* hashtable iterator */
+        struct stm_hashtable_table_s *table;
+        table = *(struct stm_hashtable_table_s **)(myobj + 1);
+        stm_hashtable_iter_tracefn(table, visit);
+        return;
+    }
     if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
@@ -348,8 +595,11 @@ void stmcb_trace_cards(struct object_s *obj, void visit(object_t **),
 {
     int i;
     struct myobj_s *myobj = (struct myobj_s*)obj;
+    assert(myobj->type_id != 0);
     assert(myobj->type_id != 421419);
     assert(myobj->type_id != 421418);
+    assert(myobj->type_id != 421417);
+    assert(myobj->type_id != 421416);
     if (myobj->type_id < 421420) {
         /* basic case: no references */
         return;
@@ -365,6 +615,11 @@ void stmcb_get_card_base_itemsize(struct object_s *obj,
                                   uintptr_t offset_itemsize[2])
 {
     struct myobj_s *myobj = (struct myobj_s*)obj;
+    assert(myobj->type_id != 0);
+    assert(myobj->type_id != 421419);
+    assert(myobj->type_id != 421418);
+    assert(myobj->type_id != 421417);
+    assert(myobj->type_id != 421416);
     if (myobj->type_id < 421420) {
         offset_itemsize[0] = SIZEOF_MYOBJ;
         offset_itemsize[1] = 1;
@@ -373,6 +628,21 @@ void stmcb_get_card_base_itemsize(struct object_s *obj,
         offset_itemsize[0] = sizeof(struct myobj_s);
         offset_itemsize[1] = sizeof(object_t *);
     }
+}
+
+void stm_push_marker(stm_thread_local_t *tl, uintptr_t onum, object_t *ob)
+{
+    STM_PUSH_MARKER(*tl, onum, ob);
+}
+
+void stm_update_marker_num(stm_thread_local_t *tl, uintptr_t onum)
+{
+    STM_UPDATE_MARKER_NUM(*tl, onum);
+}
+
+void stm_pop_marker(stm_thread_local_t *tl)
+{
+    STM_POP_MARKER(*tl);
 }
 
 long current_segment_num(void)
@@ -385,11 +655,13 @@ long current_segment_num(void)
                     ('STM_LARGEMALLOC_TEST', '1'),
                     ('STM_NO_COND_WAIT', '1'),
                     ('STM_DEBUGPRINT', '1'),
+                    ('_STM_NURSERY_ZEROED', '1'),
+                    ('STM_GC_NURSERY', '128'), # KB
                     ('GC_N_SMALL_REQUESTS', str(GC_N_SMALL_REQUESTS)), #check
                     ],
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
-     extra_compile_args=['-g', '-O0', '-Wall', '-ferror-limit=5'],
+                 extra_compile_args=['-g', '-O0', '-Werror', '-Wall'], #, '-ferror-limit=5'],
      extra_link_args=['-g', '-lrt'],
      force_generic_engine=True)
 
@@ -404,7 +676,9 @@ CARD_SIZE = lib._STM_CARD_SIZE # 16b at least
 CARD_CLEAR = 0
 CARD_MARKED = lib._STM_CARD_MARKED
 CARD_MARKED_OLD = lib._stm_get_transaction_read_version
-
+lib.stm_hashtable_entry_userdata = 421418
+NURSERY_SIZE = lib.STM_GC_NURSERY * 1024 # bytes
+SIZEOF_HASHTABLE_ENTRY = lib.SIZEOF_HASHTABLE_ENTRY
 
 class Conflict(Exception):
     pass
@@ -454,6 +728,18 @@ def stm_allocate_refs(n):
     lib._set_type_id(o, tid)
     return o
 
+def stm_allocate_noconflict(size):
+    o = lib.stm_allocate_noconflict(size)
+    tid = 42 + size
+    lib._set_type_id(o, tid)
+    return o
+
+def stm_allocate_noconflict_refs(n):
+    o = lib.stm_allocate_noconflict(HDR + n * WORD)
+    tid = 421420 + n
+    lib._set_type_id(o, tid)
+    return o
+
 def stm_allocate_with_finalizer(size):
     o = lib.stm_allocate_with_finalizer(size)
     tid = 42 + size
@@ -465,6 +751,46 @@ def stm_allocate_with_finalizer_refs(n):
     tid = 421420 + n
     lib._set_type_id(o, tid)
     return o
+
+SIZEOF_HASHTABLE_OBJ = 16 + lib.SIZEOF_MYOBJ
+def stm_allocate_hashtable():
+    o = lib.stm_allocate(16)
+    assert is_in_nursery(o)
+    tid = 421419
+    lib._set_type_id(o, tid)
+    h = lib.stm_hashtable_create()
+    lib._set_hashtable(o, h)
+    return o
+
+def hashtable_iter(hobj):
+    return lib._hashtable_iter(get_hashtable(hobj))
+
+def hashtable_iter_next(hobj, o):
+    return lib._hashtable_iter_next(hobj, o)
+
+def hashtable_lookup(hto, ht, idx):
+    return ffi.cast("object_t*",
+                    lib.stm_hashtable_lookup(hto, ht, idx))
+
+def get_hashtable(o):
+    assert lib._get_type_id(o) == 421419
+    h = lib._get_hashtable(o)
+    assert h
+    return h
+
+def stm_allocate_queue():
+    o = lib.stm_allocate(16)
+    tid = 421417
+    lib._set_type_id(o, tid)
+    q = lib.stm_queue_create()
+    lib._set_queue(o, q)
+    return o
+
+def get_queue(o):
+    assert lib._get_type_id(o) == 421417
+    q = lib._get_queue(o)
+    assert q
+    return q
 
 def stm_get_weakref(o):
     return lib._get_weakref(o)
@@ -611,14 +937,14 @@ class BaseTest(object):
         lib.stmcb_expand_marker = ffi.NULL
         lib.stmcb_debug_print = ffi.NULL
         tl = self.tls[self.current_thread]
-        if lib._stm_in_transaction(tl) and lib.stm_is_inevitable():
+        if lib._stm_in_transaction(tl) and self.is_inevitable():
             self.commit_transaction()      # must succeed!
         #
         for n, tl in enumerate(self.tls):
             if lib._stm_in_transaction(tl):
                 if self.current_thread != n:
                     self.switch(n)
-                if lib.stm_is_inevitable():
+                if self.is_inevitable():
                     self.commit_transaction()   # must succeed!
                 else:
                     self.abort_transaction()
@@ -626,6 +952,11 @@ class BaseTest(object):
         for tl in self.tls:
             lib.stm_unregister_thread_local(tl)
         lib.stm_teardown()
+
+    def is_inevitable(self):
+        tl = self.tls[self.current_thread]
+        assert lib._stm_in_transaction(tl)
+        return lib.stm_is_inevitable(tl)
 
     def get_stm_thread_local(self):
         return self.tls[self.current_thread]
@@ -641,8 +972,8 @@ class BaseTest(object):
         seen = set()
         for tl1 in self.tls:
             if lib._stm_in_transaction(tl1):
-                assert tl1.associated_segment_num not in seen
-                seen.add(tl1.associated_segment_num)
+                assert tl1.last_associated_segment_num not in seen
+                seen.add(tl1.last_associated_segment_num)
 
     def commit_transaction(self):
         tl = self.tls[self.current_thread]
@@ -676,6 +1007,17 @@ class BaseTest(object):
 
     def switch_to_segment(self, seg_num):
         lib._stm_test_switch_segment(seg_num)
+
+    def push_roots(self, os):
+        for o in os:
+            self.push_root(o)
+        self._last_push_all = os
+
+    def pop_roots(self):
+        os = self._last_push_all
+        self._last_push_all = None
+        return list(reversed([self.pop_root() for _ in os]))
+
 
     def push_root(self, o):
         assert ffi.typeof(o) == ffi.typeof("object_t *")
@@ -728,6 +1070,7 @@ class BaseTest(object):
             raise Conflict()
 
     def become_globally_unique_transaction(self):
+        import py; py.test.skip("this function was removed")
         tl = self.tls[self.current_thread]
         if lib._check_become_globally_unique_transaction(tl):
             raise Conflict()

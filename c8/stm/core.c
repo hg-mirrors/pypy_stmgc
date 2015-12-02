@@ -2,6 +2,11 @@
 # error "must be compiled via stmgc.c"
 #endif
 
+char *stm_object_pages;
+long _stm_segment_nb_pages = NB_PAGES;
+int _stm_nb_segments = NB_SEGMENTS;
+int _stm_psegment_ofs = (int)(uintptr_t)STM_PSEGMENT;
+
 
 
 /* General helper: copies objects into our own segment, from some
@@ -19,28 +24,32 @@ static void import_objects(
     char *src_segment_base = (from_segnum >= 0 ? get_segment_base(from_segnum)
                                                : NULL);
 
-    assert(IMPLY(from_segnum >= 0, get_priv_segment(from_segnum)->modification_lock));
-    assert(STM_PSEGMENT->modification_lock);
+    assert(IMPLY(from_segnum >= 0, modification_lock_check_rdlock(from_segnum)));
+    assert(modification_lock_check_wrlock(STM_SEGMENT->segment_num));
 
+    long my_segnum = STM_SEGMENT->segment_num;
     DEBUG_EXPECT_SEGFAULT(false);
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
         uintptr_t current_page_num = ((uintptr_t)oslice) / 4096;
 
         if (pagenum == -1) {
-            if (get_page_status_in(STM_SEGMENT->segment_num,
-                                   current_page_num) == PAGE_NO_ACCESS)
+            if (get_page_status_in(my_segnum, current_page_num) == PAGE_NO_ACCESS)
                 continue;
-        }
-        else {
-            if (current_page_num != pagenum)
-                continue;
+        } else if (pagenum != current_page_num) {
+            continue;
         }
 
-        if (from_segnum == -2 && _stm_was_read(obj) && (obj->stm_flags & GCFLAG_WB_EXECUTED)) {
+        if (from_segnum == -2
+            && _stm_was_read(obj)
+            && (get_page_status_in(my_segnum, (uintptr_t)obj / 4096) == PAGE_ACCESSIBLE)
+            && (obj->stm_flags & GCFLAG_WB_EXECUTED)) {
             /* called from stm_validate():
                 > if not was_read(), we certainly didn't modify
+                > if obj->stm_flags is not accessible, WB_EXECUTED cannot be set
                 > if not WB_EXECUTED, we may have read from the obj in a different page but
                   did not modify it (should not occur right now, but future proof!)
                only the WB_EXECUTED alone is not enough, since we may have imported from a
@@ -51,8 +60,7 @@ static void import_objects(
 
         /* XXX: if the next assert is always true, we should never get a segfault
            in this function at all. So the DEBUG_EXPECT_SEGFAULT is correct. */
-        assert((get_page_status_in(STM_SEGMENT->segment_num,
-                                   current_page_num) != PAGE_NO_ACCESS));
+        assert((get_page_status_in(my_segnum, current_page_num) != PAGE_NO_ACCESS));
 
         /* dprintf(("import slice seg=%d obj=%p off=%lu sz=%d pg=%lu\n", */
         /*          from_segnum, obj, SLICE_OFFSET(undo->slice), */
@@ -67,7 +75,8 @@ static void import_objects(
 
         if (src_segment_base == NULL && SLICE_OFFSET(undo->slice) == 0) {
             /* check that restored obj doesn't have WB_EXECUTED */
-            assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
+            assert((get_page_status_in(my_segnum, (uintptr_t)obj / 4096) == PAGE_NO_ACCESS)
+                   || !(obj->stm_flags & GCFLAG_WB_EXECUTED));
         }
     }
     DEBUG_EXPECT_SEGFAULT(true);
@@ -84,6 +93,7 @@ static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum,
     dprintf(("copy_bk_objs_in_page_from(%d, %ld, %d)\n",
              from_segnum, (long)pagenum, only_if_not_modified));
 
+    assert(modification_lock_check_rdlock(from_segnum));
     struct list_s *list = get_priv_segment(from_segnum)->modified_old_objects;
     struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
@@ -96,7 +106,7 @@ static void go_to_the_past(uintptr_t pagenum,
                            struct stm_commit_log_entry_s *from,
                            struct stm_commit_log_entry_s *to)
 {
-    assert(STM_PSEGMENT->modification_lock);
+    assert(modification_lock_check_wrlock(STM_SEGMENT->segment_num));
     assert(from->rev_num >= to->rev_num);
     /* walk BACKWARDS the commit log and update the page 'pagenum',
        initially at revision 'from', until we reach the revision 'to'. */
@@ -164,8 +174,8 @@ static void handle_segfault_in_page(uintptr_t pagenum)
 
     /* before copying anything, acquire modification locks from our and
        the other segment */
-    uint64_t to_lock = (1UL << copy_from_segnum)| (1UL << my_segnum);
-    acquire_modification_lock_set(to_lock);
+    uint64_t to_lock = (1UL << copy_from_segnum);
+    acquire_modification_lock_set(to_lock, my_segnum);
     pagecopy(get_virtual_page(my_segnum, pagenum),
              get_virtual_page(copy_from_segnum, pagenum));
 
@@ -188,7 +198,7 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     if (src_version->rev_num > target_version->rev_num)
         go_to_the_past(pagenum, src_version, target_version);
 
-    release_modification_lock_set(to_lock);
+    release_modification_lock_set(to_lock, my_segnum);
     release_all_privatization_locks();
 }
 
@@ -203,6 +213,7 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
         addr >= stm_object_pages+TOTAL_MEMORY) {
         /* actual segfault, unrelated to stmgc */
         fprintf(stderr, "Segmentation fault: accessing %p\n", addr);
+        detect_shadowstack_overflow(addr);
         abort();
     }
 
@@ -232,11 +243,9 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
 }
 
 
+static void reset_modified_from_backup_copies(int segment_num, object_t *only_obj);  /* forward */
 
-
-static void reset_modified_from_backup_copies(int segment_num);  /* forward */
-
-static bool _stm_validate()
+static bool _stm_validate(void)
 {
     /* returns true if we reached a valid state, or false if
        we need to abort now */
@@ -252,14 +261,17 @@ static bool _stm_validate()
     /* Don't check this 'cl'. This entry is already checked */
 
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
-        //assert(first_cl->next == INEV_RUNNING);
-        /* the above assert may fail when running a major collection
-           while the commit of the inevitable transaction is in progress
-           and the element is already attached */
+        assert(first_cl->next == INEV_RUNNING);
         return true;
     }
 
     bool needs_abort = false;
+
+    if (STM_PSEGMENT->transaction_state == TS_NONE) {
+        /* can be seen from major_do_validation_and_minor_collections();
+           don't try to detect pseudo-conflicts in this case */
+        needs_abort = true;
+    }
 
     while(1) {
         /* retry IF: */
@@ -279,7 +291,7 @@ static bool _stm_validate()
         }
 
         /* Find the set of segments we need to copy from and lock them: */
-        uint64_t segments_to_lock = 1UL << my_segnum;
+        uint64_t segments_to_lock = 0;
         cl = first_cl;
         while ((next_cl = cl->next) != NULL) {
             if (next_cl == INEV_RUNNING) {
@@ -297,8 +309,8 @@ static bool _stm_validate()
 
         /* HERE */
 
-        acquire_privatization_lock(STM_SEGMENT->segment_num);
-        acquire_modification_lock_set(segments_to_lock);
+        acquire_privatization_lock(my_segnum);
+        acquire_modification_lock_set(segments_to_lock, my_segnum);
 
 
         /* import objects from first_cl to last_cl: */
@@ -311,18 +323,61 @@ static bool _stm_validate()
                     struct stm_undo_s *undo = cl->written;
                     struct stm_undo_s *end = cl->written + cl->written_count;
                     for (; undo < end; undo++) {
-                        if (_stm_was_read(undo->object)) {
-                            /* first reset all modified objects from the backup
-                               copies as soon as the first conflict is detected;
-                               then we will proceed below to update our segment from
-                               the old (but unmodified) version to the newer version.
-                            */
-                            reset_modified_from_backup_copies(my_segnum);
-                            needs_abort = true;
+                        object_t *obj;
 
-                            dprintf(("_stm_validate() failed for obj %p\n", undo->object));
-                            break;
+                        if (undo->type != TYPE_POSITION_MARKER) {
+                            /* common case: 'undo->object' was written to
+                               in this past commit, so we must check that
+                               it was not read by us. */
+                            obj = undo->object;
                         }
+                        else if (undo->type2 != TYPE_MODIFIED_HASHTABLE)
+                            continue;
+                        else {
+                            /* the previous stm_undo_s is about a written
+                               'entry' object, which belongs to the hashtable
+                               given now.  Check that we haven't read the
+                               hashtable (via stm_hashtable_list()). */
+                            obj = undo->modif_hashtable;
+                        }
+
+                        if (LIKELY(!_stm_was_read(obj)))
+                            continue;
+
+                        /* check for NO_CONFLICT flag in seg0. While its data may
+                           not be current there, the flag will be there and is
+                           immutable. (we cannot check in my_segnum bc. we may
+                           only have executed stm_read(o) but not touched its pages
+                           yet -> they may be NO_ACCESS */
+                        struct object_s *obj0 = (struct object_s *)REAL_ADDRESS(get_segment_base(0), obj);
+                        if (obj0->stm_flags & GCFLAG_NO_CONFLICT) {
+                            /* obj is noconflict and therefore shouldn't cause
+                               an abort. However, from now on, we also assume
+                               that an abort would not roll-back to what is in
+                               the backup copy, as we don't trace the bkcpy
+                               during major GCs.
+                               We choose the approach to reset all our changes
+                               to this obj here, so that we can throw away the
+                               backup copy completely: */
+                            /* XXX: this browses through the whole list of modified
+                               fragments; this may become a problem... */
+                            reset_modified_from_backup_copies(my_segnum, obj);
+                            continue;
+                        }
+
+                        /* conflict! */
+                        dprintf(("_stm_validate() failed for obj %p\n", obj));
+
+                        /* first reset all modified objects from the backup
+                           copies as soon as the first conflict is detected;
+                           then we will proceed below to update our segment
+                           from the old (but unmodified) version to the newer
+                           version.
+                        */
+                        reset_modified_from_backup_copies(my_segnum, NULL);
+                        timing_write_read_contention(cl->written, undo);
+                        needs_abort = true;
+                        break;
                     }
                 }
 
@@ -366,8 +421,8 @@ static bool _stm_validate()
         }
 
         /* done with modifications */
-        release_modification_lock_set(segments_to_lock);
-        release_privatization_lock(STM_SEGMENT->segment_num);
+        release_modification_lock_set(segments_to_lock, my_segnum);
+        release_privatization_lock(my_segnum);
     }
 
     return !needs_abort;
@@ -398,97 +453,117 @@ static void reset_wb_executed_flags(void);
 static void readd_wb_executed_flags(void);
 static void check_all_write_barrier_flags(char *segbase, struct list_s *list);
 
+static void wait_for_inevitable(void)
+{
+    intptr_t detached = 0;
+
+    s_mutex_lock();
+ wait_some_more:
+    if (safe_point_requested()) {
+        /* XXXXXX if the safe point below aborts, in
+           _validate_and_attach(), 'new' leaks */
+        enter_safe_point_if_requested();
+    }
+    else if (STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
+        /* loop until C_SEGMENT_FREE_OR_SAFE_POINT_REQ is signalled, but
+           try to detach an inevitable transaction regularly */
+        detached = fetch_detached_transaction();
+        if (detached == 0) {
+            EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
+            if (!cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ, 0.00001))
+                goto wait_some_more;
+        }
+    }
+    EMIT_WAIT_DONE();
+    s_mutex_unlock();
+
+    if (detached != 0)
+        commit_fetched_detached_transaction(detached);
+}
+
+/* This is called to do stm_validate() and then attach 'new' at the
+   head of the 'commit_log_root' chained list.  This function sleeps
+   and retries until it succeeds or aborts.
+*/
 static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 {
     struct stm_commit_log_entry_s *old;
 
     OPT_ASSERT(new != NULL);
-    /* we are attaching a real CL entry: */
-    bool is_commit = new != INEV_RUNNING;
+    OPT_ASSERT(new != INEV_RUNNING);
 
-    while (1) {
-        if (!_stm_validate()) {
-            if (new != INEV_RUNNING)
-                free_cle((struct stm_commit_log_entry_s*)new);
-            stm_abort_transaction();
-        }
+    soon_finished_or_inevitable_thread_segment();
 
-#if STM_TESTS
-        if (STM_PSEGMENT->transaction_state != TS_INEVITABLE
-            && STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
-            /* abort for tests... */
-            stm_abort_transaction();
-        }
-#endif
-
-        if (is_commit) {
-            /* we must not remove the WB_EXECUTED flags before validation as
-               it is part of a condition in import_objects() called by
-               copy_bk_objs_in_page_from to not overwrite our modifications.
-               So we do it here: */
-            reset_wb_executed_flags();
-            check_all_write_barrier_flags(STM_SEGMENT->segment_base,
-                                          STM_PSEGMENT->modified_old_objects);
-
-            /* need to remove the entries in modified_old_objects "at the same
-               time" as the attach to commit log. Otherwise, another thread may
-               see the new CL entry, import it, look for backup copies in this
-               segment and find the old backup copies! */
-            acquire_modification_lock(STM_SEGMENT->segment_num);
-        }
-
-        /* try to attach to commit log: */
-        old = STM_PSEGMENT->last_commit_log_entry;
-        if (old->next == NULL) {
-            if (new != INEV_RUNNING) /* INEVITABLE */
-                new->rev_num = old->rev_num + 1;
-
-            if (__sync_bool_compare_and_swap(&old->next, NULL, new))
-                break;   /* success! */
-        } else if (old->next == INEV_RUNNING) {
-            /* we failed because there is an INEV transaction running */
-            /* XXXXXX for now just sleep (XXX with the lock acquired?
-               isn't it a bad idea?).  We should really ask to inev
-               transaction to do the commit for us, and then we can
-               continue running. */
-            usleep(10);
-        }
-
-        if (is_commit) {
-            release_modification_lock(STM_SEGMENT->segment_num);
-            /* XXX: unfortunately, if we failed to attach our CL entry,
-               we have to re-add the WB_EXECUTED flags before we try to
-               validate again because of said condition (s.a) */
-            readd_wb_executed_flags();
-        }
-
-        dprintf(("_validate_and_attach(%p) failed, enter safepoint\n", new));
-
-        /* check for requested safe point. otherwise an INEV transaction
-           may try to commit but cannot because of the busy-loop here. */
-        /* minor gc is fine here because we did one immediately before, so
-           there are no young objs anyway. major gc is fine because the
-           modified_old_objects list is still populated with the same
-           cl-entry objs */
-        /* XXXXXXXX: memory leak if we happen to do a major gc, we get aborted
-           in major_do_validation_and_minor_collections, and don't free 'new' */
-        _stm_collectable_safe_point();
+ retry_from_start:
+    if (!_stm_validate()) {
+        free_cle(new);
+        stm_abort_transaction();
     }
 
-    if (is_commit) {
-        /* compare with _validate_and_add_to_commit_log */
-        STM_PSEGMENT->transaction_state = TS_NONE;
-        STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
+#if STM_TESTS
+    if (STM_PSEGMENT->transaction_state != TS_INEVITABLE
+        && STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
+        /* abort for tests... */
+        stm_abort_transaction();
+    }
+#endif
 
+    if (STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
+        wait_for_inevitable();
+        goto retry_from_start;   /* redo _stm_validate() now */
+    }
+
+    /* we must not remove the WB_EXECUTED flags before validation as
+       it is part of a condition in import_objects() called by
+       copy_bk_objs_in_page_from to not overwrite our modifications.
+       So we do it here: */
+    reset_wb_executed_flags();
+    check_all_write_barrier_flags(STM_SEGMENT->segment_base,
+                                  STM_PSEGMENT->modified_old_objects);
+
+    /* need to remove the entries in modified_old_objects "at the same
+       time" as the attach to commit log. Otherwise, another thread may
+       see the new CL entry, import it, look for backup copies in this
+       segment and find the old backup copies! */
+    acquire_modification_lock_wr(STM_SEGMENT->segment_num);
+
+    /* try to attach to commit log: */
+    old = STM_PSEGMENT->last_commit_log_entry;
+    new->rev_num = old->rev_num + 1;
+    if (__sync_bool_compare_and_swap(&old->next, NULL, new)) {
+        /* success! */
+        /* compare with _validate_and_add_to_commit_log */
         list_clear(STM_PSEGMENT->modified_old_objects);
         STM_PSEGMENT->last_commit_log_entry = new;
-        release_modification_lock(STM_SEGMENT->segment_num);
+        release_modification_lock_wr(STM_SEGMENT->segment_num);
+    }
+    else {
+        /* fail */
+        release_modification_lock_wr(STM_SEGMENT->segment_num);
+        /* XXX: unfortunately, if we failed to attach our CL entry,
+           we have to re-add the WB_EXECUTED flags before we try to
+           validate again because of said condition (s.a) */
+        readd_wb_executed_flags();
+
+        dprintf(("_validate_and_attach(%p) failed, retrying\n", new));
+        goto retry_from_start;
     }
 }
 
-static void _validate_and_turn_inevitable(void)
+/* This is called to do stm_validate() and then attach INEV_RUNNING to
+   the head of the 'commit_log_root' chained list.  This function
+   may succeed or fail (or abort).
+*/
+static bool _validate_and_turn_inevitable(void)
 {
-    _validate_and_attach((struct stm_commit_log_entry_s *)INEV_RUNNING);
+    struct stm_commit_log_entry_s *old;
+
+    if (!_stm_validate())
+        stm_abort_transaction();
+
+    /* try to attach to commit log: */
+    old = STM_PSEGMENT->last_commit_log_entry;
+    return __sync_bool_compare_and_swap(&old->next, NULL, INEV_RUNNING);
 }
 
 static void _validate_and_add_to_commit_log(void)
@@ -497,6 +572,9 @@ static void _validate_and_add_to_commit_log(void)
 
     new = _create_commit_log_entry();
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
+        assert(_stm_detached_inevitable_from_thread == 0  /* running it */
+               || _stm_detached_inevitable_from_thread == -1);  /* committing external */
+
         old = STM_PSEGMENT->last_commit_log_entry;
         new->rev_num = old->rev_num + 1;
         OPT_ASSERT(old->next == INEV_RUNNING);
@@ -507,14 +585,15 @@ static void _validate_and_add_to_commit_log(void)
                                       STM_PSEGMENT->modified_old_objects);
 
         /* compare with _validate_and_attach: */
-        STM_PSEGMENT->transaction_state = TS_NONE;
-        STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
+        acquire_modification_lock_wr(STM_SEGMENT->segment_num);
         list_clear(STM_PSEGMENT->modified_old_objects);
         STM_PSEGMENT->last_commit_log_entry = new;
 
         /* do it: */
         bool yes = __sync_bool_compare_and_swap(&old->next, INEV_RUNNING, new);
         OPT_ASSERT(yes);
+
+        release_modification_lock_wr(STM_SEGMENT->segment_num);
     }
     else {
         _validate_and_attach(new);
@@ -552,6 +631,8 @@ static void make_bk_slices_for_range(
 {
     dprintf(("make_bk_slices_for_range(%p, %lu, %lu)\n",
              obj, start - (stm_char*)obj, end - start));
+    timing_record_write_position();
+
     char *realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
     uintptr_t first_page = ((uintptr_t)start) / 4096UL;
     uintptr_t end_page = ((uintptr_t)end) / 4096UL;
@@ -575,7 +656,7 @@ static void make_bk_slices_for_range(
         char *bk_slice = malloc_bk(slice_sz);
         memcpy(bk_slice, realobj + slice_off, slice_sz);
 
-        acquire_modification_lock(STM_SEGMENT->segment_num);
+        acquire_modification_lock_wr(STM_SEGMENT->segment_num);
         /* !! follows layout of "struct stm_undo_s" !! */
         STM_PSEGMENT->modified_old_objects = list_append3(
             STM_PSEGMENT->modified_old_objects,
@@ -583,7 +664,7 @@ static void make_bk_slices_for_range(
             (uintptr_t)bk_slice,  /* bk_addr */
             NEW_SLICE(slice_off, slice_sz));
         dprintf(("> append slice %p, off=%lu, sz=%lu\n", bk_slice, slice_off, slice_sz));
-        release_modification_lock(STM_SEGMENT->segment_num);
+        release_modification_lock_wr(STM_SEGMENT->segment_num);
 
         slice_off += slice_sz;
     }
@@ -745,7 +826,6 @@ static void make_bk_slices(object_t *obj,
     _cards_cleared_in_object(get_priv_segment(STM_SEGMENT->segment_num), obj, false);
 }
 
-__attribute__((always_inline))
 static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
 {
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
@@ -777,7 +857,32 @@ static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
 }
 
 
-__attribute__((always_inline))
+static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
+{
+    /* XXX: make this function not needed */
+    int my_segnum = STM_SEGMENT->segment_num;
+    uintptr_t end_page, first_page = ((uintptr_t)obj) / 4096UL;
+
+    /* get the last page containing data from the object */
+    if (LIKELY(is_small_uniform(obj))) {
+        end_page = first_page;
+    } else {
+        end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
+    }
+
+    acquire_privatization_lock(STM_SEGMENT->segment_num);
+    uintptr_t page;
+    for (page = first_page; page <= end_page; page++) {
+        if (get_page_status_in(my_segnum, page) == PAGE_NO_ACCESS) {
+            release_privatization_lock(STM_SEGMENT->segment_num);
+            /* emulate pagefault -> PAGE_ACCESSIBLE: */
+            handle_segfault_in_page(page);
+            acquire_privatization_lock(STM_SEGMENT->segment_num);
+        }
+    }
+    release_privatization_lock(STM_SEGMENT->segment_num);
+}
+
 static void write_slowpath_common(object_t *obj, bool mark_card)
 {
     assert(_seems_to_be_running_transaction());
@@ -803,29 +908,10 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
            the full obj in this segment (XXX) */
         char *realobj;
         size_t obj_size;
-        int my_segnum = STM_SEGMENT->segment_num;
-        uintptr_t end_page, first_page = ((uintptr_t)obj) / 4096UL;
-
         realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
-        /* get the last page containing data from the object */
-        if (LIKELY(is_small_uniform(obj))) {
-            end_page = first_page;
-        } else {
-            end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
-        }
 
-        acquire_privatization_lock(STM_SEGMENT->segment_num);
-        uintptr_t page;
-        for (page = first_page; page <= end_page; page++) {
-            if (get_page_status_in(my_segnum, page) == PAGE_NO_ACCESS) {
-                release_privatization_lock(STM_SEGMENT->segment_num);
-                volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
-                *dummy;            /* force segfault */
-                acquire_privatization_lock(STM_SEGMENT->segment_num);
-            }
-        }
-        release_privatization_lock(STM_SEGMENT->segment_num);
+        touch_all_pages_of_obj(obj, obj_size);
     }
 
     if (mark_card) {
@@ -939,6 +1025,7 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
              obj, index, get_index_to_card_index(index), CARD_MARKED));
 }
 
+__attribute__((flatten))
 void _stm_write_slowpath(object_t *obj) {
     write_slowpath_common(obj,  /* mark_card */ false);
 }
@@ -973,6 +1060,8 @@ static void reset_wb_executed_flags(void)
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         obj->stm_flags &= ~GCFLAG_WB_EXECUTED;
     }
@@ -986,6 +1075,8 @@ static void readd_wb_executed_flags(void)
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         obj->stm_flags |= GCFLAG_WB_EXECUTED;
     }
@@ -994,15 +1085,17 @@ static void readd_wb_executed_flags(void)
 
 
 
-static void _stm_start_transaction(stm_thread_local_t *tl)
+static void _do_start_transaction(stm_thread_local_t *tl)
 {
     assert(!_stm_in_transaction(tl));
+    tl->wait_event_emitted = 0;
 
-    while (!acquire_thread_segment(tl)) {}
+    acquire_thread_segment(tl);
     /* GS invalid before this point! */
 
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
+    timing_event(tl, STM_TRANSACTION_START);
     STM_PSEGMENT->transaction_state = TS_REGULAR;
     STM_PSEGMENT->safe_point = SP_RUNNING;
 #ifndef NDEBUG
@@ -1010,17 +1103,9 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
 #endif
     STM_PSEGMENT->shadowstack_at_start_of_transaction = tl->shadowstack;
     STM_PSEGMENT->threadlocal_at_start_of_transaction = tl->thread_local_obj;
-
-    enter_safe_point_if_requested();
-    dprintf(("> start_transaction\n"));
-
-    s_mutex_unlock();   // XXX it's probably possible to not acquire this here
-
-    uint8_t old_rv = STM_SEGMENT->transaction_read_version;
-    STM_SEGMENT->transaction_read_version = old_rv + 1;
-    if (UNLIKELY(old_rv == 0xff)) {
-        reset_transaction_read_version();
-    }
+    STM_PSEGMENT->total_throw_away_nursery = 0;
+    assert(tl->self_or_0_if_atomic == (intptr_t)tl);   /* not atomic */
+    assert(STM_PSEGMENT->atomic_nesting_levels == 0);
 
     assert(list_is_empty(STM_PSEGMENT->modified_old_objects));
     assert(list_is_empty(STM_PSEGMENT->large_overflow_objects));
@@ -1032,41 +1117,64 @@ static void _stm_start_transaction(stm_thread_local_t *tl)
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[1]));
     assert(list_is_empty(STM_PSEGMENT->young_objects_with_light_finalizers));
     assert(STM_PSEGMENT->finalizers == NULL);
+    assert(STM_PSEGMENT->active_queues == NULL);
+#ifndef NDEBUG
+    /* this should not be used when objects_pointing_to_nursery == NULL */
+    STM_PSEGMENT->position_markers_len_old = 99999999999999999L;
+#endif
 
     check_nursery_at_transaction_start();
+
+    /* Change read-version here, because if we do stm_validate in the
+       safe-point below, we should not see our old reads from the last
+       transaction. */
+    uint8_t rv = STM_SEGMENT->transaction_read_version;
+    if (rv < 0xff)   /* else, rare (maybe impossible?) case: we did already */
+        rv++;        /* incr it but enter_safe_point_if_requested() aborted */
+    STM_SEGMENT->transaction_read_version = rv;
+
+    /* Warning: this safe-point may run light finalizers and register
+       commit/abort callbacks if a major GC is triggered here */
+    enter_safe_point_if_requested();
+    dprintf(("> start_transaction\n"));
+
+    s_mutex_unlock();   // XXX it's probably possible to not acquire this here
+
+    if (UNLIKELY(rv == 0xff)) {
+        reset_transaction_read_version();
+    }
 
     stm_validate();
 }
 
-long stm_start_transaction(stm_thread_local_t *tl)
+#ifdef STM_NO_AUTOMATIC_SETJMP
+static int did_abort = 0;
+#endif
+
+long _stm_start_transaction(stm_thread_local_t *tl)
 {
     s_mutex_lock();
 #ifdef STM_NO_AUTOMATIC_SETJMP
-    long repeat_count = 0;    /* test/support.py */
+    long repeat_count = did_abort;    /* test/support.py */
+    did_abort = 0;
 #else
     long repeat_count = stm_rewind_jmp_setjmp(tl);
 #endif
-    _stm_start_transaction(tl);
+    _do_start_transaction(tl);
+
+    if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
+                                 in abort_data_structures_from_segment_num() */
+        STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
+                                     stm_fill_mark_nursery_bytes);
+    }
     return repeat_count;
-}
-
-void stm_start_inevitable_transaction(stm_thread_local_t *tl)
-{
-    /* used to be more efficient, starting directly an inevitable transaction,
-       but there is no real point any more, I believe */
-    rewind_jmp_buf rjbuf;
-    stm_rewind_jmp_enterframe(tl, &rjbuf);
-
-    stm_start_transaction(tl);
-    stm_become_inevitable(tl, "start_inevitable_transaction");
-
-    stm_rewind_jmp_leaveframe(tl, &rjbuf);
 }
 
 #ifdef STM_NO_AUTOMATIC_SETJMP
 void _test_run_abort(stm_thread_local_t *tl) __attribute__((noreturn));
-int stm_is_inevitable(void)
+int stm_is_inevitable(stm_thread_local_t *tl)
 {
+    assert(STM_SEGMENT->running_thread == tl);
     switch (STM_PSEGMENT->transaction_state) {
     case TS_REGULAR: return 0;
     case TS_INEVITABLE: return 1;
@@ -1077,10 +1185,11 @@ int stm_is_inevitable(void)
 
 /************************************************************/
 
-static void _finish_transaction()
+static void _finish_transaction(enum stm_event_e event)
 {
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
 
+    assert(_has_mutex());
     STM_PSEGMENT->safe_point = SP_NO_TRANSACTION;
     STM_PSEGMENT->transaction_state = TS_NONE;
 
@@ -1088,6 +1197,15 @@ static void _finish_transaction()
     list_clear(STM_PSEGMENT->objects_pointing_to_nursery);
     list_clear(STM_PSEGMENT->old_objects_with_cards_set);
     list_clear(STM_PSEGMENT->large_overflow_objects);
+    if (tl != NULL)
+        timing_event(tl, event);
+
+    /* If somebody is waiting for us to reach a safe point, we simply
+       signal it now and leave this transaction.  This should be enough
+       for synchronize_all_threads() to retry and notice that we are
+       no longer SP_RUNNING. */
+    if (STM_SEGMENT->nursery_end != NURSERY_END)
+        cond_signal(C_AT_SAFE_POINT);
 
     release_thread_segment(tl);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
@@ -1099,6 +1217,8 @@ static void check_all_write_barrier_flags(char *segbase, struct list_s *list)
     struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
         object_t *obj = undo->object;
         struct object_s *dst = (struct object_s*)REAL_ADDRESS(segbase, obj);
         assert(dst->stm_flags & GCFLAG_WRITE_BARRIER);
@@ -1134,27 +1254,77 @@ static void push_large_overflow_objects_to_other_segments(void)
 }
 
 
-void stm_commit_transaction(void)
+void _stm_commit_transaction(void)
+{
+    assert(STM_PSEGMENT->running_pthread == pthread_self());
+    _core_commit_transaction(/*external=*/ false);
+}
+
+static void _core_commit_transaction(bool external)
 {
     exec_local_finalizers();
 
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
-    assert(STM_PSEGMENT->running_pthread == pthread_self());
+    assert(STM_PSEGMENT->transaction_state != TS_NONE);
+    if (globally_unique_transaction) {
+        stm_fatalerror("cannot commit between stm_stop_all_other_threads "
+                       "and stm_resume_all_other_threads");
+    }
+    if (STM_PSEGMENT->atomic_nesting_levels > 0) {
+        stm_fatalerror("cannot commit between stm_enable_atomic "
+                       "and stm_disable_atomic");
+    }
+    assert(STM_SEGMENT->running_thread->self_or_0_if_atomic ==
+           (intptr_t)(STM_SEGMENT->running_thread));
+    assert(STM_SEGMENT->running_thread->wait_event_emitted == 0);
 
-    dprintf(("> stm_commit_transaction()\n"));
-    minor_collection(1);
+    dprintf(("> stm_commit_transaction(external=%d)\n", (int)external));
+    minor_collection(/*commit=*/ true, external);
+    if (!external && is_major_collection_requested()) {
+        s_mutex_lock();
+        if (is_major_collection_requested()) {   /* if still true */
+            major_collection_with_mutex();
+        }
+        s_mutex_unlock();
+    }
 
     push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
+
+
+    /* before releasing _stm_detached_inevitable_from_thread, perform
+       the commit. Otherwise, the same thread whose (inev) transaction we try
+       to commit here may start a new one in another segment *but* w/o
+       the committed data from its previous inev transaction. (the
+       stm_validate() at the start of a new transaction is happy even
+       if there is an inevitable tx running) */
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
 
-    stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+    if (external) {
+        /* from this point on, unlink the original 'stm_thread_local_t *'
+           from its segment.  Better do it as soon as possible, because
+           other threads might be spin-looping, waiting for the -1 to
+           disappear. */
+        /* but first, emit commit-event of this thread: */
+        timing_event(STM_SEGMENT->running_thread, STM_TRANSACTION_COMMIT);
+        STM_SEGMENT->running_thread = NULL;
+        write_fence();
+        assert(_stm_detached_inevitable_from_thread == -1);
+        _stm_detached_inevitable_from_thread = 0;
+    }
+
+
+    if (!was_inev) {
+        assert(!external);
+        stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+    }
+
+    commit_finalizers();
 
     /* XXX do we still need a s_mutex_lock() section here? */
     s_mutex_lock();
-    commit_finalizers();
 
     /* update 'overflow_number' if needed */
     if (STM_PSEGMENT->overflow_number_has_been_used) {
@@ -1165,46 +1335,33 @@ void stm_commit_transaction(void)
         STM_PSEGMENT->overflow_number_has_been_used = false;
     }
 
+    if (STM_PSEGMENT->active_queues)
+        queues_deactivate_all(get_priv_segment(STM_SEGMENT->segment_num),
+                              /*at_commit=*/true);
+
     invoke_and_clear_user_callbacks(0);   /* for commit */
-
-    /* >>>>> there may be a FORK() happening in the safepoint below <<<<<*/
-    enter_safe_point_if_requested();
-    assert(STM_SEGMENT->nursery_end == NURSERY_END);
-
-    /* if a major collection is required, do it here */
-    if (is_major_collection_requested()) {
-        synchronize_all_threads(STOP_OTHERS_UNTIL_MUTEX_UNLOCK);
-
-        if (is_major_collection_requested()) {   /* if *still* true */
-            major_collection_now_at_safe_point();
-        }
-    }
-
-    _verify_cards_cleared_in_all_lists(get_priv_segment(STM_SEGMENT->segment_num));
-
-    if (globally_unique_transaction && was_inev) {
-        committed_globally_unique_transaction();
-    }
 
     /* done */
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
-    _finish_transaction();
+    assert(external == (tl == NULL));
+    _finish_transaction(STM_TRANSACTION_COMMIT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
 
     /* between transactions, call finalizers. this will execute
        a transaction itself */
-    invoke_general_finalizers(tl);
+    if (tl != NULL)
+        invoke_general_finalizers(tl);
 }
 
-static void reset_modified_from_backup_copies(int segment_num)
+static void reset_modified_from_backup_copies(int segment_num, object_t *only_obj)
 {
 #pragma push_macro("STM_PSEGMENT")
 #pragma push_macro("STM_SEGMENT")
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
-    assert(get_priv_segment(segment_num)->modification_lock);
+    assert(modification_lock_check_wrlock(segment_num));
 
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
     struct list_s *list = pseg->modified_old_objects;
@@ -1212,7 +1369,13 @@ static void reset_modified_from_backup_copies(int segment_num)
     struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
 
     for (; undo < end; undo++) {
+        if (undo->type == TYPE_POSITION_MARKER)
+            continue;
+
         object_t *obj = undo->object;
+        if (only_obj != NULL && obj != only_obj)
+            continue;
+
         char *dst = REAL_ADDRESS(pseg->pub.segment_base, obj);
 
         memcpy(dst + SLICE_OFFSET(undo->slice),
@@ -1224,12 +1387,29 @@ static void reset_modified_from_backup_copies(int segment_num)
                  SLICE_SIZE(undo->slice), undo->backup));
 
         free_bk(undo);
+
+        if (only_obj != NULL) {
+            assert(IMPLY(only_obj != NULL,
+                         (((struct object_s *)dst)->stm_flags
+                          & (GCFLAG_NO_CONFLICT
+                             | GCFLAG_WRITE_BARRIER
+                             | GCFLAG_WB_EXECUTED))
+                         == (GCFLAG_NO_CONFLICT | GCFLAG_WRITE_BARRIER)));
+            /* copy last element over this one */
+            end--;
+            list->count -= 3;
+            if (undo < end)
+                *undo = *end;
+            undo--;  /* next itr */
+        }
     }
 
-    /* check that all objects have the GCFLAG_WRITE_BARRIER afterwards */
-    check_all_write_barrier_flags(pseg->pub.segment_base, list);
+    if (only_obj == NULL) {
+        /* check that all objects have the GCFLAG_WRITE_BARRIER afterwards */
+        check_all_write_barrier_flags(pseg->pub.segment_base, list);
 
-    list_clear(list);
+        list_clear(list);
+    }
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
@@ -1254,7 +1434,7 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     abort_finalizers(pseg);
 
-    long bytes_in_nursery = throw_away_nursery(pseg);
+    throw_away_nursery(pseg);
 
     /* clear CARD_MARKED on objs (don't care about CARD_MARKED_OLD) */
     LIST_FOREACH_R(pseg->old_objects_with_cards_set, object_t * /*item*/,
@@ -1264,9 +1444,9 @@ static void abort_data_structures_from_segment_num(int segment_num)
             _reset_object_cards(pseg, item, CARD_CLEAR, false, false);
         });
 
-    acquire_modification_lock(segment_num);
-    reset_modified_from_backup_copies(segment_num);
-    release_modification_lock(segment_num);
+    acquire_modification_lock_wr(segment_num);
+    reset_modified_from_backup_copies(segment_num, NULL);
+    release_modification_lock_wr(segment_num);
     _verify_cards_cleared_in_all_lists(pseg);
 
     stm_thread_local_t *tl = pseg->pub.running_thread;
@@ -1288,10 +1468,40 @@ static void abort_data_structures_from_segment_num(int segment_num)
     assert(tl->shadowstack == pseg->shadowstack_at_start_of_transaction);
 #endif
     tl->thread_local_obj = pseg->threadlocal_at_start_of_transaction;
-    tl->last_abort__bytes_in_nursery = bytes_in_nursery;
+
+    if (pseg->active_queues)
+        queues_deactivate_all(pseg, /*at_commit=*/false);
+
+
+    /* Set the next nursery_mark: first compute the value that
+       nursery_mark must have had at the start of the aborted transaction */
+    stm_char *old_mark =pseg->pub.nursery_mark + pseg->total_throw_away_nursery;
+
+    /* This means that the limit, in term of bytes, was: */
+    uintptr_t old_limit = old_mark - (stm_char *)_stm_nursery_start;
+
+    /* If 'total_throw_away_nursery' is smaller than old_limit, use that */
+    if (pseg->total_throw_away_nursery < old_limit)
+        old_limit = pseg->total_throw_away_nursery;
+
+    /* Now set the new limit to 90% of the old limit */
+    pseg->pub.nursery_mark = ((stm_char *)_stm_nursery_start +
+                              (uintptr_t)(old_limit * 0.9));
+
+#ifdef STM_NO_AUTOMATIC_SETJMP
+    did_abort = 1;
+#endif
 
     list_clear(pseg->objects_pointing_to_nursery);
     list_clear(pseg->old_objects_with_cards_set);
+    LIST_FOREACH_R(pseg->large_overflow_objects, uintptr_t /*item*/,
+        {
+            if (is_small_uniform((object_t*)item)) {
+                //_stm_small_free()
+            } else {
+                _stm_large_free(stm_object_pages + item);
+            }
+        });
     list_clear(pseg->large_overflow_objects);
     list_clear(pseg->young_weakrefs);
 #pragma pop_macro("STM_SEGMENT")
@@ -1309,6 +1519,8 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
     abort_data_structures_from_segment_num(STM_SEGMENT->segment_num);
 
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
+    tl->self_or_0_if_atomic = (intptr_t)tl;   /* clear the 'atomic' flag */
+    STM_PSEGMENT->atomic_nesting_levels = 0;
 
     if (tl->mem_clear_on_abort)
         memset(tl->mem_clear_on_abort, 0, tl->mem_bytes_to_clear_on_abort);
@@ -1321,7 +1533,7 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
                                                    : NURSERY_END;
     }
 
-    _finish_transaction();
+    _finish_transaction(STM_TRANSACTION_ABORT);
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     return tl;
@@ -1357,34 +1569,94 @@ void stm_abort_transaction(void)
 
 void _stm_become_inevitable(const char *msg)
 {
-    if (STM_PSEGMENT->transaction_state == TS_REGULAR) {
-        dprintf(("become_inevitable: %s\n", msg));
-        _stm_collectable_safe_point();
+    int num_waits = 0;
 
-        _validate_and_turn_inevitable();
-        STM_PSEGMENT->transaction_state = TS_INEVITABLE;
-        stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
-        invoke_and_clear_user_callbacks(0);   /* for commit */
+    timing_become_inevitable();
+
+ retry_from_start:
+    assert(STM_PSEGMENT->transaction_state == TS_REGULAR);
+    _stm_collectable_safe_point();
+
+    if (msg != MSG_INEV_DONT_SLEEP) {
+        dprintf(("become_inevitable: %s\n", msg));
+
+        if (any_soon_finished_or_inevitable_thread_segment() &&
+                num_waits <= NB_SEGMENTS) {
+#if STM_TESTS                           /* for tests: another transaction */
+            stm_abort_transaction();    /*   is already inevitable, abort */
+#endif
+
+            bool timed_out = false;
+
+            s_mutex_lock();
+            if (any_soon_finished_or_inevitable_thread_segment() &&
+                    !safe_point_requested()) {
+
+                /* wait until C_SEGMENT_FREE_OR_SAFE_POINT_REQ is signalled */
+                EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
+                if (!cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ,
+                                       0.000054321))
+                    timed_out = true;
+            }
+            s_mutex_unlock();
+
+            if (timed_out) {
+                /* try to detach another inevitable transaction, but
+                   only after waiting a bit.  This is necessary to avoid
+                   deadlocks in some situations, which are hopefully
+                   not too common.  We don't want two threads constantly
+                   detaching each other. */
+                intptr_t detached = fetch_detached_transaction();
+                if (detached != 0) {
+                    EMIT_WAIT_DONE();
+                    commit_fetched_detached_transaction(detached);
+                }
+            }
+            else {
+                num_waits++;
+            }
+            goto retry_from_start;
+        }
+        EMIT_WAIT_DONE();
+        if (!_validate_and_turn_inevitable())
+            goto retry_from_start;
     }
     else {
-        assert(STM_PSEGMENT->transaction_state == TS_INEVITABLE);
+        if (!_validate_and_turn_inevitable())
+            return;
     }
+
+    /* There may be a concurrent commit of a detached Tx going on.
+       Here, we may be right after the _validate_and_add_to_commit_log
+       and before resetting _stm_detached_inevitable_from_thread to
+       0. We have to wait for this to happen bc. otherwise, eg.
+       _stm_detach_inevitable_transaction is not safe to do yet */
+    while (_stm_detached_inevitable_from_thread == -1)
+        spin_loop();
+    assert(_stm_detached_inevitable_from_thread == 0);
+
+    soon_finished_or_inevitable_thread_segment();
+    STM_PSEGMENT->transaction_state = TS_INEVITABLE;
+
+    stm_rewind_jmp_forget(STM_SEGMENT->running_thread);
+    invoke_and_clear_user_callbacks(0);   /* for commit */
 }
 
+#if 0
 void stm_become_globally_unique_transaction(stm_thread_local_t *tl,
                                             const char *msg)
 {
-    stm_become_inevitable(tl, msg);   /* may still abort */
+    stm_become_inevitable(tl, msg);
 
     s_mutex_lock();
     synchronize_all_threads(STOP_OTHERS_AND_BECOME_GLOBALLY_UNIQUE);
     s_mutex_unlock();
 }
-
+#endif
 
 void stm_stop_all_other_threads(void)
 {
-    if (!stm_is_inevitable())         /* may still abort */
+    if (!stm_is_inevitable(STM_SEGMENT->running_thread))  /* may still abort */
         _stm_become_inevitable("stop_all_other_threads");
 
     s_mutex_lock();

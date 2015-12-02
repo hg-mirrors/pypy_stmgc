@@ -70,18 +70,20 @@ void *demo2(void *arg)
 
     object_t *tmp;
     int i = 0;
+
+    stm_enter_transactional_zone(&stm_thread_local);
     while (i < ITERS) {
-        stm_start_transaction(&stm_thread_local);
         tl_counter++;
         if (i % 500 < 250)
             STM_PUSH_ROOT(stm_thread_local, stm_allocate(16));//gl_counter++;
         else
             STM_POP_ROOT(stm_thread_local, tmp);
-        stm_commit_transaction();
+        stm_force_transaction_break(&stm_thread_local);
         i++;
     }
 
     OPT_ASSERT(org == (char *)stm_thread_local.shadowstack);
+    stm_leave_transactional_zone(&stm_thread_local);
 
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     stm_unregister_thread_local(&stm_thread_local);

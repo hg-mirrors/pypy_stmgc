@@ -58,14 +58,14 @@ void Du_TransactionRun(void)
     if (TLOBJ == NULL)
         return;
 
-    stm_start_inevitable_transaction(&stm_thread_local);
+    stm_enter_transactional_zone(&stm_thread_local);
 
     DuConsObject *root = du_pending_transactions;
     _du_write1(root);
     root->cdr = TLOBJ;
 
     TLOBJ = NULL;
-    stm_commit_transaction();
+    stm_leave_transactional_zone(&stm_thread_local);
 
     run_all_threads();
 }
@@ -74,17 +74,18 @@ void Du_TransactionRun(void)
 
 static DuObject *next_cell(void)
 {
-    DuObject *pending = TLOBJ;
+    DuObject *pending;
 
+    /* this code is critical enough so that we want it to
+       be serialized perfectly using inevitable transactions */
+    stm_become_inevitable(&stm_thread_local, "next_cell");
+
+    pending = TLOBJ;
     if (pending == NULL) {
         /* fish from the global list of pending transactions */
         DuConsObject *root;
 
       restart:
-        /* this code is critical enough so that we want it to
-           be serialized perfectly using inevitable transactions */
-        stm_start_inevitable_transaction(&stm_thread_local);
-
         root = du_pending_transactions;
         _du_read1(root);        /* not immutable... */
 
@@ -99,7 +100,7 @@ static DuObject *next_cell(void)
             return result;
         }
         else {
-            stm_commit_transaction();
+            _stm_commit_transaction();
 
             /* nothing to do, wait */
             int ts = __sync_add_and_fetch(&thread_sleeping, 1);
@@ -118,14 +119,13 @@ static DuObject *next_cell(void)
                 if (__sync_bool_compare_and_swap(&thread_sleeping, ts, ts - 1))
                     break;
             }
+            _stm_start_transaction(&stm_thread_local);
             goto restart;
         }
     }
 
     /* we have at least one thread-local transaction pending */
     TLOBJ = NULL;
-
-    stm_start_inevitable_transaction(&stm_thread_local);
 
     /* _du_read1(pending); IMMUTABLE */
     DuObject *result = _DuCons_CAR(pending);
@@ -165,6 +165,7 @@ void *run_thread(void *thread_id)
     rewind_jmp_buf rjbuf;
     stm_register_thread_local(&stm_thread_local);
     stm_rewind_jmp_enterframe(&stm_thread_local, &rjbuf);
+    stm_enter_transactional_zone(&stm_thread_local);
 
     TLOBJ = NULL;
 
@@ -176,15 +177,12 @@ void *run_thread(void *thread_id)
         assert(TLOBJ == NULL);
 
         TLOBJ = cell;
-        stm_commit_transaction(); /* inevitable */
-        stm_start_transaction(&stm_thread_local);
+        stm_force_transaction_break(&stm_thread_local);
+
         cell = TLOBJ;
         TLOBJ = NULL;
 
         run_transaction(cell);
-
-        stm_commit_transaction();
-
     }
 
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);

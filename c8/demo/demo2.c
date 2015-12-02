@@ -214,7 +214,7 @@ void setup_list(void)
 
 void teardown_list(void)
 {
-    STM_POP_ROOT_RET(stm_thread_local);
+    STM_POP_ROOT_DROP(stm_thread_local);
 }
 
 
@@ -255,6 +255,7 @@ void *demo2(void *arg)
     stm_rewind_jmp_leaveframe(&stm_thread_local, &rjbuf);
     unregister_thread_local();
     status = sem_post(&done); assert(status == 0);
+    (void)status;
     return NULL;
 }
 
@@ -292,6 +293,7 @@ int main(void)
     rewind_jmp_buf rjbuf;
 
     status = sem_init(&done, 0, 0); assert(status == 0);
+    (void)status;
 
     stm_setup();
     stm_register_thread_local(&stm_thread_local);
@@ -308,6 +310,7 @@ int main(void)
 
     for (i = 1; i <= NTHREADS; i++) {
         status = sem_wait(&done); assert(status == 0);
+        (void)status;
     }
 
     final_check();

@@ -43,6 +43,7 @@ static char *malloc_bk(size_t bk_size)
 
 static void free_bk(struct stm_undo_s *undo)
 {
+    assert(undo->type != TYPE_POSITION_MARKER);
     free(undo->backup);
     assert(undo->backup = (char*)-88);
     add_cle_allocated(-SLICE_SIZE(undo->slice));
@@ -67,7 +68,7 @@ static void free_cle(struct stm_commit_log_entry_s *e)
 }
 
 
-void _dbg_print_commit_log()
+void _dbg_print_commit_log(void)
 {
     struct stm_commit_log_entry_s *cl = &commit_log_root;
 
@@ -77,6 +78,17 @@ void _dbg_print_commit_log()
         struct stm_undo_s *undo = cl->written;
         struct stm_undo_s *end = undo + cl->written_count;
         for (; undo < end; undo++) {
+            if (undo->type == TYPE_POSITION_MARKER) {
+                if (undo->type2 == TYPE_MODIFIED_HASHTABLE) {
+                    fprintf(stderr, "    hashtable %p\n",
+                            undo->modif_hashtable);
+                }
+                else {
+                    fprintf(stderr, "    marker %p %lu\n",
+                            undo->marker_object, undo->marker_odd_number);
+                }
+                continue;
+            }
             fprintf(stderr, "    obj %p, size %d, ofs %lu: ", undo->object,
                     SLICE_SIZE(undo->slice), SLICE_OFFSET(undo->slice));
             /* long i; */
@@ -92,7 +104,6 @@ void _dbg_print_commit_log()
         }
     }
 }
-
 
 
 void free_commit_log_entries_up_to(struct stm_commit_log_entry_s *end)
@@ -113,7 +124,8 @@ void free_commit_log_entries_up_to(struct stm_commit_log_entry_s *end)
         /* free bk copies of entries: */
         long count = cl->written_count;
         while (count-->0) {
-            free_bk(&cl->written[count]);
+            if (cl->written[count].type != TYPE_POSITION_MARKER)
+                free_bk(&cl->written[count]);
         }
 
         next = cl->next;
@@ -131,7 +143,7 @@ void free_commit_log_entries_up_to(struct stm_commit_log_entry_s *end)
     commit_log_root.rev_num = rev_num;
 }
 
-void maybe_collect_commit_log()
+void maybe_collect_commit_log(void)
 {
     /* XXX: maybe use other lock, but right now we must make sure
        that we do not run a major GC in parallel, since we do a
