@@ -23,15 +23,17 @@ def ht_length_upper_bound(o):
 def htitems(o):
     h = get_hashtable(o)
     upper_bound = lib.stm_hashtable_length_upper_bound(h)
-    entries = ffi.new("stm_hashtable_entry_t *[]", upper_bound)
-    count = lib.stm_hashtable_list(o, h, entries)
+    entries = stm_allocate_refs(upper_bound)
+    count = lib._stm_hashtable_list(o, h, entries)
     assert count <= upper_bound
-    return [(lib._get_entry_index(entries[i]),
-             lib._get_entry_object(entries[i])) for i in range(count)]
+
+    return [(lib._get_entry_index(ffi.cast("stm_hashtable_entry_t *", stm_get_ref(entries, i))),
+             lib._get_entry_object(ffi.cast("stm_hashtable_entry_t *", stm_get_ref(entries, i))))
+            for i in range(count)]
 
 def htlen(o):
     h = get_hashtable(o)
-    count = lib.stm_hashtable_list(o, h, ffi.NULL)
+    count = lib._stm_hashtable_list(o, h, ffi.NULL)
     return count
 
 
@@ -350,6 +352,267 @@ class TestHashtable(BaseTestHashtable):
         self.pop_root()
         self.start_transaction()
         stm_major_collect()       # to get rid of the hashtable object
+
+
+    def test_new_entry_if_nursery_full(self):
+        self.start_transaction()
+        tl0 = self.tls[self.current_thread]
+        # make sure we fill the nursery *exactly* so that
+        # the last entry allocation triggers a minor GC
+        # and needs to allocate preexisting outside the nursery:
+        SMALL = 24 + lib.SIZEOF_MYOBJ
+        assert (NURSERY_SIZE - SIZEOF_HASHTABLE_OBJ) % SMALL < SIZEOF_HASHTABLE_ENTRY
+        to_alloc = (NURSERY_SIZE - SIZEOF_HASHTABLE_OBJ) // SMALL
+        for i in range(to_alloc):
+            stm_allocate(SMALL)
+        h = self.allocate_hashtable()
+        assert is_in_nursery(h)
+        self.push_root(h)
+        # would trigger minor GC when allocating 'entry' in nursery:
+        entry = hashtable_lookup(h, get_hashtable(h), 123)
+        h = self.pop_root()
+        self.push_root(h)
+        assert is_in_nursery(h) # didn't trigger minor-gc, since entry allocated outside
+        assert not is_in_nursery(entry)
+        assert htget(h, 123) == ffi.NULL
+        htset(h, 123, h, tl0)
+
+        # stm_write(h) - the whole thing may be fixed also by ensuring
+        # the hashtable gets retraced in minor-GC if stm_hashtable_write_entry
+        # detects the 'entry' to be young (and hobj being old)
+
+        stm_minor_collect()
+        h = self.pop_root()
+        assert htget(h, 123) == h
+        entry2 = hashtable_lookup(h, get_hashtable(h), 123)
+        assert entry == entry2
+        assert not is_in_nursery(h)
+        assert not is_in_nursery(entry2)
+
+        # get rid of ht:
+        self.commit_transaction()
+        self.start_transaction()
+        stm_major_collect()
+        self.commit_transaction()
+
+    def test_dont_lose_entry(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        self.push_root(h)
+        stm_minor_collect()
+        h = self.pop_root()
+        self.push_root(h)
+        # produce entries:
+        K = 300
+        for i in range(K):
+            hashtable_lookup(h, get_hashtable(h), i)
+
+        table = lib._get_hashtable_table(get_hashtable(h))
+        entry = hashtable_lookup(h, get_hashtable(h), K)
+        self.push_root(entry)
+        stm_major_collect()
+        entry2 = hashtable_lookup(h, get_hashtable(h), K)
+        entry = self.pop_root()
+        assert table != lib._get_hashtable_table(get_hashtable(h)) # compacted
+        assert entry == entry2
+
+        # get rid of ht:
+        self.pop_root()
+        self.commit_transaction()
+        self.start_transaction()
+        stm_major_collect()
+        self.commit_transaction()
+
+    def test_empty_entry_not_kept_alive(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        self.push_root(h)
+        stm_minor_collect()
+        h = self.pop_root()
+        self.push_root(h)
+
+        # produce some entries so we get compaction in major GC
+        K = 300
+        for i in range(K):
+            hashtable_lookup(h, get_hashtable(h), i)
+
+        entry = hashtable_lookup(h, get_hashtable(h), K)
+        self.push_root(entry)
+
+        self.commit_transaction()
+        self.start_transaction()
+
+        stm_major_collect() # compaction and rehashing
+
+        entry = self.pop_root()
+        entry2 = hashtable_lookup(h, get_hashtable(h), K)
+        assert entry != entry2
+
+        # get rid of ht:
+        self.pop_root()
+        self.commit_transaction()
+        self.start_transaction()
+        stm_major_collect()
+        self.commit_transaction()
+
+    def test_pickitem(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        expected = []
+        for i in range(29):
+            lp = stm_allocate(32)
+            htset(h, 19 ^ i, lp, tl0)
+            expected.append((19 ^ i, lp))
+        # successive calls to pickitem() return different items, even
+        # though we don't delete the entries in this first step
+        seen = []
+        for i in range(29):
+            entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+            assert entry != ffi.NULL
+            seen.append((lib._get_entry_index(entry),
+                         lib._get_entry_object(entry)))
+        assert sorted(seen) == sorted(expected)
+        # now call pickitem() and delete each entry returned
+        seen = []
+        for i in range(29):
+            entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+            assert entry != ffi.NULL
+            seen.append((lib._get_entry_index(entry),
+                         lib._get_entry_object(entry)))
+            res = lib._check_hashtable_write_entry(h, entry, ffi.NULL)
+            assert not res   # no conflict in this test
+        assert sorted(seen) == sorted(expected)
+        # check that the next pickitem() returns NULL
+        entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+        assert entry == ffi.NULL
+        # verify that the dict is empty
+        assert htitems(h) == []
+
+    def test_pickitem_conflict(self):
+        for op in range(4):
+            self.start_transaction()
+            tl0 = self.tls[self.current_thread]
+            h = self.allocate_hashtable()
+            self.push_root(h)
+            self.commit_transaction()
+            #
+            self.start_transaction()
+            h = self.pop_root()
+            self.push_root(h)
+            if op & 1:
+                entry = lib.stm_hashtable_pickitem(h, get_hashtable(h))
+                assert entry == ffi.NULL
+            #
+            self.switch(1)
+            self.start_transaction()
+            if op & 2:
+                lp1 = stm_allocate(16)
+                htset(h, 12345678901, lp1, tl0)
+            self.commit_transaction()
+            #
+            if op == 1 | 2:
+                py.test.raises(Conflict, self.switch, 0)   # conflict!
+                # transaction aborted here
+            else:
+                self.switch(0)   # no conflict
+                self.commit_transaction()
+            # get rid of h
+            self.pop_root()
+            self.start_transaction()
+            stm_major_collect()
+            self.commit_transaction()
+
+    def test_iter_direct(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        expected = []
+        for i in range(29):
+            lp = stm_allocate(32)
+            htset(h, 19 ^ i, lp, tl0)
+            expected.append((19 ^ i, lp))
+        table = lib.stm_hashtable_iter(get_hashtable(h))
+        previous = ffi.NULL
+        seen = []
+        while True:
+            next_pentry = lib.stm_hashtable_iter_next(h, table, previous)
+            if next_pentry == ffi.NULL:
+                break
+            previous = next_pentry
+            entry = next_pentry[0]
+            seen.append((lib._get_entry_index(entry),
+                         lib._get_entry_object(entry)))
+        assert len(seen) == 29
+        assert sorted(seen) == sorted(expected)
+
+    def test_iter_object(self):
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        expected = []
+        for i in range(29):
+            lp = stm_allocate(32)
+            htset(h, 19 ^ i, lp, tl0)
+            expected.append((19 ^ i, lp))
+        iterobj = hashtable_iter(h)
+        seen = []
+        while True:
+            entry = hashtable_iter_next(h, iterobj)
+            if entry == ffi.NULL:
+                break
+            seen.append((lib._get_entry_index(entry),
+                         lib._get_entry_object(entry)))
+        assert len(seen) == 29
+        assert sorted(seen) == sorted(expected)
+
+    def test_iter_collections(self):
+        def advance(iterobj, seen):
+            entry = hashtable_iter_next(h, iterobj)
+            if entry == ffi.NULL:
+                seen.add('DONE')
+            else:
+                item = (lib._get_entry_index(entry),
+                        lib._get_entry_object(entry))
+                assert htget(h, item[0]) == item[1]
+                assert item[0] not in seen
+                seen.add(item[0])
+
+        self.start_transaction()
+        h = self.allocate_hashtable()
+        tl0 = self.tls[self.current_thread]
+        iterators = []
+        for i in range(250):
+            lp = stm_allocate(32)
+            htset(h, 19 ^ i, lp, tl0)
+            iterators.append((hashtable_iter(h), i, set()))
+
+            iterobj, _, seen = random.choice(iterators)
+            if 'DONE' not in seen:
+                advance(iterobj, seen)
+
+            self.push_root(h)
+            for iterobj, _, _ in iterators:
+                self.push_root(iterobj)
+            if i % 49 == 48:
+                stm_major_collect()
+            elif i % 7 == 6:
+                stm_minor_collect()
+            for i, prev in reversed(list(enumerate(iterators))):
+                iterators[i] = (self.pop_root(),) + prev[1:]
+            h = self.pop_root()
+
+        for iterobj, _, seen in iterators:
+            while 'DONE' not in seen:
+                advance(iterobj, seen)
+
+        maximum = set([j ^ 19 for j in range(250)])
+        maximum.add('DONE')
+        for iterobj, i, seen in iterators:
+            assert seen.issubset(maximum)
+            for j in range(i + 1):
+                assert j ^ 19 in seen
+            # we may also have seen more items added later
 
 
 class TestRandomHashtable(BaseTestHashtable):

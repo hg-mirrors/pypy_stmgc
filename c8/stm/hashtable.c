@@ -49,8 +49,12 @@ uint32_t stm_hashtable_entry_userdata;
 #define PERTURB_SHIFT            5
 #define RESIZING_LOCK            0
 
-typedef struct {
-    uintptr_t mask;
+#define TRACE_FLAG_OFF              0
+#define TRACE_FLAG_ONCE             1
+#define TRACE_FLAG_KEEPALIVE        2
+
+struct stm_hashtable_table_s {
+    uintptr_t mask;      /* 'mask' is always immutable. */
 
     /* 'resize_counter' start at an odd value, and is decremented (by
        6) for every new item put in 'items'.  When it crosses 0, we
@@ -63,8 +67,10 @@ typedef struct {
     */
     uintptr_t resize_counter;
 
+    uint8_t trace_flag;
+
     stm_hashtable_entry_t *items[INITIAL_HASHTABLE_SIZE];
-} stm_hashtable_table_t;
+};
 
 #define IS_EVEN(p) (((p) & 1) == 0)
 
@@ -72,6 +78,7 @@ struct stm_hashtable_s {
     stm_hashtable_table_t *table;
     stm_hashtable_table_t initial_table;
     uint64_t additions;
+    uint64_t pickitem_index;
 };
 
 
@@ -79,6 +86,7 @@ static inline void init_table(stm_hashtable_table_t *table, uintptr_t itemcount)
 {
     table->mask = itemcount - 1;
     table->resize_counter = itemcount * 4 + 1;
+    table->trace_flag = TRACE_FLAG_OFF;
     memset(table->items, 0, itemcount * sizeof(stm_hashtable_entry_t *));
 }
 
@@ -150,8 +158,9 @@ static void _insert_clean(stm_hashtable_table_t *table,
 
 static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
                                   uintptr_t biggercount,
-                                  char *segment_base)
+                                  long segnum) /* segnum=-1 if no major GC */
 {
+    char *segment_base = segnum == -1 ? NULL : get_segment_base(segnum);
     dprintf(("rehash %p to size %ld, segment_base=%p\n",
              hashtable, biggercount, segment_base));
 
@@ -161,6 +170,7 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
     assert(biggertable);   // XXX
 
     stm_hashtable_table_t *table = hashtable->table;
+    table->trace_flag = TRACE_FLAG_ONCE;
     table->resize_counter = (uintptr_t)biggertable;
     /* ^^^ this unlocks the table by writing a non-zero value to
        table->resize_counter, but the new value is a pointer to the
@@ -175,22 +185,28 @@ static void _stm_rehash_hashtable(stm_hashtable_t *hashtable,
         stm_hashtable_entry_t *entry = table->items[j];
         if (entry == NULL)
             continue;
-        if (segment_base != NULL) {
+
+        char *to_read_from = segment_base;
+        if (segnum != -1) {
             /* -> compaction during major GC */
+            /* it's possible that we just created this entry, and it wasn't
+               touched in this segment yet. Then seg0 is up-to-date.  */
+            to_read_from = get_page_status_in(segnum, (uintptr_t)entry / 4096UL) == PAGE_NO_ACCESS
+                ? stm_object_pages : to_read_from;
             if (((struct stm_hashtable_entry_s *)
-                       REAL_ADDRESS(segment_base, entry))->object == NULL &&
-                   !_stm_was_read_by_anybody((object_t *)entry)) {
-                dprintf(("  removing dead %p\n", entry));
+                 REAL_ADDRESS(to_read_from, entry))->object == NULL &&
+                !_stm_was_read_by_anybody((object_t *)entry)) {
+                dprintf(("  removing dead %p at %ld\n", entry, j));
                 continue;
             }
         }
 
         uintptr_t eindex;
-        if (segment_base == NULL)
+        if (segnum == -1)
             eindex = entry->index;   /* read from STM_SEGMENT */
         else
             eindex = ((struct stm_hashtable_entry_s *)
-                       REAL_ADDRESS(segment_base, entry))->index;
+                       REAL_ADDRESS(to_read_from, entry))->index;
 
         dprintf(("  insert_clean %p at index=%ld\n",
                  entry, eindex));
@@ -222,8 +238,10 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
     i = index & mask;
     entry = VOLATILE_TABLE(table)->items[i];
     if (entry != NULL) {
-        if (entry->index == index)
+        if (entry->index == index) {
+            stm_read((object_t*)entry);
             return entry;           /* found at the first try */
+        }
 
         uintptr_t perturb = index;
         while (1) {
@@ -231,8 +249,10 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             i &= mask;
             entry = VOLATILE_TABLE(table)->items[i];
             if (entry != NULL) {
-                if (entry->index == index)
+                if (entry->index == index) {
+                    stm_read((object_t*)entry);
                     return entry;    /* found */
+                }
             }
             else
                 break;
@@ -285,7 +305,8 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
     if (rc > 6) {
         /* we can only enter here once!  If we allocate stuff, we may
            run the GC, and so 'hashtableobj' might move afterwards. */
-        if (_is_in_nursery(hashtableobj)) {
+        if (_is_in_nursery(hashtableobj)
+            && will_allocate_in_nursery(sizeof(stm_hashtable_entry_t))) {
             /* this also means that the hashtable is from this
                transaction and not visible to other segments yet, so
                the new entry can be nursery-allocated. */
@@ -329,6 +350,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
         table->items[i] = entry;
         write_fence();     /* make sure 'table->items' is written here */
         VOLATILE_TABLE(table)->resize_counter = rc - 6;    /* unlock */
+        stm_read((object_t*)entry);
         return entry;
     }
     else {
@@ -339,7 +361,7 @@ stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
             biggercount *= 4;
         else
             biggercount *= 2;
-        _stm_rehash_hashtable(hashtable, biggercount, /*segment_base=*/NULL);
+        _stm_rehash_hashtable(hashtable, biggercount, /*segnum=*/-1);
         goto restart;
     }
 }
@@ -348,7 +370,7 @@ object_t *stm_hashtable_read(object_t *hobj, stm_hashtable_t *hashtable,
                              uintptr_t key)
 {
     stm_hashtable_entry_t *e = stm_hashtable_lookup(hobj, hashtable, key);
-    stm_read((object_t *)e);
+    // stm_read((object_t *)e); - done in _lookup()
     return e->object;
 }
 
@@ -358,6 +380,9 @@ void stm_hashtable_write_entry(object_t *hobj, stm_hashtable_entry_t *entry,
     if (_STM_WRITE_CHECK_SLOWPATH((object_t *)entry)) {
 
         stm_write((object_t *)entry);
+
+        /* this restriction may be lifted, see test_new_entry_if_nursery_full: */
+        assert(IMPLY(_is_young((object_t *)entry), _is_young(hobj)));
 
         uintptr_t i = list_count(STM_PSEGMENT->modified_old_objects);
         if (i > 0 && list_item(STM_PSEGMENT->modified_old_objects, i - 3)
@@ -422,7 +447,7 @@ long stm_hashtable_length_upper_bound(stm_hashtable_t *hashtable)
 }
 
 long stm_hashtable_list(object_t *hobj, stm_hashtable_t *hashtable,
-                        stm_hashtable_entry_t **results)
+                        stm_hashtable_entry_t * TLPREFIX *results)
 {
     /* Set the read marker.  It will be left as long as we're running
        the same transaction.
@@ -466,9 +491,128 @@ long stm_hashtable_list(object_t *hobj, stm_hashtable_t *hashtable,
     return nresult;
 }
 
+stm_hashtable_entry_t *stm_hashtable_pickitem(object_t *hobj,
+                                       stm_hashtable_t *hashtable)
+{
+    /* We use hashtable->pickitem_index as a shared index counter (not
+       initialized, any initial garbage is fine).  The goal is
+       two-folds:
+
+       - This is used to implement popitem().  Like CPython and PyPy's
+         non-STM dict implementations, the goal is that repeated calls
+         to pickitem() maintains a roughly O(1) time per call while
+         returning different items (in the case of popitem(), the
+         returned items are immediately deleted).
+
+       - Additionally, with STM, if several threads all call
+         pickitem(), this should give the best effort to distribute
+         different items to different threads and thus minimize
+         conflicts.  (At least that's the theory; it should be tested
+         in practice.)
+    */
+ restart:;
+    uint64_t startindex = VOLATILE_HASHTABLE(hashtable)->pickitem_index;
+
+    /* Get the table.  No synchronization is needed: we may miss some
+       entries that are being added, but they would contain NULL in
+       this segment anyway. */
+    stm_hashtable_table_t *table = VOLATILE_HASHTABLE(hashtable)->table;
+
+    /* Find the first entry with a non-NULL object, starting at
+       'index'. */
+    uintptr_t mask = table->mask;
+    uintptr_t count;
+    stm_hashtable_entry_t *entry;
+
+    for (count = 0; count <= mask; ) {
+        entry = VOLATILE_TABLE(table)->items[(startindex + count) & mask];
+        count++;
+        if (entry != NULL && entry->object != NULL) {
+            /*
+               Found the next entry.  Update pickitem_index now.  If
+               it was already changed under our feet, we assume that
+               it is because another thread just did pickitem() too
+               and is likely to have got the very same entry.  In that
+               case we start again from scratch to look for the
+               following entry.
+            */
+            if (!__sync_bool_compare_and_swap(&hashtable->pickitem_index,
+                                              startindex,
+                                              startindex + count))
+                goto restart;
+
+            /* Here we mark the entry as as read and return it.
+
+               Note a difference with notably stm_hashtable_list(): we
+               only call stm_read() after we checked that
+               entry->object is not NULL.  If we find NULL, we don't
+               mark the entry as read from this thread at all in this
+               step---this is fine, as we can return a random
+               different entry here.
+            */
+            stm_read((object_t *)entry);
+            return entry;
+        }
+    }
+
+    /* Didn't find any entry.  We have to be sure that the dictionary
+       is empty now, in the sense that returning NULL must guarantee
+       conflicts with a different thread adding items.  This is done
+       by marking both the dict and all entries' read marker. */
+    stm_read(hobj);
+
+    /* Reload the table after setting the read marker */
+    uintptr_t i;
+    table = VOLATILE_HASHTABLE(hashtable)->table;
+    mask = table->mask;
+    for (i = 0; i <= mask; i++) {
+        entry = VOLATILE_TABLE(table)->items[i];
+        if (entry != NULL) {
+            stm_read((object_t *)entry);
+            assert(entry->object == NULL);
+        }
+    }
+    return NULL;
+}
+
 static void _stm_compact_hashtable(struct object_s *hobj,
                                    stm_hashtable_t *hashtable)
 {
+    /* Walk the chained list that starts at 'hashtable->initial_table'
+       and follows the 'resize_counter' fields.  Remove all tables
+       except (1) the initial one, (2) the most recent one, and (3)
+       the ones on which stm_hashtable_iter_tracefn() was called.
+    */
+    stm_hashtable_table_t *most_recent_table = hashtable->table;
+    assert(!IS_EVEN(most_recent_table->resize_counter));
+    /* set the "don't free me" flag on the most recent table */
+    most_recent_table->trace_flag = TRACE_FLAG_KEEPALIVE;
+
+    stm_hashtable_table_t *known_alive = &hashtable->initial_table;
+    known_alive->trace_flag = TRACE_FLAG_OFF;
+    /* a KEEPALIVE flag is ignored on the initial table: it is never
+       individually freed anyway */
+
+    while (known_alive != most_recent_table) {
+        uintptr_t rc = known_alive->resize_counter;
+        assert(IS_EVEN(rc));
+        assert(rc != RESIZING_LOCK);
+
+        stm_hashtable_table_t *next_table = (stm_hashtable_table_t *)rc;
+        if (next_table->trace_flag != TRACE_FLAG_KEEPALIVE) {
+            /* free this next table and relink the chained list to skip it */
+            assert(IS_EVEN(next_table->resize_counter));
+            known_alive->resize_counter = next_table->resize_counter;
+            free(next_table);
+        }
+        else {
+            /* this next table is kept alive */
+            known_alive = next_table;
+            known_alive->trace_flag = TRACE_FLAG_OFF;
+        }
+    }
+    /* done the first part */
+
     stm_hashtable_table_t *table = hashtable->table;
     uintptr_t rc = table->resize_counter;
     assert(!IS_EVEN(rc));
@@ -483,7 +627,7 @@ static void _stm_compact_hashtable(struct object_s *hobj,
            objects in the segment of the running transaction.  Otherwise,
            the base case is to read them all from segment zero.
         */
-        long segnum = get_num_segment_containing_address((char *)hobj);
+        long segnum = get_segment_of_linear_address((char *)hobj);
         if (!IS_OVERFLOW_OBJ(get_priv_segment(segnum), hobj))
             segnum = 0;
 
@@ -497,37 +641,26 @@ static void _stm_compact_hashtable(struct object_s *hobj,
         assert(count <= table->mask + 1);
 
         dprintf(("compact with %ld items:\n", num_entries_times_6 / 6));
-        _stm_rehash_hashtable(hashtable, count, get_segment_base(segnum));
-    }
-
-    table = hashtable->table;
-    assert(!IS_EVEN(table->resize_counter));
-
-    if (table != &hashtable->initial_table) {
-        uintptr_t rc = hashtable->initial_table.resize_counter;
-        while (1) {
-            assert(IS_EVEN(rc));
-            assert(rc != RESIZING_LOCK);
-
-            stm_hashtable_table_t *old_table = (stm_hashtable_table_t *)rc;
-            if (old_table == table)
-                break;
-            rc = old_table->resize_counter;
-            free(old_table);
-        }
-        hashtable->initial_table.resize_counter = (uintptr_t)table;
-        assert(IS_EVEN(hashtable->initial_table.resize_counter));
+        _stm_rehash_hashtable(hashtable, count, segnum);
     }
 }
 
-void stm_hashtable_tracefn(struct object_s *hobj, stm_hashtable_t *hashtable,
-                           void trace(object_t **))
+static void stm_compact_hashtables(void)
 {
-    if (trace == TRACE_FOR_MAJOR_COLLECTION)
-        _stm_compact_hashtable(hobj, hashtable);
+    uintptr_t i = all_hashtables_seen->count;
+    while (i > 0) {
+        i -= 2;
+        _stm_compact_hashtable(
+            (struct object_s *)all_hashtables_seen->items[i],
+            (stm_hashtable_t *)all_hashtables_seen->items[i + 1]);
+    }
+}
 
-    stm_hashtable_table_t *table;
-    table = VOLATILE_HASHTABLE(hashtable)->table;
+static void _hashtable_tracefn(stm_hashtable_table_t *table,
+                               void trace(object_t **))
+{
+    if (table->trace_flag == TRACE_FLAG_ONCE)
+        table->trace_flag = TRACE_FLAG_OFF;
 
     uintptr_t j, mask = table->mask;
     for (j = 0; j <= mask; j++) {
@@ -536,5 +669,107 @@ void stm_hashtable_tracefn(struct object_s *hobj, stm_hashtable_t *hashtable,
         if (*pentry != NULL) {
             trace((object_t **)pentry);
         }
+    }
+}
+
+void stm_hashtable_tracefn(struct object_s *hobj, stm_hashtable_t *hashtable,
+                           void trace(object_t **))
+{
+    if (all_hashtables_seen != NULL)
+        all_hashtables_seen = list_append2(all_hashtables_seen,
+                                           (uintptr_t)hobj,
+                                           (uintptr_t)hashtable);
+
+    _hashtable_tracefn(VOLATILE_HASHTABLE(hashtable)->table, trace);
+}
+
+
+/* Hashtable iterators */
+
+/* TRACE_FLAG_ONCE: the table must be traced once if it supports an iterator
+   TRACE_FLAG_OFF: the table is the most recent table, or has already been
+       traced once
+   TRACE_FLAG_KEEPALIVE: during major collection only: mark tables that
+       must be kept alive because there are iterators
+*/
+
+struct stm_hashtable_table_s *stm_hashtable_iter(stm_hashtable_t *hashtable)
+{
+    /* Get the table.  No synchronization is needed: we may miss some
+       entries that are being added, but they would contain NULL in
+       this segment anyway. */
+    return VOLATILE_HASHTABLE(hashtable)->table;
+}
+
+stm_hashtable_entry_t **
+stm_hashtable_iter_next(object_t *hobj, stm_hashtable_table_t *table,
+                        stm_hashtable_entry_t **previous)
+{
+    /* Set the read marker on hobj for every item, in case we have
+       transaction breaks in-between.
+    */
+    stm_read(hobj);
+
+    /* Get the bounds of the part of the 'stm_hashtable_entry_t *' array
+       that we have to check */
+    stm_hashtable_entry_t **pp, **last;
+    if (previous == NULL)
+        pp = table->items;
+    else
+        pp = previous + 1;
+    last = table->items + table->mask;
+
+    /* Find the first non-null entry */
+    stm_hashtable_entry_t *entry;
+
+    while (pp <= last) {
+        entry = *(stm_hashtable_entry_t *volatile *)pp;
+        if (entry != NULL) {
+            stm_read((object_t *)entry);
+            if (entry->object != NULL) {
+                //fprintf(stderr, "stm_hashtable_iter_next(%p, %p, %p) = %p\n",
+                //        hobj, table, previous, pp);
+                return pp;
+            }
+        }
+        ++pp;
+    }
+    //fprintf(stderr, "stm_hashtable_iter_next(%p, %p, %p) = %p\n",
+    //        hobj, table, previous, NULL);
+    return NULL;
+}
+
+void stm_hashtable_iter_tracefn(stm_hashtable_table_t *table,
+                                void trace(object_t **))
+{
+    if (all_hashtables_seen == NULL) {   /* for minor collections */
+
+        /* During minor collection, tracing the table is only required
+           the first time: if it contains young objects, they must be
+           kept alive and have their address updated.  We use
+           TRACE_FLAG_ONCE to know that.  We don't need to do it if
+           our 'table' is the latest version, because in that case it
+           will be done by stm_hashtable_tracefn().  That's why
+           TRACE_FLAG_ONCE is only set when a more recent table is
+           attached.
+
+           It is only needed once: non-latest-version tables are
+           immutable.  We mark once all the entries as old, and
+           then these now-old objects stay alive until the next
+           major collection.
+
+           Checking the flag can be done without synchronization: it
+           never wrong to call _hashtable_tracefn() too much, and the
+           only case where it *has to* be called occurs if the
+           hashtable object is still young (and not seen by other
+           threads).
+        */
+        if (table->trace_flag == TRACE_FLAG_ONCE)
+            _hashtable_tracefn(table, trace);
+    }
+    else {       /* for major collections */
+
+        /* Set this flag for _stm_compact_hashtable() */
+        table->trace_flag = TRACE_FLAG_KEEPALIVE;
     }
 }

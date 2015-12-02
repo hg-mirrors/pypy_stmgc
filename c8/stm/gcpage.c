@@ -371,6 +371,9 @@ static void major_reshare_pages(void)
    version and thus don't need tracing. */
 static struct list_s *marked_objects_to_trace;
 
+/* a list of hobj/hashtable pairs for all hashtables seen */
+static struct list_s *all_hashtables_seen = NULL;
+
 /* we use the sharing seg0's pages for the GCFLAG_VISITED flag */
 
 static inline struct object_s *mark_loc(object_t *obj)
@@ -448,8 +451,6 @@ static inline void mark_record_trace(object_t **pobj)
 }
 
 
-#define TRACE_FOR_MAJOR_COLLECTION  (&mark_record_trace)
-
 static void mark_and_trace(
     object_t *obj,
     char *segment_base, /* to trace obj in */
@@ -488,7 +489,7 @@ static inline void mark_visit_object(
 }
 
 
-static void mark_visit_possibly_new_object(object_t *obj, struct stm_priv_segment_info_s *pseg)
+static void mark_visit_possibly_overflow_object(object_t *obj, struct stm_priv_segment_info_s *pseg)
 {
     /* if newly allocated object, we trace in segment_base, otherwise in
        the sharing seg0 */
@@ -634,7 +635,7 @@ static void mark_visit_from_markers(void)
         for (; modified < end; modified++) {
             if (modified->type == TYPE_POSITION_MARKER &&
                     modified->type2 != TYPE_MODIFIED_HASHTABLE)
-                mark_visit_possibly_new_object(modified->marker_object, pseg);
+                mark_visit_possibly_overflow_object(modified->marker_object, pseg);
         }
     }
 }
@@ -673,11 +674,11 @@ static void mark_visit_from_roots(void)
         struct stm_shadowentry_s *base = tl->shadowstack_base;
         while (current-- != base) {
             if ((((uintptr_t)current->ss) & 3) == 0) {
-                mark_visit_possibly_new_object(current->ss, pseg);
+                mark_visit_possibly_overflow_object(current->ss, pseg);
             }
         }
 
-        mark_visit_possibly_new_object(tl->thread_local_obj, pseg);
+        mark_visit_possibly_overflow_object(tl->thread_local_obj, pseg);
 
         tl = tl->next;
     } while (tl != stm_all_thread_locals);
@@ -687,7 +688,7 @@ static void mark_visit_from_roots(void)
     assert(get_priv_segment(0)->transaction_state == TS_NONE);
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (get_priv_segment(i)->transaction_state != TS_NONE) {
-            mark_visit_possibly_new_object(
+            mark_visit_possibly_overflow_object(
                 get_priv_segment(i)->threadlocal_at_start_of_transaction,
                 get_priv_segment(i));
 
@@ -961,6 +962,7 @@ static void major_collection_now_at_safe_point(void)
 
     /* marking */
     LIST_CREATE(marked_objects_to_trace);
+    LIST_CREATE(all_hashtables_seen);
     mark_visit_from_modified_objects();
     mark_visit_from_markers();
     mark_visit_from_roots();
@@ -984,6 +986,10 @@ static void major_collection_now_at_safe_point(void)
     /* sweeping */
     sweep_large_objects();
     sweep_small_objects();
+
+    /* hashtables */
+    stm_compact_hashtables();
+    LIST_FREE(all_hashtables_seen);
 
     /* *after* marking modified objects, we may try to reshare pages */
     major_reshare_pages();

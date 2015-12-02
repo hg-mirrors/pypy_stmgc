@@ -31,8 +31,14 @@ call it 'gcc-seg-gs', and put it in the $PATH:
 
     #!/bin/bash
     BUILD=/..../build      # <- insert full path
-    exec $BUILD/gcc/xgcc -B $BUILD/gcc -fno-ivopts "$@"
+    exec $BUILD/gcc/xgcc -B $BUILD/gcc -fno-ivopts -fno-tree-vectorize -fno-tree-loop-distribute-patterns "$@"
 
 So far, GCC has a bug in the presence of multiple address spaces, likely
 in the "ivopts" optimization.  It can be worked around by specifying
 "-fno-ivopts" like above.  https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66768
+
+Another bug in -ftree-vectorize seems to generate unprefixed vector
+instructions.
+
+Similarly, GCC tries to make a memset out of 0-initializing stores and
+crashes itself doing that. -fno-tree-loop-distribute-patterns 
