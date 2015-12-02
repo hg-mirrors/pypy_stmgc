@@ -306,7 +306,7 @@ void sweep_small_page(char *baseptr, struct small_free_loc_s *page_free,
            inaccessible from all other segments again (except seg0) */
         uintptr_t page = (baseptr - stm_object_pages) / 4096UL;
         for (i = 1; i < NB_SEGMENTS; i++) {
-            if (get_page_status_in(i, page) == PAGE_ACCESSIBLE)
+            if (get_page_status_in(i, page) != PAGE_NO_ACCESS)
                 page_mark_inaccessible(i, page);
         }
 

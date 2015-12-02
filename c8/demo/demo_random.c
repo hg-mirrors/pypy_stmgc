@@ -149,7 +149,7 @@ void pop_roots()
         }
     }
 
-    dprintf(("stm_is_inevitable() = %d\n", (int)stm_is_inevitable()));
+    dprintf(("stm_is_inevitable() = %d\n", (int)stm_is_inevitable(&stm_thread_local)));
     for (i = 0; i < td.num_roots_at_transaction_start; i++) {
         if (td.roots[i]) {
             dprintf(("root %d: %p\n", i, td.roots[i]));

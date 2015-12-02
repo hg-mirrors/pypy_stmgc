@@ -3,6 +3,7 @@
 #endif
 
 char *stm_object_pages;
+int stm_object_pages_fd;
 long _stm_segment_nb_pages = NB_PAGES;
 int _stm_nb_segments = NB_SEGMENTS;
 int _stm_psegment_ofs = (int)(uintptr_t)STM_PSEGMENT;
@@ -62,8 +63,11 @@ static void import_objects(
         stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
         uintptr_t current_page_num = ((uintptr_t)oslice) / 4096;
 
+        /* never import anything into READONLY pages */
+        assert(get_page_status_in(my_segnum, current_page_num) != PAGE_READONLY);
+
         if (pagenum == -1) {
-            if (get_page_status_in(my_segnum, current_page_num) == PAGE_NO_ACCESS)
+            if (get_page_status_in(my_segnum, current_page_num) != PAGE_ACCESSIBLE)
                 continue;
         } else if (pagenum != current_page_num) {
             continue;
@@ -86,7 +90,7 @@ static void import_objects(
 
         /* XXX: if the next assert is always true, we should never get a segfault
            in this function at all. So the DEBUG_EXPECT_SEGFAULT is correct. */
-        assert((get_page_status_in(my_segnum, current_page_num) != PAGE_NO_ACCESS));
+        assert((get_page_status_in(my_segnum, current_page_num) == PAGE_ACCESSIBLE));
 
         /* dprintf(("import slice seg=%d obj=%p off=%lu sz=%d pg=%lu\n", */
         /*          from_segnum, obj, SLICE_OFFSET(undo->slice), */
@@ -150,12 +154,11 @@ static void go_to_the_past(uintptr_t pagenum,
 }
 
 
-
+long ro_to_acc = 0;
 static void handle_segfault_in_page(uintptr_t pagenum)
 {
     /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
        and validates to newest revision */
-
     dprintf(("handle_segfault_in_page(%lu), seg %d\n", pagenum, STM_SEGMENT->segment_num));
 
     /* XXX: bad, but no deadlocks: */
@@ -164,14 +167,45 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     long i;
     int my_segnum = STM_SEGMENT->segment_num;
 
-    assert(get_page_status_in(my_segnum, pagenum) == PAGE_NO_ACCESS);
+    uint8_t page_status = get_page_status_in(my_segnum, pagenum);
+    assert(page_status == PAGE_NO_ACCESS
+           || page_status == PAGE_READONLY);
+
+    if (page_status == PAGE_READONLY) {
+        /* make our page write-ready */
+        page_mark_accessible(my_segnum, pagenum);
+
+        dprintf((" > found READONLY, make others NO_ACCESS\n"));
+        /* our READONLY copy *has* to have the current data, no
+           copy necessary */
+        /* make READONLY pages in other segments NO_ACCESS */
+        for (i = 1; i < NB_SEGMENTS; i++) {
+            if (i == my_segnum)
+                continue;
+
+            if (get_page_status_in(i, pagenum) == PAGE_READONLY)
+                page_mark_inaccessible(i, pagenum);
+        }
+
+        ro_to_acc++;
+
+        release_all_privatization_locks();
+        return;
+    }
 
     /* find who has the most recent revision of our page */
+    /* XXX: uh, *more* recent would be enough, right? */
     int copy_from_segnum = -1;
     uint64_t most_recent_rev = 0;
+    bool was_readonly = false;
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
+
+        if (!was_readonly && get_page_status_in(i, pagenum) == PAGE_READONLY) {
+            was_readonly = true;
+            break;
+        }
 
         struct stm_commit_log_entry_s *log_entry;
         log_entry = get_priv_segment(i)->last_commit_log_entry;
@@ -183,13 +217,29 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     }
     OPT_ASSERT(copy_from_segnum != my_segnum);
 
+    if (was_readonly) {
+        assert(page_status == PAGE_NO_ACCESS);
+        /* this case could be avoided by making all NO_ACCESS to READONLY
+           when resharing pages (XXX: better?).
+           We may go from NO_ACCESS->READONLY->ACCESSIBLE on write with
+           2 SIGSEGV in a row.*/
+        dprintf((" > make a previously NO_ACCESS page READONLY\n"));
+        page_mark_readonly(my_segnum, pagenum);
+
+        release_all_privatization_locks();
+        return;
+    }
+
     /* make our page write-ready */
     page_mark_accessible(my_segnum, pagenum);
 
     /* account for this page now: XXX */
     /* increment_total_allocated(4096); */
 
+
     if (copy_from_segnum == -1) {
+        dprintf((" > found newly allocated page: copy from seg0\n"));
+
         /* this page is only accessible in the sharing segment seg0 so far (new
            allocation). We can thus simply mark it accessible here. */
         pagecopy(get_virtual_page(my_segnum, pagenum),
@@ -197,6 +247,8 @@ static void handle_segfault_in_page(uintptr_t pagenum)
         release_all_privatization_locks();
         return;
     }
+
+    dprintf((" > import data from seg %d\n", copy_from_segnum));
 
     /* before copying anything, acquire modification locks from our and
        the other segment */
@@ -936,17 +988,33 @@ static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
         end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
     }
 
+    dprintf(("touch_all_pages_of_obj(%p, %lu): %ld-%ld\n",
+             obj, obj_size, first_page, end_page));
+
     acquire_privatization_lock(STM_SEGMENT->segment_num);
     uintptr_t page;
     for (page = first_page; page <= end_page; page++) {
-        if (get_page_status_in(my_segnum, page) == PAGE_NO_ACCESS) {
+        set_hint_modified_recently(page);
+
+        if (get_page_status_in(my_segnum, page) != PAGE_ACCESSIBLE) {
             release_privatization_lock(STM_SEGMENT->segment_num);
-            /* emulate pagefault -> PAGE_ACCESSIBLE: */
+            /* emulate pagefault -> PAGE_ACCESSIBLE/READONLY: */
             handle_segfault_in_page(page);
+            volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
+            *dummy = *dummy;            /* force segfault (incl. writing) */
             acquire_privatization_lock(STM_SEGMENT->segment_num);
         }
     }
     release_privatization_lock(STM_SEGMENT->segment_num);
+
+#ifndef NDEBUG
+    acquire_privatization_lock(STM_SEGMENT->segment_num);
+    for (page = first_page; page <= end_page; page++) {
+        if (get_page_status_in(my_segnum, page) != PAGE_ACCESSIBLE)
+            abort();
+    }
+    release_privatization_lock(STM_SEGMENT->segment_num);
+#endif
 }
 
 static void write_slowpath_common(object_t *obj, bool mark_card)
@@ -1308,15 +1376,8 @@ static void push_large_overflow_objects_to_other_segments(void)
     synchronize_objects_flush();
     release_privatization_lock(STM_SEGMENT->segment_num);
 
-    /* we can as well clear the list here, since the
-       objects are only useful if the commit succeeds. And
-       we never do a major collection in-between.
-       They should also survive any page privatization happening
-       before the actual commit, since we always do a pagecopy
-       in handle_segfault_in_page() that also copies
-       unknown-to-the-segment/uncommitted things.
-    */
-    list_clear(STM_PSEGMENT->large_overflow_objects);
+    /* don't clear the list yet, as major GC page resharing
+       depends on the list until the real commit */
 }
 
 
@@ -1357,7 +1418,6 @@ static void _core_commit_transaction(bool external)
 
     push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
-
 
     /* before releasing _stm_detached_inevitable_from_thread, perform
        the commit. Otherwise, the same thread whose (inev) transaction we try
@@ -1428,6 +1488,7 @@ static void reset_modified_from_backup_copies(int segment_num, object_t *only_ob
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
     assert(modification_lock_check_wrlock(segment_num));
+    DEBUG_EXPECT_SEGFAULT(false);
 
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
     struct list_s *list = pseg->modified_old_objects;
@@ -1476,6 +1537,7 @@ static void reset_modified_from_backup_copies(int segment_num, object_t *only_ob
 
         list_clear(list);
     }
+    DEBUG_EXPECT_SEGFAULT(true);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
@@ -1826,7 +1888,8 @@ static void synchronize_objects_flush(void)
             if (i == myself)
                 continue;
 
-            if (get_page_status_in(i, page) != PAGE_NO_ACCESS) {
+            assert(get_page_status_in(i, page) != PAGE_READONLY);
+            if (get_page_status_in(i, page) == PAGE_ACCESSIBLE) {
                 /* shared or private, but never segfault */
                 char *dst = REAL_ADDRESS(get_segment_base(i), frag);
                 dprintf(("-> flush %p to seg %lu, sz=%lu\n", frag, i, frag_size));

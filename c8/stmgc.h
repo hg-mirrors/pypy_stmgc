@@ -118,7 +118,8 @@ uint8_t _stm_get_card_value(object_t *obj, long idx);
 bool _stm_was_read(object_t *obj);
 bool _stm_was_written(object_t *obj);
 bool _stm_was_written_card(object_t *obj);
-bool _stm_is_accessible_page(uintptr_t pagenum);
+uint8_t _stm_get_page_status(uintptr_t pagenum);
+bool _stm_get_hint_modified_recently(uintptr_t pagenum);
 
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
@@ -135,7 +136,7 @@ void _stm_largemalloc_sweep(void);
 
 
 char *stm_object_pages;
-char *stm_file_pages;
+int stm_object_pages_fd;
 object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
 bool (*_stm_smallmalloc_keep)(char *data);
 void _stm_smallmalloc_sweep_test(void);

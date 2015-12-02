@@ -769,6 +769,22 @@ static void major_do_validation_and_minor_collections(void)
         }
     }
 
+    /* XXXXXXX: necessary?? AFAIK it is undefined if changes
+       to the MAP_SHARED in seg0 propagate to the READONLY
+       MAP_SHARED/MAP_PRIVATE in other segments */
+    /* IFF page_mark_readonly really maps not to the file-page but
+       actually to the MAP_SHARED page, this should be unnecessary.
+       The kernel should only create a physical copy of the same
+       page when we write to one of them, and in that case we get
+       the SIGSEGV and handle it ourselves. */
+    /* char *range_start = stm_object_pages + END_NURSERY_PAGE*4096; */
+    /* msync(range_start, uninitialized_page_start - range_start, */
+    /*       MS_INVALIDATE | MS_SYNC); */
+    /* char *range_end = stm_object_pages + NB_PAGES * 4096UL; */
+    /* msync(uninitialized_page_stop, range_end - uninitialized_page_stop, */
+    /*       MS_INVALIDATE | MS_SYNC); */
+
+
     ensure_gs_register(original_num);
 }
 
