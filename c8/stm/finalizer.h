@@ -28,11 +28,11 @@ static void abort_finalizers(struct stm_priv_segment_info_s *);
 /* regular finalizers (objs from already-committed transactions) */
 static struct finalizers_s g_finalizers;
 
-static void _invoke_general_finalizers(stm_thread_local_t *tl);
+static void _invoke_general_finalizers(stm_thread_local_t *tl, bool own_tx);
 
-#define invoke_general_finalizers(tl)    do {   \
-    if (g_finalizers.run_finalizers != NULL)    \
-        _invoke_general_finalizers(tl);         \
+#define invoke_general_finalizers(tl, own_tx)    do {  \
+    if (g_finalizers.run_finalizers != NULL)           \
+        _invoke_general_finalizers(tl, own_tx);        \
 } while (0)
 
 static void _execute_finalizers(struct finalizers_s *f);
