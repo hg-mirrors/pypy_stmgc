@@ -1,3 +1,91 @@
+
+##################
+Issue: lee_router_tm in one of its versions uses a temporary grid (big list)
+to do some calculations. This grid gets cleared everytime the router does
+one transaction (lay_next_track). Hence, the transaction writes a big amount
+of *old* memory.
+ * For one, clearing an array causes tons of stm_write_card() and creating
+   tons of small backup slices.
+ * Also, all of this stuff goes to the commit log, as we "modify" an old
+   object.
+ * Of course this is all completely unecessary, as the temporary grid is
+   basically thread-local, always gets cleared at the start of an atomic
+   block ("application-level transaction"), and therefore wouldn't need
+   to be mentioned in the commit log (and in theory wouldn't even need
+   reverting on abort).
+
+Here is a slice of the perf-profile:
+-   Total     Self
+-   14.39%    13.62%  pypy-c-clcollec  libc-2.19.so        [.] __memcpy_sse2_unaligned
+   - __memcpy_sse2_unaligned
+      + 80.47% import_objects.constprop.50
+      + 10.72% make_bk_slices_for_range
++   16.82%     1.43%  pypy-c-clcollec  pypy-c-clcollector  [.] make_bk_slices
++   14.71%     4.44%  pypy-c-clcollec  pypy-c-clcollector  [.] make_bk_slices_for_range
++    4.63%     4.62%  pypy-c-clcollec  pypy-c-clcollector  [.] go_to_the_past
+
+On this benchmark, pypy-stm is ~4x slower than pypy-default. It also doesn't
+scale at all (probably because a lot of the things above are actually protected
+by the privatization locks, which seem to be quite contended).
+Probably around 10% of the time is spent importing the changes done to
+a thread-local object. So here are a few ideas:
+ * Play with card-marking card size to speed up make_bk_slices?
+ * After marking a significant percentage of cards of an obj, maybe just
+   mark all of them (do a full write barrier)?
+ * Should modification-heavy transactions run longer (with high priority)?
+ * Special allocation area for thread-local objects which is always mapped
+   shared between all segments.
+    + changes to objs in this area do not need to be added to the commit log
+    - need to guarantee that only one thread/segment at a time accesses an
+      obj at a time
+    - needs explicit designation as thread-local at allocation time (by programmer)
+    - doesn't avoid creating backup copies
+ * Special objs that are transaction-local
+    + no need for backup copies, should always "reset" automatically
+    - needs programmer support
+    - limited applicability
+ * As long as a slice is in a page that is only mapped in one segment,
+   we can depend on the slice not being imported in other segs since
+   the page is not mapped. At least it avoids importing to seg0 before
+   major GC and also pushing overflow objs to seg0 on commit. However,
+   this requires the elimination of seg0 as it is now, which is hard:
+    * main concern is that major GC needs to trace objs somewhere, and right
+      now it traces them in seg0. We probably need a way to tell in which seg
+      an obj is accessible.
+    * one way would be to say an obj is always fully accessible in the seg it
+      was first allocated in, but that makes page resharing more difficult.
+      Still, we could record this information in the largemalloc-header, which
+      we first need to find (per obj check for where obj-header is accessible).
+      A check if all pages of an obj are accessible in some segment is probably
+      too slow, as is checking on-the-fly during tracing...
+    * largemalloc currently keeps its data structures in seg0. We would need
+      to keep the data structure up-to-date in all segments (e.g. by always
+      writing to all accessible segments, but this requires us to have the
+      privatization readlock when allocating, and privatization locks are
+      already contended in some cases)
+    * smallmalloc is a bit simpler since objs are always in a single page.
+      But I guess we still need to find the accessible page for each obj...
+  Overall:
+   + modifications to single-mapped pages would not be copied if they stay
+     single-mapped
+   + fully automatic/transparent
+   - provides only page-level granularity
+   - potentially slow complication of largemalloc and major GC
+   - requires us to put effort into making threads always run in the same
+     segment to increase effectivness
+   - doesn't avoid creating backup copies
+ * One could also argue that keeping around a tempgrid is not good and
+   the programmer should just re-create it in every transaction
+   (counter-intuitive). This indeed speeds up the benchmark ("only" 2x
+   slower than pypy-default), but causes tons of major GCs. These
+   major GCs completely prevent scaling, as they are stop-the-world.
+   So this opens up a whole new can of worms (concurrent, parallel,
+   incremental GC?).
+
+
+##################
+
+
 - stm_identityhash spends a good time figuring out if an obj is prebuilt
   (40% of its time). maybe after setup_prebuilt, we could defer the test
   of GCFLAG_HAS_SHADOW in id_or_identityhash to after an address comparison.
