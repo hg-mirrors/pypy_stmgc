@@ -19,6 +19,10 @@ class TestExtra(BaseTest):
         tl.mem_bytes_to_clear_on_abort = 2
         #
         self.start_transaction()
+        self.commit_transaction()
+        assert ffi.string(p) == "hello"
+        #
+        self.start_transaction()
         assert ffi.string(p) == "hello"
         self.abort_transaction()
         assert p[0] == '\0'
@@ -26,6 +30,27 @@ class TestExtra(BaseTest):
         assert p[2] == 'l'
         assert p[3] == 'l'
         assert p[4] == 'o'
+
+    def test_reset_on_abort(self):
+        p = ffi.new("char[]", "hello")
+        tl = self.get_stm_thread_local()
+        assert tl.mem_reset_on_abort == ffi.NULL
+        tl.mem_reset_on_abort = p
+        tl.mem_bytes_to_reset_on_abort = 2
+        tl.mem_stored_for_reset_on_abort = ffi.new("char[5]")
+        #
+        self.start_transaction()
+        assert ffi.string(p) == "hello"
+        p[0] = 'w'
+        self.commit_transaction()
+        assert ffi.string(p) == "wello"
+        #
+        self.start_transaction()
+        assert ffi.string(p) == "wello"
+        p[1] = 'a'
+        p[4] = 'i'
+        self.abort_transaction()
+        assert ffi.string(p) == "welli"
 
     def test_call_on_abort(self):
         p0 = ffi_new_aligned("aaa")
