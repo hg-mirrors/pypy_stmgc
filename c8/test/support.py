@@ -30,6 +30,9 @@ typedef struct {
     object_t *thread_local_obj;
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
+    char *mem_reset_on_abort;   /* addr */
+    size_t mem_bytes_to_reset_on_abort; /* how many bytes */
+    char *mem_stored_for_reset_on_abort; /* content at tx start */
     int last_associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
