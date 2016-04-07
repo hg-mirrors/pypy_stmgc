@@ -50,6 +50,8 @@ class TestExtra(BaseTest):
         p[1] = 'a'
         p[4] = 'i'
         self.abort_transaction()
+        assert p[0] == '\0' # impl detail
+        self.start_transaction()
         assert ffi.string(p) == "welli"
 
     def test_call_on_abort(self):
