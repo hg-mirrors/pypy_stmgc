@@ -1,6 +1,11 @@
 import cffi, weakref
 from common import parent_dir, source_files
 
+import os
+# enable some malloc debug checks:
+os.environ["MALLOC_CHECK_"] = "3"
+
+
 # ----------
 
 ffi = cffi.FFI()
@@ -666,6 +671,7 @@ long current_segment_num(void)
                  extra_compile_args=['-g', '-O0', '-Werror', '-Wall'], #, '-ferror-limit=5'],
      extra_link_args=['-g', '-lrt'],
      force_generic_engine=True)
+
 
 
 WORD = 8
