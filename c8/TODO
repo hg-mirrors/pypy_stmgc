@@ -1,4 +1,13 @@
 
+- investigate if userfaultfd() helps:
+  http://kernelnewbies.org/Linux_4.3#head-3deefea7b0add8c1b171b0e72ce3b69c5ed35cb0
+
+  AFAICS, we could avoid the current in-kernel-pagefault+SIGSEGV-handler for
+  making pages accessible on-demand, and replace that mechanism with a
+  user-pagefault "handler". That should save on the number of needed VMAs and
+  possibly be faster (although I'm quite unsure of that).
+
+
 ##################
 Issue: lee_router_tm in one of its versions uses a temporary grid (big list)
 to do some calculations. This grid gets cleared everytime the router does
