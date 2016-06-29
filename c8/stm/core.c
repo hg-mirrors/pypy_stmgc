@@ -151,6 +151,7 @@ void _dbg_print_commit_log(void)
 }
 
 static void reset_modified_from_backup_copies(int segment_num, object_t *only_obj);  /* forward */
+static void undo_modifications_to_single_obj(int segment_num, object_t *only_obj); /* forward */
 
 static bool _stm_validate(void)
 {
@@ -268,7 +269,8 @@ static bool _stm_validate(void)
                                backup copy completely: */
                             /* XXX: this browses through the whole list of modified
                                fragments; this may become a problem... */
-                            reset_modified_from_backup_copies(my_segnum, obj);
+                            undo_modifications_to_single_obj(my_segnum, obj);
+
                             continue;
                         }
 
@@ -1276,6 +1278,37 @@ static void _core_commit_transaction(bool external)
         invoke_general_finalizers(tl);
 }
 
+static void undo_modifications_to_single_obj(int segment_num, object_t *obj)
+{
+    /* special function used for noconflict objs to reset all their
+     * modifications and make them appear untouched in the current transaction.
+     * I.e., reset modifications and remove from all lists. */
+
+    struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
+
+    reset_modified_from_backup_copies(segment_num, obj);
+
+    LIST_FOREACH_R(pseg->old_objects_with_cards_set, object_t * /*item*/,
+       {
+           if (item == obj) {
+               _reset_object_cards(pseg, item, CARD_CLEAR, false, false);
+               /* copy last element over this one (HACK) */
+               _lst->count -= 1;
+               _lst->items[_i] = _lst->items[_lst->count];
+               break;
+           }
+       });
+    LIST_FOREACH_R(pseg->objects_pointing_to_nursery, object_t * /*item*/,
+       {
+           if (item == obj) {
+               /* copy last element over this one (HACK) */
+               _lst->count -= 1;
+               _lst->items[_i] = _lst->items[_lst->count];
+               break;
+           }
+       });
+}
+
 static void reset_modified_from_backup_copies(int segment_num, object_t *only_obj)
 {
 #pragma push_macro("STM_PSEGMENT")
@@ -1283,6 +1316,9 @@ static void reset_modified_from_backup_copies(int segment_num, object_t *only_ob
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
     assert(modification_lock_check_wrlock(segment_num));
+
+    /* WARNING: resetting the obj will remove the WB flag. Make sure you either
+     * re-add it or remove it from lists where it was added based on the flag. */
 
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
     struct list_s *list = pseg->modified_old_objects;
@@ -1310,12 +1346,10 @@ static void reset_modified_from_backup_copies(int segment_num, object_t *only_ob
         free_bk(undo);
 
         if (only_obj != NULL) {
+            /* WB_EXECUTED should be set on small objs, but not on card objs */
             assert(IMPLY(only_obj != NULL,
                          (((struct object_s *)dst)->stm_flags
-                          & (GCFLAG_NO_CONFLICT
-                             | GCFLAG_WRITE_BARRIER
-                             | GCFLAG_WB_EXECUTED))
-                         == (GCFLAG_NO_CONFLICT | GCFLAG_WRITE_BARRIER)));
+                          & GCFLAG_NO_CONFLICT)));
             /* copy last element over this one */
             end--;
             list->count -= 3;
