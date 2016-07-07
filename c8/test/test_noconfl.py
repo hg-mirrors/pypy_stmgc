@@ -175,6 +175,8 @@ class TestNoConflict(BaseTest):
 
         stm_set_char(o, 'a')
         stm_set_char(oh, 'x', use_cards=True)
+        assert stm_was_read(o)
+        assert stm_was_read(oh)
         assert o in modified_old_objects()
         assert oh in modified_old_objects()
         assert o in objects_pointing_to_nursery()
@@ -189,6 +191,8 @@ class TestNoConflict(BaseTest):
         self.commit_transaction()
 
         self.switch(0, False)
+        assert stm_was_read(o)
+        assert stm_was_read(oh)
         assert stm_get_char(o) == 'a'
         assert stm_get_char(oh) == 'x'
         assert o in modified_old_objects()
@@ -197,6 +201,8 @@ class TestNoConflict(BaseTest):
         assert oh not in objects_pointing_to_nursery()
         assert oh in old_objects_with_cards_set()
         stm_validate()
+        assert not stm_was_read(o)
+        assert not stm_was_read(oh)
         assert stm_get_char(o) == 'b'
         assert stm_get_char(oh) == 'y'
         assert o not in modified_old_objects()
