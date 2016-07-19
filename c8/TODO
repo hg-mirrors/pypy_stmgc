@@ -7,6 +7,9 @@
   user-pagefault "handler". That should save on the number of needed VMAs and
   possibly be faster (although I'm quite unsure of that).
 
+- investigate if membarrier() helps:
+  http://man7.org/linux/man-pages/man2/membarrier.2.html
+
 
 ##################
 Issue: lee_router_tm in one of its versions uses a temporary grid (big list)
