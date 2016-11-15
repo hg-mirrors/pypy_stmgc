@@ -1,5 +1,6 @@
 #ifndef _STM_CORE_H_
 # error "must be compiled via stmgc.c"
+# include "core.h"  // for auto-completion
 #endif
 
 #include <signal.h>

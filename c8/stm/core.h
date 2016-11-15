@@ -1,3 +1,9 @@
+#ifndef _STMGC_H
+# error "must be compiled via stmgc.c"
+# include "../stmgc.h"  // silence flymake
+#endif
+
+
 #define _STM_CORE_H_
 
 #include <stdlib.h>
@@ -7,7 +13,6 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
-
 
 /************************************************************/
 
