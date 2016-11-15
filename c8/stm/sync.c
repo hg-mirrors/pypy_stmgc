@@ -5,6 +5,7 @@
 
 #ifndef _STM_CORE_H_
 # error "must be compiled via stmgc.c"
+# include "core.h"  // silence flymake
 #endif
 
 
