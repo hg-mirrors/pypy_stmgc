@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
+#include "list.h"
 
 /************************************************************/
 

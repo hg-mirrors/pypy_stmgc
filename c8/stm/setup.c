@@ -5,6 +5,8 @@
 
 #include <signal.h>
 #include <fcntl.h>           /* For O_* constants */
+#include "signal_handler.h"
+#include "fprintcolor.h"
 
 static void setup_mmap(char *reason)
 {
