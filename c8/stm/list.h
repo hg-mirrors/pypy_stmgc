@@ -17,13 +17,13 @@ struct list_s {
 
 static struct list_s *list_create(void) __attribute__((unused));
 
-static inline void list_free(struct list_s *lst)
+static inline void _list_free(struct list_s *lst)
 {
     free(lst);
 }
 
 #define LIST_CREATE(lst)  ((lst) = list_create())
-#define LIST_FREE(lst)  (list_free(lst), (lst) = NULL)
+#define LIST_FREE(lst)  (_list_free(lst), (lst) = NULL)
 
 
 static struct list_s *_list_grow(struct list_s *, uintptr_t);

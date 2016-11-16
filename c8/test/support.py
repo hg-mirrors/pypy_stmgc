@@ -52,7 +52,6 @@ void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
-object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 object_t *stm_allocate_noconflict(ssize_t size_rounded_up);
 
 /*void stm_write_card(); use _checked_stm_write_card() instead */
@@ -209,7 +208,11 @@ void _stm_smallmalloc_sweep_test(void);
 void (*stmcb_destructor)(object_t *);
 void stm_enable_destructor(object_t *);
 
+typedef void (*stm_finalizer_trigger_fn)(void);
 void (*stmcb_finalizer)(object_t *);
+void stm_setup_finalizer_queues(int number, stm_finalizer_trigger_fn *triggers);
+void stm_enable_finalizer(int queue_index, object_t *obj);
+object_t *stm_next_to_finalize(int queue_index);
 
 typedef struct stm_hashtable_s stm_hashtable_t;
 typedef ... stm_hashtable_entry_t;
@@ -748,15 +751,19 @@ def stm_allocate_noconflict_refs(n):
     return o
 
 def stm_allocate_with_finalizer(size):
-    o = lib.stm_allocate_with_finalizer(size)
+    # OLD-Style finalizers!
+    o = lib.stm_allocate(size)
     tid = 42 + size
     lib._set_type_id(o, tid)
+    lib.stm_enable_finalizer(-1, o)
     return o
 
 def stm_allocate_with_finalizer_refs(n):
-    o = lib.stm_allocate_with_finalizer(HDR + n * WORD)
+    # OLD-Style finalizers!
+    o = lib.stm_allocate(HDR + n * WORD)
     tid = 421420 + n
     lib._set_type_id(o, tid)
+    lib.stm_enable_finalizer(-1, o)
     return o
 
 SIZEOF_HASHTABLE_OBJ = 16 + lib.SIZEOF_MYOBJ
