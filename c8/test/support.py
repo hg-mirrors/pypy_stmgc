@@ -206,9 +206,8 @@ object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
 bool (*_stm_smallmalloc_keep)(char *data);
 void _stm_smallmalloc_sweep_test(void);
 
-
-void (*stmcb_light_finalizer)(object_t *);
-void stm_enable_light_finalizer(object_t *);
+void (*stmcb_destructor)(object_t *);
+void stm_enable_destructor(object_t *);
 
 void (*stmcb_finalizer)(object_t *);
 

@@ -100,8 +100,8 @@ void stm_setup(void)
         pr->nursery_objects_shadows = tree_create();
         pr->callbacks_on_commit_and_abort[0] = tree_create();
         pr->callbacks_on_commit_and_abort[1] = tree_create();
-        pr->young_objects_with_light_finalizers = list_create();
-        pr->old_objects_with_light_finalizers = list_create();
+        pr->young_objects_with_destructors = list_create();
+        pr->old_objects_with_destructors = list_create();
 
         pr->last_commit_log_entry = &commit_log_root;
         pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * i;
@@ -156,8 +156,8 @@ void stm_teardown(void)
         tree_free(pr->nursery_objects_shadows);
         tree_free(pr->callbacks_on_commit_and_abort[0]);
         tree_free(pr->callbacks_on_commit_and_abort[1]);
-        list_free(pr->young_objects_with_light_finalizers);
-        list_free(pr->old_objects_with_light_finalizers);
+        list_free(pr->young_objects_with_destructors);
+        list_free(pr->old_objects_with_destructors);
         if (pr->active_queues) tree_free(pr->active_queues);
     }
 

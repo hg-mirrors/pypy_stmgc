@@ -1047,7 +1047,7 @@ static void _do_start_transaction(stm_thread_local_t *tl)
     assert(tree_is_cleared(STM_PSEGMENT->nursery_objects_shadows));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[0]));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[1]));
-    assert(list_is_empty(STM_PSEGMENT->young_objects_with_light_finalizers));
+    assert(list_is_empty(STM_PSEGMENT->young_objects_with_destructors));
     assert(STM_PSEGMENT->finalizers == NULL);
     assert(STM_PSEGMENT->active_queues == NULL);
 #ifndef NDEBUG
