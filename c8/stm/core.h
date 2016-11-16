@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdbool.h>
 
 /************************************************************/
 
@@ -145,8 +146,8 @@ struct stm_priv_segment_info_s {
 #endif
 
     /* light finalizers */
-    struct list_s *young_objects_with_light_finalizers;
-    struct list_s *old_objects_with_light_finalizers;
+    struct list_s *young_objects_with_destructors;
+    struct list_s *old_objects_with_destructors;
 
     /* regular finalizers (objs from the current transaction only) */
     struct finalizers_s *finalizers;

@@ -1,3 +1,4 @@
+#include <stdint.h>
 
 /* see deal_with_objects_with_finalizers() for explanation of these fields */
 struct finalizers_s {

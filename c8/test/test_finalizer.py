@@ -2,13 +2,13 @@ from support import *
 import py
 
 
-class TestLightFinalizer(BaseTest):
+class TestDestructors(BaseTest):
 
     def setup_method(self, meth):
         BaseTest.setup_method(self, meth)
         #
         @ffi.callback("void(object_t *)")
-        def light_finalizer(obj):
+        def destructor(obj):
             assert stm_get_obj_size(obj) == 48
             segnum = lib.current_segment_num()
             tlnum = '?'
@@ -17,21 +17,21 @@ class TestLightFinalizer(BaseTest):
                     if tl.last_associated_segment_num == segnum:
                         tlnum = n
                         break
-            self.light_finalizers_called.append((obj, tlnum))
-        self.light_finalizers_called = []
-        lib.stmcb_light_finalizer = light_finalizer
-        self._light_finalizer_keepalive = light_finalizer
+            self.destructors_called.append((obj, tlnum))
+        self.destructors_called = []
+        lib.stmcb_destructor = destructor
+        self._destructor_keepalive = destructor
 
     def teardown_method(self, meth):
-        lib.stmcb_light_finalizer = ffi.NULL
+        lib.stmcb_destructor = ffi.NULL
         BaseTest.teardown_method(self, meth)
 
     def expect_finalized(self, objs, from_tlnum=None):
-        assert [obj for (obj, tlnum) in self.light_finalizers_called] == objs
+        assert [obj for (obj, tlnum) in self.destructors_called] == objs
         if from_tlnum is not None:
-            for obj, tlnum in self.light_finalizers_called:
+            for obj, tlnum in self.destructors_called:
                 assert tlnum == from_tlnum
-        self.light_finalizers_called = []
+        self.destructors_called = []
 
     def test_no_finalizer(self):
         self.start_transaction()
@@ -39,45 +39,45 @@ class TestLightFinalizer(BaseTest):
         self.commit_transaction()
         self.expect_finalized([])
 
-    def test_young_light_finalizer(self):
+    def test_young_destructor(self):
         self.start_transaction()
         lp1 = stm_allocate(48)
-        lib.stm_enable_light_finalizer(lp1)
+        lib.stm_enable_destructor(lp1)
         self.expect_finalized([])
         self.commit_transaction()
         self.expect_finalized([lp1], from_tlnum=0)
 
-    def test_young_light_finalizer_survives(self):
+    def test_young_destructor_survives(self):
         self.start_transaction()
         lp1 = stm_allocate(48)
-        lib.stm_enable_light_finalizer(lp1)
+        lib.stm_enable_destructor(lp1)
         self.push_root(lp1)       # stays alive
         self.commit_transaction()
         self.expect_finalized([])
 
-    def test_young_light_finalizer_aborts(self):
+    def test_young_destructor_aborts(self):
         self.start_transaction()
         lp1 = stm_allocate(48)
-        lib.stm_enable_light_finalizer(lp1)
+        lib.stm_enable_destructor(lp1)
         self.expect_finalized([])
         self.abort_transaction()
         self.start_transaction()
         self.expect_finalized([lp1], from_tlnum=0)
 
-    def test_old_light_finalizer(self):
+    def test_old_destructor(self):
         self.start_transaction()
         lp1 = stm_allocate(48)
         self.push_root(lp1)
         stm_minor_collect()
         lp1 = self.pop_root()
-        lib.stm_enable_light_finalizer(lp1)
+        lib.stm_enable_destructor(lp1)
         self.commit_transaction()
         self.expect_finalized([])
 
-    def test_old_light_finalizer_2(self):
+    def test_old_destructor_2(self):
         self.start_transaction()
         lp1 = stm_allocate(48)
-        lib.stm_enable_light_finalizer(lp1)
+        lib.stm_enable_destructor(lp1)
         self.push_root(lp1)
         stm_minor_collect()
         lp1 = self.pop_root()
@@ -86,10 +86,10 @@ class TestLightFinalizer(BaseTest):
         self.expect_finalized([lp1])
         self.commit_transaction()
 
-    def test_old_light_finalizer_survives(self):
+    def test_old_destructor_survives(self):
         self.start_transaction()
         lp1 = stm_allocate(48)
-        lib.stm_enable_light_finalizer(lp1)
+        lib.stm_enable_destructor(lp1)
         self.push_root(lp1)
         stm_minor_collect()
         lp1 = self.pop_root()
@@ -98,13 +98,13 @@ class TestLightFinalizer(BaseTest):
         self.commit_transaction()
         self.expect_finalized([])
 
-    def test_old_light_finalizer_segment(self):
+    def test_old_destructor_segment(self):
         self.start_transaction()
         #
         self.switch(1)
         self.start_transaction()
         lp1 = stm_allocate(48)
-        lib.stm_enable_light_finalizer(lp1)
+        lib.stm_enable_destructor(lp1)
         self.push_root(lp1)
         stm_minor_collect()
         lp1 = self.pop_root()
@@ -114,10 +114,10 @@ class TestLightFinalizer(BaseTest):
         stm_major_collect()
         self.expect_finalized([lp1], from_tlnum=1)
 
-    def test_old_light_finalizer_aborts(self):
+    def test_old_destructor_aborts(self):
         self.start_transaction()
         lp1 = stm_allocate(48)
-        lib.stm_enable_light_finalizer(lp1)
+        lib.stm_enable_destructor(lp1)
         self.push_root(lp1)
         self.commit_transaction()
         #
@@ -126,10 +126,10 @@ class TestLightFinalizer(BaseTest):
         self.abort_transaction()
         self.expect_finalized([])
 
-    def test_overflow_light_finalizer_aborts(self):
+    def test_overflow_destructor_aborts(self):
         self.start_transaction()
         lp1 = stm_allocate(48)
-        lib.stm_enable_light_finalizer(lp1)
+        lib.stm_enable_destructor(lp1)
         self.push_root(lp1)
         stm_minor_collect()
         lp1 = self.pop_root()

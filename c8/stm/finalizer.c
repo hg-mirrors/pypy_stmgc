@@ -4,7 +4,7 @@
 #endif
 
 /* callbacks */
-void (*stmcb_light_finalizer)(object_t *);
+void (*stmcb_destructor)(object_t *);
 void (*stmcb_finalizer)(object_t *);
 
 
@@ -91,7 +91,7 @@ static void abort_finalizers(struct stm_priv_segment_info_s *pseg)
     char *old_gs_register = STM_SEGMENT->segment_base;
     bool must_fix_gs = old_gs_register != pseg->pub.segment_base;
 
-    struct list_s *lst = pseg->young_objects_with_light_finalizers;
+    struct list_s *lst = pseg->young_objects_with_destructors;
     long i, count = list_count(lst);
     if (lst > 0) {
         for (i = 0; i < count; i++) {
@@ -101,15 +101,15 @@ static void abort_finalizers(struct stm_priv_segment_info_s *pseg)
                 set_gs_register(pseg->pub.segment_base);
                 must_fix_gs = false;
             }
-            stmcb_light_finalizer(obj);
+            stmcb_destructor(obj);
         }
         list_clear(lst);
     }
 
     /* also deals with overflow objects: they are at the tail of
-       old_objects_with_light_finalizers (this list is kept in order
+       old_objects_with_destructors (this list is kept in order
        and we cannot add any already-committed object) */
-    lst = pseg->old_objects_with_light_finalizers;
+    lst = pseg->old_objects_with_destructors;
     count = list_count(lst);
     while (count > 0) {
         object_t *obj = (object_t *)list_item(lst, --count);
@@ -120,7 +120,7 @@ static void abort_finalizers(struct stm_priv_segment_info_s *pseg)
             set_gs_register(pseg->pub.segment_base);
             must_fix_gs = false;
         }
-        stmcb_light_finalizer(obj);
+        stmcb_destructor(obj);
     }
 
     if (STM_SEGMENT->segment_base != old_gs_register)
@@ -128,14 +128,14 @@ static void abort_finalizers(struct stm_priv_segment_info_s *pseg)
 }
 
 
-void stm_enable_light_finalizer(object_t *obj)
+void stm_enable_destructor(object_t *obj)
 {
     if (_is_young(obj)) {
-        LIST_APPEND(STM_PSEGMENT->young_objects_with_light_finalizers, obj);
+        LIST_APPEND(STM_PSEGMENT->young_objects_with_destructors, obj);
     }
     else {
         assert(_is_from_same_transaction(obj));
-        LIST_APPEND(STM_PSEGMENT->old_objects_with_light_finalizers, obj);
+        LIST_APPEND(STM_PSEGMENT->old_objects_with_destructors, obj);
     }
 }
 
@@ -165,7 +165,7 @@ static void deal_with_young_objects_with_finalizers(void)
 {
     /* for light finalizers: executes finalizers for objs that don't survive
        this minor gc */
-    struct list_s *lst = STM_PSEGMENT->young_objects_with_light_finalizers;
+    struct list_s *lst = STM_PSEGMENT->young_objects_with_destructors;
     long i, count = list_count(lst);
     for (i = 0; i < count; i++) {
         object_t *obj = (object_t *)list_item(lst, i);
@@ -174,12 +174,12 @@ static void deal_with_young_objects_with_finalizers(void)
         object_t *TLPREFIX *pforwarded_array = (object_t *TLPREFIX *)obj;
         if (pforwarded_array[0] != GCWORD_MOVED) {
             /* not moved: the object dies */
-            stmcb_light_finalizer(obj);
+            stmcb_destructor(obj);
         }
         else {
             obj = pforwarded_array[1]; /* moved location */
             assert(!_is_young(obj));
-            LIST_APPEND(STM_PSEGMENT->old_objects_with_light_finalizers, obj);
+            LIST_APPEND(STM_PSEGMENT->old_objects_with_destructors, obj);
         }
     }
     list_clear(lst);
@@ -191,11 +191,11 @@ static void deal_with_old_objects_with_finalizers(void)
     int old_gs_register = STM_SEGMENT->segment_num;
     int current_gs_register = old_gs_register;
     long j;
-    assert(list_is_empty(get_priv_segment(0)->old_objects_with_light_finalizers));
+    assert(list_is_empty(get_priv_segment(0)->old_objects_with_destructors));
     for (j = 1; j < NB_SEGMENTS; j++) {
         struct stm_priv_segment_info_s *pseg = get_priv_segment(j);
 
-        struct list_s *lst = pseg->old_objects_with_light_finalizers;
+        struct list_s *lst = pseg->old_objects_with_destructors;
         long i, count = list_count(lst);
         lst->count = 0;
         for (i = 0; i < count; i++) {
@@ -217,7 +217,7 @@ static void deal_with_old_objects_with_finalizers(void)
                     set_gs_register(get_segment_base(j));
                     current_gs_register = j;
                 }
-                stmcb_light_finalizer(obj);
+                stmcb_destructor(obj);
             }
             else {
                 /* object survives */
