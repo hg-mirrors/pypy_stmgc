@@ -716,7 +716,7 @@ void stm_force_transaction_break(stm_thread_local_t *tl);
 extern void (*stmcb_destructor)(object_t *);
 void stm_enable_destructor(object_t *);
 
-/* Support for regular finalizers.  Unreachable objects with
+/* XXX: Support for regular finalizers.  Unreachable objects with
    finalizers are kept alive, as well as everything they point to, and
    stmcb_finalizer() is called after the major GC.  If there are
    several objects with finalizers that reference each other in a
@@ -730,8 +730,14 @@ void stm_enable_destructor(object_t *);
    transaction.  For older objects, the finalizer is called from a
    random thread between regular transactions, in a new custom
    transaction. */
-extern void (*stmcb_finalizer)(object_t *);
-object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
+typedef void (*stm_finalizer_trigger_fn)(void);
+void (*stmcb_finalizer)(object_t *);
+void stm_setup_finalizer_queues(int number, stm_finalizer_trigger_fn *triggers);
+void stm_enable_finalizer(int queue_index, object_t *obj);
+
+/* Returns the next object that supposedly died and should have its finalizer
+   called. XXX: This function turns the transaction inevitable. */
+object_t *stm_next_to_finalize(int queue_index);
 
 
 /* dummies for now: */

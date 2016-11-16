@@ -3,6 +3,8 @@
 # include "core.h"  // silence flymake
 #endif
 
+#include "finalizer.h"
+
 /************************************************************/
 
 #define NURSERY_START         (FIRST_NURSERY_PAGE * 4096UL)
@@ -56,7 +58,6 @@ long stm_can_move(object_t *obj)
 
 /************************************************************/
 static object_t *find_existing_shadow(object_t *obj);
-#define GCWORD_MOVED  ((object_t *) -1)
 #define FLAG_SYNC_LARGE       0x01
 
 
@@ -441,21 +442,24 @@ static void collect_roots_from_markers(uintptr_t len_old)
     }
 }
 
-static void collect_objs_still_young_but_with_finalizers(void)
+static void collect_young_objects_with_finalizers(void)
 {
-    struct list_s *lst = STM_PSEGMENT->finalizers->objects_with_finalizers;
-    uintptr_t i, total = list_count(lst);
+    /* for real finalizers: in a minor collection, all young objs must survive! */
 
-    for (i = STM_PSEGMENT->finalizers->count_non_young; i < total; i++) {
+    struct list_s *lst = STM_PSEGMENT->finalizers->probably_young_objects_with_finalizers;
+    long i, count = list_count(lst);
+    for (i = 0; i < count; i += 2) {
+        object_t *obj = (object_t *)list_item(lst, i);
+        uintptr_t qindex = list_item(lst, i + 1);
 
-        object_t *o = (object_t *)list_item(lst, i);
-        minor_trace_if_young(&o);
+        minor_trace_if_young(&obj);
 
-        /* was not actually movable */
-        assert(o == (object_t *)list_item(lst, i));
+        LIST_APPEND(STM_PSEGMENT->finalizers->objects_with_finalizers, obj);
+        LIST_APPEND(STM_PSEGMENT->finalizers->objects_with_finalizers, qindex);
     }
-    STM_PSEGMENT->finalizers->count_non_young = total;
+    list_clear(lst);
 }
+
 
 
 static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
@@ -555,8 +559,7 @@ static void _do_minor_collection(bool commit)
 
     collect_roots_in_nursery();
 
-    if (STM_PSEGMENT->finalizers != NULL)
-        collect_objs_still_young_but_with_finalizers();
+    collect_young_objects_with_finalizers();
 
     if (STM_PSEGMENT->active_queues != NULL)
         collect_active_queues();
@@ -568,7 +571,7 @@ static void _do_minor_collection(bool commit)
     acquire_privatization_lock(STM_SEGMENT->segment_num);
     stm_move_young_weakrefs();
     release_privatization_lock(STM_SEGMENT->segment_num);
-    deal_with_young_objects_with_finalizers();
+    deal_with_young_objects_with_destructors();
 
     assert(list_is_empty(STM_PSEGMENT->objects_pointing_to_nursery));
 

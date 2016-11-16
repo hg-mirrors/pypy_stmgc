@@ -1048,7 +1048,6 @@ static void _do_start_transaction(stm_thread_local_t *tl)
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[0]));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[1]));
     assert(list_is_empty(STM_PSEGMENT->young_objects_with_destructors));
-    assert(STM_PSEGMENT->finalizers == NULL);
     assert(STM_PSEGMENT->active_queues == NULL);
 #ifndef NDEBUG
     /* this should not be used when objects_pointing_to_nursery == NULL */
@@ -1207,8 +1206,6 @@ void _stm_commit_transaction(void)
 
 static void _core_commit_transaction(bool external)
 {
-    exec_local_finalizers();
-
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     assert(STM_PSEGMENT->transaction_state != TS_NONE);

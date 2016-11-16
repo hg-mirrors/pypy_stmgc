@@ -146,7 +146,7 @@ struct stm_priv_segment_info_s {
     pthread_t running_pthread;
 #endif
 
-    /* light finalizers */
+    /* destructors */
     struct list_s *young_objects_with_destructors;
     struct list_s *old_objects_with_destructors;
 
