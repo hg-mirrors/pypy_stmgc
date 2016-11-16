@@ -1,5 +1,11 @@
+#ifndef _LIST_H
+#define _LIST_H
+
+
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
+
 
 /************************************************************/
 
@@ -245,3 +251,5 @@ static inline bool tree_contains(struct tree_s *tree, uintptr_t addr)
     TREE_FIND(tree, addr, result, return false);
     return true;
 }
+
+#endif
