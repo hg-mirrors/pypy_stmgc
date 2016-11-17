@@ -311,6 +311,7 @@ void _stm_test_switch(stm_thread_local_t *tl)
     assert(_stm_in_transaction(tl));
     ensure_gs_register(tl->last_associated_segment_num);
     assert(STM_SEGMENT->running_thread == tl);
+    exec_local_finalizers();
 }
 
 void _stm_test_switch_segment(int segnum)

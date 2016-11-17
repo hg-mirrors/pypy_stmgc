@@ -179,6 +179,8 @@ class TestOldStyleRegularFinalizer(BaseTest):
         if isinstance(objs, int):
             assert len(self.finalizers_called) == objs
         else:
+            print objs
+            print self.finalizers_called
             assert self.finalizers_called == objs
         self.finalizers_called = []
 
@@ -186,14 +188,12 @@ class TestOldStyleRegularFinalizer(BaseTest):
         self.start_transaction()
         lp1 = stm_allocate(48)
         stm_major_collect()
-        self.commit_transaction()
         self.expect_finalized([])
 
     def test_no_finalizer_in_minor_collection(self):
         self.start_transaction()
         lp1 = stm_allocate_with_finalizer(48)
         stm_minor_collect()
-        self.commit_transaction()
         self.expect_finalized([])
 
     def test_finalizer_in_major_collection(self):
@@ -204,21 +204,20 @@ class TestOldStyleRegularFinalizer(BaseTest):
             lp3 = stm_allocate_with_finalizer(48)
             self.expect_finalized([])
             self.push_roots([lp1, lp2, lp3])
-            self.commit_transaction()  # move finalizer-objs to global queue
-            self.start_transaction()
+            stm_minor_collect()
             lp1, lp2, lp3 = self.pop_roots()
             print repeat, lp1, lp2, lp3
             stm_major_collect()
-            self.commit_transaction()  # invoke finalizers
             self.expect_finalized([lp1, lp2, lp3])
-            self.start_transaction()
-        self.commit_transaction()
 
     def test_finalizer_from_other_thread(self):
         self.start_transaction()
         lp1 = stm_allocate_with_finalizer(48)
         stm_set_char(lp1, 'H')
         self.expect_content_character = 'H'
+        self.push_root(lp1)
+        stm_minor_collect()
+        lp1 = self.pop_root()
         print lp1
         #
         self.switch(1)
@@ -227,7 +226,6 @@ class TestOldStyleRegularFinalizer(BaseTest):
         self.expect_finalized([])      # marked as dead, but wrong thread
         #
         self.switch(0)
-        py.test.xfail("we don't finalize in the same transaction anymore.")
         self.expect_finalized([lp1])   # now it has been finalized
 
     def test_finalizer_ordering(self):
@@ -240,12 +238,10 @@ class TestOldStyleRegularFinalizer(BaseTest):
         stm_set_ref(lp1, 0, lp2)
 
         self.push_roots([lp1, lp2, lp3])
-        self.commit_transaction()  # move finalizer-objs to global queue
-        self.start_transaction()
+        stm_minor_collect()
         lp1, lp2, lp3 = self.pop_roots()
 
         stm_major_collect()
-        self.commit_transaction() # invoke finalizers
         self.expect_finalized([lp3])
 
     def test_finalizer_extra_transaction(self):
@@ -280,11 +276,8 @@ class TestOldStyleRegularFinalizer(BaseTest):
 
         self.expect_finalized([])
         stm_major_collect()
-        self.commit_transaction()
-        self.expect_finalized(1)
         self.switch(0)
-        self.commit_transaction()
-        self.expect_finalized(1)
+        self.expect_finalized(2)
 
     def test_run_major_collect_in_finalizer(self):
         self.run_major_collect_in_finalizer = True
@@ -294,7 +287,6 @@ class TestOldStyleRegularFinalizer(BaseTest):
         lp3 = stm_allocate_with_finalizer(32)
         print lp1, lp2, lp3
         stm_major_collect()
-        self.commit_transaction()
 
     def test_new_objects_w_finalizers(self):
         self.switch(2)
@@ -311,5 +303,4 @@ class TestOldStyleRegularFinalizer(BaseTest):
 
         self.expect_finalized([])
         stm_major_collect()
-        self.commit_transaction()
         self.expect_finalized([lp1])
