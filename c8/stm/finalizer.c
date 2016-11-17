@@ -528,9 +528,13 @@ static bool _trigger_finalizer_queues(struct finalizers_s *f)
             // XXX: check that triggers *really* cannot touch GC-memory,
             // otherwise, this needs to run in an (inevitable) transaction
 #ifndef NDEBUG
+            char *old_gs_register = STM_SEGMENT->segment_base;
             set_gs_register(NULL);
 #endif
             g_finalizer_triggers.triggers[i]();
+#ifndef NDEBUG
+            set_gs_register(old_gs_register);
+#endif
         }
     }
 
@@ -586,6 +590,8 @@ static void _invoke_general_finalizers(stm_thread_local_t *tl)
 }
 
 object_t* stm_next_to_finalize(int queue_index) {
+    assert(STM_PSEGMENT->transaction_state != TS_NONE);
+
     /* first check local run_finalizers queue, then global */
     if (!list_is_empty(STM_PSEGMENT->finalizers->run_finalizers)) {
         struct list_s *lst = STM_PSEGMENT->finalizers->run_finalizers;
