@@ -38,9 +38,16 @@ static struct {
 
 
 static void _invoke_general_finalizers(stm_thread_local_t *tl);
+static void _invoke_local_finalizers(void);
 
 #define invoke_general_finalizers(tl)    do {   \
      _invoke_general_finalizers(tl);         \
+} while (0)
+
+
+#define exec_local_finalizers()  do {                   \
+    if (!list_is_empty(STM_PSEGMENT->finalizers->run_finalizers)) \
+        _invoke_local_finalizers();  \
 } while (0)
 
 #endif

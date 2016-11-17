@@ -1206,6 +1206,8 @@ void _stm_commit_transaction(void)
 
 static void _core_commit_transaction(bool external)
 {
+    exec_local_finalizers();
+
     assert(!_has_mutex());
     assert(STM_PSEGMENT->safe_point == SP_RUNNING);
     assert(STM_PSEGMENT->transaction_state != TS_NONE);

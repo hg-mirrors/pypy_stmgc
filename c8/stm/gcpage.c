@@ -213,6 +213,7 @@ static void major_collection_if_requested(void)
     }
 
     s_mutex_unlock();
+    exec_local_finalizers();
 }
 
 
