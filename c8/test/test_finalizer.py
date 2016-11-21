@@ -150,7 +150,7 @@ class TestDestructors(BaseTest):
 
 class TestRegularFinalizerQueues(BaseTest):
     expect_content_character = None
-    run_major_collect_in_finalizer = False
+    run_major_collect_in_trigger = False
 
     def setup_method(self, meth):
         BaseTest.setup_method(self, meth)
@@ -158,9 +158,13 @@ class TestRegularFinalizerQueues(BaseTest):
         @ffi.callback("stm_finalizer_trigger_fn")
         def trigger0():
             self.queues_triggered.append(0)
+            if self.run_major_collect_in_trigger:
+                stm_major_collect()
         @ffi.callback("stm_finalizer_trigger_fn")
         def trigger1():
             self.queues_triggered.append(1)
+            if self.run_major_collect_in_trigger:
+                stm_major_collect()
         self._trigger_keepalive = [trigger0, trigger1]
         triggers = ffi.new("stm_finalizer_trigger_fn[]", self._trigger_keepalive)
         lib.stm_setup_finalizer_queues(2, triggers)
@@ -276,8 +280,8 @@ class TestRegularFinalizerQueues(BaseTest):
 
         self.start_transaction()
         stm_major_collect()
-        assert not self.get_queues_triggered()
-        self.commit_transaction() # invoke finalizers
+        assert {0} == self.get_queues_triggered()
+        self.commit_transaction() # invoke finalizers (triggers again...)
         self.start_transaction()
         assert {0} == self.get_queues_triggered()
         assert [lp1b] == self.get_to_finalize(0)
@@ -301,17 +305,19 @@ class TestRegularFinalizerQueues(BaseTest):
         assert self.get_queues_triggered() == {0, 1}
         assert len(self.get_to_finalize(0)) == 1
 
-    def test_run_major_collect_in_finalizer(self):
-        self.run_major_collect_in_finalizer = True
+    def test_run_major_collect_in_trigger(self):
+        self.run_major_collect_in_trigger  = True
         self.start_transaction()
         lp1 = stm_allocate(32)
         lp2 = stm_allocate(32)
         lp3 = stm_allocate(32)
         lib.stm_enable_finalizer(0, lp1)
-        lib.stm_enable_finalizer(0, lp2)
-        lib.stm_enable_finalizer(0, lp3)
+        lib.stm_enable_finalizer(1, lp2)
+        lib.stm_enable_finalizer(1, lp3)
         print lp1, lp2, lp3
         stm_major_collect()
+        assert 1 == len(self.get_to_finalize(0))
+        assert 2 == len(self.get_to_finalize(1))
 
     def test_new_objects_w_finalizers(self):
         self.switch(2)
