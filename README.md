@@ -67,6 +67,7 @@ The folder `c8` contains the current version of the STMGC library
      - `forksupport`: support for forking an STM process
      - `extra`: on-commit and on-abort callback mechanism
      - `detach`: transaction detach mechanism (optimised transactional zones)
+     - `setup`: sets up the memory layout and segments
      
     Misc:
     
@@ -79,7 +80,6 @@ The folder `c8` contains the current version of the STMGC library
      - `misc`: mostly debug and testing interface
      - `pagecopy`: fast copy implementation for pages
      - `prebuilt`: logic for PyPy's prebuilt objects
-     - `setup`: setup code
        
 
 
@@ -88,7 +88,7 @@ The folder `c8` contains the current version of the STMGC library
 Tests are written in Python that calls the C-library through CFFI (Python package).
 
  1. install `pytest` and `cffi` packages for Python (via `pip`)
- 2. running py.test in c8/test should run all the tests (alternatively, the
+ 2. running `py.test` in `c8/test` should run all the tests (alternatively, the
     PyPy-checkout has a pytest.py script in its root-folder, which should work
     too)
 
@@ -99,7 +99,7 @@ expose real data-races that the sequential Python tests cannot expose.
 
  1. for example: `make build-demo_random2`
  2. then run `./build-demo_random2`
-
+ 
 
 ## Building PyPy-STM
 
@@ -158,6 +158,36 @@ following, `/` is the root of your PyPy checkout.
         
  4. The script puts a `pypy-c` into `/pypy/goal/` that should be ready to run.
 
+
+### Log tools
+
+STMGC produces an event-log, if requested. Some tools to parse and analyse these
+logs are in the PyPy repository under `/pypy/stm/`. To produce a log, set the
+environment variable `PYPYSTM` to a file name. E.g.:
+
+`env PYPYSTM=log.pypystm time -p pypy-c program.py`
+
+and then see some statistics with 
+
+`/pypy/stm/print_stm_log.py log.pypystm`
+
+
+### Benchmarks
+
+In PyPy's benchmark repository (`https://bitbucket.org/pypy/benchmarks`) under
+`multithread` is a collection of multi-threaded Python programs to measure
+performance.
+
+One way to run them is to check out the branch `multithread-runner` and do the
+following:
+
+`./runner.py pypy-c config-raytrace.json result.json`
+
+This will use the configuration in the JSON file and run a few iterations; then
+write the result into a JSON file again. It will also print the command-line
+used to run the benchmark, in case you don't want to use the runner. The
+`getresults.py` script can be used to compare two versions of PyPy against each
+other, but it is very limited.
 
 
 
