@@ -97,7 +97,8 @@ Tests are written in Python that calls the C-library through CFFI (Python packag
 Demos are small C programs that use the STMGC library directly. They sometimes
 expose real data-races that the sequential Python tests cannot expose.
 
- 1. for example: `make build-demo_random2`
+ 1. for 
+ example: `make build-demo_random2`
  2. then run `./build-demo_random2`
  
 
@@ -106,6 +107,9 @@ expose real data-races that the sequential Python tests cannot expose.
 The STM branch of PyPy contains a *copy* of the STMGC library. After changes to
 STMGC, run the `import_stmgc.py` script in `/rpython/translator/stm/`. In the
 following, `/` is the root of your PyPy checkout.
+
+ 0. Follow the [http://doc.pypy.org/en/latest/build.html](build instructions)
+    for PyPy until you get to the point to run the translation.
 
  1. The Makefile expects a `gcc-seg-gs` executable to be on the `$PATH`. This
     should be a GCC that is either patched or a wrapper to GCC 6.1 that passes
@@ -130,7 +134,7 @@ following, `/` is the root of your PyPy checkout.
         STM=--stm #--stm
         JIT=-Ojit #-Ojit #-O2
         VERSION=$(hg id -i)
-        time  ionice -c3 pypy ~/pypy_dir/rpython/bin/rpython --no-shared --source $STM $JIT  targetpypystandalone.py
+        ionice -c3 pypy ~/pypy_dir/rpython/bin/rpython --no-shared --source $STM $JIT  targetpypystandalone.py
         # --no-allworkingmodules
         
         notify-send "PyPy" "C source generated."
@@ -165,7 +169,7 @@ STMGC produces an event-log, if requested. Some tools to parse and analyse these
 logs are in the PyPy repository under `/pypy/stm/`. To produce a log, set the
 environment variable `PYPYSTM` to a file name. E.g.:
 
-`env PYPYSTM=log.pypystm time -p pypy-c program.py`
+`env PYPYSTM=log.pypystm pypy-c program.py`
 
 and then see some statistics with 
 
