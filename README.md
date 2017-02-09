@@ -105,38 +105,37 @@ following, `/` is the root of your PyPy checkout.
     the necessary options. In my case, this is a script that points to my custom
     build of GCC with the following content:
     
-    ```bash
-    #!/bin/bash
-    BUILD=/home/remi/work/bin/gcc-build
-    exec $BUILD/gcc/xgcc -B $BUILD/gcc -fno-ivopts -fno-tree-vectorize -fno-tree-loop-distribute-patterns "$@"
-    ```
+        :::bash
+        #!/bin/bash
+        BUILD=/home/remi/work/bin/gcc-build
+        exec $BUILD/gcc/xgcc -B $BUILD/gcc -fno-ivopts -fno-tree-vectorize -fno-tree-loop-distribute-patterns "$@"
+    
     
  2. `cd /pypy/goal/`
  
  3. A script to translate PyPy-STM (adapt all paths):
  
-    ```bash
-    #!/bin/bash
-    export PYPY_USESSION_KEEP=200
-    export PYPY_USESSION_DIR=~/pypy-usession
-
-    STM=--stm #--stm
-    JIT=-Ojit #-Ojit #-O2
-    VERSION=$(hg id -i)
-    time  ionice -c3 pypy ~/pypy_dir/rpython/bin/rpython --no-shared --source $STM $JIT  targetpypystandalone.py
-    # --no-allworkingmodules
-
-    notify-send "PyPy" "C source generated."
-
-    cd ~/pypy-usession/usession-$(hg branch)-remi/testing_1/
-    ionice -c3 make -Bj4
-
-    TIME=$(date +%y-%m-%d-%H:%M)
-    cp pypy-c ~/pypy_dir/pypy/goal/pypy-c-$STM-$JIT-$VERSION-$TIME
-    cp pypy-c ~/pypy_dir/pypy/goal/pypy-c
-
-    notify-send "PyPy" "Make finished."
-    ```
+        :::bash
+        #!/bin/bash
+        export PYPY_USESSION_KEEP=200
+        export PYPY_USESSION_DIR=~/pypy-usession
+        
+        STM=--stm #--stm
+        JIT=-Ojit #-Ojit #-O2
+        VERSION=$(hg id -i)
+        time  ionice -c3 pypy ~/pypy_dir/rpython/bin/rpython --no-shared --source $STM $JIT  targetpypystandalone.py
+        # --no-allworkingmodules
+        
+        notify-send "PyPy" "C source generated."
+        
+        cd ~/pypy-usession/usession-$(hg branch)-remi/testing_1/
+        ionice -c3 make -Bj4
+        
+        TIME=$(date +%y-%m-%d-%H:%M)
+        cp pypy-c ~/pypy_dir/pypy/goal/pypy-c-$STM-$JIT-$VERSION-$TIME
+        cp pypy-c ~/pypy_dir/pypy/goal/pypy-c
+        
+        notify-send "PyPy" "Make finished."
     
     The usession-folder will keep the produced C source files. You will need
     them whenever you do a change to the STMGC library only (no need to
