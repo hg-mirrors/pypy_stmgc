@@ -9,6 +9,7 @@ It is meant to be a general library that can be used in C programs.
 The library interface is in `c8/stmgc.h`.
 
 Progress (these revisions are roughly stable versions, pick the last one):
+
  - 3af462f
 
 Run tests with `py.test`.
@@ -46,35 +47,41 @@ The folder `c8` contains the current version of the STMGC library
 
  - `stmgc.h`: the main header file for the library
  - `stm/`: 
-    - For the GC part: 
-       + `nursery`: minor collection
-       + `gcpage`: major collection
-       + `largemalloc`, `smallmalloc`: object allocation
-       + `finalizer`: object finalizer support
-       + `weakref`: weak references support
-    - For the STM part:
-       + `core`: commit, abort, barrier logic of STM
-       + `sync`: segment management and thread support
-       + `pages`: management of page metadata
-       + `signal_handler`: manages pages together with `pages`
-       + `locks`: a set of locks to protect segments
-       + `rewind_setjmp`: setjmp/longjmp implementation that supports arbitrary rollback
-       + `forksupport`: support for forking an STM process
-       + `extra`: on-commit and on-abort callback mechanism
-       + `detach`: transaction detach mechanism (optimised transactional zones)
-    - Misc:
-       + `fprintcolor`: colourful debug output
-       + `hash_id`: PyPy-compatible identity and identity-hash functionality
-       + `hashtable`: transactional hash table implementation
-       + `queue`: transactional work-queue implementation
-       + `list`: simple growable list implementation
-       + `marker`, `prof`: mechanism to record events
-       + `misc`: mostly debug and testing interface
-       + `pagecopy`: fast copy implementation for pages
-       + `prebuilt`: logic for PyPy's prebuilt objects
-       + `setup`: setup code
+ 
+    For the GC part: 
+    
+     - `nursery`: minor collection
+     - `gcpage`: major collection
+     - `largemalloc`, `smallmalloc`: object allocation
+     - `finalizer`: object finalizer support
+     - `weakref`: weak references support
+     
+    For the STM part:
+    
+     - `core`: commit, abort, barrier logic of STM
+     - `sync`: segment management and thread support
+     - `pages`: management of page metadata
+     - `signal_handler`: manages pages together with `pages`
+     - `locks`: a set of locks to protect segments
+     - `rewind_setjmp`: setjmp/longjmp implementation that supports arbitrary rollback
+     - `forksupport`: support for forking an STM process
+     - `extra`: on-commit and on-abort callback mechanism
+     - `detach`: transaction detach mechanism (optimised transactional zones)
+     
+    Misc:
+    
+     - `fprintcolor`: colourful debug output
+     - `hash_id`: PyPy-compatible identity and identity-hash functionality
+     - `hashtable`: transactional hash table implementation
+     - `queue`: transactional work-queue implementation
+     - `list`: simple growable list implementation
+     - `marker`, `prof`: mechanism to record events
+     - `misc`: mostly debug and testing interface
+     - `pagecopy`: fast copy implementation for pages
+     - `prebuilt`: logic for PyPy's prebuilt objects
+     - `setup`: setup code
        
-       
+
 
 ### Running Tests
 
