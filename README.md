@@ -108,7 +108,7 @@ The STM branch of PyPy contains a *copy* of the STMGC library. After changes to
 STMGC, run the `import_stmgc.py` script in `/rpython/translator/stm/`. In the
 following, `/` is the root of your PyPy checkout.
 
- 0. Follow the [http://doc.pypy.org/en/latest/build.html](build instructions)
+ 0. Follow the [build instructions](http://doc.pypy.org/en/latest/build.html)
     for PyPy until you get to the point to run the translation.
 
  1. The Makefile expects a `gcc-seg-gs` executable to be on the `$PATH`. This
