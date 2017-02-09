@@ -411,12 +411,19 @@ def op_allocate_no_confl(ex, global_state, thread_state):
     global_state.add_noconfl_obj(r)
 
 def op_allocate_ref(ex, global_state, thread_state):
-    num = str(global_state.rnd.randrange(1, 1000))
+    g_rnd = global_state.rnd
+    num = str(g_rnd.randrange(1, 1000))
     r = global_state.get_new_root_name(True, num)
     thread_state.push_roots(ex)
     ex.do('%s = stm_allocate_refs(%s)' % (r, num))
     ex.do('# 0x%x' % (int(ffi.cast("uintptr_t", ex.content[r]))))
     thread_state.transaction_state.add_root(r, "ffi.NULL", True)
+
+    if g_rnd.randrange(10) == 0:
+        # XXX: should empty the queues sometimes! but calling next_to_finalize
+        # *may* turn inevitable (but only if there is something in the queue).
+        # so that's a bit involved...
+        ex.do('lib.stm_enable_finalizer(%s, %s)' % (g_rnd.randrange(2), r))
 
     thread_state.pop_roots(ex)
     thread_state.reload_roots(ex)
@@ -585,6 +592,25 @@ class TestRandom(BaseTest):
         N_THREADS = self.NB_THREADS
         ex = Exec(self)
         ex.do("################################################################\n"*10)
+        ex.do("""
+
+@ffi.callback("stm_finalizer_trigger_fn")
+def trigger0():
+    pass
+@ffi.callback("stm_finalizer_trigger_fn")
+def trigger1():
+    pass
+self._trigger_keepalive = [trigger0, trigger1]
+triggers = ffi.new("stm_finalizer_trigger_fn[]", self._trigger_keepalive)
+lib.stm_setup_finalizer_queues(2, triggers)
+#
+@ffi.callback("void(object_t *)")
+def finalizer(obj):
+    pass
+lib.stmcb_finalizer = finalizer
+self._finalizer_keepalive = finalizer
+        """)
+
         ex.do('# initialization')
 
         global_state = GlobalState(ex, rnd)
@@ -624,7 +650,7 @@ class TestRandom(BaseTest):
         ]
         possible_actions = [item for sublist in possible_actions for item in sublist]
         print possible_actions
-        for _ in range(2000):
+        for _ in range(3000):
             # make sure we are in a transaction:
             curr_thread = op_switch_thread(ex, global_state, curr_thread)
 

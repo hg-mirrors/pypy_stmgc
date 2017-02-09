@@ -807,9 +807,9 @@ static void major_collection_now_at_safe_point(void)
 
     LIST_FREE(marked_objects_to_trace);
 
-    /* weakrefs and execute old light finalizers */
+    /* weakrefs and execute old destructors */
     stm_visit_old_weakrefs();
-    deal_with_old_objects_with_finalizers();
+    deal_with_old_objects_with_destructors();
 
     /* cleanup */
     clean_up_segment_lists();
