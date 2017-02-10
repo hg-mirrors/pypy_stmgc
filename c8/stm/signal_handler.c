@@ -5,6 +5,7 @@
 
 
 
+
 static void setup_signal_handler(void)
 {
     struct sigaction act;
@@ -76,19 +77,37 @@ static void handle_segfault_in_page(uintptr_t pagenum)
 
     assert(get_page_status_in(my_segnum, pagenum) == PAGE_NO_ACCESS);
 
-    /* find who has the most recent revision of our page */
+    /* find a suitable page to copy from in other segments:
+     * suitable means:
+     *  - if there is a revision around >= target_rev, get the oldest >= target_rev.
+     *  - otherwise find most recent revision
+     * Note: simply finding the most recent revision would be a conservative strategy, but
+     *       requires going back in time more often (see below)
+     */
     int copy_from_segnum = -1;
-    uint64_t most_recent_rev = 0;
+    uint64_t copy_from_rev = 0;
+    uint64_t target_rev = STM_PSEGMENT->last_commit_log_entry->rev_num;
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
 
         struct stm_commit_log_entry_s *log_entry;
         log_entry = get_priv_segment(i)->last_commit_log_entry;
-        if (get_page_status_in(i, pagenum) != PAGE_NO_ACCESS
-            && (copy_from_segnum == -1 || log_entry->rev_num > most_recent_rev)) {
+
+        /* - if not found anything, initialise copy_from_rev
+         * - else if target_rev is higher than everything we found, find newest among them
+         * - else: find revision that is as close to target_rev as possible         */
+        bool accessible = get_page_status_in(i, pagenum) != PAGE_NO_ACCESS;
+        bool uninit = copy_from_segnum == -1;
+        bool find_most_recent = copy_from_rev < target_rev && log_entry->rev_num > copy_from_rev;
+        bool find_closest = copy_from_rev >= target_rev && (
+            log_entry->rev_num - target_rev < copy_from_rev - target_rev);
+
+        if (accessible && (uninit || find_most_recent || find_closest)) {
             copy_from_segnum = i;
-            most_recent_rev = log_entry->rev_num;
+            copy_from_rev = log_entry->rev_num;
+            if (copy_from_rev == target_rev)
+                break;
         }
     }
     OPT_ASSERT(copy_from_segnum != my_segnum);
@@ -118,21 +137,20 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     /* if there were modifications in the page, revert them. */
     copy_bk_objs_in_page_from(copy_from_segnum, pagenum, false);
 
-    /* we need to go from 'src_version' to 'target_version'.  This
-       might need a walk into the past. */
-    struct stm_commit_log_entry_s *src_version, *target_version;
-    src_version = get_priv_segment(copy_from_segnum)->last_commit_log_entry;
-    target_version = STM_PSEGMENT->last_commit_log_entry;
-
-
     dprintf(("handle_segfault_in_page: rev %lu to rev %lu\n",
-             src_version->rev_num, target_version->rev_num));
-    /* adapt revision of page to our revision:
-       if our rev is higher than the page we copy from, everything
-       is fine as we never read/modified the page anyway
-     */
-    if (src_version->rev_num > target_version->rev_num)
+             copy_from_rev, target_rev));
+    /* we need to go from 'copy_from_rev' to 'target_rev'.  This
+       might need a walk into the past. */
+    if (copy_from_rev > target_rev) {
+        /* adapt revision of page to our revision:
+           if our rev is higher than the page we copy from, everything
+           is fine as we never read/modified the page anyway */
+        struct stm_commit_log_entry_s *src_version, *target_version;
+        src_version = get_priv_segment(copy_from_segnum)->last_commit_log_entry;
+        target_version = STM_PSEGMENT->last_commit_log_entry;
+
         go_to_the_past(pagenum, src_version, target_version);
+    }
 
     release_modification_lock_set(to_lock, my_segnum);
     release_all_privatization_locks();
