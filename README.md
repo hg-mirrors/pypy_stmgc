@@ -101,6 +101,58 @@ expose real data-races that the sequential Python tests cannot expose.
  example: `make build-demo_random2`
  2. then run `./build-demo_random2`
  
+ 
+### Debugging
+
+GDB works fine for debugging programs with the STMGC library. However, you have
+to tell GDB to ignore `SIGSEGV` by default. A `.gdbinit` could look like this:
+
+    handle SIGSEGV nostop pass noprint
+
+    define sigon
+        handle SIGSEGV stop nopass print
+    end
+
+    define sigoff
+        handle SIGSEGV nostop pass noprint
+    end
+
+    define lon
+        set scheduler-locking on
+    end
+    define loff
+        set scheduler-locking off
+    end
+    
+    # run until crash
+    define runloop
+        set pagination off
+        p $_exitcode = 0
+        while $_exitcode == 0
+            p $_exitcode = -1
+            r
+        end
+        set pagination on
+    end
+
+
+The commands `sigon` and `sigoff` enable and disable `SIGSEGV`-handling. `lon`
+and `loff` enables and disables stopping of other threads while stepping through
+one of them. After reaching a breakpoint in GDB, I usually run `sigon` and `lon`
+to enable GDB to handle real `SIGSEGV` (e.g., while printing) and to stop other
+threads.
+
+`runloop` re-runs a program until there is a crash (useful for reproducing rare
+race conditions).
+
+Furthermore, there are some useful GDB extensions under `/c7/gdb/gdb_stm.py`
+that allow for inspecting segment-local pointers. To enable them, add the
+following line to your `.gdbinit`:
+
+    python exec(open('PATH-TO-STMGC/c7/gdb/gdb_stm.py').read())
+    
+
+
 
 ## Building PyPy-STM
 
