@@ -8,9 +8,8 @@ If you want, you can follow the instructions below to download and
 compile the standard gcc.  Of course, it is likely that gcc 6.1 will
 soon be available from your Linux distribution directly.
 
-Note that with gcc 6.1, you no longer need gcc-5.1.0-patch.diff, and you
-should not need the "-fno-*" options either (but we didn't check that
-yet).
+Note that with gcc 6.1, you no longer need gcc-5.1.0-patch.diff, but you
+still need the "-fno-*" options.
 
 
 
