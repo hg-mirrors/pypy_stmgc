@@ -61,8 +61,26 @@ static void go_to_the_past(uintptr_t pagenum,
 }
 
 
+static void readonly_to_accessible(int my_segnum, uintptr_t pagenum)
+{
+    /* make our page write-ready */
+    page_mark_accessible(my_segnum, pagenum);
+
+    /* our READONLY copy *has* to have the current data, no
+       copy necessary */
+    /* make READONLY pages in other segments NO_ACCESS */
+    for (int i = 1; i < NB_SEGMENTS; i++) {
+        if (i == my_segnum)
+            continue;
+
+        if (get_page_status_in(i, pagenum) == PAGE_READONLY)
+            page_mark_inaccessible(i, pagenum);
+    }
+
+}
+
 long ro_to_acc = 0;
-static void handle_segfault_in_page(uintptr_t pagenum)
+static void handle_segfault_in_page(uintptr_t pagenum, bool is_write)
 {
     /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
        and validates to newest revision */
@@ -78,22 +96,13 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     assert(page_status == PAGE_NO_ACCESS
            || page_status == PAGE_READONLY);
 
+
+    //is_write=false;
+    if (page_status == PAGE_READONLY || is_write) {
+        dprintf(("SHORTCUT\n"));
+        readonly_to_accessible(my_segnum, pagenum);
+    }
     if (page_status == PAGE_READONLY) {
-        /* make our page write-ready */
-        page_mark_accessible(my_segnum, pagenum);
-
-        dprintf((" > found READONLY, make others NO_ACCESS\n"));
-        /* our READONLY copy *has* to have the current data, no
-           copy necessary */
-        /* make READONLY pages in other segments NO_ACCESS */
-        for (i = 1; i < NB_SEGMENTS; i++) {
-            if (i == my_segnum)
-                continue;
-
-            if (get_page_status_in(i, pagenum) == PAGE_READONLY)
-                page_mark_inaccessible(i, pagenum);
-        }
-
         ro_to_acc++;
 
         release_all_privatization_locks();
@@ -155,7 +164,8 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     }
 
     /* make our page write-ready */
-    page_mark_accessible(my_segnum, pagenum);
+    if (!is_write) // is_write -> already marked accessible above
+        page_mark_accessible(my_segnum, pagenum);
 
     /* account for this page now: XXX */
     /* increment_total_allocated(4096); */
@@ -230,8 +240,11 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
         abort();
     }
 
+    // http://stackoverflow.com/questions/17671869/how-to-identify-read-or-write-operations-of-page-fault-when-using-sigaction-hand
+    bool is_write = ((ucontext_t*)context)->uc_mcontext.gregs[REG_ERR] & 0x2;
+
     DEBUG_EXPECT_SEGFAULT(false);
-    handle_segfault_in_page(pagenum);
+    handle_segfault_in_page(pagenum, is_write);
     DEBUG_EXPECT_SEGFAULT(true);
 
     errno = saved_errno;

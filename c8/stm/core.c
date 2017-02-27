@@ -817,7 +817,7 @@ static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
         if (get_page_status_in(my_segnum, page) != PAGE_ACCESSIBLE) {
             release_privatization_lock(STM_SEGMENT->segment_num);
             /* emulate pagefault -> PAGE_ACCESSIBLE/READONLY: */
-            handle_segfault_in_page(page);
+            handle_segfault_in_page(page, false);
             volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
             *dummy = *dummy;            /* force segfault (incl. writing) */
             acquire_privatization_lock(STM_SEGMENT->segment_num);
