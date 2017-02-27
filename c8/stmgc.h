@@ -76,6 +76,11 @@ typedef struct stm_thread_local_s {
        the following raw region of memory is cleared. */
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
+    /* mechanism to reset a memory location to the value it had at the start
+       of the transaction in case of an abort */
+    char *mem_reset_on_abort;   /* addr */
+    size_t mem_bytes_to_reset_on_abort; /* how many bytes */
+    char *mem_stored_for_reset_on_abort; /* content at tx start */
     /* the next fields are handled internally by the library */
     int last_associated_segment_num;   /* always a valid seg num */
     int thread_local_counter;
@@ -98,7 +103,7 @@ long _stm_start_transaction(stm_thread_local_t *tl);
 void _stm_commit_transaction(void);
 void _stm_leave_noninevitable_transactional_zone(void);
 #define _stm_detach_inevitable_transaction(tl)  do {                    \
-    write_fence();                                                      \
+    stm_write_fence();                                                  \
     assert(_stm_detached_inevitable_from_thread == 0);                  \
     if (stmcb_timing_event != NULL && tl->self_or_0_if_atomic != 0)     \
         {stmcb_timing_event(tl, STM_TRANSACTION_DETACH, NULL);}         \
@@ -112,6 +117,11 @@ void _stm_collectable_safe_point(void);
 object_t *_stm_allocate_old(ssize_t size_rounded_up);
 char *_stm_real_address(object_t *o);
 #ifdef STM_TESTS
+
+#ifdef STM_NO_AUTOMATIC_SETJMP
+extern int did_abort;
+#endif
+
 #include <stdbool.h>
 uint8_t _stm_get_transaction_read_version(void);
 uint8_t _stm_get_card_value(object_t *obj, long idx);
@@ -196,7 +206,7 @@ uint64_t _stm_total_allocated(void);
    threads than the number of segments, it will block, waiting for the
    next segment to become free.
 */
-#define STM_NB_SEGMENTS    4
+#define STM_NB_SEGMENTS    8
 
 /* Structure of objects
    --------------------
@@ -701,13 +711,13 @@ static inline void stm_leave_transactional_zone(stm_thread_local_t *tl) {
 void stm_force_transaction_break(stm_thread_local_t *tl);
 
 
-/* Support for light finalizers.  This is a simple version of
+/* Support for destructors.  This is a simple version of
    finalizers that guarantees not to do anything fancy, like not
    resurrecting objects. */
-extern void (*stmcb_light_finalizer)(object_t *);
-void stm_enable_light_finalizer(object_t *);
+extern void (*stmcb_destructor)(object_t *);
+void stm_enable_destructor(object_t *);
 
-/* Support for regular finalizers.  Unreachable objects with
+/* XXX: Support for regular finalizers.  Unreachable objects with
    finalizers are kept alive, as well as everything they point to, and
    stmcb_finalizer() is called after the major GC.  If there are
    several objects with finalizers that reference each other in a
@@ -721,8 +731,14 @@ void stm_enable_light_finalizer(object_t *);
    transaction.  For older objects, the finalizer is called from a
    random thread between regular transactions, in a new custom
    transaction. */
-extern void (*stmcb_finalizer)(object_t *);
-object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
+typedef void (*stm_finalizer_trigger_fn)(void);
+void (*stmcb_finalizer)(object_t *);
+void stm_setup_finalizer_queues(int number, stm_finalizer_trigger_fn *triggers);
+void stm_enable_finalizer(int queue_index, object_t *obj);
+
+/* Returns the next object that supposedly died and should have its finalizer
+   called. XXX: This function turns the transaction inevitable. */
+object_t *stm_next_to_finalize(int queue_index);
 
 
 /* dummies for now: */
@@ -733,7 +749,7 @@ static inline void stm_flush_timing(stm_thread_local_t *tl, int verbose) {}
    'object_t *'.  Note that the type 'stm_hashtable_t' is not an
    object type at all; you need to allocate and free it explicitly.
    If you want to embed the hashtable inside an 'object_t' you
-   probably need a light finalizer to do the freeing. */
+   probably need a destructor to do the freeing. */
 typedef struct stm_hashtable_s stm_hashtable_t;
 typedef TLPREFIX struct stm_hashtable_entry_s stm_hashtable_entry_t;
 
@@ -788,8 +804,8 @@ void stm_hashtable_iter_tracefn(stm_hashtable_table_t *table,
 /* Queues.  The items you put() and get() back are in random order.
    Like hashtables, the type 'stm_queue_t' is not an object type at
    all; you need to allocate and free it explicitly.  If you want to
-   embed the queue inside an 'object_t' you probably need a light
-   finalizer to do the freeing. */
+   embed the queue inside an 'object_t' you probably need a destructor
+   to do the freeing. */
 typedef struct stm_queue_s stm_queue_t;
 
 stm_queue_t *stm_queue_create(void);

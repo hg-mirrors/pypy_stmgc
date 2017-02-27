@@ -6,7 +6,7 @@ from common import parent_dir
 ffi = cffi.FFI()
 ffi.cdef("""
 struct list_s *list_create(void);
-void list_free(struct list_s *lst);
+void _list_free(struct list_s *lst);
 struct list_s *list_append(struct list_s *lst, uintptr_t item);
 uintptr_t list_count(struct list_s *lst);
 uintptr_t list_item(struct list_s *lst, uintptr_t index);
@@ -144,5 +144,5 @@ def test_list_extend():
     assert lib.list_count(a) == 17 + 7
     for i, expected in enumerate(range(103, 120) + range(113, 120)):
         assert lib.list_item(a, i) == expected
-    lib.list_free(b)
-    lib.list_free(a)
+    lib._list_free(b)
+    lib._list_free(a)

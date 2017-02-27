@@ -1,9 +1,12 @@
 #ifndef _STM_CORE_H_
 # error "must be compiled via stmgc.c"
+# include "core.h"  // for auto-completion
 #endif
 
 #include <signal.h>
 #include <fcntl.h>           /* For O_* constants */
+#include "signal_handler.h"
+#include "fprintcolor.h"
 
 static void setup_mmap(char *reason)
 {
@@ -70,20 +73,6 @@ static void setup_protection_settings(void)
 }
 
 
-static void setup_signal_handler(void)
-{
-    struct sigaction act;
-    memset(&act, 0, sizeof(act));
-
-	act.sa_sigaction = &_signal_handler;
-	/* The SA_SIGINFO flag tells sigaction() to use the sa_sigaction field, not sa_handler. */
-	act.sa_flags = SA_SIGINFO | SA_NODEFER;
-
-	if (sigaction(SIGSEGV, &act, NULL) < 0) {
-		perror ("sigaction");
-		abort();
-	}
-}
 
 void stm_setup(void)
 {
@@ -114,6 +103,10 @@ void stm_setup(void)
     commit_log_root.rev_num = 0;
     commit_log_root.written_count = 0;
 
+#ifdef STM_NO_AUTOMATIC_SETJMP
+    did_abort = 0;
+#endif
+
     long i;
     /* including seg0 */
     for (i = 0; i < NB_SEGMENTS; i++) {
@@ -140,8 +133,8 @@ void stm_setup(void)
         pr->nursery_objects_shadows = tree_create();
         pr->callbacks_on_commit_and_abort[0] = tree_create();
         pr->callbacks_on_commit_and_abort[1] = tree_create();
-        pr->young_objects_with_light_finalizers = list_create();
-        pr->old_objects_with_light_finalizers = list_create();
+        pr->young_objects_with_destructors = list_create();
+        pr->old_objects_with_destructors = list_create();
 
         pr->last_commit_log_entry = &commit_log_root;
         pr->overflow_number = GCFLAG_OVERFLOW_NUMBER_bit0 * i;
@@ -185,19 +178,19 @@ void stm_teardown(void)
     for (i = 0; i < NB_SEGMENTS; i++) {
         struct stm_priv_segment_info_s *pr = get_priv_segment(i);
         assert(list_is_empty(pr->objects_pointing_to_nursery));
-        list_free(pr->objects_pointing_to_nursery);
-        list_free(pr->old_objects_with_cards_set);
-        list_free(pr->modified_old_objects);
+        LIST_FREE(pr->objects_pointing_to_nursery);
+        LIST_FREE(pr->old_objects_with_cards_set);
+        LIST_FREE(pr->modified_old_objects);
         assert(list_is_empty(pr->large_overflow_objects));
-        list_free(pr->large_overflow_objects);
-        list_free(pr->young_weakrefs);
-        list_free(pr->old_weakrefs);
+        LIST_FREE(pr->large_overflow_objects);
+        LIST_FREE(pr->young_weakrefs);
+        LIST_FREE(pr->old_weakrefs);
         tree_free(pr->young_outside_nursery);
         tree_free(pr->nursery_objects_shadows);
         tree_free(pr->callbacks_on_commit_and_abort[0]);
         tree_free(pr->callbacks_on_commit_and_abort[1]);
-        list_free(pr->young_objects_with_light_finalizers);
-        list_free(pr->old_objects_with_light_finalizers);
+        LIST_FREE(pr->young_objects_with_destructors);
+        LIST_FREE(pr->old_objects_with_destructors);
         if (pr->active_queues) tree_free(pr->active_queues);
     }
 
@@ -333,13 +326,15 @@ static void detect_shadowstack_overflow(char *addr)
     if (addr == NULL)
         return;
     stm_thread_local_t *tl = stm_all_thread_locals;
-    while (tl != NULL) {
+    if (tl == NULL)
+        return;
+    do {
         char *trap = _shadowstack_trap_page(tl->shadowstack_base);
         if (trap <= addr && addr <= trap + 4095) {
             fprintf(stderr, "This is caused by a stack overflow.\n"
-                "Sorry, proper RuntimeError support is not implemented yet.\n");
+                    "Sorry, proper RuntimeError support is not implemented yet.\n");
             return;
         }
         tl = tl->next;
-    }
+    } while (tl != stm_all_thread_locals);
 }

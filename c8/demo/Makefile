@@ -2,9 +2,9 @@
 # Makefile for the demos.
 #
 
-DEBUG_EXE = debug-demo2
-BUILD_EXE = build-demo2
-RELEASE_EXE = release-demo2
+DEBUG_EXE = debug-demo_simple
+BUILD_EXE = build-demo_simple
+RELEASE_EXE = release-demo_simple
 
 debug: $(DEBUG_EXE)       # with prints and asserts
 build: $(BUILD_EXE)       # without prints, but with asserts

@@ -1,5 +1,6 @@
 #ifndef _STM_CORE_H_
 # error "must be compiled via stmgc.c"
+# include "core.h"  // silence flymake
 #endif
 
 char *stm_object_pages;
@@ -113,212 +114,6 @@ static void import_objects(
 }
 
 
-/* ############# signal handler ############# */
-
-static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum,
-                                      bool only_if_not_modified)
-{
-    /* looks at all bk copies of objects overlapping page 'pagenum' and
-       copies the part in 'pagenum' back to the current segment */
-    dprintf(("copy_bk_objs_in_page_from(%d, %ld, %d)\n",
-             from_segnum, (long)pagenum, only_if_not_modified));
-
-    assert(modification_lock_check_rdlock(from_segnum));
-    struct list_s *list = get_priv_segment(from_segnum)->modified_old_objects;
-    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
-    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
-
-    import_objects(only_if_not_modified ? -2 : -1,
-                   pagenum, undo, end);
-}
-
-static void go_to_the_past(uintptr_t pagenum,
-                           struct stm_commit_log_entry_s *from,
-                           struct stm_commit_log_entry_s *to)
-{
-    assert(modification_lock_check_wrlock(STM_SEGMENT->segment_num));
-    assert(from->rev_num >= to->rev_num);
-    /* walk BACKWARDS the commit log and update the page 'pagenum',
-       initially at revision 'from', until we reach the revision 'to'. */
-
-    /* XXXXXXX Recursive algo for now, fix this! */
-    if (from != to) {
-        struct stm_commit_log_entry_s *cl = to->next;
-        go_to_the_past(pagenum, from, cl);
-
-        struct stm_undo_s *undo = cl->written;
-        struct stm_undo_s *end = cl->written + cl->written_count;
-
-        import_objects(-1, pagenum, undo, end);
-    }
-}
-
-
-long ro_to_acc = 0;
-static void handle_segfault_in_page(uintptr_t pagenum)
-{
-    /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
-       and validates to newest revision */
-    dprintf(("handle_segfault_in_page(%lu), seg %d\n", pagenum, STM_SEGMENT->segment_num));
-
-    /* XXX: bad, but no deadlocks: */
-    acquire_all_privatization_locks();
-
-    long i;
-    int my_segnum = STM_SEGMENT->segment_num;
-
-    uint8_t page_status = get_page_status_in(my_segnum, pagenum);
-    assert(page_status == PAGE_NO_ACCESS
-           || page_status == PAGE_READONLY);
-
-    if (page_status == PAGE_READONLY) {
-        /* make our page write-ready */
-        page_mark_accessible(my_segnum, pagenum);
-
-        dprintf((" > found READONLY, make others NO_ACCESS\n"));
-        /* our READONLY copy *has* to have the current data, no
-           copy necessary */
-        /* make READONLY pages in other segments NO_ACCESS */
-        for (i = 1; i < NB_SEGMENTS; i++) {
-            if (i == my_segnum)
-                continue;
-
-            if (get_page_status_in(i, pagenum) == PAGE_READONLY)
-                page_mark_inaccessible(i, pagenum);
-        }
-
-        ro_to_acc++;
-
-        release_all_privatization_locks();
-        return;
-    }
-
-    /* find who has the most recent revision of our page */
-    /* XXX: uh, *more* recent would be enough, right? */
-    int copy_from_segnum = -1;
-    uint64_t most_recent_rev = 0;
-    bool was_readonly = false;
-    for (i = 1; i < NB_SEGMENTS; i++) {
-        if (i == my_segnum)
-            continue;
-
-        if (!was_readonly && get_page_status_in(i, pagenum) == PAGE_READONLY) {
-            was_readonly = true;
-            break;
-        }
-
-        struct stm_commit_log_entry_s *log_entry;
-        log_entry = get_priv_segment(i)->last_commit_log_entry;
-        if (get_page_status_in(i, pagenum) != PAGE_NO_ACCESS
-            && (copy_from_segnum == -1 || log_entry->rev_num > most_recent_rev)) {
-            copy_from_segnum = i;
-            most_recent_rev = log_entry->rev_num;
-        }
-    }
-    OPT_ASSERT(copy_from_segnum != my_segnum);
-
-    if (was_readonly) {
-        assert(page_status == PAGE_NO_ACCESS);
-        /* this case could be avoided by making all NO_ACCESS to READONLY
-           when resharing pages (XXX: better?).
-           We may go from NO_ACCESS->READONLY->ACCESSIBLE on write with
-           2 SIGSEGV in a row.*/
-        dprintf((" > make a previously NO_ACCESS page READONLY\n"));
-        page_mark_readonly(my_segnum, pagenum);
-
-        release_all_privatization_locks();
-        return;
-    }
-
-    /* make our page write-ready */
-    page_mark_accessible(my_segnum, pagenum);
-
-    /* account for this page now: XXX */
-    /* increment_total_allocated(4096); */
-
-
-    if (copy_from_segnum == -1) {
-        dprintf((" > found newly allocated page: copy from seg0\n"));
-
-        /* this page is only accessible in the sharing segment seg0 so far (new
-           allocation). We can thus simply mark it accessible here. */
-        pagecopy(get_virtual_page(my_segnum, pagenum),
-                 get_virtual_page(0, pagenum));
-        release_all_privatization_locks();
-        return;
-    }
-
-    dprintf((" > import data from seg %d\n", copy_from_segnum));
-
-    /* before copying anything, acquire modification locks from our and
-       the other segment */
-    uint64_t to_lock = (1UL << copy_from_segnum);
-    acquire_modification_lock_set(to_lock, my_segnum);
-    pagecopy(get_virtual_page(my_segnum, pagenum),
-             get_virtual_page(copy_from_segnum, pagenum));
-
-    /* if there were modifications in the page, revert them. */
-    copy_bk_objs_in_page_from(copy_from_segnum, pagenum, false);
-
-    /* we need to go from 'src_version' to 'target_version'.  This
-       might need a walk into the past. */
-    struct stm_commit_log_entry_s *src_version, *target_version;
-    src_version = get_priv_segment(copy_from_segnum)->last_commit_log_entry;
-    target_version = STM_PSEGMENT->last_commit_log_entry;
-
-
-    dprintf(("handle_segfault_in_page: rev %lu to rev %lu\n",
-             src_version->rev_num, target_version->rev_num));
-    /* adapt revision of page to our revision:
-       if our rev is higher than the page we copy from, everything
-       is fine as we never read/modified the page anyway
-     */
-    if (src_version->rev_num > target_version->rev_num)
-        go_to_the_past(pagenum, src_version, target_version);
-
-    release_modification_lock_set(to_lock, my_segnum);
-    release_all_privatization_locks();
-}
-
-static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
-{
-    assert(_stm_segfault_expected > 0);
-
-    int saved_errno = errno;
-    char *addr = siginfo->si_addr;
-    dprintf(("si_addr: %p\n", addr));
-    if (addr == NULL || addr < stm_object_pages ||
-        addr >= stm_object_pages+TOTAL_MEMORY) {
-        /* actual segfault, unrelated to stmgc */
-        fprintf(stderr, "Segmentation fault: accessing %p\n", addr);
-        detect_shadowstack_overflow(addr);
-        abort();
-    }
-
-    int segnum = get_segment_of_linear_address(addr);
-    OPT_ASSERT(segnum != 0);
-    if (segnum != STM_SEGMENT->segment_num) {
-        fprintf(stderr, "Segmentation fault: accessing %p (seg %d) from"
-                " seg %d\n", addr, segnum, STM_SEGMENT->segment_num);
-        abort();
-    }
-    dprintf(("-> segment: %d\n", segnum));
-
-    char *seg_base = STM_SEGMENT->segment_base;
-    uintptr_t pagenum = ((char*)addr - seg_base) / 4096UL;
-    if (pagenum < END_NURSERY_PAGE) {
-        fprintf(stderr, "Segmentation fault: accessing %p (seg %d "
-                        "page %lu)\n", addr, segnum, pagenum);
-        abort();
-    }
-
-    DEBUG_EXPECT_SEGFAULT(false);
-    handle_segfault_in_page(pagenum);
-    DEBUG_EXPECT_SEGFAULT(true);
-
-    errno = saved_errno;
-    /* now return and retry */
-}
 
 /* ############# commit log ############# */
 
@@ -361,6 +156,7 @@ void _dbg_print_commit_log(void)
 }
 
 static void reset_modified_from_backup_copies(int segment_num, object_t *only_obj);  /* forward */
+static void undo_modifications_to_single_obj(int segment_num, object_t *only_obj); /* forward */
 
 static bool _stm_validate(void)
 {
@@ -442,7 +238,7 @@ static bool _stm_validate(void)
                     for (; undo < end; undo++) {
                         object_t *obj;
 
-                        if (undo->type != TYPE_POSITION_MARKER) {
+                        if (LIKELY(undo->type != TYPE_POSITION_MARKER)) {
                             /* common case: 'undo->object' was written to
                                in this past commit, so we must check that
                                it was not read by us. */
@@ -472,13 +268,17 @@ static bool _stm_validate(void)
                                an abort. However, from now on, we also assume
                                that an abort would not roll-back to what is in
                                the backup copy, as we don't trace the bkcpy
-                               during major GCs.
+                               during major GCs. (Seg0 may contain the version
+                               found in the other segment and thus not have to
+                               content of our bk_copy)
+
                                We choose the approach to reset all our changes
                                to this obj here, so that we can throw away the
                                backup copy completely: */
                             /* XXX: this browses through the whole list of modified
                                fragments; this may become a problem... */
-                            reset_modified_from_backup_copies(my_segnum, obj);
+                            undo_modifications_to_single_obj(my_segnum, obj);
+
                             continue;
                         }
 
@@ -604,10 +404,14 @@ static void wait_for_inevitable(void)
 */
 static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 {
+    uintptr_t cle_length = 0;
     struct stm_commit_log_entry_s *old;
 
     OPT_ASSERT(new != NULL);
     OPT_ASSERT(new != INEV_RUNNING);
+
+    cle_length = list_count(STM_PSEGMENT->modified_old_objects);
+    assert(cle_length == new->written_count * 3);
 
     soon_finished_or_inevitable_thread_segment();
 
@@ -615,6 +419,16 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
     if (!_stm_validate()) {
         free_cle(new);
         stm_abort_transaction();
+    }
+
+    if (cle_length != list_count(STM_PSEGMENT->modified_old_objects)) {
+        /* something changed the list of modified objs during _stm_validate; or
+         * during a major GC that also does _stm_validate(). That "something"
+         * can only be a reset of a noconflict obj. Thus, we recreate the CL
+         * entry */
+        free_cle(new);
+        new = _create_commit_log_entry();
+        cle_length = list_count(STM_PSEGMENT->modified_old_objects);
     }
 
 #if STM_TESTS
@@ -815,6 +629,10 @@ static void make_bk_slices(object_t *obj,
     size_t start_offset;
     if (first_call) {
         start_offset = 0;
+
+        /* flags like a never-touched obj */
+        assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
+        assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
     } else {
         start_offset = -1;
     }
@@ -1249,8 +1067,7 @@ static void _do_start_transaction(stm_thread_local_t *tl)
     assert(tree_is_cleared(STM_PSEGMENT->nursery_objects_shadows));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[0]));
     assert(tree_is_cleared(STM_PSEGMENT->callbacks_on_commit_and_abort[1]));
-    assert(list_is_empty(STM_PSEGMENT->young_objects_with_light_finalizers));
-    assert(STM_PSEGMENT->finalizers == NULL);
+    assert(list_is_empty(STM_PSEGMENT->young_objects_with_destructors));
     assert(STM_PSEGMENT->active_queues == NULL);
 #ifndef NDEBUG
     /* this should not be used when objects_pointing_to_nursery == NULL */
@@ -1258,6 +1075,13 @@ static void _do_start_transaction(stm_thread_local_t *tl)
 #endif
 
     check_nursery_at_transaction_start();
+
+    if (tl->mem_reset_on_abort) {
+        assert(!!tl->mem_stored_for_reset_on_abort);
+        memcpy(tl->mem_stored_for_reset_on_abort, tl->mem_reset_on_abort,
+               tl->mem_bytes_to_reset_on_abort);
+    }
+
 
     /* Change read-version here, because if we do stm_validate in the
        safe-point below, we should not see our old reads from the last
@@ -1282,7 +1106,7 @@ static void _do_start_transaction(stm_thread_local_t *tl)
 }
 
 #ifdef STM_NO_AUTOMATIC_SETJMP
-static int did_abort = 0;
+int did_abort = 0;
 #endif
 
 long _stm_start_transaction(stm_thread_local_t *tl)
@@ -1294,6 +1118,12 @@ long _stm_start_transaction(stm_thread_local_t *tl)
 #else
     long repeat_count = stm_rewind_jmp_setjmp(tl);
 #endif
+    if (repeat_count) {
+        /* only if there was an abort, we need to reset the memory: */
+        if (tl->mem_reset_on_abort)
+            memcpy(tl->mem_reset_on_abort, tl->mem_stored_for_reset_on_abort,
+                   tl->mem_bytes_to_reset_on_abort);
+    }
     _do_start_transaction(tl);
 
     if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
@@ -1419,6 +1249,7 @@ static void _core_commit_transaction(bool external)
     push_large_overflow_objects_to_other_segments();
     /* push before validate. otherwise they are reachable too early */
 
+
     /* before releasing _stm_detached_inevitable_from_thread, perform
        the commit. Otherwise, the same thread whose (inev) transaction we try
        to commit here may start a new one in another segment *but* w/o
@@ -1436,7 +1267,7 @@ static void _core_commit_transaction(bool external)
         /* but first, emit commit-event of this thread: */
         timing_event(STM_SEGMENT->running_thread, STM_TRANSACTION_COMMIT);
         STM_SEGMENT->running_thread = NULL;
-        write_fence();
+        stm_write_fence();
         assert(_stm_detached_inevitable_from_thread == -1);
         _stm_detached_inevitable_from_thread = 0;
     }
@@ -1481,6 +1312,48 @@ static void _core_commit_transaction(bool external)
         invoke_general_finalizers(tl);
 }
 
+static void undo_modifications_to_single_obj(int segment_num, object_t *obj)
+{
+    /* special function used for noconflict objs to reset all their
+     * modifications and make them appear untouched in the current transaction.
+     * I.e., reset modifications and remove from all lists. */
+
+    struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
+
+    reset_modified_from_backup_copies(segment_num, obj);
+
+    /* reset read marker (must not be considered read either) */
+    ((struct stm_read_marker_s *)
+     (pseg->pub.segment_base + (((uintptr_t)obj) >> 4)))->rm = 0;
+
+    /* reset possibly marked cards */
+    if (get_page_status_in(segment_num, (uintptr_t)obj / 4096) == PAGE_ACCESSIBLE
+        && obj_should_use_cards(pseg->pub.segment_base, obj)) {
+        /* if header is not accessible, we didn't mark any cards */
+        _reset_object_cards(pseg, obj, CARD_CLEAR, false, false);
+    }
+
+    /* remove from all other lists */
+    LIST_FOREACH_R(pseg->old_objects_with_cards_set, object_t * /*item*/,
+       {
+           if (item == obj) {
+               /* copy last element over this one (HACK) */
+               _lst->count -= 1;
+               _lst->items[_i] = _lst->items[_lst->count];
+               break;
+           }
+       });
+    LIST_FOREACH_R(pseg->objects_pointing_to_nursery, object_t * /*item*/,
+       {
+           if (item == obj) {
+               /* copy last element over this one (HACK) */
+               _lst->count -= 1;
+               _lst->items[_i] = _lst->items[_lst->count];
+               break;
+           }
+       });
+}
+
 static void reset_modified_from_backup_copies(int segment_num, object_t *only_obj)
 {
 #pragma push_macro("STM_PSEGMENT")
@@ -1489,6 +1362,9 @@ static void reset_modified_from_backup_copies(int segment_num, object_t *only_ob
 #undef STM_SEGMENT
     assert(modification_lock_check_wrlock(segment_num));
     DEBUG_EXPECT_SEGFAULT(false);
+
+    /* WARNING: resetting the obj will remove the WB flag. Make sure you either
+     * re-add it or remove it from lists where it was added based on the flag. */
 
     struct stm_priv_segment_info_s *pseg = get_priv_segment(segment_num);
     struct list_s *list = pseg->modified_old_objects;
@@ -1500,7 +1376,7 @@ static void reset_modified_from_backup_copies(int segment_num, object_t *only_ob
             continue;
 
         object_t *obj = undo->object;
-        if (only_obj != NULL && obj != only_obj)
+        if (UNLIKELY(only_obj != NULL) && LIKELY(obj != only_obj))
             continue;
 
         char *dst = REAL_ADDRESS(pseg->pub.segment_base, obj);
@@ -1515,19 +1391,15 @@ static void reset_modified_from_backup_copies(int segment_num, object_t *only_ob
 
         free_bk(undo);
 
-        if (only_obj != NULL) {
-            assert(IMPLY(only_obj != NULL,
-                         (((struct object_s *)dst)->stm_flags
-                          & (GCFLAG_NO_CONFLICT
-                             | GCFLAG_WRITE_BARRIER
-                             | GCFLAG_WB_EXECUTED))
-                         == (GCFLAG_NO_CONFLICT | GCFLAG_WRITE_BARRIER)));
+        if (UNLIKELY(only_obj != NULL)) {
+            assert(((struct object_s *)dst)->stm_flags & GCFLAG_NO_CONFLICT);
+
             /* copy last element over this one */
             end--;
             list->count -= 3;
-            if (undo < end)
-                *undo = *end;
-            undo--;  /* next itr */
+            *undo = *end;
+            /* to neutralise the increment for the next iter: */
+            undo--;
         }
     }
 
@@ -1652,6 +1524,13 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
 
     if (tl->mem_clear_on_abort)
         memset(tl->mem_clear_on_abort, 0, tl->mem_bytes_to_clear_on_abort);
+    if (tl->mem_reset_on_abort) {
+        /* temporarily set the memory of mem_reset_on_abort to zeros since in the
+           case of vmprof, the old value is really wrong if we didn't do the longjmp
+           back yet (that restores the C stack). We restore the memory in
+           _stm_start_transaction() */
+        memset(tl->mem_reset_on_abort, 0, tl->mem_bytes_to_reset_on_abort);
+    }
 
     invoke_and_clear_user_callbacks(1);   /* for abort */
 
@@ -1760,7 +1639,7 @@ void _stm_become_inevitable(const char *msg)
        0. We have to wait for this to happen bc. otherwise, eg.
        _stm_detach_inevitable_transaction is not safe to do yet */
     while (_stm_detached_inevitable_from_thread == -1)
-        spin_loop();
+        stm_spin_loop();
     assert(_stm_detached_inevitable_from_thread == 0);
 
     soon_finished_or_inevitable_thread_segment();
@@ -1830,13 +1709,13 @@ static void synchronize_object_enqueue(object_t *obj)
     assert(STM_PSEGMENT->privatization_lock);
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
     assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
+    assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
 
     ssize_t obj_size = stmcb_size_rounded_up(
         (struct object_s *)REAL_ADDRESS(STM_SEGMENT->segment_base, obj));
     OPT_ASSERT(obj_size >= 16);
 
     if (LIKELY(is_small_uniform(obj))) {
-        assert(!(obj->stm_flags & GCFLAG_CARDS_SET));
         OPT_ASSERT(obj_size <= GC_LAST_SMALL_SIZE);
         _synchronize_fragment((stm_char *)obj, obj_size);
         return;

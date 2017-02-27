@@ -1,6 +1,11 @@
 import cffi, weakref
 from common import parent_dir, source_files
 
+import os
+# enable some malloc debug checks:
+os.environ["MALLOC_CHECK_"] = "3"
+
+
 # ----------
 
 ffi = cffi.FFI()
@@ -30,6 +35,9 @@ typedef struct {
     object_t *thread_local_obj;
     char *mem_clear_on_abort;
     size_t mem_bytes_to_clear_on_abort;
+    char *mem_reset_on_abort;   /* addr */
+    size_t mem_bytes_to_reset_on_abort; /* how many bytes */
+    char *mem_stored_for_reset_on_abort; /* content at tx start */
     int last_associated_segment_num;
     struct stm_thread_local_s *prev, *next;
     void *creating_pthread[2];
@@ -43,7 +51,6 @@ void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
 object_t *stm_allocate(ssize_t size_rounded_up);
 object_t *stm_allocate_weakref(ssize_t size_rounded_up);
-object_t *stm_allocate_with_finalizer(ssize_t size_rounded_up);
 object_t *stm_allocate_noconflict(ssize_t size_rounded_up);
 
 /*void stm_write_card(); use _checked_stm_write_card() instead */
@@ -198,11 +205,14 @@ object_t *_stm_allocate_old_small(ssize_t size_rounded_up);
 bool (*_stm_smallmalloc_keep)(char *data);
 void _stm_smallmalloc_sweep_test(void);
 
+void (*stmcb_destructor)(object_t *);
+void stm_enable_destructor(object_t *);
 
-void (*stmcb_light_finalizer)(object_t *);
-void stm_enable_light_finalizer(object_t *);
-
+typedef void (*stm_finalizer_trigger_fn)(void);
 void (*stmcb_finalizer)(object_t *);
+void stm_setup_finalizer_queues(int number, stm_finalizer_trigger_fn *triggers);
+void stm_enable_finalizer(int queue_index, object_t *obj);
+object_t *stm_next_to_finalize(int queue_index);
 
 typedef struct stm_hashtable_s stm_hashtable_t;
 typedef ... stm_hashtable_entry_t;
@@ -665,6 +675,7 @@ long current_segment_num(void)
      force_generic_engine=True)
 
 
+
 WORD = 8
 HDR = lib.SIZEOF_MYOBJ
 assert HDR == 8
@@ -745,15 +756,19 @@ def stm_allocate_noconflict_refs(n):
     return o
 
 def stm_allocate_with_finalizer(size):
-    o = lib.stm_allocate_with_finalizer(size)
+    # OLD-Style finalizers!
+    o = lib.stm_allocate(size)
     tid = 42 + size
     lib._set_type_id(o, tid)
+    lib.stm_enable_finalizer(-1, o)
     return o
 
 def stm_allocate_with_finalizer_refs(n):
-    o = lib.stm_allocate_with_finalizer(HDR + n * WORD)
+    # OLD-Style finalizers!
+    o = lib.stm_allocate(HDR + n * WORD)
     tid = 421420 + n
     lib._set_type_id(o, tid)
+    lib.stm_enable_finalizer(-1, o)
     return o
 
 SIZEOF_HASHTABLE_OBJ = 16 + lib.SIZEOF_MYOBJ

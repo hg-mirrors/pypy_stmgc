@@ -1,5 +1,6 @@
 #ifndef _STM_CORE_H_
 # error "must be compiled via stmgc.c"
+# include "core.h"  // silence flymake
 #endif
 
 
@@ -53,7 +54,7 @@ static void grab_more_free_pages_for_small_allocations(void)
        lock of pages.c to prevent any remapping from occurring under our
        feet.
     */
-    spinlock_acquire(gmfp_lock);
+    stm_spinlock_acquire(gmfp_lock);
 
     if (free_uniform_pages == NULL) {
 
@@ -90,7 +91,7 @@ static void grab_more_free_pages_for_small_allocations(void)
         }
     }
 
-    spinlock_release(gmfp_lock);
+    stm_spinlock_release(gmfp_lock);
     return;
 
  out_of_memory:

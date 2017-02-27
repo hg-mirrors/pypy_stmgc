@@ -1,5 +1,6 @@
 #ifndef _STM_CORE_H_
 # error "must be compiled via stmgc.c"
+# include "core.h"  // silence flymake
 #endif
 
 /* This contains a lot of inspiration from malloc() in the GNU C Library.
@@ -116,12 +117,12 @@ static struct {
 
 static void lm_lock(void)
 {
-    spinlock_acquire(lm.lock);
+    stm_spinlock_acquire(lm.lock);
 }
 
 static void lm_unlock(void)
 {
-    spinlock_release(lm.lock);
+    stm_spinlock_release(lm.lock);
 }
 
 

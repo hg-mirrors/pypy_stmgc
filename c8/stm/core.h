@@ -1,3 +1,9 @@
+#ifndef _STMGC_H
+# error "must be compiled via stmgc.c"
+# include "../stmgc.h"  // silence flymake
+#endif
+
+
 #define _STM_CORE_H_
 
 #include <stdlib.h>
@@ -7,7 +13,8 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
-
+#include <stdbool.h>
+#include "list.h"
 
 /************************************************************/
 
@@ -139,9 +146,9 @@ struct stm_priv_segment_info_s {
     pthread_t running_pthread;
 #endif
 
-    /* light finalizers */
-    struct list_s *young_objects_with_light_finalizers;
-    struct list_s *old_objects_with_light_finalizers;
+    /* destructors */
+    struct list_s *young_objects_with_destructors;
+    struct list_s *old_objects_with_destructors;
 
     /* regular finalizers (objs from the current transaction only) */
     struct finalizers_s *finalizers;
@@ -304,6 +311,14 @@ static void _signal_handler(int sig, siginfo_t *siginfo, void *context);
 static bool _stm_validate(void);
 static void _core_commit_transaction(bool external);
 
+static void import_objects(
+        int from_segnum,            /* or -1: from undo->backup,
+                                       or -2: from undo->backup if not modified */
+        uintptr_t pagenum,          /* or -1: "all accessible" */
+        struct stm_undo_s *undo,
+        struct stm_undo_s *end);
+
+
 static inline bool was_read_remote(char *base, object_t *obj)
 {
     uint8_t other_transaction_read_version =
@@ -326,12 +341,12 @@ static inline void _duck(void) {
 
 static inline void acquire_privatization_lock(int segnum)
 {
-    spinlock_acquire(get_priv_segment(segnum)->privatization_lock);
+    stm_spinlock_acquire(get_priv_segment(segnum)->privatization_lock);
 }
 
 static inline void release_privatization_lock(int segnum)
 {
-    spinlock_release(get_priv_segment(segnum)->privatization_lock);
+    stm_spinlock_release(get_priv_segment(segnum)->privatization_lock);
 }
 
 static inline bool all_privatization_locks_acquired(void)

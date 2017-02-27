@@ -1,0 +1,239 @@
+#ifndef _STM_CORE_H_
+# error "must be compiled via stmgc.c"
+# include "core.h"  // silence flymake
+#endif
+
+
+
+
+static void setup_signal_handler(void)
+{
+    struct sigaction act;
+    memset(&act, 0, sizeof(act));
+
+	act.sa_sigaction = &_signal_handler;
+	/* The SA_SIGINFO flag tells sigaction() to use the sa_sigaction field, not sa_handler. */
+	act.sa_flags = SA_SIGINFO | SA_NODEFER;
+
+	if (sigaction(SIGSEGV, &act, NULL) < 0) {
+		perror ("sigaction");
+		abort();
+	}
+}
+
+
+static void copy_bk_objs_in_page_from(int from_segnum, uintptr_t pagenum,
+                                      bool only_if_not_modified)
+{
+    /* looks at all bk copies of objects overlapping page 'pagenum' and
+       copies the part in 'pagenum' back to the current segment */
+    dprintf(("copy_bk_objs_in_page_from(%d, %ld, %d)\n",
+             from_segnum, (long)pagenum, only_if_not_modified));
+
+    assert(modification_lock_check_rdlock(from_segnum));
+    struct list_s *list = get_priv_segment(from_segnum)->modified_old_objects;
+    struct stm_undo_s *undo = (struct stm_undo_s *)list->items;
+    struct stm_undo_s *end = (struct stm_undo_s *)(list->items + list->count);
+
+    import_objects(only_if_not_modified ? -2 : -1,
+                   pagenum, undo, end);
+}
+
+static void go_to_the_past(uintptr_t pagenum,
+                           struct stm_commit_log_entry_s *from,
+                           struct stm_commit_log_entry_s *to)
+{
+    assert(modification_lock_check_wrlock(STM_SEGMENT->segment_num));
+    assert(from->rev_num >= to->rev_num);
+    /* walk BACKWARDS the commit log and update the page 'pagenum',
+       initially at revision 'from', until we reach the revision 'to'. */
+
+    /* XXXXXXX Recursive algo for now, fix this! */
+    if (from != to) {
+        struct stm_commit_log_entry_s *cl = to->next;
+        go_to_the_past(pagenum, from, cl);
+
+        struct stm_undo_s *undo = cl->written;
+        struct stm_undo_s *end = cl->written + cl->written_count;
+
+        import_objects(-1, pagenum, undo, end);
+    }
+}
+
+
+long ro_to_acc = 0;
+static void handle_segfault_in_page(uintptr_t pagenum)
+{
+    /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
+       and validates to newest revision */
+    dprintf(("handle_segfault_in_page(%lu), seg %d\n", pagenum, STM_SEGMENT->segment_num));
+
+    /* XXX: bad, but no deadlocks: */
+    acquire_all_privatization_locks();
+
+    long i;
+    int my_segnum = STM_SEGMENT->segment_num;
+
+    uint8_t page_status = get_page_status_in(my_segnum, pagenum);
+    assert(page_status == PAGE_NO_ACCESS
+           || page_status == PAGE_READONLY);
+
+    if (page_status == PAGE_READONLY) {
+        /* make our page write-ready */
+        page_mark_accessible(my_segnum, pagenum);
+
+        dprintf((" > found READONLY, make others NO_ACCESS\n"));
+        /* our READONLY copy *has* to have the current data, no
+           copy necessary */
+        /* make READONLY pages in other segments NO_ACCESS */
+        for (i = 1; i < NB_SEGMENTS; i++) {
+            if (i == my_segnum)
+                continue;
+
+            if (get_page_status_in(i, pagenum) == PAGE_READONLY)
+                page_mark_inaccessible(i, pagenum);
+        }
+
+        ro_to_acc++;
+
+        release_all_privatization_locks();
+        return;
+    }
+
+    /* find a suitable page to copy from in other segments:
+     * suitable means:
+     *  - if there is a revision around >= target_rev, get the oldest >= target_rev.
+     *  - otherwise find most recent revision
+     * Note: simply finding the most recent revision would be a conservative strategy, but
+     *       requires going back in time more often (see below)
+     */
+    int copy_from_segnum = -1;
+    uint64_t copy_from_rev = 0;
+    uint64_t target_rev = STM_PSEGMENT->last_commit_log_entry->rev_num;
+    bool was_readonly = false;
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        if (i == my_segnum)
+            continue;
+
+        if (!was_readonly && get_page_status_in(i, pagenum) == PAGE_READONLY) {
+            was_readonly = true;
+            break;
+        }
+
+        struct stm_commit_log_entry_s *log_entry;
+        log_entry = get_priv_segment(i)->last_commit_log_entry;
+
+        /* - if not found anything, initialise copy_from_rev
+         * - else if target_rev is higher than everything we found, find newest among them
+         * - else: find revision that is as close to target_rev as possible         */
+        bool accessible = get_page_status_in(i, pagenum) != PAGE_NO_ACCESS;
+        bool uninit = copy_from_segnum == -1;
+        bool find_most_recent = copy_from_rev < target_rev && log_entry->rev_num > copy_from_rev;
+        bool find_closest = copy_from_rev >= target_rev && (
+            log_entry->rev_num - target_rev < copy_from_rev - target_rev);
+
+        if (accessible && (uninit || find_most_recent || find_closest)) {
+            copy_from_segnum = i;
+            copy_from_rev = log_entry->rev_num;
+            if (copy_from_rev == target_rev)
+                break;
+        }
+    }
+    OPT_ASSERT(copy_from_segnum != my_segnum);
+
+    if (was_readonly) {
+        assert(page_status == PAGE_NO_ACCESS);
+        /* this case could be avoided by making all NO_ACCESS to READONLY
+           when resharing pages (XXX: better?).
+           We may go from NO_ACCESS->READONLY->ACCESSIBLE on write with
+           2 SIGSEGV in a row.*/
+        dprintf((" > make a previously NO_ACCESS page READONLY\n"));
+        page_mark_readonly(my_segnum, pagenum);
+
+        release_all_privatization_locks();
+        return;
+    }
+
+    /* make our page write-ready */
+    page_mark_accessible(my_segnum, pagenum);
+
+    /* account for this page now: XXX */
+    /* increment_total_allocated(4096); */
+
+    if (copy_from_segnum == -1) {
+        /* this page is only accessible in the sharing segment seg0 so far (new
+           allocation). We can thus simply mark it accessible here. */
+        pagecopy(get_virtual_page(my_segnum, pagenum),
+                 get_virtual_page(0, pagenum));
+        release_all_privatization_locks();
+        return;
+    }
+
+    /* before copying anything, acquire modification locks from our and
+       the other segment */
+    uint64_t to_lock = (1UL << copy_from_segnum);
+    acquire_modification_lock_set(to_lock, my_segnum);
+    pagecopy(get_virtual_page(my_segnum, pagenum),
+             get_virtual_page(copy_from_segnum, pagenum));
+
+    /* if there were modifications in the page, revert them. */
+    copy_bk_objs_in_page_from(copy_from_segnum, pagenum, false);
+
+    dprintf(("handle_segfault_in_page: rev %lu to rev %lu\n",
+             copy_from_rev, target_rev));
+    /* we need to go from 'copy_from_rev' to 'target_rev'.  This
+       might need a walk into the past. */
+    if (copy_from_rev > target_rev) {
+        /* adapt revision of page to our revision:
+           if our rev is higher than the page we copy from, everything
+           is fine as we never read/modified the page anyway */
+        struct stm_commit_log_entry_s *src_version, *target_version;
+        src_version = get_priv_segment(copy_from_segnum)->last_commit_log_entry;
+        target_version = STM_PSEGMENT->last_commit_log_entry;
+
+        go_to_the_past(pagenum, src_version, target_version);
+    }
+
+    release_modification_lock_set(to_lock, my_segnum);
+    release_all_privatization_locks();
+}
+
+static void _signal_handler(int sig, siginfo_t *siginfo, void *context)
+{
+    assert(_stm_segfault_expected > 0);
+
+    int saved_errno = errno;
+    char *addr = siginfo->si_addr;
+    dprintf(("si_addr: %p\n", addr));
+    if (addr == NULL || addr < stm_object_pages ||
+        addr >= stm_object_pages+TOTAL_MEMORY) {
+        /* actual segfault, unrelated to stmgc */
+        fprintf(stderr, "Segmentation fault: accessing %p\n", addr);
+        detect_shadowstack_overflow(addr);
+        abort();
+    }
+
+    int segnum = get_segment_of_linear_address(addr);
+    OPT_ASSERT(segnum != 0);
+    if (segnum != STM_SEGMENT->segment_num) {
+        fprintf(stderr, "Segmentation fault: accessing %p (seg %d) from"
+                " seg %d\n", addr, segnum, STM_SEGMENT->segment_num);
+        abort();
+    }
+    dprintf(("-> segment: %d\n", segnum));
+
+    char *seg_base = STM_SEGMENT->segment_base;
+    uintptr_t pagenum = ((char*)addr - seg_base) / 4096UL;
+    if (pagenum < END_NURSERY_PAGE) {
+        fprintf(stderr, "Segmentation fault: accessing %p (seg %d "
+                        "page %lu)\n", addr, segnum, pagenum);
+        abort();
+    }
+
+    DEBUG_EXPECT_SEGFAULT(false);
+    handle_segfault_in_page(pagenum);
+    DEBUG_EXPECT_SEGFAULT(true);
+
+    errno = saved_errno;
+    /* now return and retry */
+}

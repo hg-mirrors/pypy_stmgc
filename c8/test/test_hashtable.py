@@ -43,8 +43,8 @@ class BaseTestHashtable(BaseTest):
         BaseTest.setup_method(self, meth)
         #
         @ffi.callback("void(object_t *)")
-        def light_finalizer(obj):
-            print 'light_finalizer:', obj
+        def destructor(obj):
+            print 'destructor:', obj
             try:
                 assert lib._get_type_id(obj) == 421419
                 self.seen_hashtables -= 1
@@ -54,20 +54,20 @@ class BaseTestHashtable(BaseTest):
                 self.errors.append(sys.exc_info()[2])
                 raise
 
-        lib.stmcb_light_finalizer = light_finalizer
-        self._light_finalizer_keepalive = light_finalizer
+        lib.stmcb_destructor = destructor
+        self._destructor_keepalive = destructor
         self.seen_hashtables = 0
         self.errors = []
 
     def teardown_method(self, meth):
         BaseTest.teardown_method(self, meth)
-        lib.stmcb_light_finalizer = ffi.NULL
+        lib.stmcb_destructor = ffi.NULL
         assert self.errors == []
         assert self.seen_hashtables == 0
 
     def allocate_hashtable(self):
         h = stm_allocate_hashtable()
-        lib.stm_enable_light_finalizer(h)
+        lib.stm_enable_destructor(h)
         self.seen_hashtables += 1
         return h
 
