@@ -60,12 +60,17 @@ long _stm_count_cl_entries(void)
 
 
 #ifdef STM_TESTS
-bool _stm_is_accessible_page(uintptr_t pagenum)
+uint8_t _stm_get_page_status(uintptr_t pagenum)
 {
     acquire_privatization_lock(STM_SEGMENT->segment_num);
-    bool res = get_page_status_in(STM_SEGMENT->segment_num, pagenum) == PAGE_ACCESSIBLE;
+    uint8_t res = get_page_status_in(STM_SEGMENT->segment_num, pagenum);
     release_privatization_lock(STM_SEGMENT->segment_num);
     return res;
+}
+
+bool _stm_get_hint_modified_recently(uintptr_t pagenum)
+{
+    return get_hint_modified_recently(pagenum);
 }
 
 long _stm_count_modified_old_objects(void)

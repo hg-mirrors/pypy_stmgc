@@ -4,6 +4,7 @@
 #endif
 
 char *stm_object_pages;
+int stm_object_pages_fd;
 long _stm_segment_nb_pages = NB_PAGES;
 int _stm_nb_segments = NB_SEGMENTS;
 int _stm_psegment_ofs = (int)(uintptr_t)STM_PSEGMENT;
@@ -63,8 +64,11 @@ static void import_objects(
         stm_char *oslice = ((stm_char *)obj) + SLICE_OFFSET(undo->slice);
         uintptr_t current_page_num = ((uintptr_t)oslice) / 4096;
 
+        /* never import anything into READONLY pages */
+        assert(get_page_status_in(my_segnum, current_page_num) != PAGE_READONLY);
+
         if (pagenum == -1) {
-            if (get_page_status_in(my_segnum, current_page_num) == PAGE_NO_ACCESS)
+            if (get_page_status_in(my_segnum, current_page_num) != PAGE_ACCESSIBLE)
                 continue;
         } else if (pagenum != current_page_num) {
             continue;
@@ -87,7 +91,7 @@ static void import_objects(
 
         /* XXX: if the next assert is always true, we should never get a segfault
            in this function at all. So the DEBUG_EXPECT_SEGFAULT is correct. */
-        assert((get_page_status_in(my_segnum, current_page_num) != PAGE_NO_ACCESS));
+        assert((get_page_status_in(my_segnum, current_page_num) == PAGE_ACCESSIBLE));
 
         /* dprintf(("import slice seg=%d obj=%p off=%lu sz=%d pg=%lu\n", */
         /*          from_segnum, obj, SLICE_OFFSET(undo->slice), */
@@ -802,17 +806,33 @@ static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
         end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
     }
 
+    dprintf(("touch_all_pages_of_obj(%p, %lu): %ld-%ld\n",
+             obj, obj_size, first_page, end_page));
+
     acquire_privatization_lock(STM_SEGMENT->segment_num);
     uintptr_t page;
     for (page = first_page; page <= end_page; page++) {
-        if (get_page_status_in(my_segnum, page) == PAGE_NO_ACCESS) {
+        set_hint_modified_recently(page);
+
+        if (get_page_status_in(my_segnum, page) != PAGE_ACCESSIBLE) {
             release_privatization_lock(STM_SEGMENT->segment_num);
-            /* emulate pagefault -> PAGE_ACCESSIBLE: */
+            /* emulate pagefault -> PAGE_ACCESSIBLE/READONLY: */
             handle_segfault_in_page(page);
+            volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
+            *dummy = *dummy;            /* force segfault (incl. writing) */
             acquire_privatization_lock(STM_SEGMENT->segment_num);
         }
     }
     release_privatization_lock(STM_SEGMENT->segment_num);
+
+#ifndef NDEBUG
+    acquire_privatization_lock(STM_SEGMENT->segment_num);
+    for (page = first_page; page <= end_page; page++) {
+        if (get_page_status_in(my_segnum, page) != PAGE_ACCESSIBLE)
+            abort();
+    }
+    release_privatization_lock(STM_SEGMENT->segment_num);
+#endif
 }
 
 static void write_slowpath_common(object_t *obj, bool mark_card)
@@ -1186,15 +1206,8 @@ static void push_large_overflow_objects_to_other_segments(void)
     synchronize_objects_flush();
     release_privatization_lock(STM_SEGMENT->segment_num);
 
-    /* we can as well clear the list here, since the
-       objects are only useful if the commit succeeds. And
-       we never do a major collection in-between.
-       They should also survive any page privatization happening
-       before the actual commit, since we always do a pagecopy
-       in handle_segfault_in_page() that also copies
-       unknown-to-the-segment/uncommitted things.
-    */
-    list_clear(STM_PSEGMENT->large_overflow_objects);
+    /* don't clear the list yet, as major GC page resharing
+       depends on the list until the real commit */
 }
 
 
@@ -1348,6 +1361,7 @@ static void reset_modified_from_backup_copies(int segment_num, object_t *only_ob
 #undef STM_PSEGMENT
 #undef STM_SEGMENT
     assert(modification_lock_check_wrlock(segment_num));
+    DEBUG_EXPECT_SEGFAULT(false);
 
     /* WARNING: resetting the obj will remove the WB flag. Make sure you either
      * re-add it or remove it from lists where it was added based on the flag. */
@@ -1395,6 +1409,7 @@ static void reset_modified_from_backup_copies(int segment_num, object_t *only_ob
 
         list_clear(list);
     }
+    DEBUG_EXPECT_SEGFAULT(true);
 #pragma pop_macro("STM_SEGMENT")
 #pragma pop_macro("STM_PSEGMENT")
 }
@@ -1752,7 +1767,8 @@ static void synchronize_objects_flush(void)
             if (i == myself)
                 continue;
 
-            if (get_page_status_in(i, page) != PAGE_NO_ACCESS) {
+            assert(get_page_status_in(i, page) != PAGE_READONLY);
+            if (get_page_status_in(i, page) == PAGE_ACCESSIBLE) {
                 /* shared or private, but never segfault */
                 char *dst = REAL_ADDRESS(get_segment_base(i), frag);
                 dprintf(("-> flush %p to seg %lu, sz=%lu\n", frag, i, frag_size));

@@ -61,12 +61,11 @@ static void go_to_the_past(uintptr_t pagenum,
 }
 
 
-
+long ro_to_acc = 0;
 static void handle_segfault_in_page(uintptr_t pagenum)
 {
     /* assumes page 'pagenum' is ACCESS_NONE, privatizes it,
        and validates to newest revision */
-
     dprintf(("handle_segfault_in_page(%lu), seg %d\n", pagenum, STM_SEGMENT->segment_num));
 
     /* XXX: bad, but no deadlocks: */
@@ -75,7 +74,31 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     long i;
     int my_segnum = STM_SEGMENT->segment_num;
 
-    assert(get_page_status_in(my_segnum, pagenum) == PAGE_NO_ACCESS);
+    uint8_t page_status = get_page_status_in(my_segnum, pagenum);
+    assert(page_status == PAGE_NO_ACCESS
+           || page_status == PAGE_READONLY);
+
+    if (page_status == PAGE_READONLY) {
+        /* make our page write-ready */
+        page_mark_accessible(my_segnum, pagenum);
+
+        dprintf((" > found READONLY, make others NO_ACCESS\n"));
+        /* our READONLY copy *has* to have the current data, no
+           copy necessary */
+        /* make READONLY pages in other segments NO_ACCESS */
+        for (i = 1; i < NB_SEGMENTS; i++) {
+            if (i == my_segnum)
+                continue;
+
+            if (get_page_status_in(i, pagenum) == PAGE_READONLY)
+                page_mark_inaccessible(i, pagenum);
+        }
+
+        ro_to_acc++;
+
+        release_all_privatization_locks();
+        return;
+    }
 
     /* find a suitable page to copy from in other segments:
      * suitable means:
@@ -87,9 +110,15 @@ static void handle_segfault_in_page(uintptr_t pagenum)
     int copy_from_segnum = -1;
     uint64_t copy_from_rev = 0;
     uint64_t target_rev = STM_PSEGMENT->last_commit_log_entry->rev_num;
+    bool was_readonly = false;
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
+
+        if (!was_readonly && get_page_status_in(i, pagenum) == PAGE_READONLY) {
+            was_readonly = true;
+            break;
+        }
 
         struct stm_commit_log_entry_s *log_entry;
         log_entry = get_priv_segment(i)->last_commit_log_entry;
@@ -111,6 +140,19 @@ static void handle_segfault_in_page(uintptr_t pagenum)
         }
     }
     OPT_ASSERT(copy_from_segnum != my_segnum);
+
+    if (was_readonly) {
+        assert(page_status == PAGE_NO_ACCESS);
+        /* this case could be avoided by making all NO_ACCESS to READONLY
+           when resharing pages (XXX: better?).
+           We may go from NO_ACCESS->READONLY->ACCESSIBLE on write with
+           2 SIGSEGV in a row.*/
+        dprintf((" > make a previously NO_ACCESS page READONLY\n"));
+        page_mark_readonly(my_segnum, pagenum);
+
+        release_all_privatization_locks();
+        return;
+    }
 
     /* make our page write-ready */
     page_mark_accessible(my_segnum, pagenum);

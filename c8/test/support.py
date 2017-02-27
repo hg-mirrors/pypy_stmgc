@@ -45,7 +45,6 @@ typedef struct {
 } stm_thread_local_t;
 
 char *stm_object_pages;
-char *stm_file_pages;
 uintptr_t stm_fill_mark_nursery_bytes;
 
 void stm_read(object_t *obj);
@@ -88,7 +87,8 @@ long stm_can_move(object_t *obj);
 char *_stm_real_address(object_t *o);
 void _stm_test_switch(stm_thread_local_t *tl);
 void _stm_test_switch_segment(int segnum);
-bool _stm_is_accessible_page(uintptr_t pagenum);
+uint8_t _stm_get_page_status(uintptr_t pagenum);
+bool _stm_get_hint_modified_recently(uintptr_t pagenum);
 
 void clear_jmpbuf(stm_thread_local_t *tl);
 long _check_start_transaction(stm_thread_local_t *tl);
@@ -690,6 +690,11 @@ lib.stm_hashtable_entry_userdata = 421418
 NURSERY_SIZE = lib.STM_GC_NURSERY * 1024 # bytes
 SIZEOF_HASHTABLE_ENTRY = lib.SIZEOF_HASHTABLE_ENTRY
 
+PAGE_NO_ACCESS = 0
+PAGE_READONLY = 1
+PAGE_ACCESSIBLE = 2
+
+
 class Conflict(Exception):
     pass
 
@@ -878,8 +883,14 @@ def stm_major_collect():
         raise Conflict()
     return res
 
+def stm_get_page_status(pagenum):
+    return lib._stm_get_page_status(pagenum)
+
 def stm_is_accessible_page(pagenum):
-    return lib._stm_is_accessible_page(pagenum)
+    return stm_get_page_status(pagenum) == PAGE_ACCESSIBLE
+
+def stm_get_hint_modified_recently(pagenum):
+    return lib._stm_get_hint_modified_recently(pagenum)
 
 def stm_get_obj_size(o):
     return lib.stmcb_size_rounded_up(stm_get_real_address(o))

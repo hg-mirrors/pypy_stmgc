@@ -14,31 +14,60 @@
   a major GC first validates all segments (incl. the extra seg.),
   then re-maps all PRIVATE, unmodified pages to the SHARED (unmodified)
   page. Thus, we get "free" copy-on-write supported by the kernel.
+
+  This probably requires the introduction of a read-only state for
+  pages in segments. They are safe to read from, but as soon as we
+  modify them, or we pull a change from the CL into that page, we
+  need to privatize the page or make it NO_ACCESS:
+   - write: SIGSEGV -> privatize
+   - validate: check if readonly page affected
+               -> mprotect and mark NO_ACCESS
+  OR: since validate should not change page mappings, make all
+      other segments NO_ACCESS if we commit to a page that is
+      readonly somewhere else. Or actually, on write (SIGSEGV)
+      to a readonly page, do this. However, I'm not sure if we
+      are really allowed to mprotect pages in other segments
+      and thereby may trigger SIGSEGV in those segments concurrently
+      (is mprotect atomic?).
 */
 
 #define PAGE_FLAG_START   END_NURSERY_PAGE
 #define PAGE_FLAG_END     NB_PAGES
+#if PAGE_FLAG_END - PAGE_FLAG_START != NB_SHARED_PAGES
+#   error "ensure this"
+#endif
 
 struct page_shared_s {
-#if NB_SEGMENTS <= 8
+#if NB_SEGMENTS <= 4
     uint8_t by_segment;
-#elif NB_SEGMENTS <= 16
+#elif NB_SEGMENTS <= 8
     uint16_t by_segment;
-#elif NB_SEGMENTS <= 32
+#elif NB_SEGMENTS <= 16
     uint32_t by_segment;
-#elif NB_SEGMENTS <= 64
+#elif NB_SEGMENTS <= 32
     uint64_t by_segment;
 #else
-#   error "NB_SEGMENTS > 64 not supported right now"
+#   error "NB_SEGMENTS > 32 not supported right now"
 #endif
 };
 
 enum {
+    /* page is inaccessible in segment, SIGSEGV on access */
     PAGE_NO_ACCESS = 0,
-    PAGE_ACCESSIBLE = 1
+    /* page is shared with seg0, SIGSEGV on write */
+    PAGE_READONLY = 1,
+    /* page is private and fully accessible */
+    PAGE_ACCESSIBLE = 2
 };
 
-static struct page_shared_s pages_status[PAGE_FLAG_END - PAGE_FLAG_START];
+static struct page_shared_s pages_status[NB_SHARED_PAGES];
+
+/* a way to track recently modified pages so that we do
+   not attempt to reshare them in major GCs */
+static uint8_t page_modified_recently[NB_SHARED_PAGES / 8];
+#if NB_SHARED_PAGES % 8 != 0
+#   error "ensure this"
+#endif
 
 static void page_mark_accessible(long segnum, uintptr_t pagenum);
 static void page_mark_inaccessible(long segnum, uintptr_t pagenum);
@@ -47,6 +76,35 @@ static uint64_t increment_total_allocated(ssize_t add_or_remove);
 static bool is_major_collection_requested(void);
 static void force_major_collection_request(void);
 static void reset_major_collection_requested(void);
+
+
+static inline bool get_hint_modified_recently(uintptr_t pagenum)
+{
+    pagenum = pagenum - PAGE_FLAG_START;
+    return !!(page_modified_recently[pagenum / 8] & (1UL << (pagenum % 8)));
+}
+
+static inline void set_hint_modified_recently(uintptr_t pagenum)
+{
+    pagenum = pagenum - PAGE_FLAG_START;
+    page_modified_recently[pagenum / 8] |= 1UL << (pagenum % 8);
+    /* /\* we depend on the information to be accurate in major GCs, so */
+    /*    make sure we do it atomically (XXX): *\/ */
+    /* __sync_fetch_and_or(&page_modified_recently[pagenum / 8], 1L << (pagenum % 8)); */
+}
+
+__attribute__((unused))
+static void clear_hint_modified_recently(uintptr_t pagenum)
+{
+    pagenum = pagenum - PAGE_FLAG_START;
+    page_modified_recently[pagenum / 8] &= ~(1UL << (pagenum % 8));
+}
+
+__attribute__((unused))
+static void clear_hint_modified_recently_all(void)
+{
+    memset(page_modified_recently, 0, NB_SHARED_PAGES / 8);
+}
 
 
 static inline char *get_virtual_page(long segnum, uintptr_t pagenum)
@@ -60,7 +118,12 @@ static inline char *get_virtual_address(long segnum, object_t *obj)
     return REAL_ADDRESS(get_segment_base(segnum), obj);
 }
 
-static inline bool get_page_status_in(long segnum, uintptr_t pagenum)
+static inline struct page_shared_s* get_page_status(uintptr_t pagenum)
+{
+    return &pages_status[pagenum - PAGE_FLAG_START];
+}
+
+static inline uint8_t get_page_status_in(long segnum, uintptr_t pagenum)
 {
     /* reading page status requires "read"-lock, which is defined as
        "any segment has the privatization_lock".  This is enough to
@@ -73,19 +136,24 @@ static inline bool get_page_status_in(long segnum, uintptr_t pagenum)
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_status[pagenum - PAGE_FLAG_START];
 
-    return (ps->by_segment >> segnum) & 1;
+    return (ps->by_segment >> (segnum * 2)) & 3;
 }
 
 static inline void set_page_status_in(long segnum, uintptr_t pagenum,
-                                      bool status)
+                                      uint8_t status)
 {
+    OPT_ASSERT(status <= PAGE_ACCESSIBLE);
+
     /* writing page status requires "write"-lock: */
     assert(all_privatization_locks_acquired());
 
-    OPT_ASSERT(segnum < 8 * sizeof(struct page_shared_s));
+    int seg_shift = segnum * 2;
+    OPT_ASSERT(segnum < 4 * sizeof(struct page_shared_s));
     volatile struct page_shared_s *ps = (volatile struct page_shared_s *)
         &pages_status[pagenum - PAGE_FLAG_START];
 
     assert(status != get_page_status_in(segnum, pagenum));
-    __sync_fetch_and_xor(&ps->by_segment, 1UL << segnum); /* invert the flag */
+    /* protected by "write"-lock: */
+    ps->by_segment &= ~(0b11UL << seg_shift); /* clear */
+    ps->by_segment |= status << seg_shift; /* set */
 }
