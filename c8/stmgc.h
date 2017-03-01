@@ -574,6 +574,13 @@ enum stm_event_e {
     STM_GC_MAJOR_START,
     STM_GC_MAJOR_DONE,
 
+    /* execution duration profiling events */
+    STM_DURATION_WRITE_BARRIER,
+    STM_DURATION_VALIDATION,
+    STM_DURATION_COMMIT,
+    STM_DURATION_MINOR_GC,
+    STM_DURATION_MAJOR_GC,
+
     _STM_EVENT_N
 };
 
@@ -596,6 +603,22 @@ typedef struct {
     uintptr_t odd_number;  /* marker odd number, or 0 if marker is missing */
     object_t *object;      /* marker object, or NULL if marker is missing */
 } stm_loc_marker_t;
+/* Allow any kind of payload to be attached to a timing event. */
+enum stm_payload_type_e {
+    STM_EVENT_PAYLOAD_MARKER,
+    STM_EVENT_PAYLOAD_DURATION,
+
+    _STM_EVENT_PAYLOAD_N
+};
+typedef union {
+    stm_loc_marker_t *loc_marker;
+    uint32_t duration;
+} stm_timing_event_payload_data_t;
+/* Wrapper for payload holding data type and data. */
+typedef struct {
+    enum stm_payload_type_e payload_type;
+    stm_timing_event_payload_data_t payload_data;
+} stm_timing_event_payload_t;
 extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
                                   enum stm_event_e event,
                                   stm_loc_marker_t *marker);
