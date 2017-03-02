@@ -596,6 +596,7 @@ enum stm_event_e {
     "gc minor done",                            \
     "gc major start",                           \
     "gc major done"
+    /* TODO names for new duration events */
 
 /* The markers pushed in the shadowstack are an odd number followed by a
    regular object pointer. */
@@ -616,12 +617,12 @@ typedef union {
 } stm_timing_event_payload_data_t;
 /* Wrapper for payload holding data type and data. */
 typedef struct {
-    enum stm_payload_type_e payload_type;
-    stm_timing_event_payload_data_t payload_data;
+    enum stm_payload_type_e type;
+    stm_timing_event_payload_data_t data;
 } stm_timing_event_payload_t;
 extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
                                   enum stm_event_e event,
-                                  stm_loc_marker_t *marker);
+                                  stm_timing_event_payload_t *payload);
 
 /* Calling this sets up a stmcb_timing_event callback that will produce
    a binary file called 'profiling_file_name'.  Call it with
@@ -634,6 +635,7 @@ extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
    the given position and with the given maximum length. */
 typedef int (*stm_expand_marker_fn)(char *seg_base, stm_loc_marker_t *marker,
                                     char *output, int output_size);
+/* TODO generalize expand function */
 int stm_set_timing_log(const char *profiling_file_name, int fork_mode,
                        stm_expand_marker_fn expand_marker);
 
