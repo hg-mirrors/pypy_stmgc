@@ -595,8 +595,13 @@ enum stm_event_e {
     "gc minor start",                           \
     "gc minor done",                            \
     "gc major start",                           \
-    "gc major done"
-    /* TODO names for new duration events */
+    "gc major done",                            \
+    /* names of duration events */              \
+    "duration of write slowpath",               \
+    "duration of validation",                   \
+    "duration of commit",                       \
+    "duration of minor gc",                     \
+    "duration of major gc"
 
 /* The markers pushed in the shadowstack are an odd number followed by a
    regular object pointer. */
