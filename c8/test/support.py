@@ -173,10 +173,23 @@ typedef struct {
     uintptr_t odd_number;
     object_t *object;
 } stm_loc_marker_t;
-
+enum stm_payload_type_e {
+    STM_EVENT_PAYLOAD_MARKER,
+    STM_EVENT_PAYLOAD_DURATION,
+    ...
+};
+typedef union {
+    stm_loc_marker_t *loc_marker;
+    uint32_t duration;
+} stm_timing_event_payload_data_t;
+/* Wrapper for payload holding data type and data. */
+typedef struct {
+    enum stm_payload_type_e type;
+    stm_timing_event_payload_data_t data;
+} stm_timing_event_payload_t;
 typedef void (*stmcb_timing_event_fn)(stm_thread_local_t *tl,
                                       enum stm_event_e event,
-                                      stm_loc_marker_t *markers);
+                                      stm_timing_event_payload_t *payload);
 stmcb_timing_event_fn stmcb_timing_event;
 
 typedef int (*stm_expand_marker_fn)(char *seg_base, stm_loc_marker_t *marker,
@@ -224,7 +237,7 @@ bool _check_hashtable_write(object_t *, stm_hashtable_t *, uintptr_t key,
                             object_t *nvalue, stm_thread_local_t *tl);
 bool _check_hashtable_write_entry(object_t *, stm_hashtable_entry_t *,
                                   object_t *nvalue);
-                            
+
 stm_hashtable_entry_t *stm_hashtable_lookup(object_t *hashtableobj,
                                             stm_hashtable_t *hashtable,
                                             uintptr_t index);
