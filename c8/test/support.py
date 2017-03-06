@@ -180,7 +180,7 @@ enum stm_payload_type_e {
 };
 typedef union {
     stm_loc_marker_t *loc_marker;
-    uint32_t duration;
+    struct timespec *duration;
 } stm_timing_event_payload_data_t;
 /* Wrapper for payload holding data type and data. */
 typedef struct {
