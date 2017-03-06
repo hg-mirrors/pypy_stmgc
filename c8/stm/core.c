@@ -959,7 +959,9 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
 
 __attribute__((flatten))
 void _stm_write_slowpath(object_t *obj) {
+    start_timer()
     write_slowpath_common(obj,  /* mark_card */ false);
+    stop_timer_and_publish(STM_DURATION_WRITE_BARRIER)
 }
 
 
