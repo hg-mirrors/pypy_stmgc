@@ -14,3 +14,17 @@
                            stop.tv_sec - start.tv_sec,                       \
                            stop.tv_nsec - start.tv_nsec                      \
                        };
+
+#define stm_duration_payload(duration)                                       \
+    stm_timing_event_payload_data_t stm_duration_data =                      \
+        { .duration = &duration };                                           \
+    stm_timing_event_payload_t stm_duration_payload =                        \
+        { STM_EVENT_PAYLOAD_DURATION, stm_duration_data };
+
+#define publish_event(event)                                                 \
+    stmcb_timing_event(STM_SEGMENT->running_thread, event, &stm_duration_payload);
+
+#define stop_timer_and_publish(event) stop_timer()                           \
+                                      get_duration()                         \
+                                      stm_duration_payload(duration)         \
+                                      publish_event(event)
