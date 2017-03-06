@@ -39,8 +39,11 @@ static void _stm_profiling_event(stm_thread_local_t *tl,
                                                             buf.extra, EXTRA_LEN_MAX);
             }
         } else if (payload->type == STM_EVENT_PAYLOAD_DURATION) {
-            uint32_t duration = payload->data.duration;
-            buf.extra_length = sprintf(buf.extra, "%u", duration);
+            struct timespec *duration = payload->data.duration;
+            buf.extra_length = sprintf(buf.extra,
+                                        "s%un%u",
+                                        duration->tv_sec,
+                                        duration->tv_nsec);
         }
     }
 
