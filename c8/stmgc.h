@@ -642,7 +642,6 @@ extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
    the given position and with the given maximum length. */
 typedef int (*stm_expand_marker_fn)(char *seg_base, stm_loc_marker_t *marker,
                                     char *output, int output_size);
-/* TODO generalize expand function */
 int stm_set_timing_log(const char *profiling_file_name, int fork_mode,
                        stm_expand_marker_fn expand_marker);
 
