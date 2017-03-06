@@ -201,7 +201,7 @@ uint64_t _stm_total_allocated(void);
 /* ==================== PUBLIC API ==================== */
 
 /* Number of segments (i.e. how many transactions can be executed in
-   parallel, in maximum).  If you try to start transactions in more
+   parallel, at maximum).  If you try to start transactions in more
    threads than the number of segments, it will block, waiting for the
    next segment to become free.
 */
@@ -616,9 +616,11 @@ enum stm_payload_type_e {
 
     _STM_EVENT_PAYLOAD_N
 };
+
+#include <time.h>
 typedef union {
     stm_loc_marker_t *loc_marker;
-    uint32_t duration;
+    struct timespec *duration;
 } stm_timing_event_payload_data_t;
 /* Wrapper for payload holding data type and data. */
 typedef struct {
