@@ -575,11 +575,14 @@ enum stm_event_e {
     STM_GC_MAJOR_DONE,
 
     /* execution duration profiling events */
-    STM_DURATION_WRITE_BARRIER,
+    STM_DURATION_WRITE_GC_ONLY,
+    STM_DURATION_WRITE_SLOWPATH,
     STM_DURATION_VALIDATION,
-    STM_DURATION_COMMIT,
+    STM_DURATION_COMMIT_MINOR_GC,
+    STM_DURATION_COMMIT_ALL,
     STM_DURATION_MINOR_GC,
-    STM_DURATION_MAJOR_GC,
+    STM_DURATION_MAJOR_GC_LOG_ONLY,
+    STM_DURATION_MAJOR_GC_FULL,
 
     _STM_EVENT_N
 };
@@ -597,11 +600,14 @@ enum stm_event_e {
     "gc major start",                           \
     "gc major done",                            \
     /* names of duration events */              \
+    "duration of minor gc due to write",        \
     "duration of write slowpath",               \
     "duration of validation",                   \
-    "duration of commit",                       \
+    "duration of minor gc due to commit",       \
+    "duration of commit except minor gc",       \
     "duration of minor gc",                     \
-    "duration of major gc"
+    "duration of major gc doing log clean up only",\
+    "duration of full major gc"
 
 /* The markers pushed in the shadowstack are an odd number followed by a
    regular object pointer. */
