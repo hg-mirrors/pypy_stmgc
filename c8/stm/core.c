@@ -156,6 +156,8 @@ static void undo_modifications_to_single_obj(int segment_num, object_t *only_obj
 
 static bool _stm_validate(void)
 {
+    start_timer();
+
     /* returns true if we reached a valid state, or false if
        we need to abort now */
     dprintf(("_stm_validate() at cl=%p, rev=%lu\n", STM_PSEGMENT->last_commit_log_entry,
@@ -337,6 +339,8 @@ static bool _stm_validate(void)
         release_modification_lock_set(segments_to_lock, my_segnum);
         release_privatization_lock(my_segnum);
     }
+
+    stop_timer_and_publish(STM_DURATION_VALIDATION);
 
     return !needs_abort;
 }
@@ -817,6 +821,8 @@ static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
 
 static void write_slowpath_common(object_t *obj, bool mark_card)
 {
+    start_timer();
+
     assert(_seems_to_be_running_transaction());
     assert(!_is_in_nursery(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
@@ -826,6 +832,8 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
            part again: */
         assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
         write_slowpath_overflow_obj(obj, mark_card);
+
+        stop_timer_and_publish(STM_DURATION_WRITE_GC_ONLY);
         return;
     }
 
@@ -893,6 +901,8 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
     }
 
     DEBUG_EXPECT_SEGFAULT(true);
+
+    stop_timer_and_publish(STM_DURATION_WRITE_SLOWPATH);
 }
 
 
@@ -959,9 +969,7 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
 
 __attribute__((flatten))
 void _stm_write_slowpath(object_t *obj) {
-    start_timer()
     write_slowpath_common(obj,  /* mark_card */ false);
-    stop_timer_and_publish(STM_DURATION_WRITE_SLOWPATH)
 }
 
 
@@ -1208,6 +1216,8 @@ void _stm_commit_transaction(void)
 
 static void _core_commit_transaction(bool external)
 {
+    start_timer();
+
     exec_local_finalizers();
 
     assert(!_has_mutex());
@@ -1226,11 +1236,17 @@ static void _core_commit_transaction(bool external)
     assert(STM_SEGMENT->running_thread->wait_event_emitted == 0);
 
     dprintf(("> stm_commit_transaction(external=%d)\n", (int)external));
+
+    pause_timer();
     minor_collection(/*commit=*/ true, external);
+    continue_timer();
+
     if (!external && is_major_collection_requested()) {
         s_mutex_lock();
         if (is_major_collection_requested()) {   /* if still true */
+            pause_timer();
             major_collection_with_mutex();
+            continue_timer();
         }
         s_mutex_unlock();
     }
@@ -1246,7 +1262,10 @@ static void _core_commit_transaction(bool external)
        stm_validate() at the start of a new transaction is happy even
        if there is an inevitable tx running) */
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
+
+    pause_timer();
     _validate_and_add_to_commit_log();
+    continue_timer();
 
     if (external) {
         /* from this point on, unlink the original 'stm_thread_local_t *'
@@ -1294,6 +1313,8 @@ static void _core_commit_transaction(bool external)
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
+
+    stop_timer_and_publish(STM_DURATION_COMMIT_EXCEPT_GC);
 
     /* between transactions, call finalizers. this will execute
        a transaction itself */
