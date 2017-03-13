@@ -750,6 +750,8 @@ static void major_collection_now_at_safe_point(void)
     /* first, force a minor collection in each of the other segments */
     major_do_validation_and_minor_collections();
 
+    start_timer();
+
     dprintf((" | used before collection: %ld\n",
              (long)pages_ctl.total_allocated));
     dprintf((" | commit log entries before: %ld\n",
@@ -782,6 +784,8 @@ static void major_collection_now_at_safe_point(void)
         if (must_abort())
             abort_with_mutex();
 
+        stop_timer_and_publish(STM_DURATION_MAJOR_GC_LOG_ONLY);
+        
         return;
 #endif
     }
@@ -838,4 +842,6 @@ static void major_collection_now_at_safe_point(void)
     dprintf(("must abort?:%d\n", (int)must_abort()));
     if (must_abort())
         abort_with_mutex();
+
+    stop_timer_and_publish(STM_DURATION_MAJOR_GC_FULL);
 }
