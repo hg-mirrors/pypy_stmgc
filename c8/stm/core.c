@@ -156,10 +156,10 @@ static void undo_modifications_to_single_obj(int segment_num, object_t *only_obj
 
 static bool _stm_validate(void)
 {
-    start_timer();
-
     /* returns true if we reached a valid state, or false if
        we need to abort now */
+    start_timer();
+
     dprintf(("_stm_validate() at cl=%p, rev=%lu\n", STM_PSEGMENT->last_commit_log_entry,
              STM_PSEGMENT->last_commit_log_entry->rev_num));
     /* go from last known entry in commit log to the
@@ -173,6 +173,8 @@ static bool _stm_validate(void)
 
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         assert(first_cl->next == INEV_RUNNING);
+
+        stop_timer_and_publish(STM_DURATION_VALIDATION);
         return true;
     }
 
