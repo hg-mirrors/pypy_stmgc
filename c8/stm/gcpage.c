@@ -747,6 +747,8 @@ static void major_collection_now_at_safe_point(void)
     dprintf((" .----- major collection -----------------------\n"));
     assert(_has_mutex());
 
+    stm_thread_local_t *thread_local_for_logging = STM_SEGMENT->running_thread;
+
     /* first, force a minor collection in each of the other segments */
     major_do_validation_and_minor_collections();
 
@@ -784,8 +786,9 @@ static void major_collection_now_at_safe_point(void)
         if (must_abort())
             abort_with_mutex();
 
-        stop_timer_and_publish(STM_DURATION_MAJOR_GC_LOG_ONLY);
-        
+        stop_timer_and_publish_for_thread(
+            thread_local_for_logging, STM_DURATION_MAJOR_GC_LOG_ONLY);
+
         return;
 #endif
     }
@@ -843,5 +846,6 @@ static void major_collection_now_at_safe_point(void)
     if (must_abort())
         abort_with_mutex();
 
-    stop_timer_and_publish(STM_DURATION_MAJOR_GC_FULL);
+    stop_timer_and_publish_for_thread(
+        thread_local_for_logging, STM_DURATION_MAJOR_GC_FULL);
 }
