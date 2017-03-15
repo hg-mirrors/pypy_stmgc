@@ -159,6 +159,7 @@ static bool _stm_validate(void)
     /* returns true if we reached a valid state, or false if
        we need to abort now */
     start_timer();
+    stm_thread_local_t *thread_local_for_logging = STM_SEGMENT->running_thread;
 
     dprintf(("_stm_validate() at cl=%p, rev=%lu\n", STM_PSEGMENT->last_commit_log_entry,
              STM_PSEGMENT->last_commit_log_entry->rev_num));
@@ -174,7 +175,10 @@ static bool _stm_validate(void)
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         assert(first_cl->next == INEV_RUNNING);
 
-        stop_timer_and_publish(STM_DURATION_VALIDATION);
+        if (thread_local_for_logging != NULL) {
+            stop_timer_and_publish_for_thread(
+                thread_local_for_logging, STM_DURATION_VALIDATION);
+        }
         return true;
     }
 
@@ -342,7 +346,10 @@ static bool _stm_validate(void)
         release_privatization_lock(my_segnum);
     }
 
-    stop_timer_and_publish(STM_DURATION_VALIDATION);
+    if (thread_local_for_logging != NULL) {
+        stop_timer_and_publish_for_thread(
+            thread_local_for_logging, STM_DURATION_VALIDATION);
+    }
 
     return !needs_abort;
 }
@@ -1219,6 +1226,7 @@ void _stm_commit_transaction(void)
 static void _core_commit_transaction(bool external)
 {
     start_timer();
+    stm_thread_local_t *thread_local_for_logging = STM_SEGMENT->running_thread;
 
     exec_local_finalizers();
 
@@ -1316,7 +1324,8 @@ static void _core_commit_transaction(bool external)
 
     s_mutex_unlock();
 
-    stop_timer_and_publish(STM_DURATION_COMMIT_EXCEPT_GC);
+    stop_timer_and_publish_for_thread(
+        thread_local_for_logging, STM_DURATION_COMMIT_EXCEPT_GC);
 
     /* between transactions, call finalizers. this will execute
        a transaction itself */
