@@ -7,11 +7,18 @@
    runtime. */
 #define start_timer() struct timespec start, stop;                             \
                       struct timespec duration = { .tv_sec = 0, .tv_nsec = 0 };\
+                      uint32_t nanosec_diff, sec_diff;                         \
                       continue_timer()
 
 /* Must use start_timer before using this macro. */
-#define get_duration() duration.tv_sec += stop.tv_sec - start.tv_sec;       \
-                       duration.tv_nsec += stop.tv_nsec - start.tv_nsec;
+#define get_duration() nanosec_diff = stop.tv_nsec - start.tv_nsec;         \
+                       sec_diff = stop.tv_sec - start.tv_sec;               \
+                       if (stop.tv_nsec < start.tv_nsec) {                  \
+                           nanosec_diff += 1000000000;                      \
+                           sec_diff -= 1;                                   \
+                       }                                                    \
+                       duration.tv_sec += sec_diff;                         \
+                       duration.tv_nsec += nanosec_diff;
 
 #define pause_timer() clock_gettime(CLOCK_MONOTONIC_RAW, &stop);            \
                       get_duration()
