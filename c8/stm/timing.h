@@ -18,7 +18,11 @@
                            sec_diff -= 1;                                   \
                        }                                                    \
                        duration.tv_sec += sec_diff;                         \
-                       duration.tv_nsec += nanosec_diff;
+                       duration.tv_nsec += nanosec_diff;                    \
+                       if (duration.tv_nsec >= 1000000000) {                \
+                           duration.tv_sec += 1;                            \
+                           duration.tv_nsec -= 1000000000;                  \
+                       }
 
 #define pause_timer() clock_gettime(CLOCK_MONOTONIC_RAW, &stop);            \
                       get_duration()
