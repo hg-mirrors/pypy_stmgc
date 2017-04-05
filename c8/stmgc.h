@@ -578,6 +578,7 @@ enum stm_event_e {
     STM_DURATION_WRITE_GC_ONLY,
     STM_DURATION_WRITE_SLOWPATH,
     STM_DURATION_VALIDATION,
+    STM_DURATION_CREATE_CLE,
     STM_DURATION_COMMIT_EXCEPT_GC,
     STM_DURATION_MINOR_GC,
     STM_DURATION_MAJOR_GC_LOG_ONLY,
@@ -602,6 +603,7 @@ enum stm_event_e {
     "duration of gc due to write",                  \
     "duration of write slowpath",                   \
     "duration of validation",                       \
+    "duration of commit log entry creation",        \
     "duration of commit except gc",                 \
     "duration of minor gc",                         \
     "duration of major gc doing log clean up only", \
