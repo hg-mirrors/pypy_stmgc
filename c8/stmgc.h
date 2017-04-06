@@ -575,6 +575,7 @@ enum stm_event_e {
     STM_GC_MAJOR_DONE,
 
     /* execution duration profiling events */
+    STM_DURATION_START_TRX,
     STM_DURATION_WRITE_GC_ONLY,
     STM_DURATION_WRITE_SLOWPATH,
     STM_DURATION_VALIDATION,
@@ -600,6 +601,7 @@ enum stm_event_e {
     "gc major start",                               \
     "gc major done",                                \
     /* names of duration events */                  \
+    "duration of transaction start",                \
     "duration of gc due to write",                  \
     "duration of write slowpath",                   \
     "duration of validation",                       \
