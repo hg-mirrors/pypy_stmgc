@@ -418,6 +418,8 @@ static void wait_for_inevitable(void)
 */
 static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 {
+    start_timer();
+
     uintptr_t cle_length = 0;
     struct stm_commit_log_entry_s *old;
 
@@ -430,10 +432,17 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
     soon_finished_or_inevitable_thread_segment();
 
  retry_from_start:
+    pause_timer();
     if (!_stm_validate()) {
+        continue_timer();
+
         free_cle(new);
-        stm_abort_transaction();
+
+        stop_timer_and_publish(STM_DURATION_VALIDATION);
+
+        stm_abort_transaction(); // leaves method by longjump
     }
+    continue_timer();
 
     if (cle_length != list_count(STM_PSEGMENT->modified_old_objects)) {
         /* something changed the list of modified objs during _stm_validate; or
@@ -493,6 +502,8 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
         dprintf(("_validate_and_attach(%p) failed, retrying\n", new));
         goto retry_from_start;
     }
+
+    stop_timer_and_publish(STM_DURATION_VALIDATION);
 }
 
 /* This is called to do stm_validate() and then attach INEV_RUNNING to
@@ -513,6 +524,8 @@ static bool _validate_and_turn_inevitable(void)
 
 static void _validate_and_add_to_commit_log(void)
 {
+    start_timer();
+
     struct stm_commit_log_entry_s *old, *new;
 
     new = _create_commit_log_entry();
@@ -541,8 +554,12 @@ static void _validate_and_add_to_commit_log(void)
         release_modification_lock_wr(STM_SEGMENT->segment_num);
     }
     else {
+        pause_timer();
         _validate_and_attach(new);
+        continue_timer();
     }
+
+    stop_timer_and_publish(STM_DURATION_VALIDATION);
 }
 
 /* ############# STM ############# */
@@ -922,6 +939,8 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
 
 void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
 {
+    start_timer();
+
     dprintf_test(("write_slowpath_card(%p, %lu)\n",
                   obj, index));
 
@@ -930,9 +949,15 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
        card marking instead. */
     if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
         bool mark_card = obj_should_use_cards(STM_SEGMENT->segment_base, obj);
+
+        pause_timer();
         write_slowpath_common(obj, mark_card);
-        if (!mark_card)
+        continue_timer();
+
+        if (!mark_card) {
+            stop_timer_and_publish(STM_DURATION_WRITE_SLOWPATH);
             return;
+        }
     }
 
     assert(obj_should_use_cards(STM_SEGMENT->segment_base, obj));
@@ -979,6 +1004,8 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
 
     dprintf(("mark %p index %lu, card:%lu with %d\n",
              obj, index, get_index_to_card_index(index), CARD_MARKED));
+
+    stop_timer_and_publish(STM_DURATION_WRITE_SLOWPATH);
 }
 
 __attribute__((flatten))
@@ -1043,6 +1070,8 @@ static void readd_wb_executed_flags(void)
 
 static void _do_start_transaction(stm_thread_local_t *tl)
 {
+    start_timer();
+
     assert(!_stm_in_transaction(tl));
     tl->wait_event_emitted = 0;
 
@@ -1105,6 +1134,8 @@ static void _do_start_transaction(stm_thread_local_t *tl)
     if (UNLIKELY(rv == 0xff)) {
         reset_transaction_read_version();
     }
+
+    stop_timer_and_publish(STM_DURATION_START_TRX);
 
     stm_validate();
 }
