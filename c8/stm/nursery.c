@@ -25,9 +25,11 @@ uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
 static void start_single_thread_mode(void) {
     stm_single_thread_mode_active = true;
     stm_fill_mark_nursery_bytes = SINGLE_THREAD_MODE_FILL_MARK_NURSERY_BYTES;
+    timing_event(STM_SEGMENT->running_thread, STM_SINGLE_THREAD_MODE_ON);
 }
 
 static void end_single_thread_mode(void) {
+    timing_event(STM_SEGMENT->running_thread, STM_SINGLE_THREAD_MODE_OFF);
     stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
     stm_single_thread_mode_active = false;
 }
