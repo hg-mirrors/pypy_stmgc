@@ -1163,6 +1163,12 @@ long _stm_start_transaction(stm_thread_local_t *tl)
 
     if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
                                  in abort_data_structures_from_segment_num() */
+        if (number_of_segments_in_use() <= 2) {
+            /* TODO two is a hack b/c benchmarks have a main thread */
+            start_single_thread_mode();
+        } else if (stm_single_thread_mode_active) {
+            end_single_thread_mode();
+        }
         STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
                                      stm_fill_mark_nursery_bytes);
     }
