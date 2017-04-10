@@ -13,13 +13,24 @@
 
 static uintptr_t _stm_nursery_start;
 
+static bool stm_single_thread_mode_active = false;
 
-#define DEFAULT_FILL_MARK_NURSERY_BYTES   (NURSERY_SIZE / 4)
+#define SINGLE_THREAD_MODE_FILL_MARK_NURSERY_BYTES  (NURSERY_SIZE * 9999)
+#define DEFAULT_FILL_MARK_NURSERY_BYTES             (NURSERY_SIZE / 4)
 
 uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
 
 /************************************************************/
 
+static void start_single_thread_mode(void) {
+    stm_single_thread_mode_active = true;
+    stm_fill_mark_nursery_bytes = SINGLE_THREAD_MODE_FILL_MARK_NURSERY_BYTES;
+}
+
+static void end_single_thread_mode(void) {
+    stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+    stm_single_thread_mode_active = false;
+}
 
 static void setup_nursery(void)
 {
