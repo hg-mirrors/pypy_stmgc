@@ -158,6 +158,9 @@ static bool _stm_validate(void)
 {
     /* returns true if we reached a valid state, or false if
        we need to abort now */
+    start_timer();
+    stm_thread_local_t *thread_local_for_logging = STM_SEGMENT->running_thread;
+
     dprintf(("_stm_validate() at cl=%p, rev=%lu\n", STM_PSEGMENT->last_commit_log_entry,
              STM_PSEGMENT->last_commit_log_entry->rev_num));
     /* go from last known entry in commit log to the
@@ -171,6 +174,11 @@ static bool _stm_validate(void)
 
     if (STM_PSEGMENT->transaction_state == TS_INEVITABLE) {
         assert(first_cl->next == INEV_RUNNING);
+
+        if (thread_local_for_logging != NULL) {
+            stop_timer_and_publish_for_thread(
+                thread_local_for_logging, STM_DURATION_VALIDATION);
+        }
         return true;
     }
 
@@ -338,6 +346,11 @@ static bool _stm_validate(void)
         release_privatization_lock(my_segnum);
     }
 
+    if (thread_local_for_logging != NULL) {
+        stop_timer_and_publish_for_thread(
+            thread_local_for_logging, STM_DURATION_VALIDATION);
+    }
+
     return !needs_abort;
 }
 
@@ -345,6 +358,8 @@ static bool _stm_validate(void)
 static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 {
     /* puts all modified_old_objects in a new commit log entry */
+
+    start_timer();
 
     // we don't need the privatization lock, as we are only
     // reading from modified_old_objs and nobody but us can change it
@@ -358,6 +373,9 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
     result->rev_num = -1;       /* invalid */
     result->written_count = count;
     memcpy(result->written, list->items, count * sizeof(struct stm_undo_s));
+
+    stop_timer_and_publish(STM_DURATION_CREATE_CLE);
+
     return result;
 }
 
@@ -400,6 +418,8 @@ static void wait_for_inevitable(void)
 */
 static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 {
+    start_timer();
+
     uintptr_t cle_length = 0;
     struct stm_commit_log_entry_s *old;
 
@@ -412,10 +432,17 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
     soon_finished_or_inevitable_thread_segment();
 
  retry_from_start:
+    pause_timer();
     if (!_stm_validate()) {
+        continue_timer();
+
         free_cle(new);
-        stm_abort_transaction();
+
+        stop_timer_and_publish(STM_DURATION_VALIDATION);
+
+        stm_abort_transaction(); // leaves method by longjump
     }
+    continue_timer();
 
     if (cle_length != list_count(STM_PSEGMENT->modified_old_objects)) {
         /* something changed the list of modified objs during _stm_validate; or
@@ -475,6 +502,8 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
         dprintf(("_validate_and_attach(%p) failed, retrying\n", new));
         goto retry_from_start;
     }
+
+    stop_timer_and_publish(STM_DURATION_VALIDATION);
 }
 
 /* This is called to do stm_validate() and then attach INEV_RUNNING to
@@ -495,6 +524,8 @@ static bool _validate_and_turn_inevitable(void)
 
 static void _validate_and_add_to_commit_log(void)
 {
+    start_timer();
+
     struct stm_commit_log_entry_s *old, *new;
 
     new = _create_commit_log_entry();
@@ -523,8 +554,12 @@ static void _validate_and_add_to_commit_log(void)
         release_modification_lock_wr(STM_SEGMENT->segment_num);
     }
     else {
+        pause_timer();
         _validate_and_attach(new);
+        continue_timer();
     }
+
+    stop_timer_and_publish(STM_DURATION_VALIDATION);
 }
 
 /* ############# STM ############# */
@@ -817,6 +852,8 @@ static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
 
 static void write_slowpath_common(object_t *obj, bool mark_card)
 {
+    start_timer();
+
     assert(_seems_to_be_running_transaction());
     assert(!_is_in_nursery(obj));
     assert(obj->stm_flags & GCFLAG_WRITE_BARRIER);
@@ -826,6 +863,8 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
            part again: */
         assert(!(obj->stm_flags & GCFLAG_WB_EXECUTED));
         write_slowpath_overflow_obj(obj, mark_card);
+
+        stop_timer_and_publish(STM_DURATION_WRITE_GC_ONLY);
         return;
     }
 
@@ -893,11 +932,15 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
     }
 
     DEBUG_EXPECT_SEGFAULT(true);
+
+    stop_timer_and_publish(STM_DURATION_WRITE_SLOWPATH);
 }
 
 
 void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
 {
+    start_timer();
+
     dprintf_test(("write_slowpath_card(%p, %lu)\n",
                   obj, index));
 
@@ -906,9 +949,15 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
        card marking instead. */
     if (!(obj->stm_flags & GCFLAG_CARDS_SET)) {
         bool mark_card = obj_should_use_cards(STM_SEGMENT->segment_base, obj);
+
+        pause_timer();
         write_slowpath_common(obj, mark_card);
-        if (!mark_card)
+        continue_timer();
+
+        if (!mark_card) {
+            stop_timer_and_publish(STM_DURATION_WRITE_SLOWPATH);
             return;
+        }
     }
 
     assert(obj_should_use_cards(STM_SEGMENT->segment_base, obj));
@@ -955,13 +1004,13 @@ void _stm_write_slowpath_card(object_t *obj, uintptr_t index)
 
     dprintf(("mark %p index %lu, card:%lu with %d\n",
              obj, index, get_index_to_card_index(index), CARD_MARKED));
+
+    stop_timer_and_publish(STM_DURATION_WRITE_SLOWPATH);
 }
 
 __attribute__((flatten))
 void _stm_write_slowpath(object_t *obj) {
-    start_timer()
     write_slowpath_common(obj,  /* mark_card */ false);
-    stop_timer_and_publish(STM_DURATION_WRITE_BARRIER)
 }
 
 
@@ -1021,6 +1070,8 @@ static void readd_wb_executed_flags(void)
 
 static void _do_start_transaction(stm_thread_local_t *tl)
 {
+    start_timer();
+
     assert(!_stm_in_transaction(tl));
     tl->wait_event_emitted = 0;
 
@@ -1083,6 +1134,8 @@ static void _do_start_transaction(stm_thread_local_t *tl)
     if (UNLIKELY(rv == 0xff)) {
         reset_transaction_read_version();
     }
+
+    stop_timer_and_publish(STM_DURATION_START_TRX);
 
     stm_validate();
 }
@@ -1208,6 +1261,9 @@ void _stm_commit_transaction(void)
 
 static void _core_commit_transaction(bool external)
 {
+    start_timer();
+    stm_thread_local_t *thread_local_for_logging = STM_SEGMENT->running_thread;
+
     exec_local_finalizers();
 
     assert(!_has_mutex());
@@ -1226,11 +1282,17 @@ static void _core_commit_transaction(bool external)
     assert(STM_SEGMENT->running_thread->wait_event_emitted == 0);
 
     dprintf(("> stm_commit_transaction(external=%d)\n", (int)external));
+
+    pause_timer();
     minor_collection(/*commit=*/ true, external);
+    continue_timer();
+
     if (!external && is_major_collection_requested()) {
         s_mutex_lock();
         if (is_major_collection_requested()) {   /* if still true */
+            pause_timer();
             major_collection_with_mutex();
+            continue_timer();
         }
         s_mutex_unlock();
     }
@@ -1246,7 +1308,10 @@ static void _core_commit_transaction(bool external)
        stm_validate() at the start of a new transaction is happy even
        if there is an inevitable tx running) */
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
+
+    pause_timer();
     _validate_and_add_to_commit_log();
+    continue_timer();
 
     if (external) {
         /* from this point on, unlink the original 'stm_thread_local_t *'
@@ -1294,6 +1359,9 @@ static void _core_commit_transaction(bool external)
     /* cannot access STM_SEGMENT or STM_PSEGMENT from here ! */
 
     s_mutex_unlock();
+
+    stop_timer_and_publish_for_thread(
+        thread_local_for_logging, STM_DURATION_COMMIT_EXCEPT_GC);
 
     /* between transactions, call finalizers. this will execute
        a transaction itself */
