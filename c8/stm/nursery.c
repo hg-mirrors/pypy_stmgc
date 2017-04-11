@@ -15,7 +15,7 @@ static uintptr_t _stm_nursery_start;
 
 static bool stm_single_thread_mode_active = false;
 
-#define SINGLE_THREAD_MODE_FILL_MARK_NURSERY_BYTES  (NURSERY_SIZE * 9999)
+#define SINGLE_THREAD_MODE_FILL_MARK_NURSERY_BYTES  (NURSERY_SIZE * 500000)
 #define DEFAULT_FILL_MARK_NURSERY_BYTES             (NURSERY_SIZE / 4)
 
 uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
@@ -26,12 +26,14 @@ static void start_single_thread_mode(void) {
     stm_single_thread_mode_active = true;
     stm_fill_mark_nursery_bytes = SINGLE_THREAD_MODE_FILL_MARK_NURSERY_BYTES;
     timing_event(STM_SEGMENT->running_thread, STM_SINGLE_THREAD_MODE_ON);
+    dprintf(("single thread mode ON\n"));
 }
 
 static void end_single_thread_mode(void) {
     timing_event(STM_SEGMENT->running_thread, STM_SINGLE_THREAD_MODE_OFF);
     stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
     stm_single_thread_mode_active = false;
+    dprintf(("single thread mode OFF\n"));
 }
 
 static void setup_nursery(void)
