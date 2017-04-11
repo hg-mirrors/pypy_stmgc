@@ -1163,8 +1163,12 @@ long _stm_start_transaction(stm_thread_local_t *tl)
 
     if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
                                  in abort_data_structures_from_segment_num() */
-        if (number_of_segments_in_use() <= 2) {
-            /* TODO two is a hack b/c benchmarks have a main thread */
+        int segments_in_use = number_of_segments_in_use();
+        int single_thread_mode_segments_in_use_limit = 2;
+        dprintf((((segments_in_use <= single_thread_mode_segments_in_use_limit) ?
+                "can activate 1TM (%d segments)\n" : "cannot activate 1TM (%d segments)\n"),
+                segments_in_use));
+        if (segments_in_use <= single_thread_mode_segments_in_use_limit) {
             start_single_thread_mode();
         } else if (stm_single_thread_mode_active) {
             end_single_thread_mode();

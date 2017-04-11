@@ -22,7 +22,7 @@ static bool _has_mutex(void);
 static void set_gs_register(char *value);
 static void ensure_gs_register(long segnum);
 
-static uint8_t number_of_segments_in_use(void);
+static int number_of_segments_in_use(void);
 
 /* acquire and release one of the segments for running the given thread
    (must have the mutex acquired!) */
