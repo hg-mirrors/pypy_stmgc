@@ -15,7 +15,7 @@ static uintptr_t _stm_nursery_start;
 
 static bool stm_single_thread_mode_active = false;
 
-#define SINGLE_THREAD_MODE_FILL_MARK_NURSERY_BYTES  (NURSERY_SIZE * 500000)
+#define SINGLE_THREAD_MODE_FILL_MARK_NURSERY_BYTES  (0x3000000000000000L)
 #define DEFAULT_FILL_MARK_NURSERY_BYTES             (NURSERY_SIZE / 4)
 
 uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
