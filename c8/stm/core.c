@@ -1170,7 +1170,9 @@ long _stm_start_transaction(stm_thread_local_t *tl)
                 segments_in_use));
         if (segments_in_use <= single_thread_mode_segments_in_use_limit) {
             start_single_thread_mode();
-            _stm_become_inevitable("execute_in_single_thread_mode");
+            if (segments_in_use < 2) {
+                _stm_become_inevitable("execute_in_single_thread_mode");
+            }
         } else if (stm_single_thread_mode_active) {
             end_single_thread_mode();
         }
