@@ -534,6 +534,8 @@ static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 
 static void _do_minor_collection(bool commit)
 {
+    start_timer();
+
     dprintf(("minor_collection commit=%d\n", (int)commit));
     assert(!STM_SEGMENT->no_safe_point_here);
 
@@ -578,6 +580,8 @@ static void _do_minor_collection(bool commit)
     throw_away_nursery(get_priv_segment(STM_SEGMENT->segment_num));
 
     assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
+
+    stop_timer_and_publish(STM_DURATION_MINOR_GC);
 }
 
 static void minor_collection(bool commit, bool external)
