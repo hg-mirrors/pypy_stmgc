@@ -27,9 +27,9 @@
 #define pause_timer() clock_gettime(CLOCK_MONOTONIC_RAW, &stop);            \
                       get_duration()
 
-#define stm_duration_payload(duration)                                      \
+#define stm_duration_payload(duration_data)                                 \
     stm_timing_event_payload_data_t stm_duration_data =                     \
-        { .duration = &duration };                                          \
+        { .duration = &duration_data };                                     \
     stm_timing_event_payload_t stm_duration_payload =                       \
         { STM_EVENT_PAYLOAD_DURATION, stm_duration_data };
 

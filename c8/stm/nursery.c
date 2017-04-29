@@ -13,26 +13,35 @@
 
 static uintptr_t _stm_nursery_start;
 
-static bool stm_single_thread_mode_active = false;
+#define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x3000000000000000L;
 
-#define SINGLE_THREAD_MODE_FILL_MARK_NURSERY_BYTES  (NURSERY_SIZE * 9999)
-#define DEFAULT_FILL_MARK_NURSERY_BYTES             (NURSERY_SIZE / 4)
+// uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+uintptr_t stm_fill_mark_nursery_bytes = LARGE_FILL_MARK_NURSERY_BYTES;
 
-uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+static uint32_t stm_max_conflicts = 1000;
+static uint32_t stm_global_conflicts = 0;
+
+static void stm_update_transaction_length(void) {
+    float relative_conflicts = (float) stm_global_conflicts / stm_max_conflicts;
+    uintptr_t max_reduction =
+        LARGE_FILL_MARK_NURSERY_BYTES - DEFAULT_FILL_MARK_NURSERY_BYTES;
+    stm_fill_mark_nursery_bytes =
+        LARGE_FILL_MARK_NURSERY_BYTES - (relative_conflicts * max_reduction);
+    if (timing_enabled()) {
+        struct timespec relative_length = {
+            .tv_sec = (int)relative_conflicts,
+            .tv_nsec = (int)(fmod(relative_conflicts, 1) * 1000000000),
+        };
+        stm_duration_payload(relative_length);
+        stmcb_timing_event(
+            STM_SEGMENT->running_thread,
+            STM_SINGLE_THREAD_MODE_ADAPTIVE,
+            &stm_duration_payload);
+}
+
 
 /************************************************************/
-
-static void start_single_thread_mode(void) {
-    stm_single_thread_mode_active = true;
-    stm_fill_mark_nursery_bytes = SINGLE_THREAD_MODE_FILL_MARK_NURSERY_BYTES;
-    timing_event(STM_SEGMENT->running_thread, STM_SINGLE_THREAD_MODE_ON);
-}
-
-static void end_single_thread_mode(void) {
-    timing_event(STM_SEGMENT->running_thread, STM_SINGLE_THREAD_MODE_OFF);
-    stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
-    stm_single_thread_mode_active = false;
-}
 
 static void setup_nursery(void)
 {

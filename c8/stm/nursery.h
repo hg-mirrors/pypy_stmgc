@@ -9,9 +9,6 @@
 
 static uint32_t highest_overflow_number;
 
-static void start_single_thread_mode(void);
-static void end_single_thread_mode(void);
-
 static void _cards_cleared_in_object(struct stm_priv_segment_info_s *pseg, object_t *obj,
                                      bool strict);
 static void _reset_object_cards(struct stm_priv_segment_info_s *pseg,
@@ -58,5 +55,10 @@ static object_t *find_shadow(object_t *obj);
 static inline bool _is_young(object_t *obj);
 static inline struct object_s *mark_loc(object_t *obj);
 static inline bool _is_from_same_transaction(object_t *obj);
+
+static uint32_t stm_max_conflicts;
+static uint32_t stm_global_conflicts;
+
+static void stm_update_transaction_length(void);
 
 #endif
