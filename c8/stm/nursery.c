@@ -13,13 +13,25 @@
 
 static uintptr_t _stm_nursery_start;
 
+#define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x3000000000000000L;
 
-#define DEFAULT_FILL_MARK_NURSERY_BYTES   (NURSERY_SIZE / 4)
+// uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+uintptr_t stm_fill_mark_nursery_bytes = LARGE_FILL_MARK_NURSERY_BYTES;
 
-uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+static uint32_t stm_max_conflicts = 1000;
+static uint32_t stm_global_conflicts = 0;
+
+static void stm_update_transaction_length(void) {
+    float relative_conflicts = (float) stm_global_conflicts / stm_max_conflicts;
+    uintptr_t max_reduction =
+        LARGE_FILL_MARK_NURSERY_BYTES - DEFAULT_FILL_MARK_NURSERY_BYTES;
+    stm_fill_mark_nursery_bytes =
+        LARGE_FILL_MARK_NURSERY_BYTES - (relative_conflicts * max_reduction);
+}
+
 
 /************************************************************/
-
 
 static void setup_nursery(void)
 {
