@@ -1166,6 +1166,9 @@ long _stm_start_transaction(stm_thread_local_t *tl)
     }
     _do_start_transaction(tl);
 
+    if (number_of_segments_in_use() < 2) {
+        stm_become_inevitable(tl, "single thread mode");
+    }
     if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
                                  in abort_data_structures_from_segment_num() */
         stm_update_transaction_length();
