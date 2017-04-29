@@ -289,6 +289,11 @@ static bool _stm_validate(void)
                         /* conflict! */
                         dprintf(("_stm_validate() failed for obj %p\n", obj));
 
+                        /* disregard race conditions */
+                        if (stm_global_conflicts < stm_max_conflicts) {
+                            stm_global_conflicts += 1;
+                        }
+
                         /* first reset all modified objects from the backup
                            copies as soon as the first conflict is detected;
                            then we will proceed below to update our segment
@@ -1163,6 +1168,7 @@ long _stm_start_transaction(stm_thread_local_t *tl)
 
     if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
                                  in abort_data_structures_from_segment_num() */
+        stm_update_transaction_length();
         STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
                                      stm_fill_mark_nursery_bytes);
     }
