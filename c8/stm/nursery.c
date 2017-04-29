@@ -28,6 +28,16 @@ static void stm_update_transaction_length(void) {
         LARGE_FILL_MARK_NURSERY_BYTES - DEFAULT_FILL_MARK_NURSERY_BYTES;
     stm_fill_mark_nursery_bytes =
         LARGE_FILL_MARK_NURSERY_BYTES - (relative_conflicts * max_reduction);
+    if (timing_enabled()) {
+        struct timespec relative_length = {
+            .tv_sec = (int)relative_conflicts,
+            .tv_nsec = (int)(fmod(relative_conflicts, 1) * 1000000000),
+        };
+        stm_duration_payload(relative_length);
+        stmcb_timing_event(
+            STM_SEGMENT->running_thread,
+            STM_SINGLE_THREAD_MODE_ADAPTIVE,
+            &stm_duration_payload);
 }
 
 
