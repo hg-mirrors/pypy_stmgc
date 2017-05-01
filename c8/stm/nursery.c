@@ -4,6 +4,7 @@
 #endif
 
 #include "finalizer.h"
+#include <math.h>
 
 /************************************************************/
 
@@ -14,30 +15,62 @@
 static uintptr_t _stm_nursery_start;
 
 #define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
-#define LARGE_FILL_MARK_NURSERY_BYTES   0x3000000000000000L;
+// just double the size at max
+// #define LARGE_FILL_MARK_NURSERY_BYTES   DEFAULT_FILL_MARK_NURSERY_BYTES
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x10000000000L
+// #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
-// uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
-uintptr_t stm_fill_mark_nursery_bytes = LARGE_FILL_MARK_NURSERY_BYTES;
+uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+// uintptr_t stm_fill_mark_nursery_bytes = LARGE_FILL_MARK_NURSERY_BYTES;
 
-static uint32_t stm_max_conflicts = 1000;
-static uint32_t stm_global_conflicts = 0;
+static float stm_default_relative_transaction_length = 0.000001;
+static float *stm_relative_transaction_length_pointer =
+                                    &stm_default_relative_transaction_length;
+
+static float get_new_transaction_length(bool aborts, float previous) {
+    float new = previous;
+    if (aborts) {
+        if (previous > 0.000001) {
+            new = previous / 2;
+        } else if (previous > 0) {
+            new = 0;
+        }
+    } else {
+        if (previous - 0.0000001 < 0) {
+            new = 0.000001;
+        } else if (previous < 1) {
+            new = previous * 2;
+        }
+    }
+    return new;
+}
+
+static void stm_transaction_length_handle_validation(stm_thread_local_t *tl, bool aborts) {
+    float actual = *stm_relative_transaction_length_pointer;
+    float expected;
+    do {
+        expected = actual;
+        float new = get_new_transaction_length(aborts, actual);
+        __atomic_exchange(
+            stm_relative_transaction_length_pointer, &new, &actual, __ATOMIC_RELAXED);
+    } while (fabs(actual - expected) > 0.0000001);
+}
 
 static void stm_update_transaction_length(void) {
-    float relative_conflicts = (float) stm_global_conflicts / stm_max_conflicts;
-    uintptr_t max_reduction =
-        LARGE_FILL_MARK_NURSERY_BYTES - DEFAULT_FILL_MARK_NURSERY_BYTES;
-    stm_fill_mark_nursery_bytes =
-        LARGE_FILL_MARK_NURSERY_BYTES - (relative_conflicts * max_reduction);
+    float relative_additional_length = *stm_relative_transaction_length_pointer;
+    stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES +
+        (uintptr_t)(LARGE_FILL_MARK_NURSERY_BYTES * relative_additional_length);
     if (timing_enabled()) {
         struct timespec relative_length = {
-            .tv_sec = (int)relative_conflicts,
-            .tv_nsec = (int)(fmod(relative_conflicts, 1) * 1000000000),
+            .tv_sec = (int)relative_additional_length,
+            .tv_nsec = (int)(fmod(relative_additional_length, 1) * 1000000000),
         };
         stm_duration_payload(relative_length);
         stmcb_timing_event(
             STM_SEGMENT->running_thread,
             STM_SINGLE_THREAD_MODE_ADAPTIVE,
             &stm_duration_payload);
+    }
 }
 
 
