@@ -289,11 +289,6 @@ static bool _stm_validate(void)
                         /* conflict! */
                         dprintf(("_stm_validate() failed for obj %p\n", obj));
 
-                        /* disregard race conditions */
-                        if (stm_global_conflicts < stm_max_conflicts) {
-                            stm_global_conflicts += 1;
-                        }
-
                         /* first reset all modified objects from the backup
                            copies as soon as the first conflict is detected;
                            then we will proceed below to update our segment
@@ -352,6 +347,7 @@ static bool _stm_validate(void)
     }
 
     if (thread_local_for_logging != NULL) {
+        stm_transaction_length_handle_validation(thread_local_for_logging, needs_abort);
         stop_timer_and_publish_for_thread(
             thread_local_for_logging, STM_DURATION_VALIDATION);
     }
