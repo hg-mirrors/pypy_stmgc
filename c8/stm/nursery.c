@@ -23,41 +23,57 @@ static uintptr_t _stm_nursery_start;
 uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
 // uintptr_t stm_fill_mark_nursery_bytes = LARGE_FILL_MARK_NURSERY_BYTES;
 
-static float stm_default_relative_transaction_length = 0.000001;
-static float *stm_relative_transaction_length_pointer =
-                                    &stm_default_relative_transaction_length;
+static float stm_relative_transaction_length = 0.000001;
+static int stm_increase_transaction_length_backoff = 0;
+
+static void reset_or_decrease_backoff(bool reset) {
+    int actual_backoff = stm_increase_transaction_length_backoff;
+    int expected_backoff;
+    int value = 5;
+    do {
+        expected_backoff = actual_backoff;
+        if (!reset) {
+            value = actual_backoff - 1;
+        }
+        actual_backoff = __atomic_exchange_n(
+            &stm_increase_transaction_length_backoff, value, __ATOMIC_RELAXED);
+    } while (expected_backoff != actual_backoff && (reset || actual_backoff > 0));
+}
 
 static float get_new_transaction_length(bool aborts, float previous) {
     float new = previous;
     if (aborts) {
+        reset_or_decrease_backoff(true); // reset backoff
         if (previous > 0.000001) {
             new = previous / 2;
         } else if (previous > 0) {
             new = 0;
         }
-    } else {
+    } else if (stm_increase_transaction_length_backoff == 0) {
         if (previous - 0.0000001 < 0) {
             new = 0.000001;
         } else if (previous < 1) {
             new = previous * 2;
         }
+    } else { // not abort and backoff != 0
+        reset_or_decrease_backoff(false); // decrease backoff by one
     }
     return new;
 }
 
 static void stm_transaction_length_handle_validation(stm_thread_local_t *tl, bool aborts) {
-    float actual = *stm_relative_transaction_length_pointer;
+    float actual = stm_relative_transaction_length;
     float expected;
     do {
         expected = actual;
         float new = get_new_transaction_length(aborts, actual);
         __atomic_exchange(
-            stm_relative_transaction_length_pointer, &new, &actual, __ATOMIC_RELAXED);
+            &stm_relative_transaction_length, &new, &actual, __ATOMIC_RELAXED);
     } while (fabs(actual - expected) > 0.0000001);
 }
 
 static void stm_update_transaction_length(void) {
-    float relative_additional_length = *stm_relative_transaction_length_pointer;
+    float relative_additional_length = stm_relative_transaction_length;
     stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES +
         (uintptr_t)(LARGE_FILL_MARK_NURSERY_BYTES * relative_additional_length);
     if (timing_enabled()) {
