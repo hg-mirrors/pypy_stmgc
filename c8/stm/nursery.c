@@ -17,13 +17,14 @@ static uintptr_t _stm_nursery_start;
 #define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
 // just double the size at max
 // #define LARGE_FILL_MARK_NURSERY_BYTES   DEFAULT_FILL_MARK_NURSERY_BYTES
-#define LARGE_FILL_MARK_NURSERY_BYTES   0x10000000000L
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000L
 // #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
 uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
 // uintptr_t stm_fill_mark_nursery_bytes = LARGE_FILL_MARK_NURSERY_BYTES;
 
-static float stm_relative_transaction_length = 0.000001;
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000000001f)
+static float stm_relative_transaction_length = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
 static int stm_increase_transaction_length_backoff = 0;
 
 static void reset_or_decrease_backoff(bool reset) {
@@ -41,19 +42,20 @@ static void reset_or_decrease_backoff(bool reset) {
 }
 
 static float get_new_transaction_length(bool aborts, float previous) {
+    const int multiplier = 1000;
     float new = previous;
     if (aborts) {
         reset_or_decrease_backoff(true); // reset backoff
-        if (previous > 0.000001) {
-            new = previous / 2;
-        } else if (previous > 0) {
+        if (previous > STM_MIN_RELATIVE_TRANSACTION_LENGTH) {
+            new = previous / multiplier;
+        } else {
             new = 0;
         }
     } else if (stm_increase_transaction_length_backoff == 0) {
-        if (previous - 0.0000001 < 0) {
-            new = 0.000001;
+        if (previous - (STM_MIN_RELATIVE_TRANSACTION_LENGTH * 0.1) < 0) {
+            new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
         } else if (previous < 1) {
-            new = previous * 2;
+            new = previous * multiplier;
         }
     } else { // not abort and backoff != 0
         reset_or_decrease_backoff(false); // decrease backoff by one
@@ -69,7 +71,7 @@ static void stm_transaction_length_handle_validation(stm_thread_local_t *tl, boo
         float new = get_new_transaction_length(aborts, actual);
         __atomic_exchange(
             &stm_relative_transaction_length, &new, &actual, __ATOMIC_RELAXED);
-    } while (fabs(actual - expected) > 0.0000001);
+    } while (fabs(actual - expected) > (STM_MIN_RELATIVE_TRANSACTION_LENGTH * 0.1));
 }
 
 static void stm_update_transaction_length(void) {
