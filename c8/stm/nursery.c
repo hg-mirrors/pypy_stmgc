@@ -44,17 +44,9 @@ static float get_new_transaction_length(bool aborts, float previous) {
     float new = previous;
     if (aborts) {
         reset_or_decrease_backoff(true); // reset backoff
-        if (previous > 0.000001) {
-            new = previous / 2;
-        } else if (previous > 0) {
-            new = 0;
-        }
+        new = 0;
     } else if (stm_increase_transaction_length_backoff == 0) {
-        if (previous - 0.0000001 < 0) {
-            new = 0.000001;
-        } else if (previous < 1) {
-            new = previous * 2;
-        }
+        new = 1;
     } else { // not abort and backoff != 0
         reset_or_decrease_backoff(false); // decrease backoff by one
     }
