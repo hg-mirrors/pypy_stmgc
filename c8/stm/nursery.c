@@ -17,13 +17,13 @@ static uintptr_t _stm_nursery_start;
 #define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
 // just double the size at max
 // #define LARGE_FILL_MARK_NURSERY_BYTES   DEFAULT_FILL_MARK_NURSERY_BYTES
-#define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000L
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000L
 // #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
 uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
 // uintptr_t stm_fill_mark_nursery_bytes = LARGE_FILL_MARK_NURSERY_BYTES;
 
-#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000000001f)
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000001f)
 static float stm_relative_transaction_length = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
 static int stm_increase_transaction_length_backoff = 0;
 
@@ -42,7 +42,7 @@ static void reset_or_decrease_backoff(bool reset) {
 }
 
 static float get_new_transaction_length(bool aborts, float previous) {
-    const int multiplier = 1000;
+    const int multiplier = 2;
     float new = previous;
     if (aborts) {
         reset_or_decrease_backoff(true); // reset backoff
