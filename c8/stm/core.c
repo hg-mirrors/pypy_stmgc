@@ -1167,9 +1167,8 @@ long _stm_start_transaction(stm_thread_local_t *tl)
     }
     if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
                                  in abort_data_structures_from_segment_num() */
-        stm_update_transaction_length();
         STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
-                                     stm_fill_mark_nursery_bytes);
+                                        stm_get_transaction_length(tl));
     }
     return repeat_count;
 }
