@@ -1167,8 +1167,7 @@ long _stm_start_transaction(stm_thread_local_t *tl)
     if (number_of_segments_in_use() < 2) {
         stm_become_inevitable(tl, "single thread mode");
     }
-    /* TODO remove: else, 'nursery_mark' was already set
-        in abort_data_structures_from_segment_num() */
+
     STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
                                         stm_get_transaction_length(tl));
     return repeat_count;
@@ -1531,22 +1530,6 @@ static void abort_data_structures_from_segment_num(int segment_num)
 
     if (pseg->active_queues)
         queues_deactivate_all(pseg, /*at_commit=*/false);
-
-
-    /* Set the next nursery_mark: first compute the value that
-       nursery_mark must have had at the start of the aborted transaction */
-    stm_char *old_mark =pseg->pub.nursery_mark + pseg->total_throw_away_nursery;
-
-    /* This means that the limit, in term of bytes, was: */
-    uintptr_t old_limit = old_mark - (stm_char *)_stm_nursery_start;
-
-    /* If 'total_throw_away_nursery' is smaller than old_limit, use that */
-    if (pseg->total_throw_away_nursery < old_limit)
-        old_limit = pseg->total_throw_away_nursery;
-
-    /* Now set the new limit to 90% of the old limit */
-    pseg->pub.nursery_mark = ((stm_char *)_stm_nursery_start +
-                              (uintptr_t)(old_limit * 0.9));
 
 #ifdef STM_NO_AUTOMATIC_SETJMP
     did_abort = 1;
