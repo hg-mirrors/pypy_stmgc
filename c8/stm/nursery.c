@@ -73,7 +73,7 @@ static uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
     }
     uintptr_t result = DEFAULT_FILL_MARK_NURSERY_BYTES +
         (uintptr_t)(LARGE_FILL_MARK_NURSERY_BYTES * relative_additional_length);
-    printf("%020" PRIxPTR "\n", result);
+    // printf("%020" PRIxPTR "\n", result);
     return result;
 }
 
