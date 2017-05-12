@@ -464,7 +464,9 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 #endif
 
     if (STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
-        wait_for_inevitable();
+        pause_timer();
+        wait_for_inevitable(); // TODO may abort!! timing event lost
+        continue_timer();
         goto retry_from_start;   /* redo _stm_validate() now */
     }
 
@@ -1165,11 +1167,10 @@ long _stm_start_transaction(stm_thread_local_t *tl)
     if (number_of_segments_in_use() < 2) {
         stm_become_inevitable(tl, "single thread mode");
     }
-    if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
-                                 in abort_data_structures_from_segment_num() */
-        STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
+    /* TODO remove: else, 'nursery_mark' was already set
+        in abort_data_structures_from_segment_num() */
+    STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
                                         stm_get_transaction_length(tl));
-    }
     return repeat_count;
 }
 
