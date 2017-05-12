@@ -90,7 +90,7 @@ typedef struct stm_thread_local_s {
     intptr_t self_or_0_if_atomic;
     void *creating_pthread[2];
     /* adaptive single thread mode */
-    float relative_transaction_length;
+    double relative_transaction_length;
     int transaction_length_backoff;
     bool initialized;
 } stm_thread_local_t;

@@ -5,6 +5,7 @@
 
 #include "finalizer.h"
 #include <math.h>
+#include <inttypes.h>
 
 /************************************************************/
 
@@ -23,12 +24,12 @@ static uintptr_t _stm_nursery_start;
 uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
 // uintptr_t stm_fill_mark_nursery_bytes = LARGE_FILL_MARK_NURSERY_BYTES;
 
-#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001f)
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001)
 
-static float get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
+static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
     const int multiplier = 100;
-    float previous = tl->relative_transaction_length;
-    float new = previous;
+    double previous = tl->relative_transaction_length;
+    double new = previous;
     if (aborts) {
         tl->transaction_length_backoff = 3;
         if (previous > STM_MIN_RELATIVE_TRANSACTION_LENGTH) {
@@ -49,16 +50,16 @@ static float get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
 }
 
 static void stm_transaction_length_handle_validation(stm_thread_local_t *tl, bool aborts) {
-    if (!tl->initialized) {
+    if (!tl->initialized) { // TODO move to setup.c
         tl->relative_transaction_length = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
         tl->initialized = true;
     }
-    float new = get_new_transaction_length(tl, aborts);
+    double new = get_new_transaction_length(tl, aborts);
     tl->relative_transaction_length = new;
 }
 
 static uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
-    float relative_additional_length = tl->relative_transaction_length;
+    double relative_additional_length = tl->relative_transaction_length;
     if (timing_enabled()) {
         struct timespec relative_length = {
             .tv_sec = (int)relative_additional_length,
@@ -70,8 +71,10 @@ static uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
             STM_SINGLE_THREAD_MODE_ADAPTIVE,
             &stm_duration_payload);
     }
-    return DEFAULT_FILL_MARK_NURSERY_BYTES +
+    uintptr_t result = DEFAULT_FILL_MARK_NURSERY_BYTES +
         (uintptr_t)(LARGE_FILL_MARK_NURSERY_BYTES * relative_additional_length);
+    printf("%020" PRIxPTR "\n", result);
+    return result;
 }
 
 
