@@ -16,13 +16,10 @@
 static uintptr_t _stm_nursery_start;
 
 #define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
-// just double the size at max
+
 // #define LARGE_FILL_MARK_NURSERY_BYTES   DEFAULT_FILL_MARK_NURSERY_BYTES
 #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000L
 // #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
-
-uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
-// uintptr_t stm_fill_mark_nursery_bytes = LARGE_FILL_MARK_NURSERY_BYTES;
 
 #define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001)
 
@@ -71,7 +68,7 @@ static uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
             STM_SINGLE_THREAD_MODE_ADAPTIVE,
             &stm_duration_payload);
     }
-    uintptr_t result = DEFAULT_FILL_MARK_NURSERY_BYTES +
+    uintptr_t result =
         (uintptr_t)(LARGE_FILL_MARK_NURSERY_BYTES * relative_additional_length);
     // printf("%020" PRIxPTR "\n", result);
     return result;
