@@ -47,12 +47,7 @@ static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
 }
 
 static void stm_transaction_length_handle_validation(stm_thread_local_t *tl, bool aborts) {
-    if (!tl->initialized) { // TODO move to setup.c
-        tl->relative_transaction_length = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
-        tl->initialized = true;
-    }
-    double new = get_new_transaction_length(tl, aborts);
-    tl->relative_transaction_length = new;
+    tl->relative_transaction_length = get_new_transaction_length(tl, aborts);
 }
 
 static uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
