@@ -52,17 +52,8 @@ static void stm_transaction_length_handle_validation(stm_thread_local_t *tl, boo
 
 static uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
     double relative_additional_length = tl->relative_transaction_length;
-    if (timing_enabled()) {
-        struct timespec relative_length = {
-            .tv_sec = (int)relative_additional_length,
-            .tv_nsec = (int)(fmod(relative_additional_length, 1) * 1000000000),
-        };
-        stm_duration_payload(relative_length);
-        stmcb_timing_event(
-            STM_SEGMENT->running_thread,
-            STM_SINGLE_THREAD_MODE_ADAPTIVE,
-            &stm_duration_payload);
-    }
+    publish_custom_value_event(
+        relative_additional_length, STM_SINGLE_THREAD_MODE_ADAPTIVE);
     uintptr_t result =
         (uintptr_t)(LARGE_FILL_MARK_NURSERY_BYTES * relative_additional_length);
     // printf("%020" PRIxPTR "\n", result);
