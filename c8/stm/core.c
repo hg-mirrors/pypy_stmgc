@@ -463,7 +463,9 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 #endif
 
     if (STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
-        wait_for_inevitable();
+        pause_timer();
+        wait_for_inevitable(); // TODO may abort!! timing event lost
+        continue_timer();
         goto retry_from_start;   /* redo _stm_validate() now */
     }
 
