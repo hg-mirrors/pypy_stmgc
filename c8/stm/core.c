@@ -1072,13 +1072,14 @@ static void readd_wb_executed_flags(void)
 
 static void _do_start_transaction(stm_thread_local_t *tl)
 {
-    start_timer();
-
     assert(!_stm_in_transaction(tl));
     tl->wait_event_emitted = 0;
 
     acquire_thread_segment(tl);
     /* GS invalid before this point! */
+
+    // acquiring segment is measured as wait time
+    start_timer();
 
     assert(STM_PSEGMENT->safe_point == SP_NO_TRANSACTION);
     assert(STM_PSEGMENT->transaction_state == TS_NONE);
@@ -1126,10 +1127,12 @@ static void _do_start_transaction(stm_thread_local_t *tl)
         rv++;        /* incr it but enter_safe_point_if_requested() aborted */
     STM_SEGMENT->transaction_read_version = rv;
 
+    pause_timer();
     /* Warning: this safe-point may run light finalizers and register
        commit/abort callbacks if a major GC is triggered here */
     enter_safe_point_if_requested();
     dprintf(("> start_transaction\n"));
+    continue_timer();
 
     s_mutex_unlock();   // XXX it's probably possible to not acquire this here
 
@@ -1148,6 +1151,8 @@ int did_abort = 0;
 
 long _stm_start_transaction(stm_thread_local_t *tl)
 {
+    start_timer();
+
     s_mutex_lock();
 #ifdef STM_NO_AUTOMATIC_SETJMP
     long repeat_count = did_abort;    /* test/support.py */
@@ -1161,13 +1166,20 @@ long _stm_start_transaction(stm_thread_local_t *tl)
             memcpy(tl->mem_reset_on_abort, tl->mem_stored_for_reset_on_abort,
                    tl->mem_bytes_to_reset_on_abort);
     }
+
+    // _do_start_transaction is instrumented as well and pauses for waits
+    pause_timer();
     _do_start_transaction(tl);
+    continue_timer();
 
     if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
                                  in abort_data_structures_from_segment_num() */
         STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
                                      stm_fill_mark_nursery_bytes);
     }
+
+    stop_timer_and_publish(STM_DURATION_START_TRX);
+
     return repeat_count;
 }
 
