@@ -29,20 +29,20 @@
 
 #define stm_duration_payload(duration_data)                                 \
     stm_timing_event_payload_data_t stm_duration_data =                     \
-        { .duration = &duration_data };                                     \
+        { .duration = &(duration_data) };                                     \
     stm_timing_event_payload_t stm_duration_payload =                       \
         { STM_EVENT_PAYLOAD_DURATION, stm_duration_data };
 
 #define publish_event(thread_local, event)                                  \
     (timing_enabled() ?                                                     \
-        stmcb_timing_event(thread_local, event, &stm_duration_payload) :    \
+        stmcb_timing_event((thread_local), (event), &stm_duration_payload) :\
         (void)0);
 
 #define stop_timer_and_publish_for_thread(thread_local, event)              \
     pause_timer()                                                           \
     stm_duration_payload(duration)                                          \
-    assert(thread_local != NULL);                                           \
-    publish_event(thread_local, event)
+    assert((thread_local) != NULL);                                         \
+    publish_event((thread_local), (event))
 
 #define stop_timer_and_publish(event)                                       \
-    stop_timer_and_publish_for_thread(STM_SEGMENT->running_thread, event)
+    stop_timer_and_publish_for_thread(STM_SEGMENT->running_thread, (event))
