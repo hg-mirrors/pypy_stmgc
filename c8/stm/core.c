@@ -1152,8 +1152,6 @@ int did_abort = 0;
 
 long _stm_start_transaction(stm_thread_local_t *tl)
 {
-    start_timer();
-
     s_mutex_lock();
 #ifdef STM_NO_AUTOMATIC_SETJMP
     long repeat_count = did_abort;    /* test/support.py */
@@ -1161,6 +1159,9 @@ long _stm_start_transaction(stm_thread_local_t *tl)
 #else
     long repeat_count = stm_rewind_jmp_setjmp(tl);
 #endif
+
+    start_timer();
+
     if (repeat_count) {
         /* only if there was an abort, we need to reset the memory: */
         if (tl->mem_reset_on_abort)
@@ -1168,7 +1169,7 @@ long _stm_start_transaction(stm_thread_local_t *tl)
                    tl->mem_bytes_to_reset_on_abort);
     }
 
-    // _do_start_transaction is instrumented as well and pauses for waits
+    // _do_start_transaction is instrumented as well b/c it needs to pause for waits
     pause_timer();
     _do_start_transaction(tl);
     continue_timer();
