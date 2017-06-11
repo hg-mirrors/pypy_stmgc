@@ -16,30 +16,15 @@
 static uintptr_t _stm_nursery_start;
 
 #define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
-
-// #define LARGE_FILL_MARK_NURSERY_BYTES   DEFAULT_FILL_MARK_NURSERY_BYTES
 #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000L
-// #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
-
-#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001)
 
 static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
-    const int multiplier = 100;
-    double previous = tl->relative_transaction_length;
-    double new = previous;
+    double new = tl->relative_transaction_length;
     if (aborts) {
         tl->transaction_length_backoff = 3;
-        if (previous > STM_MIN_RELATIVE_TRANSACTION_LENGTH) {
-            new = previous / multiplier;
-        } else {
-            new = 0;
-        }
+        new = 0;
     } else if (tl->transaction_length_backoff == 0) {
-        if (previous - (STM_MIN_RELATIVE_TRANSACTION_LENGTH * 0.1) < 0) {
-            new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
-        } else if (previous < 1) {
-            new = previous * multiplier;
-        }
+        new = 1;
     } else { // not abort and backoff != 0
         tl->transaction_length_backoff -= 1;
     }
