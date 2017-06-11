@@ -29,7 +29,7 @@
 
 #define stm_duration_payload(duration_data)                                 \
     stm_timing_event_payload_data_t stm_duration_data =                     \
-        { .duration = &(duration_data) };                                     \
+        { .duration = &(duration_data) };                                   \
     stm_timing_event_payload_t stm_duration_payload =                       \
         { STM_EVENT_PAYLOAD_DURATION, stm_duration_data };
 
