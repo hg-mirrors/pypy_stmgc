@@ -247,7 +247,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
     tl->thread_local_counter = ++thread_local_counters;
 
     /* init single thread mode */
-    tl->relative_transaction_length = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
+    tl->relative_transaction_length = 1;
     tl->transaction_length_backoff = 0;
 
     *_get_cpth(tl) = pthread_self();
