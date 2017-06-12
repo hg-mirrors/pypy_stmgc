@@ -22,7 +22,7 @@ static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
     double new = tl->relative_transaction_length;
     if (aborts) {
         tl->transaction_length_backoff = 3;
-        new = 0;
+        new = 100.0 / LARGE_FILL_MARK_NURSERY_BYTES;
     } else if (tl->transaction_length_backoff == 0) {
         new = 1;
     } else { // not abort and backoff != 0
