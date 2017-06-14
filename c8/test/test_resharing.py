@@ -118,6 +118,62 @@ class TestBasic(BaseTest):
         assert stm_get_page_status(p2) == PAGE_NO_ACCESS
 
 
+    def test_seg0_updated_on_majorgc(self):
+        self.start_transaction()
+        lp1 = stm_allocate(16)
+        stm_set_char(lp1, 'a')
+        self.push_roots([lp1,])
+        stm_minor_collect()
+        lp1, = self.pop_roots()
+        self.push_roots([lp1,])
+        self.commit_transaction()
+        p1 = stm_get_obj_pages(lp1)[0]
+
+        self.switch(1)
+        self.start_transaction()
+        # NOACC -> ACC
+        assert stm_get_page_status(p1) == PAGE_NO_ACCESS
+        assert stm_get_char(lp1) == 'a'
+        assert stm_get_page_status(p1) == PAGE_ACCESSIBLE
+        stm_set_char(lp1, 'b')
+        self.commit_transaction()
+
+        self.switch(2)
+        self.start_transaction()
+        # NOACC -> ACC
+        assert stm_get_page_status(p1) == PAGE_NO_ACCESS
+        assert stm_get_char(lp1) == 'b'
+        # stm_set_char(lp1, 'x')
+        assert stm_get_page_status(p1) == PAGE_ACCESSIBLE
+        # merging: unmodified ACC -> RO
+        stm_major_collect()
+        stm_major_collect()
+        stm_major_collect()
+        assert stm_get_page_status(p1) == PAGE_READONLY
+
+        self.switch(1)
+
+        self.start_transaction()
+        # RO stays RO
+        assert stm_get_page_status(p1) == PAGE_READONLY
+        assert stm_get_char(lp1) == 'b'
+        assert stm_get_page_status(p1) == PAGE_READONLY
+
+        self.switch(2)
+
+        # write makes RO -> ACC, all others RO->NO_ACC
+        assert stm_get_page_status(p1) == PAGE_READONLY
+        stm_set_char(lp1, 'x')
+        assert stm_get_page_status(p1) == PAGE_ACCESSIBLE
+
+        self.switch(1)
+
+        assert stm_get_page_status(p1) == PAGE_NO_ACCESS
+        stm_major_collect()
+        stm_major_collect()
+        stm_major_collect()
+        assert stm_get_page_status(p1) == PAGE_NO_ACCESS
+
 
 
     def test_resharing_more(self):
@@ -215,7 +271,7 @@ class TestBasic(BaseTest):
         # now wref is in NO_ACCESS page
         assert stm_get_page_status(page) == PAGE_NO_ACCESS
         assert stm_get_weakref(wref) == ffi.NULL
-        assert stm_get_page_status(page) == PAGE_ACCESSIBLE
+        assert stm_get_page_status(page) == PAGE_READONLY
 
     def test_weakref2(self):
         self.start_transaction()
@@ -244,4 +300,4 @@ class TestBasic(BaseTest):
         # now wref is in NO_ACCESS page
         assert stm_get_page_status(page) == PAGE_NO_ACCESS
         assert stm_get_weakref(wref) == ffi.NULL
-        assert stm_get_page_status(page) == PAGE_ACCESSIBLE
+        assert stm_get_page_status(page) == PAGE_READONLY

@@ -671,7 +671,7 @@ object_t *_stm_allocate_external(ssize_t size_rounded_up)
     o->stm_flags = 0;
     /* make all pages of 'o' accessible as synchronize_obj_flush() in minor
        collections assumes all young objs are fully accessible. */
-    touch_all_pages_of_obj(o, size_rounded_up);
+    make_all_pages_of_obj_accessible(o, size_rounded_up);
 #endif
     return o;
 }

@@ -5,7 +5,6 @@
 
 
 
-
 static void setup_signal_handler(void)
 {
     struct sigaction act;
@@ -61,7 +60,7 @@ static void go_to_the_past(uintptr_t pagenum,
 }
 
 
-static void readonly_to_accessible(int my_segnum, uintptr_t pagenum)
+static void any_to_accessible(int my_segnum, uintptr_t pagenum)
 {
     /* make our page write-ready */
     page_mark_accessible(my_segnum, pagenum);
@@ -91,22 +90,55 @@ static void handle_segfault_in_page(uintptr_t pagenum, bool is_write)
 
     long i;
     int my_segnum = STM_SEGMENT->segment_num;
-
     uint8_t page_status = get_page_status_in(my_segnum, pagenum);
+
     assert(page_status == PAGE_NO_ACCESS
            || page_status == PAGE_READONLY);
+    _assert_page_status_invariants(pagenum);
 
-
-    //is_write=false;
-    if (page_status == PAGE_READONLY || is_write) {
-        dprintf(("SHORTCUT\n"));
-        readonly_to_accessible(my_segnum, pagenum);
-    }
     if (page_status == PAGE_READONLY) {
+        /* RO -> ACC */
+        assert(is_write);       /* should only fail if linux kernel changed */
+        any_to_accessible(my_segnum, pagenum);
         ro_to_acc++;
 
+        /* if was RO, page already has the right contents */
+        _assert_page_status_invariants(pagenum);
         release_all_privatization_locks();
         return;
+
+    }
+
+    assert(page_status == PAGE_NO_ACCESS);
+
+    /* if this is just a read-access, try to get a RO view: */
+    if (!is_write) {
+        bool acc_exists = false;
+        for (i = 1; i < NB_SEGMENTS; i++) {
+            if (i == my_segnum)
+                continue;
+
+            if (get_page_status_in(i, pagenum) == PAGE_ACCESSIBLE) {
+                acc_exists = true;
+                break;
+            }
+        }
+
+        if (!acc_exists) {
+            /* if there is no ACC version around, it means noone ever had that page
+             * ACC since the last major GC -> seg0 has the most current revision and
+             * we can get a RO of that. (of course only if this is not a
+             * write-access anyway) */
+
+            /* this case could be avoided by making all NO_ACCESS to READONLY
+               when resharing pages (XXX: better?).
+               We may go from NO_ACCESS->READONLY->ACCESSIBLE */
+            dprintf((" > make a previously NO_ACCESS page READONLY\n"));
+            page_mark_readonly(my_segnum, pagenum);
+            _assert_page_status_invariants(pagenum);
+            release_all_privatization_locks();
+            return;
+        }
     }
 
     /* find a suitable page to copy from in other segments:
@@ -116,18 +148,15 @@ static void handle_segfault_in_page(uintptr_t pagenum, bool is_write)
      * Note: simply finding the most recent revision would be a conservative strategy, but
      *       requires going back in time more often (see below)
      */
+
+    /* special case: if there are RO versions around, we want to copy from seg0,
+     * since we make RO -> NOACC below before we copy (which wouldn't work). */
     int copy_from_segnum = -1;
     uint64_t copy_from_rev = 0;
     uint64_t target_rev = STM_PSEGMENT->last_commit_log_entry->rev_num;
-    bool was_readonly = false;
     for (i = 1; i < NB_SEGMENTS; i++) {
         if (i == my_segnum)
             continue;
-
-        if (!was_readonly && get_page_status_in(i, pagenum) == PAGE_READONLY) {
-            was_readonly = true;
-            break;
-        }
 
         struct stm_commit_log_entry_s *log_entry;
         log_entry = get_priv_segment(i)->last_commit_log_entry;
@@ -135,7 +164,7 @@ static void handle_segfault_in_page(uintptr_t pagenum, bool is_write)
         /* - if not found anything, initialise copy_from_rev
          * - else if target_rev is higher than everything we found, find newest among them
          * - else: find revision that is as close to target_rev as possible         */
-        bool accessible = get_page_status_in(i, pagenum) != PAGE_NO_ACCESS;
+        bool accessible = get_page_status_in(i, pagenum) == PAGE_ACCESSIBLE;
         bool uninit = copy_from_segnum == -1;
         bool find_most_recent = copy_from_rev < target_rev && log_entry->rev_num > copy_from_rev;
         bool find_closest = copy_from_rev >= target_rev && (
@@ -150,29 +179,19 @@ static void handle_segfault_in_page(uintptr_t pagenum, bool is_write)
     }
     OPT_ASSERT(copy_from_segnum != my_segnum);
 
-    if (was_readonly) {
-        assert(page_status == PAGE_NO_ACCESS);
-        /* this case could be avoided by making all NO_ACCESS to READONLY
-           when resharing pages (XXX: better?).
-           We may go from NO_ACCESS->READONLY->ACCESSIBLE on write with
-           2 SIGSEGV in a row.*/
-        dprintf((" > make a previously NO_ACCESS page READONLY\n"));
-        page_mark_readonly(my_segnum, pagenum);
 
-        release_all_privatization_locks();
-        return;
-    }
-
-    /* make our page write-ready */
-    if (!is_write) // is_write -> already marked accessible above
-        page_mark_accessible(my_segnum, pagenum);
+    /* make our page write-ready and reconstruct contents */
+    any_to_accessible(my_segnum, pagenum);
+    _assert_page_status_invariants(pagenum);
 
     /* account for this page now: XXX */
     /* increment_total_allocated(4096); */
 
     if (copy_from_segnum == -1) {
         /* this page is only accessible in the sharing segment seg0 so far (new
-           allocation). We can thus simply mark it accessible here. */
+           allocation). Or it was only in RO pages, which are the same as seg0.
+           We can thus simply mark it accessible here w/o undoing any
+           modifications or going back in time (seg0 is up-to-date). */
         pagecopy(get_virtual_page(my_segnum, pagenum),
                  get_virtual_page(0, pagenum));
         release_all_privatization_locks();

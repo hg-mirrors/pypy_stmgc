@@ -249,6 +249,7 @@ static long page_check_and_reshare(uintptr_t pagenum)
             count++;
         }
     }
+    _assert_page_status_invariants(pagenum);
 
     return count;
 }
@@ -278,7 +279,7 @@ static void major_reshare_pages(void)
             fprintf(stderr, "COLLECT_HINTS_ONLY\n");
 
             /* XXX: since major GC also makes sure that currently modified objs are
-               "modified recently", maybe don't need to do it in touch_all_pages_of_obj() */
+               "modified recently", maybe don't need to do it in make_all_pages_of_obj_accessible() */
             return;
         }
     }
