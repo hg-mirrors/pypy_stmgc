@@ -67,8 +67,10 @@ static void import_objects(
         /* never import anything into READONLY pages */
         assert(get_page_status_in(my_segnum, current_page_num) != PAGE_READONLY);
 
-        if (pagenum == -1) {
-            if (get_page_status_in(my_segnum, current_page_num) != PAGE_ACCESSIBLE)
+        if (pagenum == -1UL) {
+            assert(IMPLY(my_segnum == 0,
+                         get_page_status_in(my_segnum, current_page_num) == PAGE_ACCESSIBLE));
+            if (get_page_status_in(my_segnum, current_page_num) == PAGE_NO_ACCESS)
                 continue;
         } else if (pagenum != current_page_num) {
             continue;
@@ -793,7 +795,7 @@ static void write_slowpath_overflow_obj(object_t *obj, bool mark_card)
 }
 
 
-static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
+static void make_all_pages_of_obj_accessible(object_t *obj, size_t obj_size)
 {
     /* XXX: make this function not needed */
     int my_segnum = STM_SEGMENT->segment_num;
@@ -806,7 +808,7 @@ static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
         end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
     }
 
-    dprintf(("touch_all_pages_of_obj(%p, %lu): %ld-%ld\n",
+    dprintf(("make_all_pages_of_obj_accessible(%p, %lu): %ld-%ld\n",
              obj, obj_size, first_page, end_page));
 
     acquire_privatization_lock(STM_SEGMENT->segment_num);
@@ -816,8 +818,8 @@ static void touch_all_pages_of_obj(object_t *obj, size_t obj_size)
 
         if (get_page_status_in(my_segnum, page) != PAGE_ACCESSIBLE) {
             release_privatization_lock(STM_SEGMENT->segment_num);
-            /* emulate pagefault -> PAGE_ACCESSIBLE/READONLY: */
-            handle_segfault_in_page(page, false);
+            /* emulate pagefault -> PAGE_ACCESSIBLE: */
+            handle_segfault_in_page(page, true);
             volatile char *dummy = REAL_ADDRESS(STM_SEGMENT->segment_base, page * 4096UL);
             *dummy = *dummy;            /* force segfault (incl. writing) */
             acquire_privatization_lock(STM_SEGMENT->segment_num);
@@ -863,7 +865,8 @@ static void write_slowpath_common(object_t *obj, bool mark_card)
         realobj = REAL_ADDRESS(STM_SEGMENT->segment_base, obj);
         obj_size = stmcb_size_rounded_up((struct object_s *)realobj);
 
-        touch_all_pages_of_obj(obj, obj_size);
+        /* ACCESSIBLE, not READONLY since we need to write flags into the obj */
+        make_all_pages_of_obj_accessible(obj, obj_size);
     }
 
     if (mark_card) {

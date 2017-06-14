@@ -157,3 +157,41 @@ static inline void set_page_status_in(long segnum, uintptr_t pagenum,
     ps->by_segment &= ~(0b11UL << seg_shift); /* clear */
     ps->by_segment |= status << seg_shift; /* set */
 }
+
+__attribute__((unused))
+static void _debug_page_status(uintptr_t pagenum)
+{
+    for (long i = 0; i < NB_SEGMENTS; i++) {
+        uint8_t status = get_page_status_in(i, pagenum);
+        switch (status) {
+        case PAGE_NO_ACCESS:
+            fprintf(stderr, "in seg %ld: NO_ACC\n", i);
+            break;
+        case PAGE_READONLY:
+            fprintf(stderr, "in seg %ld: RO\n", i);
+            break;
+        case PAGE_ACCESSIBLE:
+            fprintf(stderr, "in seg %ld: ACC\n", i);
+            break;
+        }
+    }
+}
+
+__attribute__((unused))
+static void _assert_page_status_invariants(uintptr_t pagenum)
+{
+#ifndef NDEBUG
+    bool has_ro = false;
+    bool has_acc = false;
+    for (long i = 1; i < NB_SEGMENTS; i++) {
+        uint8_t status = get_page_status_in(i, pagenum);
+        has_ro |= (status == PAGE_READONLY);
+        has_acc |= (status == PAGE_ACCESSIBLE);
+    }
+
+    if (has_ro && has_acc) {
+        _debug_page_status(pagenum);
+        assert(false);
+    }
+#endif
+}
