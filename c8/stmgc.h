@@ -92,8 +92,10 @@ typedef struct stm_thread_local_s {
     /* == adaptive single thread mode == */
     /* factor that is multiplied with max transaction length before the start of the next transaction on this thread */
     double relative_transaction_length;
-    /* when zero, transaction length may increase or decrease, otherwise transaction length may only decrease. is (re-)set to some value upon abort and counted down until zero upon successful validation. */
+    /* when zero, transaction length may increase exponentially, otherwise transaction length may only increase linearly. is (re-)set to some value upon abort and counted down until zero upon successful validation. */
     int transaction_length_backoff;
+    /* during the backoff, transaction length may increase linearly by this increment on every successful validation */
+    double linear_transaction_length_increment;
 } stm_thread_local_t;
 
 

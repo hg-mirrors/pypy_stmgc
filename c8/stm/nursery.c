@@ -21,26 +21,32 @@ static uintptr_t _stm_nursery_start;
 #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000L
 // #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
-#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001)
+// corresponds to ~7 bytes nursery fill
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.0000000001)
 
 static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
     const int multiplier = 100;
     double previous = tl->relative_transaction_length;
     double new = previous;
     if (aborts) {
-        tl->transaction_length_backoff = 3;
         if (previous > STM_MIN_RELATIVE_TRANSACTION_LENGTH) {
             new = previous / multiplier;
         } else {
-            new = 0;
-        }
-    } else if (tl->transaction_length_backoff == 0) {
-        if (previous - (STM_MIN_RELATIVE_TRANSACTION_LENGTH * 0.1) < 0) {
             new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
-        } else if (previous < 1) {
+        }
+        // the shorter the trx, the more backoff
+        tl->transaction_length_backoff = (int)(1 / new);
+        tl->linear_transaction_length_increment = new;
+    } else if (tl->transaction_length_backoff == 0) {
+        // backoff counter is zero, exponential increase up to 1
+        if (previous < 1) {
             new = previous * multiplier;
         }
     } else { // not abort and backoff != 0
+        // in backoff, linear increase up to 1
+        if (previous < 1) {
+            new = previous + tl->linear_transaction_length_increment;
+        }
         tl->transaction_length_backoff -= 1;
     }
     return new;
