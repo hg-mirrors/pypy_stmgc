@@ -34,8 +34,8 @@ static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
         } else {
             new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
         }
-        // the shorter the trx, the more backoff
-        tl->transaction_length_backoff = (int)(1 / new);
+        // the shorter the trx, the more backoff: 1000 at min trx length, proportional decrease to 1 at max trx length (think a/x + b = backoff)
+        tl->transaction_length_backoff = (int)(0.0000001 / new - 0.9999999);
         tl->linear_transaction_length_increment = new;
     } else if (tl->transaction_length_backoff == 0) {
         // backoff counter is zero, exponential increase up to 1
