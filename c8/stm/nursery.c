@@ -500,6 +500,11 @@ static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     pseg->pub.nursery_current = (stm_char *)_stm_nursery_start;
     pseg->pub.nursery_mark -= nursery_used;
 
+    if (pseg->commit_if_not_atomic && pseg->pub.running_thread->self_or_0_if_atomic != 0) {
+        // not atomic and commit signalled by waiting thread: commit immediately
+        pseg->pub.nursery_mark = 0;
+    }
+
     /* free any object left from 'young_outside_nursery' */
     if (!tree_is_cleared(pseg->young_outside_nursery)) {
         wlog_t *item;

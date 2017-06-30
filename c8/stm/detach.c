@@ -215,6 +215,7 @@ static void commit_detached_transaction_if_from(stm_thread_local_t *tl)
     }
 }
 
+// TODO write tests, verify is working, verify no overflows with adaptive mode
 uintptr_t stm_is_atomic(stm_thread_local_t *tl)
 {
     assert(STM_SEGMENT->running_thread == tl);
