@@ -1594,6 +1594,8 @@ void _stm_become_inevitable(const char *msg)
             if (any_soon_finished_or_inevitable_thread_segment() &&
                     !safe_point_requested()) {
 
+                signal_commit_to_inevitable_transaction();
+
                 /* wait until C_SEGMENT_FREE_OR_SAFE_POINT_REQ is signalled */
                 EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
                 if (!cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ,
