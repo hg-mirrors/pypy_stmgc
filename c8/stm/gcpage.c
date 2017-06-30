@@ -747,8 +747,12 @@ static void major_collection_now_at_safe_point(void)
     dprintf((" .----- major collection -----------------------\n"));
     assert(_has_mutex());
 
+    stm_thread_local_t *thread_local_for_logging = STM_SEGMENT->running_thread;
+
     /* first, force a minor collection in each of the other segments */
     major_do_validation_and_minor_collections();
+
+    start_timer();
 
     dprintf((" | used before collection: %ld\n",
              (long)pages_ctl.total_allocated));
@@ -779,9 +783,12 @@ static void major_collection_now_at_safe_point(void)
         dprintf((" | used after collection:  %ld\n",
                 (long)pages_ctl.total_allocated));
         dprintf((" `----------------------------------------------\n"));
+
+        stop_timer_and_publish_for_thread(
+            thread_local_for_logging, STM_DURATION_MAJOR_GC_LOG_ONLY);
+
         if (must_abort())
             abort_with_mutex();
-
         return;
 #endif
     }
@@ -836,6 +843,10 @@ static void major_collection_now_at_safe_point(void)
        must abort, do it now. The others are in safe-points that will
        abort if they need to. */
     dprintf(("must abort?:%d\n", (int)must_abort()));
+
+    stop_timer_and_publish_for_thread(
+        thread_local_for_logging, STM_DURATION_MAJOR_GC_FULL);
+
     if (must_abort())
         abort_with_mutex();
 }

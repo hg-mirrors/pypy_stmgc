@@ -9,6 +9,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <assert.h>
 #include <limits.h>
 #include <unistd.h>
@@ -88,6 +89,11 @@ typedef struct stm_thread_local_s {
     struct stm_thread_local_s *prev, *next;
     intptr_t self_or_0_if_atomic;
     void *creating_pthread[2];
+    /* == adaptive single thread mode == */
+    /* factor that is multiplied with max transaction length before the start of the next transaction on this thread */
+    double relative_transaction_length;
+    /* when zero, transaction length may increase or decrease, otherwise transaction length may only decrease. is (re-)set to some value upon abort and counted down until zero upon successful validation. */
+    int transaction_length_backoff;
 } stm_thread_local_t;
 
 
@@ -201,7 +207,7 @@ uint64_t _stm_total_allocated(void);
 /* ==================== PUBLIC API ==================== */
 
 /* Number of segments (i.e. how many transactions can be executed in
-   parallel, in maximum).  If you try to start transactions in more
+   parallel, at maximum).  If you try to start transactions in more
    threads than the number of segments, it will block, waiting for the
    next segment to become free.
 */
@@ -574,21 +580,46 @@ enum stm_event_e {
     STM_GC_MAJOR_START,
     STM_GC_MAJOR_DONE,
 
+    /* execution duration profiling events */
+    STM_DURATION_START_TRX,
+    STM_DURATION_WRITE_GC_ONLY,
+    STM_DURATION_WRITE_SLOWPATH,
+    STM_DURATION_VALIDATION,
+    STM_DURATION_CREATE_CLE,
+    STM_DURATION_COMMIT_EXCEPT_GC,
+    STM_DURATION_MINOR_GC,
+    STM_DURATION_MAJOR_GC_LOG_ONLY,
+    STM_DURATION_MAJOR_GC_FULL,
+
+    STM_SINGLE_THREAD_MODE_ON,
+    STM_SINGLE_THREAD_MODE_OFF,
+    STM_SINGLE_THREAD_MODE_ADAPTIVE,
+
     _STM_EVENT_N
 };
 
-#define STM_EVENT_NAMES                         \
-    "transaction start",                        \
-    "transaction commit",                       \
-    "transaction abort",                        \
-    "contention write read",                    \
-    "wait free segment",                        \
-    "wait other inevitable",                    \
-    "wait done",                                \
-    "gc minor start",                           \
-    "gc minor done",                            \
-    "gc major start",                           \
-    "gc major done"
+#define STM_EVENT_NAMES                             \
+    "transaction start",                            \
+    "transaction commit",                           \
+    "transaction abort",                            \
+    "contention write read",                        \
+    "wait free segment",                            \
+    "wait other inevitable",                        \
+    "wait done",                                    \
+    "gc minor start",                               \
+    "gc minor done",                                \
+    "gc major start",                               \
+    "gc major done",                                \
+    /* names of duration events */                  \
+    "duration of transaction start",                \
+    "duration of gc due to write",                  \
+    "duration of write slowpath",                   \
+    "duration of validation",                       \
+    "duration of commit log entry creation",        \
+    "duration of commit except gc",                 \
+    "duration of minor gc",                         \
+    "duration of major gc doing log clean up only", \
+    "duration of full major gc"
 
 /* The markers pushed in the shadowstack are an odd number followed by a
    regular object pointer. */
@@ -596,9 +627,27 @@ typedef struct {
     uintptr_t odd_number;  /* marker odd number, or 0 if marker is missing */
     object_t *object;      /* marker object, or NULL if marker is missing */
 } stm_loc_marker_t;
+/* Allow any kind of payload to be attached to a timing event. */
+enum stm_payload_type_e {
+    STM_EVENT_PAYLOAD_MARKER,
+    STM_EVENT_PAYLOAD_DURATION,
+
+    _STM_EVENT_PAYLOAD_N
+};
+
+#include <time.h>
+typedef union {
+    stm_loc_marker_t *loc_marker;
+    struct timespec *duration;
+} stm_timing_event_payload_data_t;
+/* Wrapper for payload holding data type and data. */
+typedef struct {
+    enum stm_payload_type_e type;
+    stm_timing_event_payload_data_t data;
+} stm_timing_event_payload_t;
 extern void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
                                   enum stm_event_e event,
-                                  stm_loc_marker_t *marker);
+                                  stm_timing_event_payload_t *payload);
 
 /* Calling this sets up a stmcb_timing_event callback that will produce
    a binary file called 'profiling_file_name'.  Call it with
