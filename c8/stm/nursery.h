@@ -56,4 +56,10 @@ static inline bool _is_young(object_t *obj);
 static inline struct object_s *mark_loc(object_t *obj);
 static inline bool _is_from_same_transaction(object_t *obj);
 
+static uint32_t stm_max_conflicts;
+static uint32_t stm_global_conflicts;
+
+static void stm_transaction_length_handle_validation(stm_thread_local_t *tl, bool aborts);
+static uintptr_t stm_get_transaction_length(stm_thread_local_t *tl);
+
 #endif

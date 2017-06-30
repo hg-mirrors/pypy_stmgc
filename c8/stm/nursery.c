@@ -4,6 +4,8 @@
 #endif
 
 #include "finalizer.h"
+#include <math.h>
+#include <inttypes.h>
 
 /************************************************************/
 
@@ -13,13 +15,53 @@
 
 static uintptr_t _stm_nursery_start;
 
+#define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
 
-#define DEFAULT_FILL_MARK_NURSERY_BYTES   (NURSERY_SIZE / 4)
+// #define LARGE_FILL_MARK_NURSERY_BYTES   DEFAULT_FILL_MARK_NURSERY_BYTES
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000L
+// #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
-uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001)
+
+static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
+    const int multiplier = 100;
+    double previous = tl->relative_transaction_length;
+    double new = previous;
+    if (aborts) {
+        tl->transaction_length_backoff = 3;
+        if (previous > STM_MIN_RELATIVE_TRANSACTION_LENGTH) {
+            new = previous / multiplier;
+        } else {
+            new = 0;
+        }
+    } else if (tl->transaction_length_backoff == 0) {
+        if (previous - (STM_MIN_RELATIVE_TRANSACTION_LENGTH * 0.1) < 0) {
+            new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
+        } else if (previous < 1) {
+            new = previous * multiplier;
+        }
+    } else { // not abort and backoff != 0
+        tl->transaction_length_backoff -= 1;
+    }
+    return new;
+}
+
+static void stm_transaction_length_handle_validation(stm_thread_local_t *tl, bool aborts) {
+    tl->relative_transaction_length = get_new_transaction_length(tl, aborts);
+}
+
+static uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
+    double relative_additional_length = tl->relative_transaction_length;
+    publish_custom_value_event(
+        relative_additional_length, STM_SINGLE_THREAD_MODE_ADAPTIVE);
+    uintptr_t result =
+        (uintptr_t)(LARGE_FILL_MARK_NURSERY_BYTES * relative_additional_length);
+    // printf("%020" PRIxPTR "\n", result);
+    return result;
+}
+
 
 /************************************************************/
-
 
 static void setup_nursery(void)
 {
@@ -539,6 +581,8 @@ static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
 
 static void _do_minor_collection(bool commit)
 {
+    start_timer();
+
     dprintf(("minor_collection commit=%d\n", (int)commit));
     assert(!STM_SEGMENT->no_safe_point_here);
 
@@ -583,6 +627,8 @@ static void _do_minor_collection(bool commit)
     throw_away_nursery(get_priv_segment(STM_SEGMENT->segment_num));
 
     assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
+
+    stop_timer_and_publish(STM_DURATION_MINOR_GC);
 }
 
 static void minor_collection(bool commit, bool external)

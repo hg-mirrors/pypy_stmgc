@@ -92,19 +92,18 @@ static void timing_write_read_contention(struct stm_undo_s *start,
 
     stm_loc_marker_t marker;
     marker_fetch_obj_write(start, contention, &marker);
+    stm_marker_payload(marker)
     stmcb_timing_event(STM_SEGMENT->running_thread,
-                       STM_CONTENTION_WRITE_READ, &marker);
+                       STM_CONTENTION_WRITE_READ,
+                       &stm_marker_payload);
 }
 
 static void _timing_become_inevitable(void)
 {
     stm_loc_marker_t marker;
     marker_fetch(STM_SEGMENT->running_thread, &marker);
+    stm_marker_payload(marker)
     stmcb_timing_event(STM_SEGMENT->running_thread,
-                       STM_BECOME_INEVITABLE, &marker);
+                       STM_BECOME_INEVITABLE,
+                       &stm_marker_payload);
 }
-
-
-void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
-                           enum stm_event_e event,
-                           stm_loc_marker_t *marker);
