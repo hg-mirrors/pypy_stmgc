@@ -385,6 +385,14 @@ static void reset_wb_executed_flags(void);
 static void readd_wb_executed_flags(void);
 static void check_all_write_barrier_flags(char *segbase, struct list_s *list);
 
+static void signal_commit_to_inevitable_transaction(void) {
+    struct stm_priv_segment_info_s* inevitable_segement = get_inevitable_thread_segment();
+    if (inevitable_segement != 0) {
+        // the inevitable thread is still running: set its "please commit" flag (is ignored by the inevitable thread if it is atomic)
+        inevitable_segement->commit_if_not_atomic = true;
+    }
+}
+
 static void wait_for_inevitable(void)
 {
     intptr_t detached = 0;
@@ -401,6 +409,8 @@ static void wait_for_inevitable(void)
            try to detach an inevitable transaction regularly */
         detached = fetch_detached_transaction();
         if (detached == 0) {
+            // the inevitable trx was not detached or it was detached but is atomic
+            signal_commit_to_inevitable_transaction();
             EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
             if (!cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ, 0.00001))
                 goto wait_some_more;
@@ -1694,6 +1704,7 @@ void _stm_become_inevitable(const char *msg)
         stm_spin_loop();
     assert(_stm_detached_inevitable_from_thread == 0);
 
+    STM_PSEGMENT->commit_if_not_atomic = false;
     soon_finished_or_inevitable_thread_segment();
     STM_PSEGMENT->transaction_state = TS_INEVITABLE;
 
