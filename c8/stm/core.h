@@ -169,6 +169,9 @@ struct stm_priv_segment_info_s {
 
     /* For stm_enable_atomic() */
     uintptr_t atomic_nesting_levels;
+
+    // TODO signal flag that is checked in throw_away_nursery() for making immediate commit
+    bool commit_if_not_atomic;
 };
 
 enum /* safe_point */ {
