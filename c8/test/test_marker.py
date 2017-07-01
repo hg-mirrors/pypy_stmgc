@@ -7,10 +7,11 @@ class TestMarker(BaseTest):
     def recording(self, *kinds):
         seen = []
         @ffi.callback("stmcb_timing_event_fn")
-        def timing_event(tl, event, marker):
+        def timing_event(tl, event, payload):
             if len(kinds) > 0 and event not in kinds:
                 return
-            if marker:
+            if payload and payload.type == lib.STM_EVENT_PAYLOAD_MARKER:
+                marker = payload.data.loc_marker
                 expanded = (marker.odd_number, marker.object)
             else:
                 expanded = None
