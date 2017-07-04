@@ -1571,7 +1571,7 @@ void stm_abort_transaction(void)
 
 void _stm_become_inevitable(const char *msg)
 {
-    int num_waits = NB_SEGMENTS; //0;
+    int num_waits = 0;
 
     timing_become_inevitable();
 
