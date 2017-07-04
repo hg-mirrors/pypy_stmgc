@@ -1638,7 +1638,7 @@ void stm_abort_transaction(void)
 
 void _stm_become_inevitable(const char *msg)
 {
-    int num_waits = NB_SEGMENTS; //0; // TODO try disable
+    int num_waits = 0;
 
     timing_become_inevitable();
 
@@ -1681,7 +1681,8 @@ void _stm_become_inevitable(const char *msg)
             }
             s_mutex_unlock();
             goto retry_from_start;
-        } else {
+        }
+        else {
             EMIT_WAIT_DONE();
             if (!_validate_and_turn_inevitable()) {
                 goto retry_from_start;
