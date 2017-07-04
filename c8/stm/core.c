@@ -1638,7 +1638,7 @@ void stm_abort_transaction(void)
 
 void _stm_become_inevitable(const char *msg)
 {
-    int num_waits = 0;
+    int num_waits = NB_SEGMENTS; //0;
 
     timing_become_inevitable();
 
@@ -1655,8 +1655,6 @@ void _stm_become_inevitable(const char *msg)
             stm_abort_transaction();    /*   is already inevitable, abort */
 #endif
 
-            bool timed_out = false;
-
             s_mutex_lock();
             if (any_soon_finished_or_inevitable_thread_segment() &&
                     !safe_point_requested()) {
@@ -1665,36 +1663,34 @@ void _stm_become_inevitable(const char *msg)
 
                 /* wait until C_SEGMENT_FREE_OR_SAFE_POINT_REQ is signalled */
                 EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
-                if (!cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ,
-                                       0.000054321))
-                    timed_out = true;
-            }
-            s_mutex_unlock();
-
-            if (timed_out) {
-                /* try to detach another inevitable transaction, but
-                   only after waiting a bit.  This is necessary to avoid
-                   deadlocks in some situations, which are hopefully
-                   not too common.  We don't want two threads constantly
-                   detaching each other. */
-                intptr_t detached = fetch_detached_transaction();
-                if (detached != 0) {
-                    EMIT_WAIT_DONE();
-                    commit_fetched_detached_transaction(detached);
+                if (!cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ, 0.00001)) {
+                    s_mutex_unlock();
+                    /* try to detach another inevitable transaction, but
+                      only after waiting a bit.  This is necessary to avoid
+                      deadlocks in some situations, which are hopefully
+                      not too common.  We don't want two threads constantly
+                      detaching each other. */
+                    intptr_t detached = fetch_detached_transaction();
+                    if (detached != 0) {
+                       EMIT_WAIT_DONE();
+                       commit_fetched_detached_transaction(detached);
+                    }
+                    goto retry_from_start;
                 }
-            }
-            else {
                 num_waits++;
             }
+            s_mutex_unlock();
             goto retry_from_start;
         }
-        EMIT_WAIT_DONE();
-        if (!_validate_and_turn_inevitable())
-            goto retry_from_start;
+        else {
+            EMIT_WAIT_DONE();
+            if (!_validate_and_turn_inevitable()) {
+                goto retry_from_start;
+            }
+        }
     }
-    else {
-        if (!_validate_and_turn_inevitable())
-            return;
+    else if (!_validate_and_turn_inevitable()) {
+        return;
     }
 
     /* There may be a concurrent commit of a detached Tx going on.
