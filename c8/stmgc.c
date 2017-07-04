@@ -22,6 +22,7 @@
 #include "stm/detach.h"
 #include "stm/hashtable.h"
 #include "stm/queue.h"
+#include "stm/timing.h"
 
 #include "stm/misc.c"
 #include "stm/list.c"
