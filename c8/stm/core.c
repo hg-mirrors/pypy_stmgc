@@ -347,7 +347,6 @@ static bool _stm_validate(void)
     }
 
     if (thread_local_for_logging != NULL) {
-        stm_transaction_length_handle_validation(thread_local_for_logging, needs_abort);
         stop_timer_and_publish_for_thread(
             thread_local_for_logging, STM_DURATION_VALIDATION);
     }
@@ -1380,6 +1379,8 @@ static void _core_commit_transaction(bool external)
 
     s_mutex_unlock();
 
+    stm_transaction_length_handle_validation(thread_local_for_logging, false);
+
     stop_timer_and_publish_for_thread(
         thread_local_for_logging, STM_DURATION_COMMIT_EXCEPT_GC);
 
@@ -1550,6 +1551,8 @@ static void abort_data_structures_from_segment_num(int segment_num)
 #ifdef STM_NO_AUTOMATIC_SETJMP
     did_abort = 1;
 #endif
+
+    stm_transaction_length_handle_validation(pseg->pub.running_thread, true);
 
     list_clear(pseg->objects_pointing_to_nursery);
     list_clear(pseg->old_objects_with_cards_set);
