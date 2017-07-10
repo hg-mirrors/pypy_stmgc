@@ -293,6 +293,19 @@ static bool any_soon_finished_or_inevitable_thread_segment(void)
     return false;
 }
 
+static struct stm_priv_segment_info_s* get_inevitable_thread_segment(void)
+{
+    struct stm_priv_segment_info_s* segment;
+    int num;
+    for (num = 1; num < NB_SEGMENTS; num++) {
+        segment = get_priv_segment(num);
+        if (segment->transaction_state == TS_INEVITABLE) {
+            return segment;
+        }
+    }
+    return 0;
+}
+
 __attribute__((unused))
 static bool _seems_to_be_running_transaction(void)
 {
