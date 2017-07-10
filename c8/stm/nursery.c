@@ -21,8 +21,8 @@ static uintptr_t _stm_nursery_start;
 #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000L
 // #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
-// corresponds to ~7 bytes nursery fill
-#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.0000000001)
+// corresponds to ~700 bytes nursery fill
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001)
 
 static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
     const int multiplier = 100;
@@ -550,7 +550,7 @@ static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     pseg->pub.nursery_mark -= nursery_used;
 
     if (pseg->commit_if_not_atomic
-        // && pseg->transaction_state == TS_INEVITABLE // TODO why does this break the mechanism? 
+        // && pseg->transaction_state == TS_INEVITABLE // TODO why does this break the mechanism?
         && pseg->pub.running_thread->self_or_0_if_atomic != 0) {
         // transaction is inevitable, not atomic, and commit has been signalled by waiting thread: commit immediately
         pseg->pub.nursery_mark = 0;
