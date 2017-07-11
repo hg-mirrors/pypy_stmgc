@@ -347,6 +347,7 @@ static bool _stm_validate(void)
     }
 
     if (thread_local_for_logging != NULL) {
+        stm_transaction_length_handle_validation(thread_local_for_logging, needs_abort);
         stop_timer_and_publish_for_thread(
             thread_local_for_logging, STM_DURATION_VALIDATION);
     }
@@ -379,6 +380,14 @@ static void reset_wb_executed_flags(void);
 static void readd_wb_executed_flags(void);
 static void check_all_write_barrier_flags(char *segbase, struct list_s *list);
 
+static void signal_commit_to_inevitable_transaction(void) {
+    struct stm_priv_segment_info_s* inevitable_segement = get_inevitable_thread_segment();
+    if (inevitable_segement != 0) {
+        // the inevitable thread is still running: set its "please commit" flag (is ignored by the inevitable thread if it is atomic)
+        inevitable_segement->commit_if_not_atomic = true;
+    }
+}
+
 static void wait_for_inevitable(void)
 {
     intptr_t detached = 0;
@@ -395,6 +404,8 @@ static void wait_for_inevitable(void)
            try to detach an inevitable transaction regularly */
         detached = fetch_detached_transaction();
         if (detached == 0) {
+            // the inevitable trx was not detached or it was detached but is atomic
+            signal_commit_to_inevitable_transaction();
             EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
             if (!cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ, 0.00001))
                 goto wait_some_more;
@@ -1168,11 +1179,8 @@ long _stm_start_transaction(stm_thread_local_t *tl)
     _do_start_transaction(tl);
     continue_timer();
 
-    if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
-                                 in abort_data_structures_from_segment_num() */
-        STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
-                                     stm_fill_mark_nursery_bytes);
-    }
+    STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
+                                        stm_get_transaction_length(tl));
 
     stop_timer_and_publish(STM_DURATION_START_TRX);
 
@@ -1537,22 +1545,6 @@ static void abort_data_structures_from_segment_num(int segment_num)
     if (pseg->active_queues)
         queues_deactivate_all(pseg, /*at_commit=*/false);
 
-
-    /* Set the next nursery_mark: first compute the value that
-       nursery_mark must have had at the start of the aborted transaction */
-    stm_char *old_mark =pseg->pub.nursery_mark + pseg->total_throw_away_nursery;
-
-    /* This means that the limit, in term of bytes, was: */
-    uintptr_t old_limit = old_mark - (stm_char *)_stm_nursery_start;
-
-    /* If 'total_throw_away_nursery' is smaller than old_limit, use that */
-    if (pseg->total_throw_away_nursery < old_limit)
-        old_limit = pseg->total_throw_away_nursery;
-
-    /* Now set the new limit to 90% of the old limit */
-    pseg->pub.nursery_mark = ((stm_char *)_stm_nursery_start +
-                              (uintptr_t)(old_limit * 0.9));
-
 #ifdef STM_NO_AUTOMATIC_SETJMP
     did_abort = 1;
 #endif
@@ -1641,7 +1633,7 @@ void stm_abort_transaction(void)
 
 void _stm_become_inevitable(const char *msg)
 {
-    int num_waits = 0;
+    int num_waits = 1;
 
     timing_become_inevitable();
 
@@ -1652,50 +1644,48 @@ void _stm_become_inevitable(const char *msg)
     if (msg != MSG_INEV_DONT_SLEEP) {
         dprintf(("become_inevitable: %s\n", msg));
 
-        if (any_soon_finished_or_inevitable_thread_segment() &&
-                num_waits <= NB_SEGMENTS) {
+        if (any_soon_finished_or_inevitable_thread_segment()) {
 #if STM_TESTS                           /* for tests: another transaction */
             stm_abort_transaction();    /*   is already inevitable, abort */
 #endif
 
-            bool timed_out = false;
+            signal_commit_to_inevitable_transaction();
 
             s_mutex_lock();
             if (any_soon_finished_or_inevitable_thread_segment() &&
-                    !safe_point_requested()) {
+                    !safe_point_requested() &&
+                    num_waits <= NB_SEGMENTS) {
 
                 /* wait until C_SEGMENT_FREE_OR_SAFE_POINT_REQ is signalled */
                 EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
-                if (!cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ,
-                                       0.000054321))
-                    timed_out = true;
-            }
-            s_mutex_unlock();
-
-            if (timed_out) {
-                /* try to detach another inevitable transaction, but
-                   only after waiting a bit.  This is necessary to avoid
-                   deadlocks in some situations, which are hopefully
-                   not too common.  We don't want two threads constantly
-                   detaching each other. */
-                intptr_t detached = fetch_detached_transaction();
-                if (detached != 0) {
-                    EMIT_WAIT_DONE();
-                    commit_fetched_detached_transaction(detached);
+                if (cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ, 0.00001)) {
+                    num_waits++;
                 }
             }
-            else {
-                num_waits++;
+            s_mutex_unlock();
+            /* XXX try to detach another inevitable transaction, but
+              only after waiting a bit.  This is necessary to avoid
+              deadlocks in some situations, which are hopefully
+              not too common.  We don't want two threads constantly
+              detaching each other. */
+            intptr_t detached = fetch_detached_transaction();
+            if (detached != 0) {
+               EMIT_WAIT_DONE();
+               commit_fetched_detached_transaction(detached);
+               EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
             }
             goto retry_from_start;
         }
-        EMIT_WAIT_DONE();
-        if (!_validate_and_turn_inevitable())
-            goto retry_from_start;
+        else {
+            EMIT_WAIT_DONE();
+            if (!_validate_and_turn_inevitable()) {
+                EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
+                goto retry_from_start;
+            }
+        }
     }
-    else {
-        if (!_validate_and_turn_inevitable())
-            return;
+    else if (!_validate_and_turn_inevitable()) {
+        return;
     }
 
     /* There may be a concurrent commit of a detached Tx going on.
@@ -1707,6 +1697,7 @@ void _stm_become_inevitable(const char *msg)
         stm_spin_loop();
     assert(_stm_detached_inevitable_from_thread == 0);
 
+    STM_PSEGMENT->commit_if_not_atomic = false;
     soon_finished_or_inevitable_thread_segment();
     STM_PSEGMENT->transaction_state = TS_INEVITABLE;
 

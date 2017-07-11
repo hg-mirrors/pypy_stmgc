@@ -4,6 +4,8 @@
 #endif
 
 #include "finalizer.h"
+#include <math.h>
+#include <inttypes.h>
 
 /************************************************************/
 
@@ -13,13 +15,53 @@
 
 static uintptr_t _stm_nursery_start;
 
+#define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
 
-#define DEFAULT_FILL_MARK_NURSERY_BYTES   (NURSERY_SIZE / 4)
+// #define LARGE_FILL_MARK_NURSERY_BYTES   DEFAULT_FILL_MARK_NURSERY_BYTES
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000L
+// #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
-uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001)
+
+static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
+    const int multiplier = 100;
+    double previous = tl->relative_transaction_length;
+    double new = previous;
+    if (aborts) {
+        tl->transaction_length_backoff = 3;
+        if (previous > STM_MIN_RELATIVE_TRANSACTION_LENGTH) {
+            new = previous / multiplier;
+        } else {
+            new = 0;
+        }
+    } else if (tl->transaction_length_backoff == 0) {
+        if (previous - (STM_MIN_RELATIVE_TRANSACTION_LENGTH * 0.1) < 0) {
+            new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
+        } else if (previous < 1) {
+            new = previous * multiplier;
+        }
+    } else { // not abort and backoff != 0
+        tl->transaction_length_backoff -= 1;
+    }
+    return new;
+}
+
+static void stm_transaction_length_handle_validation(stm_thread_local_t *tl, bool aborts) {
+    tl->relative_transaction_length = get_new_transaction_length(tl, aborts);
+}
+
+static uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
+    double relative_additional_length = tl->relative_transaction_length;
+    publish_custom_value_event(
+        relative_additional_length, STM_SINGLE_THREAD_MODE_ADAPTIVE);
+    uintptr_t result =
+        (uintptr_t)(LARGE_FILL_MARK_NURSERY_BYTES * relative_additional_length);
+    // printf("%020" PRIxPTR "\n", result);
+    return result;
+}
+
 
 /************************************************************/
-
 
 static void setup_nursery(void)
 {
@@ -499,6 +541,13 @@ static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     pseg->total_throw_away_nursery += nursery_used;
     pseg->pub.nursery_current = (stm_char *)_stm_nursery_start;
     pseg->pub.nursery_mark -= nursery_used;
+
+    if (pseg->commit_if_not_atomic
+        // && pseg->transaction_state == TS_INEVITABLE // TODO why does this break the mechanism?
+        && pseg->pub.running_thread->self_or_0_if_atomic != 0) {
+        // transaction is inevitable, not atomic, and commit has been signalled by waiting thread: commit immediately
+        pseg->pub.nursery_mark = 0;
+    }
 
     /* free any object left from 'young_outside_nursery' */
     if (!tree_is_cleared(pseg->young_outside_nursery)) {
