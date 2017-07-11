@@ -1638,7 +1638,7 @@ void stm_abort_transaction(void)
 
 void _stm_become_inevitable(const char *msg)
 {
-    int num_waits = 0;
+    int num_waits = 1;
 
     timing_become_inevitable();
 
@@ -1649,42 +1649,42 @@ void _stm_become_inevitable(const char *msg)
     if (msg != MSG_INEV_DONT_SLEEP) {
         dprintf(("become_inevitable: %s\n", msg));
 
-        if (any_soon_finished_or_inevitable_thread_segment() &&
-                num_waits <= NB_SEGMENTS) {
+        if (any_soon_finished_or_inevitable_thread_segment()) {
 #if STM_TESTS                           /* for tests: another transaction */
             stm_abort_transaction();    /*   is already inevitable, abort */
 #endif
 
+            signal_commit_to_inevitable_transaction();
+
             s_mutex_lock();
             if (any_soon_finished_or_inevitable_thread_segment() &&
-                    !safe_point_requested()) {
-
-                signal_commit_to_inevitable_transaction();
+                    !safe_point_requested() &&
+                    num_waits <= NB_SEGMENTS) {
 
                 /* wait until C_SEGMENT_FREE_OR_SAFE_POINT_REQ is signalled */
                 EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
-                if (!cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ, 0.00001)) {
-                    s_mutex_unlock();
-                    /* try to detach another inevitable transaction, but
-                      only after waiting a bit.  This is necessary to avoid
-                      deadlocks in some situations, which are hopefully
-                      not too common.  We don't want two threads constantly
-                      detaching each other. */
-                    intptr_t detached = fetch_detached_transaction();
-                    if (detached != 0) {
-                       EMIT_WAIT_DONE();
-                       commit_fetched_detached_transaction(detached);
-                    }
-                    goto retry_from_start;
+                if (cond_wait_timeout(C_SEGMENT_FREE_OR_SAFE_POINT_REQ, 0.00001)) {
+                    num_waits++;
                 }
-                num_waits++;
             }
             s_mutex_unlock();
+            /* XXX try to detach another inevitable transaction, but
+              only after waiting a bit.  This is necessary to avoid
+              deadlocks in some situations, which are hopefully
+              not too common.  We don't want two threads constantly
+              detaching each other. */
+            intptr_t detached = fetch_detached_transaction();
+            if (detached != 0) {
+               EMIT_WAIT_DONE();
+               commit_fetched_detached_transaction(detached);
+               EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
+            }
             goto retry_from_start;
         }
         else {
             EMIT_WAIT_DONE();
             if (!_validate_and_turn_inevitable()) {
+                EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
                 goto retry_from_start;
             }
         }
