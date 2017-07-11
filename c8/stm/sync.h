@@ -22,6 +22,7 @@ static bool _has_mutex(void);
 static void set_gs_register(char *value);
 static void ensure_gs_register(long segnum);
 
+static uint8_t number_of_segments_in_use(void);
 
 /* acquire and release one of the segments for running the given thread
    (must have the mutex acquired!) */
@@ -29,6 +30,7 @@ static void acquire_thread_segment(stm_thread_local_t *tl);
 static void release_thread_segment(stm_thread_local_t *tl);
 static void soon_finished_or_inevitable_thread_segment(void);
 static bool any_soon_finished_or_inevitable_thread_segment(void);
+static struct stm_priv_segment_info_s* get_inevitable_thread_segment(void);
 
 enum sync_type_e {
     STOP_OTHERS_UNTIL_MUTEX_UNLOCK,

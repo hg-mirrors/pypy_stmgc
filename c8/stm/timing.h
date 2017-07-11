@@ -46,3 +46,14 @@
 
 #define stop_timer_and_publish(event)                                       \
     stop_timer_and_publish_for_thread(STM_SEGMENT->running_thread, (event))
+
+#define set_payload(double_value)                                           \
+    struct timespec payload_value = {                                       \
+        .tv_sec = (int)(double_value),                                      \
+        .tv_nsec = (int)(fmod((double_value), 1) * 1000000000),             \
+    };
+
+#define publish_custom_value_event(double_value, event)                     \
+    set_payload((double_value))                                             \
+    stm_duration_payload(payload_value);                                    \
+    publish_event(STM_SEGMENT->running_thread, (event))
