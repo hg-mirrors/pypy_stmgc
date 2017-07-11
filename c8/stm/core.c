@@ -358,9 +358,6 @@ static bool _stm_validate(void)
 static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
 {
     /* puts all modified_old_objects in a new commit log entry */
-
-    start_timer();
-
     // we don't need the privatization lock, as we are only
     // reading from modified_old_objs and nobody but us can change it
     struct list_s *list = STM_PSEGMENT->modified_old_objects;
@@ -373,8 +370,6 @@ static struct stm_commit_log_entry_s *_create_commit_log_entry(void)
     result->rev_num = -1;       /* invalid */
     result->written_count = count;
     memcpy(result->written, list->items, count * sizeof(struct stm_undo_s));
-
-    stop_timer_and_publish(STM_DURATION_CREATE_CLE);
 
     return result;
 }
