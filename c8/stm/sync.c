@@ -176,6 +176,16 @@ static inline void cond_broadcast(enum cond_type_e ctype)
 
 /************************************************************/
 
+static uint8_t number_of_segments_in_use(void) {
+    uint8_t result = 0;
+    int num;
+    for (num = 1; num < NB_SEGMENTS; num++) {
+        if (sync_ctl.in_use1[num] > 0) {
+            result++;
+        }
+    }
+    return result;
+}
 
 #if 0
 void stm_wait_for_current_inevitable_transaction(void)
@@ -201,7 +211,6 @@ void stm_wait_for_current_inevitable_transaction(void)
     s_mutex_unlock();
 }
 #endif
-
 
 static void acquire_thread_segment(stm_thread_local_t *tl)
 {

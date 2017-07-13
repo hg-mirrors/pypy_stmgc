@@ -6,37 +6,48 @@ static FILE *volatile profiling_file;
 static char *profiling_basefn = NULL;
 static stm_expand_marker_fn profiling_expand_marker;
 
-#define MARKER_LEN_MAX   160
+#define EXTRA_LEN_MAX   160
 
 
 static bool close_timing_log(void);   /* forward */
 
 static void _stm_profiling_event(stm_thread_local_t *tl,
                                  enum stm_event_e event,
-                                 stm_loc_marker_t *marker)
+                                 stm_timing_event_payload_t *payload)
 {
     struct buf_s {
         uint32_t tv_sec;
         uint32_t tv_nsec;
         uint32_t thread_num;
         uint8_t event;
-        uint8_t marker_length;
-        char extra[MARKER_LEN_MAX+1];
+        uint8_t extra_length;
+        char extra[EXTRA_LEN_MAX+1];
     } __attribute__((packed));
 
     struct buf_s buf;
     struct timespec t;
     buf.thread_num = tl->thread_local_counter;
     buf.event = event;
-    buf.marker_length = 0;
+    buf.extra_length = 0;
 
-    if (marker != NULL && marker->odd_number != 0) {
-        buf.marker_length = profiling_expand_marker(get_segment_base(0),
-                                                    marker,
-                                                    buf.extra, MARKER_LEN_MAX);
+    if (payload != NULL) {
+        if (payload->type == STM_EVENT_PAYLOAD_MARKER) {
+            stm_loc_marker_t *marker = payload->data.loc_marker;
+            if (marker != NULL && marker->odd_number != 0) {
+                buf.extra_length = profiling_expand_marker(get_segment_base(0),
+                                                            marker,
+                                                            buf.extra, EXTRA_LEN_MAX);
+            }
+        } else if (payload->type == STM_EVENT_PAYLOAD_DURATION) {
+            struct timespec *duration = payload->data.duration;
+            buf.extra_length = sprintf(buf.extra,
+                                        "s%un%u",
+                                        (uint32_t)duration->tv_sec,
+                                        (uint32_t)duration->tv_nsec);
+        }
     }
 
-    size_t result, outsize = offsetof(struct buf_s, extra) + buf.marker_length;
+    size_t result, outsize = offsetof(struct buf_s, extra) + buf.extra_length;
     FILE *f = profiling_file;
     if (f == NULL)
         return;
@@ -146,3 +157,7 @@ int stm_set_timing_log(const char *profiling_file_name, int fork_mode,
         profiling_basefn = strdup(profiling_file_name);
     return 0;
 }
+
+void (*stmcb_timing_event)(stm_thread_local_t *tl, /* the local thread */
+                           enum stm_event_e event,
+                           stm_timing_event_payload_t *payload);
