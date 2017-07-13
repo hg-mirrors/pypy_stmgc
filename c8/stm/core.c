@@ -1178,6 +1178,7 @@ long _stm_start_transaction(stm_thread_local_t *tl)
     _do_start_transaction(tl);
     continue_timer();
 
+    STM_PSEGMENT->commit_if_not_atomic = false;
     STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
                                         stm_get_transaction_length(tl));
 

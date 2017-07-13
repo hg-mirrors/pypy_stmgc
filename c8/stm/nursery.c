@@ -542,8 +542,9 @@ static void throw_away_nursery(struct stm_priv_segment_info_s *pseg)
     pseg->pub.nursery_current = (stm_char *)_stm_nursery_start;
     pseg->pub.nursery_mark -= nursery_used;
 
+    assert((pseg->transaction_state == TS_INEVITABLE) || !pseg->commit_if_not_atomic)
     if (pseg->commit_if_not_atomic
-        // && pseg->transaction_state == TS_INEVITABLE // TODO why does this break the mechanism?
+        && pseg->transaction_state == TS_INEVITABLE
         && pseg->pub.running_thread->self_or_0_if_atomic != 0) {
         // transaction is inevitable, not atomic, and commit has been signalled by waiting thread: commit immediately
         pseg->pub.nursery_mark = 0;
