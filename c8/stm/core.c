@@ -1116,6 +1116,7 @@ long _stm_start_transaction(stm_thread_local_t *tl)
     }
     _do_start_transaction(tl);
 
+    STM_PSEGMENT->commit_if_not_atomic = false;
     if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
                                  in abort_data_structures_from_segment_num() */
         STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
