@@ -8,6 +8,8 @@
 #define start_timer() struct timespec start, stop;                             \
                       struct timespec duration = { .tv_sec = 0, .tv_nsec = 0 };\
                       uint32_t nanosec_diff, sec_diff;                         \
+                      stm_timing_event_payload_data_t stm_duration_data;       \
+                      stm_timing_event_payload_t stm_duration_payload;         \
                       continue_timer()
 
 /* Must use start_timer before using this macro. */
@@ -30,10 +32,9 @@
 #define reset_timer() duration.tv_sec = 0; duration.tv_nsec = 0;
 
 #define stm_duration_payload(duration_data)                                 \
-    stm_timing_event_payload_data_t stm_duration_data =                     \
-        { .duration = &(duration_data) };                                   \
-    stm_timing_event_payload_t stm_duration_payload =                       \
-        { STM_EVENT_PAYLOAD_DURATION, stm_duration_data };
+    stm_duration_data.duration = &(duration_data);                          \
+    stm_duration_payload.type = STM_EVENT_PAYLOAD_DURATION;                 \
+    stm_duration_payload.data = stm_duration_data;
 
 #define publish_event(thread_local, event)                                  \
     (timing_enabled() ?                                                     \
