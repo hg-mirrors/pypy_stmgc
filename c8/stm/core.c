@@ -468,8 +468,8 @@ static void _validate_and_attach(struct stm_commit_log_entry_s *new)
 #endif
 
     if (STM_PSEGMENT->last_commit_log_entry->next == INEV_RUNNING) {
-        pause_timer();
-        wait_for_inevitable(); // TODO may abort!! timing event lost
+        stop_timer_and_publish(STM_DURATION_VALIDATION);
+        wait_for_inevitable();
         continue_timer();
         goto retry_from_start;   /* redo _stm_validate() now */
     }
@@ -559,14 +559,13 @@ static void _validate_and_add_to_commit_log(void)
         OPT_ASSERT(yes);
 
         release_modification_lock_wr(STM_SEGMENT->segment_num);
+
+        stop_timer_and_publish(STM_DURATION_VALIDATION);
     }
     else {
-        pause_timer();
+        stop_timer_and_publish(STM_DURATION_VALIDATION);
         _validate_and_attach(new);
-        continue_timer();
     }
-
-    stop_timer_and_publish(STM_DURATION_VALIDATION);
 }
 
 /* ############# STM ############# */
@@ -1327,7 +1326,9 @@ static void _core_commit_transaction(bool external)
        if there is an inevitable tx running) */
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
 
-    pause_timer();
+    // publish here because the validation may abort
+    stop_timer_and_publish_for_thread(
+        thread_local_for_logging, STM_DURATION_COMMIT_EXCEPT_GC);
     _validate_and_add_to_commit_log();
     continue_timer();
 
@@ -1656,9 +1657,9 @@ void _stm_become_inevitable(const char *msg)
             signal_commit_to_inevitable_transaction();
 
             s_mutex_lock();
-            if (any_soon_finished_or_inevitable_thread_segment() &&
-                    !safe_point_requested() &&
-                    num_waits <= NB_SEGMENTS) {
+            if (any_soon_finished_or_inevitable_thread_segment()
+                && !safe_point_requested()
+                && num_waits <= NB_SEGMENTS) {
 
                 /* wait until C_SEGMENT_FREE_OR_SAFE_POINT_REQ is signalled */
                 EMIT_WAIT(STM_WAIT_OTHER_INEVITABLE);
