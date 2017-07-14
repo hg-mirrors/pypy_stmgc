@@ -16,6 +16,12 @@ static void _timing_become_inevitable(void);
 #define timing_become_inevitable()                                      \
     (timing_enabled() ? _timing_become_inevitable() : (void)0)
 
+#define stm_marker_payload(marker)                                      \
+    stm_timing_event_payload_data_t stm_marker_data =                   \
+        { .loc_marker = &marker };                                      \
+    stm_timing_event_payload_t stm_marker_payload =                     \
+        { STM_EVENT_PAYLOAD_MARKER, stm_marker_data };
+
 
 static inline void emit_wait(stm_thread_local_t *tl, enum stm_event_e event)
 {
