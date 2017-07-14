@@ -1178,11 +1178,8 @@ long _stm_start_transaction(stm_thread_local_t *tl)
     continue_timer();
 
     STM_PSEGMENT->commit_if_not_atomic = false;
-    if (repeat_count == 0) {  /* else, 'nursery_mark' was already set
-                                 in abort_data_structures_from_segment_num() */
-        STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
-                                     stm_fill_mark_nursery_bytes);
-    }
+    STM_SEGMENT->nursery_mark = ((stm_char *)_stm_nursery_start +
+                                        stm_get_transaction_length(tl));
 
     stop_timer_and_publish(STM_DURATION_START_TRX);
 
@@ -1382,6 +1379,8 @@ static void _core_commit_transaction(bool external)
 
     s_mutex_unlock();
 
+    stm_transaction_length_handle_validation(thread_local_for_logging, false);
+
     stop_timer_and_publish_for_thread(
         thread_local_for_logging, STM_DURATION_COMMIT_EXCEPT_GC);
 
@@ -1549,22 +1548,6 @@ static void abort_data_structures_from_segment_num(int segment_num)
     if (pseg->active_queues)
         queues_deactivate_all(pseg, /*at_commit=*/false);
 
-
-    /* Set the next nursery_mark: first compute the value that
-       nursery_mark must have had at the start of the aborted transaction */
-    stm_char *old_mark =pseg->pub.nursery_mark + pseg->total_throw_away_nursery;
-
-    /* This means that the limit, in term of bytes, was: */
-    uintptr_t old_limit = old_mark - (stm_char *)_stm_nursery_start;
-
-    /* If 'total_throw_away_nursery' is smaller than old_limit, use that */
-    if (pseg->total_throw_away_nursery < old_limit)
-        old_limit = pseg->total_throw_away_nursery;
-
-    /* Now set the new limit to 90% of the old limit */
-    pseg->pub.nursery_mark = ((stm_char *)_stm_nursery_start +
-                              (uintptr_t)(old_limit * 0.9));
-
 #ifdef STM_NO_AUTOMATIC_SETJMP
     did_abort = 1;
 #endif
@@ -1598,6 +1581,8 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     tl->self_or_0_if_atomic = (intptr_t)tl;   /* clear the 'atomic' flag */
     STM_PSEGMENT->atomic_nesting_levels = 0;
+
+    stm_transaction_length_handle_validation(tl, true);
 
     if (tl->mem_clear_on_abort)
         memset(tl->mem_clear_on_abort, 0, tl->mem_bytes_to_clear_on_abort);
