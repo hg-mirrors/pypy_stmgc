@@ -1,5 +1,9 @@
 #include <time.h>
 
+#define define_payload_types()                                              \
+    stm_timing_event_payload_data_t stm_duration_data;                      \
+    stm_timing_event_payload_t stm_duration_payload;
+
 #define continue_timer() clock_gettime(CLOCK_MONOTONIC_RAW, &start);
 
 /* Use raw monotonic time, i.e., solely based on local hardware (no NTP
@@ -8,8 +12,7 @@
 #define start_timer() struct timespec start, stop;                             \
                       struct timespec duration = { .tv_sec = 0, .tv_nsec = 0 };\
                       uint32_t nanosec_diff, sec_diff;                         \
-                      stm_timing_event_payload_data_t stm_duration_data;       \
-                      stm_timing_event_payload_t stm_duration_payload;         \
+                      define_payload_types()                                   \
                       continue_timer()
 
 /* Must use start_timer before using this macro. */
@@ -59,5 +62,6 @@
 
 #define publish_custom_value_event(double_value, event)                     \
     set_payload((double_value))                                             \
+    define_payload_types()                                                  \
     stm_duration_payload(payload_value);                                    \
     publish_event(STM_SEGMENT->running_thread, (event))
