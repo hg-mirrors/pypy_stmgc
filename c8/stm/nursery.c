@@ -732,16 +732,21 @@ static void check_nursery_at_transaction_start(void)
 
 static void major_do_validation_and_minor_collections(void)
 {
+    start_timer();
+
     int original_num = STM_SEGMENT->segment_num;
     long i;
 
     assert(_has_mutex());
 
     /* including the sharing seg0 */
-    for (i = 0; i < NB_SEGMENTS; i++) {
+    for (i = 0; i < NB_SEGMENTS; i++) { // TODO why is this strictly smaller than?
         ensure_gs_register(i);
 
+        pause_timer();
         bool ok = _stm_validate();
+        continue_timer();
+
         assert(get_priv_segment(i)->last_commit_log_entry->next == NULL
                || get_priv_segment(i)->last_commit_log_entry->next == INEV_RUNNING);
         if (!ok) {
@@ -776,7 +781,9 @@ static void major_do_validation_and_minor_collections(void)
            Collecting might fail due to invalid state.
         */
         if (!must_abort()) {
+            pause_timer();
             _do_minor_collection(/*commit=*/ false);
+            continue_timer();
             assert(MINOR_NOTHING_TO_DO(STM_PSEGMENT));
         }
         else {
@@ -786,6 +793,8 @@ static void major_do_validation_and_minor_collections(void)
     }
 
     ensure_gs_register(original_num);
+
+    stop_timer_and_publish(STM_DURATION_MAJOR_GC_FULL);
 }
 
 
