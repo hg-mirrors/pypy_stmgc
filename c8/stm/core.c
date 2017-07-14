@@ -1551,8 +1551,6 @@ static void abort_data_structures_from_segment_num(int segment_num)
     did_abort = 1;
 #endif
 
-    stm_transaction_length_handle_validation(pseg->pub.running_thread, true);
-
     list_clear(pseg->objects_pointing_to_nursery);
     list_clear(pseg->old_objects_with_cards_set);
     LIST_FOREACH_R(pseg->large_overflow_objects, uintptr_t /*item*/,
@@ -1582,6 +1580,8 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     tl->self_or_0_if_atomic = (intptr_t)tl;   /* clear the 'atomic' flag */
     STM_PSEGMENT->atomic_nesting_levels = 0;
+
+    stm_transaction_length_handle_validation(tl, true);
 
     if (tl->mem_clear_on_abort)
         memset(tl->mem_clear_on_abort, 0, tl->mem_bytes_to_clear_on_abort);
