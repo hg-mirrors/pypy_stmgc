@@ -27,6 +27,8 @@
 #define pause_timer() clock_gettime(CLOCK_MONOTONIC_RAW, &stop);            \
                       get_duration()
 
+#define reset_timer() duration.tv_sec = 0; duration.tv_nsec = 0;
+
 #define stm_duration_payload(duration_data)                                 \
     stm_timing_event_payload_data_t stm_duration_data =                     \
         { .duration = &(duration_data) };                                   \
@@ -42,7 +44,8 @@
     pause_timer()                                                           \
     stm_duration_payload(duration)                                          \
     assert((thread_local) != NULL);                                         \
-    publish_event((thread_local), (event))
+    publish_event((thread_local), (event))                                  \
+    reset_timer()
 
 #define stop_timer_and_publish(event)                                       \
     stop_timer_and_publish_for_thread(STM_SEGMENT->running_thread, (event))
