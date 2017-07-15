@@ -23,12 +23,12 @@ static uintptr_t _stm_nursery_start;
 
 // corresponds to ~700 bytes nursery fill
 #define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001)
-#define BACKOFF_MULTIPLIER (0.05 / STM_MIN_RELATIVE_TRANSACTION_LENGTH)
+#define BACKOFF_MULTIPLIER (20 / -log10(STM_MIN_RELATIVE_TRANSACTION_LENGTH))
 
 static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
     // the shorter the trx, the more backoff: 100 at min trx length, proportional decrease to 5 at max trx length (think a/x + b = backoff)
     tl->transaction_length_backoff =
-        (int)(1 / (BACKOFF_MULTIPLIER * rel_trx_len) + 5);
+        (int)((BACKOFF_MULTIPLIER * -log10(rel_trx_len)) + 5);
     // printf("thread %d, backoff %d\n", tl->thread_local_counter, tl->transaction_length_backoff);
     tl->linear_transaction_length_increment = rel_trx_len;
 }
