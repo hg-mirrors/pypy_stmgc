@@ -23,8 +23,17 @@ static uintptr_t _stm_nursery_start;
 
 // corresponds to ~700 bytes nursery fill
 #define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001)
+#define BACKOFF_MULTIPLIER (0.05 / STM_MIN_RELATIVE_TRANSACTION_LENGTH)
 
-static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
+static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
+    // the shorter the trx, the more backoff: 100 at min trx length, proportional decrease to 5 at max trx length (think a/x + b = backoff)
+    tl->transaction_length_backoff =
+        (int)(1 / (BACKOFF_MULTIPLIER * rel_trx_len) + 5);
+    // printf("thread %d, backoff %d\n", tl->thread_local_counter, tl->transaction_length_backoff);
+    tl->linear_transaction_length_increment = rel_trx_len;
+}
+
+static inline double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
     const int multiplier = 100;
     double previous = tl->relative_transaction_length;
     double new = previous;
@@ -34,10 +43,7 @@ static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
         } else {
             new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
         }
-        // the shorter the trx, the more backoff: 1000 at min trx length, proportional decrease to 1 at max trx length (think a/x + b = backoff)
-        tl->transaction_length_backoff = (int)(1 / (100000000 * new) + 5);
-        // printf("thread %d, backoff %d\n", tl->thread_local_counter, tl->transaction_length_backoff);
-        tl->linear_transaction_length_increment = new;
+        set_backoff(tl, new);
     } else if (tl->transaction_length_backoff == 0) {
         // backoff counter is zero, exponential increase up to 1
         if (previous < 1) {
@@ -53,11 +59,11 @@ static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
     return new;
 }
 
-static void stm_transaction_length_handle_validation(stm_thread_local_t *tl, bool aborts) {
+static inline void stm_transaction_length_handle_validation(stm_thread_local_t *tl, bool aborts) {
     tl->relative_transaction_length = get_new_transaction_length(tl, aborts);
 }
 
-static uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
+static inline uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
     double relative_additional_length = tl->relative_transaction_length;
     publish_custom_value_event(
         relative_additional_length, STM_SINGLE_THREAD_MODE_ADAPTIVE);
