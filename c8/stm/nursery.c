@@ -18,11 +18,11 @@ static uintptr_t _stm_nursery_start;
 #define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
 
 // #define LARGE_FILL_MARK_NURSERY_BYTES   DEFAULT_FILL_MARK_NURSERY_BYTES
-#define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000L
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x10000000L
 // #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
-// corresponds to ~700 bytes nursery fill
-#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.00000001)
+// corresponds to ~270 bytes nursery fill
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000001)
 #define BACKOFF_MULTIPLIER (20 / -log10(STM_MIN_RELATIVE_TRANSACTION_LENGTH))
 
 static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
