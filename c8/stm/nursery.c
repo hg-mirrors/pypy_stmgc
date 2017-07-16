@@ -49,6 +49,10 @@ static inline double get_new_transaction_length(stm_thread_local_t *tl, bool abo
         if (previous < 1) {
             new = previous * multiplier;
         }
+        if (tl->linear_transaction_length_increment != 0) {
+            // thread had to abort before: slow start
+            set_backoff(tl, new);
+        }
     } else { // not abort and backoff != 0
         // in backoff, linear increase up to 1
         if (previous < 1) {
