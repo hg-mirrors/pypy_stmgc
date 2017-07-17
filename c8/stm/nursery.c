@@ -18,23 +18,24 @@ static uintptr_t _stm_nursery_start;
 #define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
 
 // #define LARGE_FILL_MARK_NURSERY_BYTES   DEFAULT_FILL_MARK_NURSERY_BYTES
-#define LARGE_FILL_MARK_NURSERY_BYTES   0x10000000L
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x100000000L
 // #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
-// corresponds to ~270 bytes nursery fill
-#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000001)
-#define BACKOFF_MULTIPLIER (20 / -log10(STM_MIN_RELATIVE_TRANSACTION_LENGTH))
+// corresponds to ~430 bytes nursery fill
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.0000001)
+#define BACKOFF_COUNT (20)
+#define BACKOFF_MULTIPLIER (BACKOFF_COUNT / -log10(STM_MIN_RELATIVE_TRANSACTION_LENGTH))
 
 static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
     // the shorter the trx, the more backoff: 100 at min trx length, proportional decrease to 5 at max trx length (think a/x + b = backoff)
     tl->transaction_length_backoff =
         (int)((BACKOFF_MULTIPLIER * -log10(rel_trx_len)) + 5);
     // printf("thread %d, backoff %d\n", tl->thread_local_counter, tl->transaction_length_backoff);
-    tl->linear_transaction_length_increment = rel_trx_len;
+    tl->linear_transaction_length_increment = rel_trx_len / BACKOFF_COUNT;
 }
 
 static inline double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
-    const int multiplier = 100;
+    const int multiplier = 2;
     double previous = tl->relative_transaction_length;
     double new = previous;
     if (aborts) {
