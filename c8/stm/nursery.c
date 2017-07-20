@@ -21,9 +21,9 @@ static uintptr_t _stm_nursery_start;
 #define LARGE_FILL_MARK_NURSERY_BYTES   0x100000000L
 // #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
-// corresponds to ~430 bytes nursery fill
-#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.0000001)
-#define BACKOFF_COUNT (20)
+// corresponds to ~4 KB nursery fill
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000001)
+#define BACKOFF_COUNT (10)
 #define BACKOFF_MULTIPLIER (BACKOFF_COUNT / -log10(STM_MIN_RELATIVE_TRANSACTION_LENGTH))
 
 static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
@@ -37,18 +37,18 @@ static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
 static inline double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
     const int multiplier = 2;
     double previous = tl->relative_transaction_length;
-    double new = previous;
+    double new;
     if (aborts) {
-        if (previous > STM_MIN_RELATIVE_TRANSACTION_LENGTH) {
-            new = previous / multiplier;
-        } else {
+        new = previous / multiplier;
+        if (new < STM_MIN_RELATIVE_TRANSACTION_LENGTH) {
             new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
         }
         set_backoff(tl, new);
     } else if (tl->transaction_length_backoff == 0) {
         // backoff counter is zero, exponential increase up to 1
-        if (previous < 1) {
-            new = previous * multiplier;
+        new = previous * multiplier;
+        if (new > 1) {
+            new = 1;
         }
         if (tl->linear_transaction_length_increment != 0) {
             // thread had to abort before: slow start
@@ -56,8 +56,9 @@ static inline double get_new_transaction_length(stm_thread_local_t *tl, bool abo
         }
     } else { // not abort and backoff != 0
         // in backoff, linear increase up to 1
-        if (previous < 1) {
-            new = previous + tl->linear_transaction_length_increment;
+        new = previous + tl->linear_transaction_length_increment;
+        if (new > 1) {
+            new = 1;
         }
         tl->transaction_length_backoff -= 1;
     }
