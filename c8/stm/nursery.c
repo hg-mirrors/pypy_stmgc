@@ -22,12 +22,18 @@ static uintptr_t _stm_nursery_start;
 // #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
 // corresponds to ~4 KB nursery fill
-#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000001)
+#define STM_DEFAULT_REL_TRANSACTION_LENGTH (0.000001)
+// commit after ~4 B or likely after every instruction
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000000001)
+
 #define BACKOFF_COUNT (10)
-#define BACKOFF_MULTIPLIER (BACKOFF_COUNT / -log10(STM_MIN_RELATIVE_TRANSACTION_LENGTH))
+#define BACKOFF_MULTIPLIER (BACKOFF_COUNT / -log10(STM_DEFAULT_REL_TRANSACTION_LENGTH))
 
 static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
-    // the shorter the trx, the more backoff: 100 at min trx length, proportional decrease to 5 at max trx length (think a/x + b = backoff)
+    /* the shorter the trx, the more backoff:
+    think a*x + b = backoff, x := -log(rel-trx-len),
+    backoff is <BACKOFF_COUNT> + b at default trx length,
+    linear decrease to b at max trx length */
     tl->transaction_length_backoff =
         (int)((BACKOFF_MULTIPLIER * -log10(rel_trx_len)) + 5);
     // printf("thread %d, backoff %d\n", tl->thread_local_counter, tl->transaction_length_backoff);
