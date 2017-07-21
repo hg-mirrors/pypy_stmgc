@@ -247,7 +247,7 @@ void stm_register_thread_local(stm_thread_local_t *tl)
     tl->thread_local_counter = ++thread_local_counters;
 
     /* init adaptive transaction length mode */
-    tl->relative_transaction_length = STM_DEFAULT_REL_TRANSACTION_LENGTH;
+    tl->relative_transaction_length = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
     tl->transaction_length_backoff = 0;
     tl->linear_transaction_length_increment = 0;
 
