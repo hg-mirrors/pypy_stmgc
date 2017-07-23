@@ -32,7 +32,7 @@ static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
     backoff is <BACKOFF_COUNT> + b at default trx length,
     linear decrease to b at max trx length */
     const int b = 5;
-    tl->transaction_length_backoff =
+    tl->transaction_length_backoff +=
         (int)((BACKOFF_MULTIPLIER * -log10(rel_trx_len)) + b);
     // printf("thread %d, backoff %d\n", tl->thread_local_counter, tl->transaction_length_backoff);
     tl->linear_transaction_length_increment = rel_trx_len / (BACKOFF_COUNT + b);
