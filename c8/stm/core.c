@@ -347,9 +347,6 @@ static bool _stm_validate(void)
     }
 
     if (thread_local_for_logging != NULL) {
-        if (needs_abort) {
-            stm_transaction_length_handle_validation(thread_local_for_logging, true);
-        }
         stop_timer_and_publish_for_thread(
             thread_local_for_logging, STM_DURATION_VALIDATION);
     }
@@ -1584,6 +1581,8 @@ static stm_thread_local_t *abort_with_mutex_no_longjmp(void)
     stm_thread_local_t *tl = STM_SEGMENT->running_thread;
     tl->self_or_0_if_atomic = (intptr_t)tl;   /* clear the 'atomic' flag */
     STM_PSEGMENT->atomic_nesting_levels = 0;
+
+    stm_transaction_length_handle_validation(tl, true);
 
     if (tl->mem_clear_on_abort)
         memset(tl->mem_clear_on_abort, 0, tl->mem_bytes_to_clear_on_abort);
