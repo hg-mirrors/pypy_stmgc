@@ -23,7 +23,7 @@ static uintptr_t _stm_nursery_start;
 
 // corresponds to ~4 KB nursery fill
 #define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000001)
-#define BACKOFF_COUNT (5)
+#define BACKOFF_COUNT (20)
 #define BACKOFF_MULTIPLIER (BACKOFF_COUNT / -log10(STM_MIN_RELATIVE_TRANSACTION_LENGTH))
 
 static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
@@ -32,10 +32,10 @@ static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
     backoff is <BACKOFF_COUNT> + b at default trx length,
     linear decrease to b at max trx length */
     const int b = 5;
-    tl->transaction_length_backoff =
-        (int)((BACKOFF_MULTIPLIER * -log10(rel_trx_len)) + b);
+    int new_backoff = (int)((BACKOFF_MULTIPLIER * -log10(rel_trx_len)) + b);
+    tl->transaction_length_backoff = new_backoff;
     // printf("thread %d, backoff %d\n", tl->thread_local_counter, tl->transaction_length_backoff);
-    tl->linear_transaction_length_increment = rel_trx_len / (BACKOFF_COUNT + b);
+    tl->linear_transaction_length_increment = rel_trx_len / new_backoff;
 }
 
 static inline double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
@@ -55,10 +55,10 @@ static inline double get_new_transaction_length(stm_thread_local_t *tl, bool abo
         if (new > 1) {
             new = 1;
         }
-        // if (tl->linear_transaction_length_increment != 0) {
-        //     // thread had to abort before: slow start
-        //     set_backoff(tl, new);
-        // }
+        if (tl->linear_transaction_length_increment != 0) {
+            // thread had to abort before: slow start
+            set_backoff(tl, new);
+        }
     } else { // not abort and backoff != 0
         // in backoff, linear increase up to 1
         new = previous + tl->linear_transaction_length_increment;
