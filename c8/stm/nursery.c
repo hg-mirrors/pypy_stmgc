@@ -17,12 +17,14 @@ static uintptr_t _stm_nursery_start;
 
 #define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
 
-// #define LARGE_FILL_MARK_NURSERY_BYTES   DEFAULT_FILL_MARK_NURSERY_BYTES
+// corresponds to ~4 GB
 #define LARGE_FILL_MARK_NURSERY_BYTES   0x100000000L
-// #define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000000000L
 
+// corresponds to ~4 MB nursery fill
+#define STM_DEFAULT_RELATIVE_TRANSACTION_LENGTH (0.001)
 // corresponds to ~4 KB nursery fill
 #define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000001)
+
 #define BACKOFF_COUNT (20)
 #define BACKOFF_MULTIPLIER (BACKOFF_COUNT / -log10(STM_MIN_RELATIVE_TRANSACTION_LENGTH))
 
@@ -45,8 +47,7 @@ static inline double get_new_transaction_length(stm_thread_local_t *tl, bool abo
     if (aborts) {
         new = previous / multiplier;
         if (new < STM_MIN_RELATIVE_TRANSACTION_LENGTH) {
-            // reached min trx length, only decrease slowly
-            new = 0.9 * previous;
+            new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
         }
         set_backoff(tl, new);
     } else if (tl->transaction_length_backoff == 0) {
