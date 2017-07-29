@@ -583,6 +583,8 @@ enum stm_event_e {
     STM_GC_MAJOR_DONE,
 
     /* execution duration profiling events */
+    STM_WARMUP_COMPLETE,
+
     STM_DURATION_START_TRX,
     STM_DURATION_WRITE_GC_ONLY,
     STM_DURATION_WRITE_SLOWPATH,
@@ -613,6 +615,7 @@ enum stm_event_e {
     "gc major start",                               \
     "gc major done",                                \
     /* names of duration events */                  \
+    "marks completion of benchmark warm up phase"   \
     "duration of transaction start",                \
     "duration of gc due to write",                  \
     "duration of write slowpath",                   \
