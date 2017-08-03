@@ -20,8 +20,8 @@ static uintptr_t _stm_nursery_start;
 // corresponds to ~4 GB
 #define LARGE_FILL_MARK_NURSERY_BYTES   0x100000000L
 
-// corresponds to ~40 KB nursery fill
-#define STM_DEFAULT_RELATIVE_TRANSACTION_LENGTH (0.00001)
+// corresponds to ~4 MB nursery fill
+#define STM_DEFAULT_RELATIVE_TRANSACTION_LENGTH (0.001)
 // corresponds to ~4 KB nursery fill
 #define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000001)
 
