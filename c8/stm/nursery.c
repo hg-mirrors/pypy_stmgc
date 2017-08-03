@@ -22,8 +22,8 @@ static uintptr_t _stm_nursery_start;
 
 // corresponds to ~4 MB nursery fill
 #define STM_DEFAULT_RELATIVE_TRANSACTION_LENGTH (0.001)
-// corresponds to ~4 KB nursery fill
-#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.000001)
+// corresponds to ~400 KB nursery fill
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.0001)
 
 #define BACKOFF_COUNT (20)
 #define BACKOFF_MULTIPLIER (BACKOFF_COUNT / -log10(STM_MIN_RELATIVE_TRANSACTION_LENGTH))
