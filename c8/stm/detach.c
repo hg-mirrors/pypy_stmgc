@@ -215,6 +215,7 @@ static void commit_detached_transaction_if_from(stm_thread_local_t *tl)
     }
 }
 
+// TODO write tests, verify is working, verify no overflows with adaptive mode
 uintptr_t stm_is_atomic(stm_thread_local_t *tl)
 {
     assert(STM_SEGMENT->running_thread == tl);
@@ -228,14 +229,18 @@ uintptr_t stm_is_atomic(stm_thread_local_t *tl)
     return STM_PSEGMENT->atomic_nesting_levels;
 }
 
+// max intptr_t value is 7FFFFFFFFFFFFFFF on 64-bit => larger than 2 * huge value
 #define HUGE_INTPTR_VALUE  0x3000000000000000L
 
 void stm_enable_atomic(stm_thread_local_t *tl)
 {
     if (!stm_is_atomic(tl)) {
+        // do for outermost atomic block only
         tl->self_or_0_if_atomic = 0;
         /* increment 'nursery_mark' by HUGE_INTPTR_VALUE, so that
-           stm_should_break_transaction() returns always false */
+           stm_should_break_transaction() returns always false.
+           preserves the previous nursery_mark, unless it is < 0
+           or >= huge value */
         intptr_t mark = (intptr_t)STM_SEGMENT->nursery_mark;
         if (mark < 0)
             mark = 0;
@@ -255,6 +260,7 @@ void stm_disable_atomic(stm_thread_local_t *tl)
     STM_PSEGMENT->atomic_nesting_levels--;
 
     if (STM_PSEGMENT->atomic_nesting_levels == 0) {
+        // revert changes by stm_enable_atomic only if we left the outermost atomic block
         tl->self_or_0_if_atomic = (intptr_t)tl;
         /* decrement 'nursery_mark' by HUGE_INTPTR_VALUE, to cancel
            what was done in stm_enable_atomic() */

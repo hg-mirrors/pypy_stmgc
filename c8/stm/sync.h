@@ -30,6 +30,7 @@ static void acquire_thread_segment(stm_thread_local_t *tl);
 static void release_thread_segment(stm_thread_local_t *tl);
 static void soon_finished_or_inevitable_thread_segment(void);
 static bool any_soon_finished_or_inevitable_thread_segment(void);
+static struct stm_priv_segment_info_s* get_inevitable_thread_segment(void);
 
 enum sync_type_e {
     STOP_OTHERS_UNTIL_MUTEX_UNLOCK,
