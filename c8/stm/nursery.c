@@ -16,13 +16,17 @@
 static uintptr_t _stm_nursery_start;
 
 #define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
-#define LARGE_FILL_MARK_NURSERY_BYTES   0x1000000000L
+
+// corresponds to ~4 GB
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x100000000L
+// corresponds to ~400 KB nursery fill
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.0001)
 
 static double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
     double new = tl->relative_transaction_length;
     if (aborts) {
-        tl->transaction_length_backoff = 3;
-        new = 100.0 / LARGE_FILL_MARK_NURSERY_BYTES;
+        new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
+        tl->transaction_length_backoff = 20;
     } else if (tl->transaction_length_backoff == 0) {
         new = 1;
     } else { // not abort and backoff != 0
