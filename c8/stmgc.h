@@ -201,7 +201,7 @@ uint64_t _stm_total_allocated(void);
 /* ==================== PUBLIC API ==================== */
 
 /* Number of segments (i.e. how many transactions can be executed in
-   parallel, in maximum).  If you try to start transactions in more
+   parallel, at maximum).  If you try to start transactions in more
    threads than the number of segments, it will block, waiting for the
    next segment to become free.
 */
@@ -574,21 +574,49 @@ enum stm_event_e {
     STM_GC_MAJOR_START,
     STM_GC_MAJOR_DONE,
 
+    /* execution duration profiling events */
+    STM_WARMUP_COMPLETE,
+
+    STM_DURATION_START_TRX,
+    STM_DURATION_WRITE_GC_ONLY,
+    STM_DURATION_WRITE_SLOWPATH,
+    STM_DURATION_VALIDATION,
+    STM_DURATION_CREATE_CLE,
+    STM_DURATION_COMMIT_EXCEPT_GC,
+    STM_DURATION_MINOR_GC,
+    STM_DURATION_MAJOR_GC_LOG_ONLY,
+    STM_DURATION_MAJOR_GC_FULL,
+
+    STM_SINGLE_THREAD_MODE_ON,
+    STM_SINGLE_THREAD_MODE_OFF,
+    STM_SINGLE_THREAD_MODE_ADAPTIVE,
+
     _STM_EVENT_N
 };
 
-#define STM_EVENT_NAMES                         \
-    "transaction start",                        \
-    "transaction commit",                       \
-    "transaction abort",                        \
-    "contention write read",                    \
-    "wait free segment",                        \
-    "wait other inevitable",                    \
-    "wait done",                                \
-    "gc minor start",                           \
-    "gc minor done",                            \
-    "gc major start",                           \
-    "gc major done"
+#define STM_EVENT_NAMES                             \
+    "transaction start",                            \
+    "transaction commit",                           \
+    "transaction abort",                            \
+    "contention write read",                        \
+    "wait free segment",                            \
+    "wait other inevitable",                        \
+    "wait done",                                    \
+    "gc minor start",                               \
+    "gc minor done",                                \
+    "gc major start",                               \
+    "gc major done",                                \
+    /* names of duration events */                  \
+    "marks completion of benchmark warm up phase"   \
+    "duration of transaction start",                \
+    "duration of gc due to write",                  \
+    "duration of write slowpath",                   \
+    "duration of validation",                       \
+    "duration of commit log entry creation",        \
+    "duration of commit except gc",                 \
+    "duration of minor gc",                         \
+    "duration of major gc doing log clean up only", \
+    "duration of full major gc"
 
 /* The markers pushed in the shadowstack are an odd number followed by a
    regular object pointer. */
