@@ -1255,6 +1255,8 @@ static void _core_commit_transaction(bool external)
     bool was_inev = STM_PSEGMENT->transaction_state == TS_INEVITABLE;
     _validate_and_add_to_commit_log();
 
+
+    stm_thread_local_t *tl_for_trx_len = STM_SEGMENT->running_thread;
     if (external) {
         /* from this point on, unlink the original 'stm_thread_local_t *'
            from its segment.  Better do it as soon as possible, because
@@ -1302,7 +1304,7 @@ static void _core_commit_transaction(bool external)
 
     s_mutex_unlock();
 
-    stm_transaction_length_handle_validation(thread_local_for_logging, false);
+    stm_transaction_length_handle_validation(tl_for_trx_len, false);
 
     /* between transactions, call finalizers. this will execute
        a transaction itself */
