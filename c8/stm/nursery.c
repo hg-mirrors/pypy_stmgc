@@ -77,8 +77,6 @@ static inline void stm_transaction_length_handle_validation(stm_thread_local_t *
 
 static inline uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
     double relative_additional_length = tl->relative_transaction_length;
-    publish_custom_value_event(
-        relative_additional_length, STM_SINGLE_THREAD_MODE_ADAPTIVE);
     uintptr_t result =
         (uintptr_t)(LARGE_FILL_MARK_NURSERY_BYTES * relative_additional_length);
     // printf("%020" PRIxPTR "\n", result);
