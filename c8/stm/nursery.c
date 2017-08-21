@@ -4,6 +4,8 @@
 #endif
 
 #include "finalizer.h"
+#include <math.h>
+#include <inttypes.h>
 
 /************************************************************/
 
@@ -13,13 +15,78 @@
 
 static uintptr_t _stm_nursery_start;
 
+#define DEFAULT_FILL_MARK_NURSERY_BYTES (NURSERY_SIZE / 4)
 
-#define DEFAULT_FILL_MARK_NURSERY_BYTES   (NURSERY_SIZE / 4)
+// corresponds to ~4 GB
+#define LARGE_FILL_MARK_NURSERY_BYTES   0x100000000L
 
-uintptr_t stm_fill_mark_nursery_bytes = DEFAULT_FILL_MARK_NURSERY_BYTES;
+// corresponds to ~4 MB nursery fill
+#define STM_DEFAULT_RELATIVE_TRANSACTION_LENGTH (0.001)
+// corresponds to ~400 KB nursery fill
+#define STM_MIN_RELATIVE_TRANSACTION_LENGTH (0.0001)
+
+#define BACKOFF_COUNT (20)
+#define BACKOFF_MULTIPLIER (BACKOFF_COUNT / -log10(STM_MIN_RELATIVE_TRANSACTION_LENGTH))
+
+static inline void set_backoff(stm_thread_local_t *tl, double rel_trx_len) {
+    /* the shorter the trx, the more backoff:
+    think a*x + b = backoff, x := -log(rel-trx-len),
+    backoff is <BACKOFF_COUNT> + b at default trx length,
+    linear decrease to b at max trx length */
+    const int b = 5;
+    int new_backoff = (int)((BACKOFF_MULTIPLIER * -log10(rel_trx_len)) + b);
+    tl->transaction_length_backoff = new_backoff;
+    // printf("thread %d, backoff %d\n", tl->thread_local_counter, tl->transaction_length_backoff);
+    tl->linear_transaction_length_increment = rel_trx_len / new_backoff;
+}
+
+static inline double get_new_transaction_length(stm_thread_local_t *tl, bool aborts) {
+    const int multiplier = 2;
+    double previous = tl->relative_transaction_length;
+    double new;
+    if (aborts) {
+        new = previous / multiplier;
+        if (new < STM_MIN_RELATIVE_TRANSACTION_LENGTH) {
+            new = STM_MIN_RELATIVE_TRANSACTION_LENGTH;
+        }
+        set_backoff(tl, new);
+    } else if (tl->transaction_length_backoff == 0) {
+        // backoff counter is zero, exponential increase up to 1
+        new = previous * multiplier;
+        if (new > 1) {
+            new = 1;
+        }
+        if (tl->linear_transaction_length_increment != 0) {
+            // thread had to abort before: slow start
+            set_backoff(tl, new);
+        }
+    } else { // not abort and backoff != 0
+        // in backoff, linear increase up to 1
+        new = previous + tl->linear_transaction_length_increment;
+        if (new > 1) {
+            new = 1;
+        }
+        tl->transaction_length_backoff -= 1;
+    }
+    return new;
+}
+
+static inline void stm_transaction_length_handle_validation(stm_thread_local_t *tl, bool aborts) {
+    tl->relative_transaction_length = get_new_transaction_length(tl, aborts);
+}
+
+static inline uintptr_t stm_get_transaction_length(stm_thread_local_t *tl) {
+    double relative_additional_length = tl->relative_transaction_length;
+    publish_custom_value_event(
+        relative_additional_length, STM_SINGLE_THREAD_MODE_ADAPTIVE);
+    uintptr_t result =
+        (uintptr_t)(LARGE_FILL_MARK_NURSERY_BYTES * relative_additional_length);
+    // printf("%020" PRIxPTR "\n", result);
+    return result;
+}
+
 
 /************************************************************/
-
 
 static void setup_nursery(void)
 {

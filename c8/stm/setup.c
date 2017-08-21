@@ -245,6 +245,12 @@ void stm_register_thread_local(stm_thread_local_t *tl)
        numbers automatically. */
     tl->last_associated_segment_num = num + 1;
     tl->thread_local_counter = ++thread_local_counters;
+
+    /* init adaptive transaction length mode */
+    tl->relative_transaction_length = STM_DEFAULT_RELATIVE_TRANSACTION_LENGTH;
+    tl->transaction_length_backoff = 0;
+    tl->linear_transaction_length_increment = 0;
+
     *_get_cpth(tl) = pthread_self();
     _init_shadow_stack(tl);
     set_gs_register(get_segment_base(num + 1));
