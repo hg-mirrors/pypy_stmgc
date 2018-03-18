@@ -51,14 +51,14 @@ guarantees that it wouldn't be a `RO` anymore if there was a change to import.
 
 In signal handler:
 
-    if read or write:
+    if is_read or is_write:
       if is `RO`:
         `RO -> ACC` (and `RO -> NOACC` for all others)
       else if is `NOACC`:
         if !is_write and noone has `ACC`:
           `NOACC -> RO`
         else:
-          `NOACC -> ACC`
+          `NOACC -> ACC` (and `RO -> NOACC` for all others)
 
 On validate: always imports into `ACC`, into `RO` would be a bug.
 
@@ -66,6 +66,10 @@ During major GC:
 
  1. Validation of seg0: gets all changes; any `RO` views still around means that
     there was *no change* in those pages, so the views stay valid.
+    
+    XXX: what about the modifications that major GC makes during tracing? how
+    does it affect the page-sharing in the kernel?
+    
  2. All other segments validate their `ACC` pages; again `RO` pages *cannot*
     have changes that need importing.
  3. While tracing modified objs and overflow objs, remember pages with

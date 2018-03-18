@@ -1,3 +1,10 @@
+- MOVNTI for non-temporal 32bit store (for read markers)
+- do we actually know if paying the cost of getting the current read-version
+  in every stm_read is lower than paying the cost of zeroing the readmarker
+  on every commit (and just use a flag)?
+
+- stm_enable_atomic() simply sets a huge value for nursery_mark, which is
+  unreliable in theory
 
 - investigate if userfaultfd() helps:
   http://kernelnewbies.org/Linux_4.3#head-3deefea7b0add8c1b171b0e72ce3b69c5ed35cb0

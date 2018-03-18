@@ -235,6 +235,7 @@ static bool _stm_validate(void)
             cl = first_cl;
             while ((cl = cl->next) != NULL) {
                 if (!needs_abort) {
+                    /* check if there is a conflict: */
                     struct stm_undo_s *undo = cl->written;
                     struct stm_undo_s *end = cl->written + cl->written_count;
                     for (; undo < end; undo++) {
@@ -301,6 +302,7 @@ static bool _stm_validate(void)
                 }
 
                 if (cl->written_count) {
+                    /* copy most recent version of modified objs to our segment: */
                     struct stm_undo_s *undo = cl->written;
                     struct stm_undo_s *end = cl->written + cl->written_count;
 
@@ -314,6 +316,13 @@ static bool _stm_validate(void)
                     copy_bk_objs_in_page_from
                         (cl->segment_num, -1,     /* any page */
                          !needs_abort);  /* if we abort, we still want to copy everything */
+
+                    /* reason we must always update to the last (non-INEV)
+                     * commit log entry: a currently running transaction in
+                     * segment_num may have backup copies that revert the
+                     * objects in cl->written to a more current revision than
+                     * the cl-entry represents. This is fine as long as we
+                     * *also* validate to that more current revision. */
                 }
 
                 dprintf(("_stm_validate() to cl=%p, rev=%lu\n", cl, cl->rev_num));
