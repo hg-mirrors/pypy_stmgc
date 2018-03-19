@@ -14,7 +14,7 @@ static void free_bk(struct stm_undo_s *undo)
 {
     assert(undo->type != TYPE_POSITION_MARKER);
     free(undo->backup);
-    assert(undo->backup = (char*)0xbb);
+    assert((undo->backup = (char*)0xbb));
     increment_total_allocated(-SLICE_SIZE(undo->slice));
 }
 
