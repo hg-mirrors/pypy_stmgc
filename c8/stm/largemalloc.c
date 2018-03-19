@@ -427,8 +427,8 @@ static void _large_free(mchunk_t *chunk)
         mscan->size = msize + chunk->size;
         next_chunk(mscan)->prev_size = mscan->size;
 
-        assert(chunk->prev_size = (size_t)-1);
-        assert(chunk->size = (size_t)-1);
+        assert((chunk->prev_size = (size_t)-1));
+        assert((chunk->size = (size_t)-1));
         chunk = mscan;
     }
 
