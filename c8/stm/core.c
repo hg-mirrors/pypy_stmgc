@@ -1594,9 +1594,9 @@ void _stm_become_inevitable(const char *msg)
 
  retry_from_start:
     assert(STM_PSEGMENT->transaction_state == TS_REGULAR);
-    _stm_collectable_safe_point();
 
     if (msg != MSG_INEV_DONT_SLEEP) {
+        _stm_collectable_safe_point();
         dprintf(("become_inevitable: %s\n", msg));
 
         if (any_soon_finished_or_inevitable_thread_segment() &&
