@@ -45,7 +45,6 @@ typedef struct {
 } stm_thread_local_t;
 
 char *stm_object_pages;
-uintptr_t stm_fill_mark_nursery_bytes;
 
 void stm_read(object_t *obj);
 /*void stm_write(object_t *obj); use _checked_stm_write() instead */
@@ -671,7 +670,7 @@ long current_segment_num(void)
      undef_macros=['NDEBUG'],
      include_dirs=[parent_dir],
                  extra_compile_args=['-g', '-O0', '-Werror', '-Wall'], #, '-ferror-limit=5'],
-     extra_link_args=['-g', '-lrt'],
+     extra_link_args=['-g', '-lrt', '-lm'],
      force_generic_engine=True)
 
 

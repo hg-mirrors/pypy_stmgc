@@ -176,6 +176,18 @@ static inline void cond_broadcast(enum cond_type_e ctype)
 
 /************************************************************/
 
+#if 0
+static uint8_t number_of_segments_in_use(void) {
+    uint8_t result = 0;
+    int num;
+    for (num = 1; num < NB_SEGMENTS; num++) {
+        if (sync_ctl.in_use1[num] > 0) {
+            result++;
+        }
+    }
+    return result;
+}
+#endif
 
 #if 0
 void stm_wait_for_current_inevitable_transaction(void)
@@ -201,7 +213,6 @@ void stm_wait_for_current_inevitable_transaction(void)
     s_mutex_unlock();
 }
 #endif
-
 
 static void acquire_thread_segment(stm_thread_local_t *tl)
 {
@@ -291,6 +302,19 @@ static bool any_soon_finished_or_inevitable_thread_segment(void)
         if (sync_ctl.in_use1[num] == 2)
             return true;
     return false;
+}
+
+static struct stm_priv_segment_info_s* get_inevitable_thread_segment(void)
+{
+    struct stm_priv_segment_info_s* segment;
+    int num;
+    for (num = 1; num < NB_SEGMENTS; num++) {
+        segment = get_priv_segment(num);
+        if (segment->transaction_state == TS_INEVITABLE) {
+            return segment;
+        }
+    }
+    return 0;
 }
 
 __attribute__((unused))

@@ -88,6 +88,13 @@ typedef struct stm_thread_local_s {
     struct stm_thread_local_s *prev, *next;
     intptr_t self_or_0_if_atomic;
     void *creating_pthread[2];
+    /* == adaptive single thread mode == */
+    /* factor that is multiplied with max transaction length before the start of the next transaction on this thread */
+    double relative_transaction_length;
+    /* when zero, transaction length may increase exponentially, otherwise transaction length may only increase linearly. is (re-)set to some value upon abort and counted down until zero upon successful validation. */
+    int transaction_length_backoff;
+    /* during the backoff, transaction length may increase linearly by this increment on every successful validation */
+    double linear_transaction_length_increment;
 } stm_thread_local_t;
 
 
@@ -202,7 +209,7 @@ uint64_t _stm_total_allocated(void);
 /* ==================== PUBLIC API ==================== */
 
 /* Number of segments (i.e. how many transactions can be executed in
-   parallel, in maximum).  If you try to start transactions in more
+   parallel, at maximum).  If you try to start transactions in more
    threads than the number of segments, it will block, waiting for the
    next segment to become free.
 */
@@ -464,14 +471,6 @@ static inline int stm_should_break_transaction(void)
     return ((intptr_t)STM_SEGMENT->nursery_current >=
             (intptr_t)STM_SEGMENT->nursery_mark);
 }
-extern uintptr_t stm_fill_mark_nursery_bytes;
-/* ^^^ at the start of a transaction, 'nursery_mark' is initialized to
-   'stm_fill_mark_nursery_bytes' inside the nursery.  This value can
-   be larger than the nursery; every minor collection shifts the
-   current 'nursery_mark' down by one nursery-size.  After an abort
-   and restart, 'nursery_mark' is set to ~90% of the value it reached
-   in the last attempt.
-*/
 
 /* "atomic" transaction: a transaction where stm_should_break_transaction()
    always returns false, and where stm_leave_transactional_zone() never
@@ -575,21 +574,49 @@ enum stm_event_e {
     STM_GC_MAJOR_START,
     STM_GC_MAJOR_DONE,
 
+    /* execution duration profiling events */
+    STM_WARMUP_COMPLETE,
+
+    STM_DURATION_START_TRX,
+    STM_DURATION_WRITE_GC_ONLY,
+    STM_DURATION_WRITE_SLOWPATH,
+    STM_DURATION_VALIDATION,
+    STM_DURATION_CREATE_CLE,
+    STM_DURATION_COMMIT_EXCEPT_GC,
+    STM_DURATION_MINOR_GC,
+    STM_DURATION_MAJOR_GC_LOG_ONLY,
+    STM_DURATION_MAJOR_GC_FULL,
+
+    STM_SINGLE_THREAD_MODE_ON,
+    STM_SINGLE_THREAD_MODE_OFF,
+    STM_SINGLE_THREAD_MODE_ADAPTIVE,
+
     _STM_EVENT_N
 };
 
-#define STM_EVENT_NAMES                         \
-    "transaction start",                        \
-    "transaction commit",                       \
-    "transaction abort",                        \
-    "contention write read",                    \
-    "wait free segment",                        \
-    "wait other inevitable",                    \
-    "wait done",                                \
-    "gc minor start",                           \
-    "gc minor done",                            \
-    "gc major start",                           \
-    "gc major done"
+#define STM_EVENT_NAMES                             \
+    "transaction start",                            \
+    "transaction commit",                           \
+    "transaction abort",                            \
+    "contention write read",                        \
+    "wait free segment",                            \
+    "wait other inevitable",                        \
+    "wait done",                                    \
+    "gc minor start",                               \
+    "gc minor done",                                \
+    "gc major start",                               \
+    "gc major done",                                \
+    /* names of duration events */                  \
+    "marks completion of benchmark warm up phase"   \
+    "duration of transaction start",                \
+    "duration of gc due to write",                  \
+    "duration of write slowpath",                   \
+    "duration of validation",                       \
+    "duration of commit log entry creation",        \
+    "duration of commit except gc",                 \
+    "duration of minor gc",                         \
+    "duration of major gc doing log clean up only", \
+    "duration of full major gc"
 
 /* The markers pushed in the shadowstack are an odd number followed by a
    regular object pointer. */

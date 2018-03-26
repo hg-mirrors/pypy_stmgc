@@ -17,7 +17,7 @@ clean:
 H_FILES = ../stmgc.h ../stm/*.h
 C_FILES = ../stmgc.c ../stm/*.c
 
-COMMON = -I.. -pthread -lrt -g -Wall -Werror -DSTM_LARGEMALLOC_TEST 
+COMMON = -I.. -pthread -lrt -lm -g -Wall -Werror -DSTM_LARGEMALLOC_TEST 
 
 CC = gcc-seg-gs
 
