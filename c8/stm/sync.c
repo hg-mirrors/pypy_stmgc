@@ -176,6 +176,7 @@ static inline void cond_broadcast(enum cond_type_e ctype)
 
 /************************************************************/
 
+#if 0
 static uint8_t number_of_segments_in_use(void) {
     uint8_t result = 0;
     int num;
@@ -186,6 +187,7 @@ static uint8_t number_of_segments_in_use(void) {
     }
     return result;
 }
+#endif
 
 #if 0
 void stm_wait_for_current_inevitable_transaction(void)

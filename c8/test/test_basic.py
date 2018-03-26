@@ -736,6 +736,7 @@ class TestBasic(BaseTest):
         self.check_char_everywhere(lp1, 'X')
 
     def test_stm_should_break_transaction_1(self):
+        py.test.skip("replaced by tcp logic")
         lib.stm_fill_mark_nursery_bytes = 100
         #
         self.start_transaction()
@@ -772,6 +773,7 @@ class TestBasic(BaseTest):
         self.commit_transaction()
 
     def test_stm_should_break_transaction_2(self):
+        py.test.skip("replaced by tcp logic")
         lib.stm_fill_mark_nursery_bytes = 10000000
         #
         n = 10000000

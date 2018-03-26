@@ -10,6 +10,21 @@
 
 static void setup_mmap(char *reason)
 {
+    char name[128];
+    sprintf(name, "/stmgc-c7-bigmem-%ld",
+            (long)getpid());
+    /* Create the shared memory object for seg0, and immediately unlink it.
+       There is a small window where if this process is killed the
+       object is left around.  It doesn't seem possible to do anything
+       about it...
+    */
+    stm_object_pages_fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+    shm_unlink(name);
+    if (stm_object_pages_fd == -1)
+        stm_fatalerror("%s failed (stm_open): %m", reason);
+    if (ftruncate(stm_object_pages_fd, NB_SHARED_PAGES * 4096UL) != 0)
+        stm_fatalerror("%s failed (ftruncate): %m", reason);
+
     /* reserve the whole virtual memory space of the program for
        all segments: (for now in one big block, but later could be
        allocated per-segment) */
@@ -18,6 +33,22 @@ static void setup_mmap(char *reason)
                             -1, 0);
     if (stm_object_pages == MAP_FAILED)
         stm_fatalerror("%s failed (mmap): %m", reason);
+
+    /* remap segment 0 to the shared file pages */
+    char *result = mmap(
+        stm_object_pages + END_NURSERY_PAGE * 4096UL, /* addr */
+        NB_SHARED_PAGES * 4096UL, /* len */
+        PROT_READ | PROT_WRITE,
+        MAP_FIXED | MAP_SHARED | MAP_NORESERVE,
+        stm_object_pages_fd, 0); /* file & offset */
+    if (result == MAP_FAILED)
+        stm_fatalerror("%s failed (mmap): %m", reason);
+
+}
+
+static void close_fd_mmap(int map_fd)
+{
+    close(map_fd);
 }
 
 static void setup_protection_settings(void)
@@ -167,6 +198,7 @@ void stm_teardown(void)
     stm_object_pages = NULL;
     commit_log_root.next = NULL; /* xxx:free them */
     commit_log_root.segment_num = -1;
+    close_fd_mmap(stm_object_pages_fd);
 
     teardown_finalizer();
     teardown_sync();

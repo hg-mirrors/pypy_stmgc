@@ -135,8 +135,16 @@ static void _fill_preexisting_slice(long segnum, char *dest,
                                     const char *src, uintptr_t size)
 {
     uintptr_t np = dest - get_segment_base(segnum);
-    if (get_page_status_in(segnum, np / 4096) != PAGE_NO_ACCESS)
+    uintptr_t page = np / 4096UL;
+    uint8_t status = get_page_status_in(segnum, page);
+    if (status == PAGE_ACCESSIBLE) {
         memcpy(dest, src, size);
+    } else if (status == PAGE_READONLY) {
+        /* we can't write to this page as we must not trigger a SIGSEGV */
+        page_mark_inaccessible(segnum, page);
+    } else {
+        assert(status == PAGE_NO_ACCESS);
+    }
 }
 
 object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
@@ -150,7 +158,9 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
     memcpy(nobj_seg0, initial_data, size_rounded_up);
     ((struct object_s *)nobj_seg0)->stm_flags = GCFLAG_WRITE_BARRIER;
 
-    acquire_privatization_lock(STM_SEGMENT->segment_num);
+    /* XXX: not sure if we need to do better: acquire all privatization
+       locks in order to make READONLY pages NO_ACCESS in _fill_preexisting_slice */
+    acquire_all_privatization_locks();
     DEBUG_EXPECT_SEGFAULT(false);
 
     long j;
@@ -177,7 +187,7 @@ object_t *stm_allocate_preexisting(ssize_t size_rounded_up,
     }
 
     DEBUG_EXPECT_SEGFAULT(true);
-    release_privatization_lock(STM_SEGMENT->segment_num);
+    release_all_privatization_locks();
 
     stm_write_fence();     /* make sure 'nobj' is fully initialized from
                           all threads here */
@@ -215,6 +225,144 @@ static void major_collection_if_requested(void)
     s_mutex_unlock();
     exec_local_finalizers();
 }
+
+static long page_check_and_reshare(uintptr_t pagenum)
+{
+    /* if page was recently modified, do nothing */
+    if (get_hint_modified_recently(pagenum)) {
+        clear_hint_modified_recently(pagenum);
+        return 0;
+    }
+
+    /* check if page is accessible *only* in segment 0,
+       then we don't need to do anything (fastpath) */
+    if (get_page_status(pagenum)->by_segment == (PAGE_ACCESSIBLE << 0))
+        return 0;               /* only accessible in seg0 */
+
+    /* XXX: fast-path for all pages=READONLY */
+
+    long i, count = 0;
+    for (i = 1; i < NB_SEGMENTS; i++){
+        if (get_page_status_in(i, pagenum) == PAGE_ACCESSIBLE) {
+            /* XXX: also do for PAGE_NO_ACCESS? */
+            page_mark_readonly(i, pagenum);
+            count++;
+        }
+    }
+    _assert_page_status_invariants(pagenum);
+
+    return count;
+}
+
+extern long ro_to_acc;
+
+/* num of pages to reshare at most per major GC: */
+#define STM_MAX_RESHARE_PAGES 2048UL                  /* 8MiB */
+/* major GCs between clearing the hints and doing a reshare-pass over all pages */
+#define _RESHARE_CLEAR_GAP 8
+__attribute__((unused))
+uintptr_t _clear_hints_pass = 0;
+uintptr_t _last_reshare_pass_page = END_NURSERY_PAGE; /* starts after the nursery */
+static void major_reshare_pages(void)
+{
+#ifndef STM_TESTS
+    if (_last_reshare_pass_page == END_NURSERY_PAGE) {
+        /* we finished a pass */
+        _clear_hints_pass++;
+        if (_clear_hints_pass % _RESHARE_CLEAR_GAP == (_RESHARE_CLEAR_GAP - 1)) {
+            /* we do a reshare pass */
+            fprintf(stderr, "ro -> acc since last reshare pass: %ld\n", ro_to_acc);
+            ro_to_acc = 0;
+            fprintf(stderr, "START_RESHARE_PASS\n");
+        } else {
+            /* we don't reshare, so just collecting modification hints */
+            fprintf(stderr, "COLLECT_HINTS_ONLY\n");
+
+            /* XXX: since major GC also makes sure that currently modified objs are
+               "modified recently", maybe don't need to do it in make_all_pages_of_obj_accessible() */
+            return;
+        }
+    }
+#endif
+
+    /* to never reshare pages with overflow objects, make sure they are
+       marked as recently modified: */
+    long i;
+    for (i = 1; i < NB_SEGMENTS; i++) {
+        struct list_s *lst = get_priv_segment(i)->large_overflow_objects;
+        if (lst != NULL) {
+            LIST_FOREACH_R(lst, object_t*,
+                 {
+                     object_t *obj = item;
+                     uintptr_t pagenum = (uintptr_t)obj / 4096UL;
+                     if (is_small_uniform(obj)) {
+                         set_hint_modified_recently(pagenum);
+                         continue;
+                     }
+                     struct object_s *realobj = (struct object_s *)get_virtual_address(i, obj);
+                     ssize_t obj_size = stmcb_size_rounded_up(realobj);
+                     assert(obj_size >= 16);
+                     uintptr_t start = (uintptr_t)obj;
+                     uintptr_t first_page = start / 4096UL;
+                     uintptr_t end = start + obj_size;
+                     uintptr_t last_page = (end - 1) / 4096UL;
+
+                     for (; first_page <= last_page; first_page++) {
+                         set_hint_modified_recently(first_page);
+                     }
+                 });
+        }
+    }
+
+    /* msync() done when validating seg0 */
+
+    /* Now loop over all pages and re-share them if possible. */
+    uintptr_t pagenum, endpagenum;
+    pagenum = _last_reshare_pass_page;
+    uintptr_t endpage_of_large_objs = (uninitialized_page_start - stm_object_pages) / 4096UL;
+    uintptr_t startpage_of_small_objs = (uninitialized_page_stop - stm_object_pages) / 4096UL;
+    if (pagenum > endpage_of_large_objs) {
+        if (pagenum < startpage_of_small_objs)
+            pagenum = startpage_of_small_objs; /* pages may have been freed already */
+        endpagenum = NB_PAGES;  /* end of smallobj pages */
+    } else {
+        endpagenum = endpage_of_large_objs;
+    }
+
+    long count = 0;
+    bool finished_pass = true;
+    while (1) {
+        if (UNLIKELY(pagenum == endpagenum)) {
+            /* we reach this point usually twice, because there are
+               more pages after 'uninitialized_page_stop' */
+            if (endpagenum == NB_PAGES)
+                break;   /* done */
+            pagenum = startpage_of_small_objs;
+            endpagenum = NB_PAGES;
+            continue;
+        }
+
+        count += page_check_and_reshare(pagenum);
+        pagenum++;
+
+        if (count >= STM_MAX_RESHARE_PAGES) {
+            /* continue in the next major GC */
+            finished_pass = false;
+            break;
+        }
+    }
+
+    if (finished_pass) {
+        _last_reshare_pass_page = END_NURSERY_PAGE;
+        fprintf(stderr,"reshared %ld pages = %ld KiB (finished pass)\n",
+                count, count * 4);
+    } else {
+        _last_reshare_pass_page = pagenum;
+        fprintf(stderr,"reshared %ld pages = %ld KiB\n",
+                count, count * 4);
+    }
+}
+
 
 
 /************************************************************/
@@ -376,6 +524,8 @@ static void assert_obj_accessible_in(long segnum, object_t *obj)
 {
 #ifndef NDEBUG
     uintptr_t page = (uintptr_t)obj / 4096UL;
+
+    /* header must even be writable! */
     assert(get_page_status_in(segnum, page) == PAGE_ACCESSIBLE);
 
     struct object_s *realobj =
@@ -384,12 +534,30 @@ static void assert_obj_accessible_in(long segnum, object_t *obj)
     size_t obj_size = stmcb_size_rounded_up(realobj);
     uintptr_t count = obj_size / 4096UL + 1;
     while (count--> 0) {
-        assert(get_page_status_in(segnum, page) == PAGE_ACCESSIBLE);
+        assert(get_page_status_in(segnum, page) != PAGE_NO_ACCESS);
         page++;
     }
 #endif
 }
 
+static void hint_whole_obj_modified_recently(long segnum, object_t *obj)
+{
+    uintptr_t end_page, first_page = ((uintptr_t)obj) / 4096UL;
+
+    if (LIKELY(is_small_uniform(obj))) {
+        end_page = first_page;
+    } else {
+        struct object_s *realobj =
+            (struct object_s *)REAL_ADDRESS(get_segment_base(segnum), obj);
+        size_t obj_size = stmcb_size_rounded_up(realobj);
+
+        end_page = (((uintptr_t)obj) + obj_size - 1) / 4096UL;
+    }
+
+    uintptr_t page;
+    for (page = first_page; page <= end_page; page++)
+        set_hint_modified_recently(page);
+}
 
 
 static void mark_visit_from_modified_objects(void)
@@ -435,6 +603,9 @@ static void mark_visit_from_modified_objects(void)
                   This is because we create a backup of the whole obj
                   and thus make all pages accessible. */
                assert_obj_accessible_in(i, item);
+               /* the whole obj may be traced, not only parts actually in
+                  modified_old_objects */
+               hint_whole_obj_modified_recently(i, item);
 
                assert(!is_overflow_obj_safe(get_priv_segment(i), item)); /* should never be in that list */
 
@@ -821,6 +992,9 @@ static void major_collection_now_at_safe_point(void)
     /* hashtables */
     stm_compact_hashtables();
     LIST_FREE(all_hashtables_seen);
+
+    /* *after* marking modified objects, we may try to reshare pages */
+    major_reshare_pages();
 
     dprintf((" | used after collection:  %ld\n",
              (long)pages_ctl.total_allocated));

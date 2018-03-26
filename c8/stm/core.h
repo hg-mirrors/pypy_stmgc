@@ -250,6 +250,7 @@ static void free_cle(struct stm_commit_log_entry_s *e);
 
 
 extern char *stm_object_pages;
+extern int stm_object_pages_fd;
 extern long _stm_segment_nb_pages;
 extern int _stm_nb_segments;
 extern int _stm_psegment_ofs;
@@ -304,7 +305,7 @@ static void abort_with_mutex(void) __attribute__((noreturn));
 static stm_thread_local_t *abort_with_mutex_no_longjmp(void);
 static void abort_data_structures_from_segment_num(int segment_num);
 
-static void touch_all_pages_of_obj(object_t *obj, size_t obj_size);
+static void make_all_pages_of_obj_accessible(object_t *obj, size_t obj_size);
 
 static void synchronize_object_enqueue(object_t *obj);
 static void synchronize_objects_flush(void);
